@@ -6,6 +6,7 @@ import (
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
+	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/plan"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
@@ -74,4 +75,57 @@ func TestApplyUnknownPlan(t *testing.T) {
 	h := newHarness(t)
 	_, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: "nope", Yes: true})
 	_ = wantCode(t, err, contract.BadFlag)
+}
+
+// A plan is only as good as the gate it was made from: if the recorded gate
+// for the same candidate says the checks failed, apply refuses and pushes
+// nothing.
+func TestApplyRefusesAPlanWhoseGateIsNotGreen(t *testing.T) {
+	h, id := planned(t)
+	sg := h.shadowGit()
+	ref := "refs/ghostbranch/features/feat-x"
+	old, err := sg.MustResolve(h.ctx, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, ok, err := sg.ShowFile(h.ctx, old, feature.MetaFile)
+	if err != nil || !ok {
+		t.Fatalf("read feature.json: %v", err)
+	}
+	m, err := feature.Decode(b)
+	if err != nil || m.Gate == nil {
+		t.Fatalf("decode feature.json: %+v %v", m, err)
+	}
+	m.Gate.Checks = feature.ChecksFailed // same candidate, now red
+	blob, err := sg.HashObject(h.ctx, feature.Encode(m))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree, err := sg.MakeTree(h.ctx, []gitx.TreeEntry{{Mode: "100644", Type: "blob", SHA: blob, Path: feature.MetaFile}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	commit, err := sg.CommitTree(h.ctx, tree, []string{old}, "gate failed", testutil.Author(1), testutil.Author(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sg.UpdateRef(h.ctx, ref, commit); err != nil {
+		t.Fatal(err)
+	}
+	before := h.publicRefs()
+	h.pushes = nil
+
+	_, _, err = h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: id, Yes: true})
+	ce := wantCode(t, err, contract.PlanStale)
+	if !reflect.DeepEqual(ce.Details["moved"], []string{"gate"}) {
+		t.Fatalf("details = %v", ce.Details)
+	}
+	if !reflect.DeepEqual(h.publicRefs(), before) {
+		t.Fatal("a plan with a red gate changed the public repo")
+	}
+	for _, p := range h.pushes {
+		if p.remote == "public" {
+			t.Fatalf("pushed to public: %+v", p)
+		}
+	}
 }

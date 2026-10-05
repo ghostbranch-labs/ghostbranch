@@ -88,6 +88,13 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan) (*ApplyRe
 			"the repos changed since plan %s was made (%s); make a new plan with ghostbranch promote", pl.ID, strings.Join(moved, ", ")).
 			WithDetails(map[string]any{"moved": moved})
 	}
+	// The plan only stands while the recorded gate is green, fresh, and for
+	// the very candidate the plan was made from.
+	if !m.Gate.Passed() || m.Gate.Candidate != gateC || !m.Gate.FreshFor(head, pm, O) {
+		return nil, warns, contract.New(contract.PlanStale,
+			"the recorded gate for %q is no longer green for plan %s's candidate; run ghostbranch gate, then make a new plan", pl.Feature, pl.ID).
+			WithDetails(map[string]any{"moved": []string{"gate"}})
+	}
 	P, ok, _ := g.Resolve(ctx, planRef(pl.ID))
 	if !ok || P != pl.Publish.Commit {
 		return nil, warns, contract.New(contract.PlanStale, "plan %s's commit is missing from the shadow repo", pl.ID).
