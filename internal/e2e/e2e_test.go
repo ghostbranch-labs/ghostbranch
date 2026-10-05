@@ -70,9 +70,9 @@ func authed(t *testing.T, tok string) *gitx.Git {
 }
 
 // reset puts both sandbox repos back to the baseline: public main is the
-// baseline commit and nothing else; the shadow repo holds only main at the
-// baseline (GitHub never lets the last default branch be deleted). Deleting
-// a branch closes its PRs.
+// baseline commit and nothing else (public tags are kept); the shadow repo
+// holds only main at the baseline (GitHub never lets the last default branch
+// be deleted). Deleting a branch closes its PRs.
 func reset(t *testing.T, tok string) {
 	t.Helper()
 	ctx := context.Background()
@@ -86,7 +86,7 @@ func reset(t *testing.T, tok string) {
 		}
 		var specs []string
 		for ref := range refs {
-			if ref == "HEAD" || strings.HasPrefix(ref, "refs/pull/") || keep(ref) {
+			if ref == "HEAD" || strings.HasPrefix(ref, "refs/pull/") || strings.HasSuffix(ref, "^{}") || keep(ref) {
 				continue
 			}
 			specs = append(specs, ":"+ref)
@@ -178,7 +178,10 @@ func TestSandboxLoop(t *testing.T) {
 	if err := g.Fetch(ctx, "public", "+refs/heads/"+feat+":refs/heads/published"); err != nil {
 		t.Fatalf("published branch missing: %v", err)
 	}
-	es, _ := g.ListTree(ctx, "refs/heads/published")
+	es, err := g.ListTree(ctx, "refs/heads/published")
+	if err != nil {
+		t.Fatal(err)
+	}
 	set := overlay.NewSet()
 	var sawHello bool
 	for _, e := range es {
@@ -198,7 +201,14 @@ func TestSandboxLoop(t *testing.T) {
 	if m["error"].(map[string]any)["code"] != "LEAK_FOUND" {
 		t.Fatalf("want LEAK_FOUND: %v", m)
 	}
-	refs, _ := g.LsRemote(ctx, "public")
+	m = run(3, "promote", leaky, "--mode", "squash", "-m", "leak attempt", "--yes")
+	if m["error"].(map[string]any)["code"] != "LEAK_FOUND" {
+		t.Fatalf("promote of a leaking feature: want LEAK_FOUND: %v", m)
+	}
+	refs, err := g.LsRemote(ctx, "public")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, ok := refs["refs/heads/"+leaky]; ok {
 		t.Fatal("a leaking feature reached the public repo")
 	}
