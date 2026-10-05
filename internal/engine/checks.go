@@ -57,7 +57,10 @@ func (e *Engine) waitChecks(ctx context.Context, repo, sha string, cfg config.Ga
 		switch {
 		case len(checks) == 0 && now.Sub(start) >= cfg.CIAppearTimeout:
 			return checkOutcome{status: feature.ChecksNoCI, failed: []string{}}, nil
-		case done && now.Sub(stableSince) >= e.SettleWindow:
+		// At ci_timeout, checks that have all completed report their outcome
+		// even if the settle window has not elapsed: there is no more time
+		// to wait for late checks, and the completed result is the truth.
+		case done && (now.Sub(stableSince) >= e.SettleWindow || now.Sub(start) >= cfg.CITimeout):
 			if len(failed) > 0 {
 				return checkOutcome{status: feature.ChecksFailed, failed: failed}, nil
 			}

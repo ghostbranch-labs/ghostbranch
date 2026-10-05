@@ -142,6 +142,9 @@ type WarningCode string
 const (
 	ConfigKeyIgnored WarningCode = "CONFIG_KEY_IGNORED"
 	PublicNotPublic  WarningCode = "PUBLIC_NOT_PUBLIC"
+	// GateNotRecorded means the gate's result could not be saved to the
+	// feature metadata; the result itself still stands.
+	GateNotRecorded WarningCode = "GATE_NOT_RECORDED"
 )
 
 // Warning is a non-fatal notice returned alongside a result.

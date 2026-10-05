@@ -17,7 +17,7 @@
         "additionalProperties": false,
         "required": ["code", "message"],
         "properties": {
-          "code": { "enum": ["CONFIG_KEY_IGNORED", "PUBLIC_NOT_PUBLIC"] },
+          "code": { "enum": ["CONFIG_KEY_IGNORED", "PUBLIC_NOT_PUBLIC", "GATE_NOT_RECORDED"] },
           "message": { "type": "string" }
         }
       }

@@ -2,8 +2,10 @@ package engine_test
 
 import (
 	"reflect"
+	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
@@ -224,4 +226,83 @@ func contains(xs []string, x string) bool {
 		}
 	}
 	return false
+}
+
+// When the gate finds a leak but cannot record that result, the leak still
+// wins: the error is LEAK_FOUND, with a warning that nothing was recorded.
+func TestGateLeakWinsOverAFailureToRecordIt(t *testing.T) {
+	h := newHarness(t)
+	h.init()
+	h.startFeature("feat-x", map[string]string{"config.env": "TOKEN=" + testutil.FakeGitHubToken() + "\n"})
+	sg := h.shadowGit()
+	metaRef := "refs/ghostbranch/features/feat-x"
+	h.eng.OnPush = func(_, _ string, specs []string) {
+		for _, s := range specs {
+			if !strings.HasSuffix(s, ":"+metaRef) {
+				continue
+			}
+			// Someone else moves the metadata ref first, so the leased push fails.
+			old, err := sg.MustResolve(h.ctx, metaRef)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tree, err := sg.TreeOf(h.ctx, old)
+			if err != nil {
+				t.Fatal(err)
+			}
+			moved, err := sg.CommitTree(h.ctx, tree, []string{old}, "concurrent", testutil.Author(2), testutil.Author(2))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := sg.UpdateRef(h.ctx, metaRef, moved); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	res, warns, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
+	_ = wantCode(t, err, contract.LeakFound)
+	if res == nil || len(res.Findings) == 0 {
+		t.Fatalf("gate = %+v", res)
+	}
+	var noted bool
+	for _, w := range warns {
+		noted = noted || w.Code == contract.GateNotRecorded
+	}
+	if !noted {
+		t.Fatalf("want a %s warning, got %+v", contract.GateNotRecorded, warns)
+	}
+}
+
+// Checks that all complete just before ci_timeout, but too recently to have
+// settled, report their outcome rather than CI_TIMEOUT.
+func TestGateCompletedChecksBeatTheTimeout(t *testing.T) {
+	for _, c := range []struct {
+		conclusion string
+		want       contract.Code
+	}{{"success", ""}, {"failure", contract.ChecksFailed}} {
+		t.Run(c.conclusion, func(t *testing.T) {
+			h := newHarness(t)
+			h.init()
+			h.startFeature("feat-x", map[string]string{"feature.txt": "x\n"})
+			var start time.Time
+			h.forge.Checks = func(string, string) []forge.Check {
+				if start.IsZero() {
+					start = h.clock.Now()
+				}
+				out := []forge.Check{{Name: "first", Status: "completed", Conclusion: "success"},
+					{Name: "slow", Status: "in_progress"}}
+				// The default ci_timeout is 60m; the last check lands 2s before
+				// it, inside the 5s settle window.
+				if h.clock.Now().Sub(start) >= 60*time.Minute-2*time.Second {
+					out[1] = forge.Check{Name: "slow", Status: "completed", Conclusion: c.conclusion}
+					out = append(out, forge.Check{Name: "late", Status: "completed", Conclusion: "success"})
+				}
+				return out
+			}
+			res, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
+			if codeOf(err) != c.want {
+				t.Fatalf("want %q, got %v (%+v)", c.want, err, res)
+			}
+		})
+	}
 }

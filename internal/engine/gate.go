@@ -103,8 +103,11 @@ func (e *Engine) gate(ctx context.Context, pc *pairCtx, name string) (*GateResul
 	if len(findings) > 0 {
 		res.Leak, res.Findings = feature.LeakFound, findings
 		if !e.DryRun {
+			// The leak is the result that matters: a failure to record it
+			// must not replace LEAK_FOUND with a lesser error.
 			if err := e.recordGate(ctx, pc, m, metaSHA, res); err != nil {
-				return res, warns, err
+				warns = append(warns, contract.Warning{Code: contract.GateNotRecorded,
+					Message: "the gate result could not be recorded in the feature metadata: " + contract.From(err).Message})
 			}
 		}
 		return res, warns, leakErr(findings)
