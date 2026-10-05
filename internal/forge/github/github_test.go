@@ -104,11 +104,11 @@ func TestPRsChecksAndDefaultBranch(t *testing.T) {
 	})
 	mux.HandleFunc("GET /repos/acme/s/pulls", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
-		if q.Get("head") != "acme:ghostbranch/gate/x" || q.Get("base") != "main" || q.Get("state") != "open" {
+		if q.Get("head") != "acme:ghostbranch-gate/x" || q.Get("base") != "main" || q.Get("state") != "open" {
 			t.Errorf("pulls query = %v", q)
 		}
 		writeJSON(w, []map[string]any{{"number": 3, "state": "open", "draft": true, "html_url": "h",
-			"head": map[string]any{"ref": "ghostbranch/gate/x"}, "base": map[string]any{"ref": "main"}}})
+			"head": map[string]any{"ref": "ghostbranch-gate/x"}, "base": map[string]any{"ref": "main"}}})
 	})
 	mux.HandleFunc("POST /repos/acme/s/pulls", func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
@@ -146,8 +146,8 @@ func TestPRsChecksAndDefaultBranch(t *testing.T) {
 	if err := c.SetDefaultBranch(ctx, "acme/s", "ghostbranch"); err != nil {
 		t.Fatal(err)
 	}
-	pr, err := c.FindOpenPR(ctx, "acme/s", "ghostbranch/gate/x", "main")
-	if err != nil || pr == nil || pr.Number != 3 || !pr.Draft || pr.Head != "ghostbranch/gate/x" {
+	pr, err := c.FindOpenPR(ctx, "acme/s", "ghostbranch-gate/x", "main")
+	if err != nil || pr == nil || pr.Number != 3 || !pr.Draft || pr.Head != "ghostbranch-gate/x" {
 		t.Fatalf("FindOpenPR = %+v %v", pr, err)
 	}
 	if p, err := c.CreatePR(ctx, "acme/s", forge.NewPR{Title: "t", Head: "b", Base: "main", Draft: true}); err != nil || p.Number != 4 {

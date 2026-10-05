@@ -27,7 +27,7 @@ func metaRef(name string) string       { return "refs/shadow-meta/features/" + n
 func planRef(id string) string         { return "refs/shadow-meta/plans/" + id } //nolint:unused // used by later tasks
 func remoteMetaRef(name string) string { return "refs/ghostbranch/features/" + name }
 func remotePlanRef(id string) string   { return "refs/ghostbranch/plans/" + id } //nolint:unused // used by later tasks
-func gateBranch(name string) string    { return "ghostbranch/gate/" + name }     //nolint:unused // used by later tasks
+func gateBranch(name string) string    { return "ghostbranch-gate/" + name }     //nolint:unused // used by later tasks
 
 // pairCtx is one operation's view of a pair: a fresh mirror and the lock.
 type pairCtx struct {
@@ -174,7 +174,7 @@ func (e *Engine) readConfig(ctx context.Context, pc *pairCtx) (config.Config, st
 }
 
 // readMeta returns a feature's metadata and the metadata commit's SHA.
-func (e *Engine) readMeta(ctx context.Context, pc *pairCtx, name string) (feature.Meta, string, error) { //nolint:unused // used by later tasks
+func (e *Engine) readMeta(ctx context.Context, pc *pairCtx, name string) (feature.Meta, string, error) {
 	sha, ok, err := pc.git.Resolve(ctx, metaRef(name))
 	if err != nil {
 		return feature.Meta{}, "", internalErr(err, "read feature metadata")
@@ -218,7 +218,7 @@ func (e *Engine) saveMeta(ctx context.Context, pc *pairCtx, m feature.Meta, pare
 }
 
 // updateMeta saves and pushes new metadata, leased on the previous commit.
-func (e *Engine) updateMeta(ctx context.Context, pc *pairCtx, m feature.Meta, parent string) error { //nolint:unused // used by later tasks
+func (e *Engine) updateMeta(ctx context.Context, pc *pairCtx, m feature.Meta, parent string) error {
 	sha, err := e.saveMeta(ctx, pc, m, parent)
 	if err != nil {
 		return err
