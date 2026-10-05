@@ -1,6 +1,8 @@
 package cli_test
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -76,5 +78,21 @@ func TestPromoteWithoutYesAndNoTTYNeedsApproval(t *testing.T) {
 	code, _, errOut := te.run("promote", "feat-x", "-m", "Add feature")
 	if code != 5 || !strings.Contains(errOut, "ghostbranch apply") {
 		t.Fatalf("%d %q", code, errOut)
+	}
+}
+
+func TestPlumbingFailureIsInternalNotUsage(t *testing.T) {
+	te := newTestEnv(t)
+	dir := filepath.Join(te.vars["GHOSTBRANCH_HOME"], "workspaces", "default")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// Corrupt workspace.json makes workspace.Open fail with a plain error.
+	if err := os.WriteFile(filepath.Join(dir, "workspace.json"), []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, env := te.runJSON("sync")
+	if e, _ := env["error"].(map[string]any); code != 1 || e["code"] != "INTERNAL" {
+		t.Fatalf("%d %v", code, env)
 	}
 }

@@ -147,7 +147,6 @@ Agents get exit 5 when the plan needs a human; a person then runs ghostbranch ap
 			// A flag value is a usage matter; reject it before touching the network.
 			// (`--mode --json` parses "--json" as the mode.)
 			if o.Mode != "squash" {
-				a.ran = true
 				return contract.New(contract.BadFlag, "--mode %s is not supported in this version; use squash", o.Mode).WithField("mode")
 			}
 			e, err := a.engine(cmd.Context())

@@ -98,7 +98,11 @@ func Run(args []string, env Env) int {
 	if err != nil {
 		var ce *contract.Error
 		if !errors.As(err, &ce) {
-			err = contract.New(contract.BadFlag, "%s", err.Error())
+			if a.ran {
+				err = contract.From(err) // plumbing failure after arg validation
+			} else {
+				err = contract.New(contract.BadFlag, "%s", err.Error())
+			}
 		}
 	} else if !a.ran {
 		return contract.ExitOK // help output only
