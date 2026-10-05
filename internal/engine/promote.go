@@ -232,14 +232,14 @@ func publishTexts(msg, name, email, branch, title, body string) []leak.Text {
 	}
 }
 
-// approve decides whether a plan may be applied now. Agents never approve
-// plans that require a human.
+// approve decides whether a plan may be applied now. Agents and apps never
+// approve plans that require a human.
 func (e *Engine) approve(pl plan.Plan, files []string, yes bool) error {
 	needs := func(why string) error {
 		return contract.New(contract.ApprovalRequired, "%s; plan %s is saved: run `ghostbranch apply %s --yes` to publish it", why, pl.ID, pl.ID).
 			WithDetails(map[string]any{"plan_id": pl.ID})
 	}
-	if pl.RequiresHuman && IsAgent(e.Actor) {
+	if pl.RequiresHuman && needsHumanApprover(e.Actor) {
 		return needs("this plan needs a human to approve it")
 	}
 	if yes {
@@ -250,7 +250,7 @@ func (e *Engine) approve(pl plan.Plan, files []string, yes bool) error {
 	}
 	ok, err := e.Prompt(planSummary(pl, files))
 	if err != nil {
-		return contract.Wrap(contract.MissingInput, err, "read the confirmation")
+		return contract.Wrap(contract.MissingInput, err, "read the confirmation").WithField("confirmation")
 	}
 	if !ok {
 		return needs("not confirmed")

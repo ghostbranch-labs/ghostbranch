@@ -53,6 +53,12 @@ type Engine struct {
 // IsAgent reports whether actor is an agent ("agent:<name>").
 func IsAgent(actor string) bool { return strings.HasPrefix(actor, "agent:") }
 
+// needsHumanApprover reports whether actor may not approve a plan that
+// requires a human. Agents never may. Until sub-project 2 defines how an app
+// approves, an app ("app") is treated like an agent, so it cannot approve its
+// own plans either.
+func needsHumanApprover(actor string) bool { return IsAgent(actor) || actor == "app" }
+
 func (e *Engine) now() time.Time { return e.Now().UTC().Truncate(time.Second) }
 
 func (e *Engine) progressf(format string, args ...any) {

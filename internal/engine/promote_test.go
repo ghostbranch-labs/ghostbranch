@@ -1,6 +1,7 @@
 package engine_test
 
 import (
+	"errors"
 	"reflect"
 	"strings"
 	"sync/atomic"
@@ -127,6 +128,30 @@ func TestPromoteApprovalRules(t *testing.T) {
 		h.eng.Actor = "human:octo"
 		if _, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: res.Plan.ID, Yes: true}); err != nil {
 			t.Fatalf("human apply: %v", err)
+		}
+	})
+	// Until sub-project 2 defines app approval, an app is treated like an
+	// agent: it cannot approve a plan that requires a human, even its own.
+	t.Run("app needs a human too", func(t *testing.T) {
+		h := gated(t)
+		h.eng.Actor = "app"
+		res, err := promote(h, engine.PromoteOptions{Message: "m", Yes: true})
+		_ = wantCode(t, err, contract.ApprovalRequired)
+		if _, ok, _ := h.pubGit.Resolve(h.ctx, "refs/heads/feat-x"); ok || res.Plan == nil {
+			t.Fatal("app promote must stop at the plan")
+		}
+		_, _, err = h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: res.Plan.ID, Yes: true})
+		_ = wantCode(t, err, contract.ApprovalRequired)
+		if _, ok, _ := h.pubGit.Resolve(h.ctx, "refs/heads/feat-x"); ok {
+			t.Fatal("app must not approve its own plan")
+		}
+	})
+	t.Run("a failed confirmation read names the field", func(t *testing.T) {
+		h := gated(t)
+		h.eng.Prompt = func(string) (bool, error) { return false, errors.New("stdin closed") }
+		_, err := promote(h, engine.PromoteOptions{Message: "m"})
+		if ce := wantCode(t, err, contract.MissingInput); ce.Field != "confirmation" {
+			t.Fatalf("field = %q", ce.Field)
 		}
 	})
 	t.Run("no tty and no --yes", func(t *testing.T) {

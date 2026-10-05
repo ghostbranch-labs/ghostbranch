@@ -48,7 +48,7 @@ func (e *Engine) Apply(ctx context.Context, opt ApplyOptions) (res *ApplyResult,
 		return nil, nil, contract.New(contract.PairAmbiguous, "plan %s is for %s, which is not in workspace %q", pl.ID, pl.Pair.Public, e.WS.Name).WithField("plan")
 	}
 	pair = &p
-	if pl.RequiresHuman && IsAgent(e.Actor) {
+	if pl.RequiresHuman && needsHumanApprover(e.Actor) {
 		return nil, nil, e.approve(pl, nil, opt.Yes)
 	}
 	pc, err := e.open(ctx, "apply", p, true)

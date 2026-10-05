@@ -141,7 +141,7 @@ func (a *app) promoteCmd() *cobra.Command {
 		Long: `promote reuses a fresh green gate (or runs one), builds one squash commit on public main with
 exactly the gated tree, scans it and its message, branch name and PR text for leaks, and saves a plan.
 With --plan it stops there. Otherwise it asks for confirmation (or takes --yes) and publishes.
-Agents get exit 5 when the plan needs a human; a person then runs ghostbranch apply <plan> --yes.`,
+Agents and apps get exit 5 when the plan needs a human; a person then runs ghostbranch apply <plan> --yes.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// A flag value is a usage matter; reject it before touching the network.
@@ -169,7 +169,7 @@ Agents get exit 5 when the plan needs a human; a person then runs ghostbranch ap
 	f.StringVar(&o.Body, "body", "", "PR body (default: the rest of the message)")
 	f.StringVar(&o.Branch, "branch", "", "public branch name (default: the feature name)")
 	f.BoolVar(&o.PlanOnly, "plan", false, "save and print the plan without publishing")
-	f.BoolVar(&o.Yes, "yes", false, "publish without asking (agents still need a human when require_human is set)")
+	f.BoolVar(&o.Yes, "yes", false, "publish without asking (agents and apps still need a human when require_human is set)")
 	return c
 }
 
