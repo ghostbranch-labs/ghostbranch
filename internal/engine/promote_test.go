@@ -194,3 +194,17 @@ func TestPromoteUnderAnotherBranchName(t *testing.T) {
 		t.Fatal("the feature name must not leak as a branch")
 	}
 }
+
+func TestPromoteReGatesWhenTheGateBranchIsGone(t *testing.T) {
+	h := gated(t)
+	if err := h.shadowGit().DeleteRef(h.ctx, "refs/heads/ghostbranch-gate/feat-x"); err != nil {
+		t.Fatal(err)
+	}
+	res, err := promote(h, engine.PromoteOptions{Message: "m", PlanOnly: true})
+	if err != nil || res.Gate.Reused {
+		t.Fatalf("promote = %+v %v", res, err)
+	}
+	if _, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: res.Plan.ID, Yes: true}); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+}

@@ -56,7 +56,10 @@ func (e *Engine) Apply(ctx context.Context, opt ApplyOptions) (res *ApplyResult,
 		return nil, nil, err
 	}
 	defer pc.unlock()
-	files, _ := pc.git.DiffNames(ctx, pl.Publish.Parent, pl.Publish.Commit)
+	files, err := pc.git.DiffNames(ctx, pl.Publish.Parent, pl.Publish.Commit)
+	if err != nil {
+		return nil, nil, internalErr(err, "list the files going public")
+	}
 	if err := e.approve(pl, files, opt.Yes); err != nil {
 		return nil, nil, err
 	}

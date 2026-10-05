@@ -84,13 +84,12 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 		return res, warns, internalErr(err, "read public main")
 	}
 
-	// A fresh green gate is reused only if its candidate is in the mirror
-	// (the gate branch may have been deleted by hand).
-	candidateLocal := false
-	if m.Gate != nil && m.Gate.Candidate != "" {
-		_, candidateLocal, _ = g.Resolve(ctx, m.Gate.Candidate)
-	}
-	if m.Gate.Passed() && m.Gate.FreshFor(head, pm, O) && candidateLocal {
+	// A fresh green gate is reused only while the shadow gate branch still
+	// points at its candidate; apply checks that branch, so a deleted or moved
+	// one would make every plan stale.
+	tip, tipOK, _ := g.Resolve(ctx, shadowRef(gateBranch(opt.Feature)))
+	candidateLive := m.Gate != nil && m.Gate.Candidate != "" && tipOK && tip == m.Gate.Candidate
+	if m.Gate.Passed() && m.Gate.FreshFor(head, pm, O) && candidateLive {
 		res.Gate = &GateResult{Feature: opt.Feature, FeatureHead: head, PublicMain: pm, Overlay: O,
 			Candidate: m.Gate.Candidate, PublishedTree: m.Gate.PublishedTree, Checks: m.Gate.Checks,
 			FailedChecks: []string{}, Leak: m.Gate.Leak, Findings: []leak.Finding{}, Reused: true, DryRun: e.DryRun}
@@ -183,7 +182,10 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	if opt.PlanOnly {
 		return res, warns, nil
 	}
-	files, _ := g.DiffNames(ctx, pm, P)
+	files, err := g.DiffNames(ctx, pm, P)
+	if err != nil {
+		return res, warns, internalErr(err, "list the files going public")
+	}
 	if err := e.approve(pl, files, opt.Yes); err != nil {
 		return res, warns, err
 	}
