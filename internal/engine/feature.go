@@ -77,20 +77,20 @@ func (e *Engine) checkNameFree(ctx context.Context, pc *pairCtx, name string) er
 		}
 		for ref := range refs {
 			b := strings.TrimPrefix(ref, s.prefix)
-			var msg string
-			switch {
-			case b == name:
-				msg = "%q already exists in the %s repo"
-			case strings.HasPrefix(name, b+"/") || strings.HasPrefix(b, name+"/"):
-				msg = "%q clashes with the existing branch " + `"` + b + `"` + " in the %s repo: git cannot have both a branch and a folder of that name"
-			default:
-				continue
-			}
 			where := s.where
 			if where == "feature" {
 				where = "shadow"
 			}
-			return contract.New(contract.BranchExists, msg, name, where).WithField("name").
+			var ce *contract.Error
+			switch {
+			case b == name:
+				ce = contract.New(contract.BranchExists, "%q already exists in the %s repo", name, where)
+			case strings.HasPrefix(name, b+"/") || strings.HasPrefix(b, name+"/"):
+				ce = contract.New(contract.BranchExists, "%q clashes with the existing branch %q in the %s repo: git cannot have both a branch and a folder of that name", name, b, where)
+			default:
+				continue
+			}
+			return ce.WithField("name").
 				WithDetails(map[string]any{"conflicts_with": b, "in": s.where})
 		}
 	}

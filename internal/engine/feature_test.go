@@ -1,6 +1,7 @@
 package engine_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
@@ -69,4 +70,15 @@ func TestFeatureStartRejectsPublicBranchNamesAndBadNames(t *testing.T) {
 	}
 	_, _, err = h.eng.FeatureStart(h.ctx, h.pair, "ghostbranch/gate/x")
 	_ = wantCode(t, err, contract.NameInvalid)
+}
+
+func TestFeatureStartPercentInExistingBranchName(t *testing.T) {
+	h := newHarness(t)
+	h.init()
+	testutil.Commit(t, h.pubGit, "pct/a%sb", "p", map[string]string{"p.txt": "p\n"})
+	_, _, err := h.eng.FeatureStart(h.ctx, h.pair, "pct")
+	ce := wantCode(t, err, contract.BranchExists)
+	if !strings.Contains(ce.Message, "pct/a%sb") || strings.Contains(ce.Message, "%!") {
+		t.Fatalf("message garbled: %q", ce.Message)
+	}
 }
