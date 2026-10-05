@@ -40,13 +40,25 @@ func (s Set) Match(path string) bool {
 // Patterns returns every pattern in the set.
 func (s Set) Patterns() []string { return append([]string(nil), s.patterns...) }
 
+// compile turns a glob into an anchored regexp. '*' and '?' never cross '/'.
+// '**' crosses directories: a leading "**/" and an inner "/**/" also match
+// zero directories, so "**/NOTES.md" matches "NOTES.md" and "docs/**/x.md"
+// matches "docs/x.md". A trailing "/**" matches everything under the
+// directory, and a bare "**" matches every path.
 func compile(pattern string) *regexp.Regexp {
 	var b strings.Builder
 	b.WriteString("^")
 	runes := []rune(pattern)
+	at := func(i int, s string) bool { return strings.HasPrefix(string(runes[i:]), s) }
 	for i := 0; i < len(runes); i++ {
 		r := runes[i]
 		switch {
+		case i == 0 && at(i, "**/"):
+			b.WriteString("(?:.*/)?")
+			i += 2
+		case at(i, "/**/"):
+			b.WriteString("/(?:.*/)?")
+			i += 3
 		case r == '*' && i+1 < len(runes) && runes[i+1] == '*':
 			b.WriteString(".*")
 			i++
