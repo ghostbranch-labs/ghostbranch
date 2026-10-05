@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // Git runs git against one repository directory (bare repo or worktree).
@@ -49,15 +50,44 @@ func (e *Error) Error() string {
 	return fmt.Sprintf("git %s: exit %d: %s", strings.Join(e.Args, " "), e.ExitCode, strings.TrimSpace(e.Stderr))
 }
 
+// isolation is a private directory, made once per process, that holds the
+// paths git is pointed at instead of the user's global config, hooks and
+// attributes: an empty hooks directory and two files that never exist.
+// These paths must never be under g.Dir: in a worktree, g.Dir is the root of
+// a checkout whose content is attacker-controlled (feature content, or
+// public main), so a tracked file there would become config (core.fsmonitor
+// runs commands), hooks or attributes. /dev/null is not used for the hooks
+// directory because Git for Windows resolves "/dev/null/<hook>" against the
+// current drive (<drive>:/dev/null/<hook>) rather than as the null device.
+type isolation struct {
+	hooks, globalConfig, attributes string
+}
+
+var isolated = sync.OnceValues(func() (isolation, error) {
+	dir, err := os.MkdirTemp("", "ghostbranch-git-") // created 0700
+	if err != nil {
+		return isolation{}, fmt.Errorf("make git isolation directory: %w", err)
+	}
+	iso := isolation{
+		hooks:        filepath.Join(dir, "hooks"),
+		globalConfig: filepath.Join(dir, "no-global-config"),
+		attributes:   filepath.Join(dir, "no-attributes"),
+	}
+	if err := os.Mkdir(iso.hooks, 0o700); err != nil {
+		return isolation{}, fmt.Errorf("make git isolation directory: %w", err)
+	}
+	return iso, nil
+})
+
 // overrides neutralize user and system config that would change content
 // (autocrlf, attributes), block non-interactive runs (signing, credential
 // prompts), or run user code (hooks).
-func (g *Git) overrides() [][2]string {
+func overrides(iso isolation) [][2]string {
 	return [][2]string{
 		{"core.autocrlf", "false"},
 		{"core.safecrlf", "false"},
-		{"core.hooksPath", filepath.Join(g.Dir, "ghostbranch-no-hooks")},
-		{"core.attributesFile", filepath.Join(g.Dir, "ghostbranch-no-attributes")},
+		{"core.hooksPath", iso.hooks},
+		{"core.attributesFile", iso.attributes},
 		{"commit.gpgSign", "false"},
 		{"tag.gpgSign", "false"},
 		{"credential.helper", ""},
@@ -80,7 +110,11 @@ var droppedEnv = []string{
 	"GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS",
 }
 
-func (g *Git) environ() []string {
+func (g *Git) environ() ([]string, error) {
+	iso, err := isolated()
+	if err != nil {
+		return nil, err
+	}
 	var env []string
 	for _, kv := range os.Environ() {
 		key, _, _ := strings.Cut(kv, "=")
@@ -94,25 +128,29 @@ func (g *Git) environ() []string {
 			env = append(env, kv)
 		}
 	}
-	cfg := append(g.overrides(), g.Config...)
+	cfg := append(overrides(iso), g.Config...)
 	// The user's global config (~/.gitconfig and the XDG file) is ignored
-	// wholesale by pointing GIT_CONFIG_GLOBAL at a file that does not exist:
+	// wholesale by pointing GIT_CONFIG_GLOBAL at a file that never exists:
 	// url.*.insteadOf, url.*.pushInsteadOf, core.sshCommand, http.proxy and
 	// the like there could redirect a push, bypass the token header, or hang
 	// on a prompt. System config stays: Git for Windows keeps its TLS CA
 	// settings there, and the overrides above neutralize the rest.
-	env = append(env, "GIT_CONFIG_GLOBAL="+filepath.Join(g.Dir, "ghostbranch-no-global-config"),
+	env = append(env, "GIT_CONFIG_GLOBAL="+iso.globalConfig,
 		"GIT_TERMINAL_PROMPT=0", "LC_ALL=C", "GIT_CONFIG_COUNT="+strconv.Itoa(len(cfg)))
 	for i, kv := range cfg {
 		env = append(env, fmt.Sprintf("GIT_CONFIG_KEY_%d=%s", i, kv[0]), fmt.Sprintf("GIT_CONFIG_VALUE_%d=%s", i, kv[1]))
 	}
-	return append(env, g.Env...)
+	return append(env, g.Env...), nil
 }
 
 func (g *Git) runRaw(ctx context.Context, stdin io.Reader, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = g.Dir
-	cmd.Env = g.environ()
+	env, err := g.environ()
+	if err != nil {
+		return nil, err
+	}
+	cmd.Env = env
 	cmd.Stdin = stdin
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

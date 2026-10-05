@@ -154,3 +154,81 @@ func TestWorktreeRemoveFallbackRemovesUnregisteredDir(t *testing.T) {
 		t.Fatalf("already-deleted dir should not error: %v", err)
 	}
 }
+
+// Checked-out content is attacker-controlled: feature content, or public
+// main, which outside contributors write to. No file in a checkout may
+// become git's global config, hooks or attributes, whatever it is named.
+func TestCheckoutContentCannotBecomeGitConfigHooksOrAttributes(t *testing.T) {
+	ctx := context.Background()
+	tmp := t.TempDir()
+	markers := filepath.Join(tmp, "markers")
+	if err := os.MkdirAll(markers, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Hooks and core.fsmonitor run through git's own sh (bundled with Git for
+	// Windows), so these payloads run on every platform.
+	mark := func(name string) string {
+		return "echo " + name + " >> '" + filepath.ToSlash(filepath.Join(markers, name)) + "'"
+	}
+	hook := func(name string) string { return "#!/bin/sh\n" + mark(name) + "\n" }
+	hostile := map[string]struct{ mode, content string }{
+		// The names gitx once used for its isolation paths under g.Dir.
+		"ghostbranch-no-global-config":       {"100644", "[core]\n\tfsmonitor = " + mark("fsmonitor") + "\n"},
+		"ghostbranch-no-hooks/post-checkout": {"100755", hook("post-checkout")},
+		"ghostbranch-no-hooks/post-rewrite":  {"100755", hook("post-rewrite")},
+		"ghostbranch-no-attributes":          {"100644", "*.txt text eol=crlf\n"},
+		"lf.txt":                             {"100644", "a\nb\nc\n"},
+	}
+	g := testutil.BareRepo(t, filepath.Join(tmp, "r.git"))
+	var entries []gitx.TreeEntry
+	for path, f := range hostile {
+		sha, err := g.HashObject(ctx, []byte(f.content))
+		if err != nil {
+			t.Fatal(err)
+		}
+		entries = append(entries, gitx.TreeEntry{Mode: f.mode, Type: "blob", SHA: sha, Path: path})
+	}
+	tree, err := g.MakeTree(ctx, entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, err := g.CommitTree(ctx, tree, nil, "hostile base", testutil.Author(0), testutil.Author(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ref := range []string{"refs/heads/main", "refs/heads/feat"} {
+		if err := g.UpdateRef(ctx, ref, base); err != nil {
+			t.Fatal(err)
+		}
+	}
+	feat := testutil.Commit(t, g, "feat", "feature", map[string]string{"feature.txt": "f\n"})
+	main := testutil.Commit(t, g, "main", "upstream", map[string]string{"lf.txt": "a\nb\nC\n"})
+
+	wtDir := filepath.Join(tmp, "wt")
+	wt, err := g.WorktreeAdd(ctx, wtDir, feat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = g.WorktreeRemove(ctx, wtDir) }()
+	if err := wt.Rebase(ctx, main, bot()); err != nil {
+		t.Fatalf("rebase: %v", err)
+	}
+	if _, err := wt.Run(ctx, "status", "--porcelain"); err != nil { // reads core.fsmonitor
+		t.Fatalf("status: %v", err)
+	}
+
+	ran, err := os.ReadDir(markers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range ran {
+		t.Errorf("checked-out content ran as git config or a hook: %s", m.Name())
+	}
+	onDisk, err := os.ReadFile(filepath.Join(wtDir, "lf.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(onDisk, []byte("\r")) {
+		t.Errorf("checked-out content was applied as attributes: lf.txt = %q", onDisk)
+	}
+}
