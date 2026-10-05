@@ -124,11 +124,24 @@ func TestPRsChecksAndDefaultBranch(t *testing.T) {
 		writeJSON(w, map[string]any{"total_count": 1, "check_runs": []map[string]any{
 			{"name": "build", "status": "completed", "conclusion": "success"}}})
 	})
+	var srvURL string
 	mux.HandleFunc("GET /repos/acme/s/commits/abc/status", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("page") == "2" {
+			writeJSON(w, map[string]any{"state": "pending", "statuses": []map[string]any{
+				{"context": "lint", "state": "error"}}})
+			return
+		}
+		w.Header().Set("Link", `<`+srvURL+`/repos/acme/s/commits/abc/status?page=2&per_page=100>; rel="next"`)
 		writeJSON(w, map[string]any{"state": "pending", "statuses": []map[string]any{
-			{"context": "legacy", "state": "pending"}, {"context": "lint", "state": "error"}}})
+			{"context": "legacy", "state": "pending"}}})
 	})
-	c := newClient(t, mux)
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	srvURL = srv.URL
+	c, err := ghforge.NewWithBaseURL("tok", srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
 	if err := c.SetDefaultBranch(ctx, "acme/s", "ghostbranch"); err != nil {
 		t.Fatal(err)

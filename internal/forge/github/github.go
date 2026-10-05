@@ -181,21 +181,28 @@ func (c *Client) ListChecks(ctx context.Context, full, sha string) ([]forge.Chec
 		}
 		opts.Page = resp.NextPage
 	}
-	st, resp, err := c.c.Repositories.GetCombinedStatus(ctx, owner, name, sha, &gh.ListOptions{PerPage: 100})
-	if err := wrap(resp, err); err != nil {
-		return nil, err
-	}
-	for _, s := range st.Statuses {
-		ch := forge.Check{Name: s.GetContext()}
-		switch s.GetState() {
-		case "pending":
-			ch.Status = "in_progress"
-		case "success":
-			ch.Status, ch.Conclusion = "completed", "success"
-		default: // failure, error
-			ch.Status, ch.Conclusion = "completed", "failure"
+	sopts := &gh.ListOptions{PerPage: 100}
+	for {
+		st, resp, err := c.c.Repositories.GetCombinedStatus(ctx, owner, name, sha, sopts)
+		if err := wrap(resp, err); err != nil {
+			return nil, err
 		}
-		out = append(out, ch)
+		for _, s := range st.Statuses {
+			ch := forge.Check{Name: s.GetContext()}
+			switch s.GetState() {
+			case "pending":
+				ch.Status = "in_progress"
+			case "success":
+				ch.Status, ch.Conclusion = "completed", "success"
+			default: // failure, error
+				ch.Status, ch.Conclusion = "completed", "failure"
+			}
+			out = append(out, ch)
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		sopts.Page = resp.NextPage
 	}
 	return out, nil
 }
