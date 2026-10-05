@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "One ledger.jsonl line",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["ts", "actor", "op", "exit_code", "summary"],
+  "properties": {
+    "ts": { "$ref": "common.schema.json#/$defs/time" },
+    "actor": { "$ref": "common.schema.json#/$defs/actor" },
+    "op": { "enum": ["init", "sync", "feature start", "gate", "promote", "apply"] },
+    "pair": { "$ref": "common.schema.json#/$defs/repo" },
+    "feature": { "type": "string" },
+    "plan_id": { "$ref": "common.schema.json#/$defs/planId" },
+    "exit_code": { "type": "integer", "minimum": 0, "maximum": 6 },
+    "error_code": { "type": "string" },
+    "summary": { "type": "string" }
+  }
+}

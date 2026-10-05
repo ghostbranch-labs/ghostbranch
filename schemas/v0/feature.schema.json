@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "feature.json (refs/ghostbranch/features/<name>)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "name", "branch", "created_by", "created_at", "base", "abandoned", "gate", "promoted"],
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "name": { "type": "string" },
+    "branch": { "type": "string" },
+    "created_by": { "$ref": "common.schema.json#/$defs/actor" },
+    "created_at": { "$ref": "common.schema.json#/$defs/time" },
+    "base": { "$ref": "common.schema.json#/$defs/sha" },
+    "abandoned": { "type": "boolean" },
+    "gate": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["feature_head", "public_main", "overlay", "candidate", "published_tree", "checks", "leak", "at"],
+          "properties": {
+            "feature_head": { "$ref": "common.schema.json#/$defs/sha" },
+            "public_main": { "$ref": "common.schema.json#/$defs/sha" },
+            "overlay": { "$ref": "common.schema.json#/$defs/sha" },
+            "candidate": { "$ref": "common.schema.json#/$defs/sha" },
+            "published_tree": { "$ref": "common.schema.json#/$defs/sha" },
+            "checks": { "enum": ["passed", "failed", "no_ci", "timeout", "not_run"] },
+            "leak": { "enum": ["clean", "found"] },
+            "at": { "$ref": "common.schema.json#/$defs/time" }
+          }
+        }
+      ]
+    },
+    "promoted": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object", "additionalProperties": false, "required": ["public_pr", "plan_id"],
+          "properties": { "public_pr": { "type": "integer", "minimum": 1 }, "plan_id": { "$ref": "common.schema.json#/$defs/planId" } }
+        }
+      ]
+    }
+  }
+}

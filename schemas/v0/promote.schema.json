@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "promote data",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["gate", "plan", "plan_path", "findings", "applied", "dry_run"],
+  "properties": {
+    "gate": { "oneOf": [{ "type": "null" }, { "$ref": "gate.schema.json" }] },
+    "plan": { "oneOf": [{ "type": "null" }, { "$ref": "plan.schema.json" }] },
+    "plan_path": { "type": "string" },
+    "findings": { "type": "array", "items": { "$ref": "finding.schema.json" } },
+    "applied": { "oneOf": [{ "type": "null" }, { "$ref": "apply.schema.json" }] },
+    "dry_run": { "type": "boolean" }
+  }
+}

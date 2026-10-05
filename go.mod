@@ -4,6 +4,7 @@ go 1.27
 
 require (
 	github.com/google/go-github/v92 v92.0.0
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/spf13/cobra v1.10.2
 	github.com/zricethezav/gitleaks/v8 v8.30.1
 	gopkg.in/yaml.v3 v3.0.1

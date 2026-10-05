@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "sync data",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["public", "shadow", "action", "public_main", "shadow_main_before", "shadow_main_after", "dry_run"],
+  "properties": {
+    "public": { "$ref": "common.schema.json#/$defs/repo" },
+    "shadow": { "$ref": "common.schema.json#/$defs/repo" },
+    "action": { "enum": ["noop", "fast_forward", "diverged"] },
+    "public_main": { "$ref": "common.schema.json#/$defs/sha" },
+    "shadow_main_before": { "$ref": "common.schema.json#/$defs/shaOrEmpty" },
+    "shadow_main_after": { "$ref": "common.schema.json#/$defs/shaOrEmpty" },
+    "dry_run": { "type": "boolean" }
+  }
+}

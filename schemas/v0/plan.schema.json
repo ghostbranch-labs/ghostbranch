@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Promote plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "kind", "actor", "created_at", "pair", "feature", "mode", "fingerprint",
+               "publish", "leak", "requires_human"],
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "id": { "$ref": "common.schema.json#/$defs/planId" },
+    "kind": { "const": "promote" },
+    "actor": { "$ref": "common.schema.json#/$defs/actor" },
+    "created_at": { "$ref": "common.schema.json#/$defs/time" },
+    "pair": {
+      "type": "object", "additionalProperties": false, "required": ["public", "shadow"],
+      "properties": { "public": { "$ref": "common.schema.json#/$defs/repo" }, "shadow": { "$ref": "common.schema.json#/$defs/repo" } }
+    },
+    "feature": { "type": "string" },
+    "mode": { "const": "squash" },
+    "fingerprint": {
+      "type": "object", "additionalProperties": false,
+      "required": ["public_main", "feature_head", "overlay", "gate_candidate"],
+      "properties": {
+        "public_main": { "$ref": "common.schema.json#/$defs/sha" },
+        "feature_head": { "$ref": "common.schema.json#/$defs/sha" },
+        "overlay": { "$ref": "common.schema.json#/$defs/sha" },
+        "gate_candidate": { "$ref": "common.schema.json#/$defs/sha" }
+      }
+    },
+    "publish": {
+      "type": "object", "additionalProperties": false,
+      "required": ["commit", "tree", "parent", "author", "target_branch", "pr"],
+      "properties": {
+        "commit": { "$ref": "common.schema.json#/$defs/sha" },
+        "tree": { "$ref": "common.schema.json#/$defs/sha" },
+        "parent": { "$ref": "common.schema.json#/$defs/sha" },
+        "author": {
+          "type": "object", "additionalProperties": false, "required": ["name", "email", "date"],
+          "properties": {
+            "name": { "type": "string" },
+            "email": { "type": "string", "pattern": "@users\\.noreply\\.github\\.com$" },
+            "date": { "$ref": "common.schema.json#/$defs/time" }
+          }
+        },
+        "target_branch": { "type": "string" },
+        "pr": {
+          "type": "object", "additionalProperties": false, "required": ["title", "body"],
+          "properties": { "title": { "type": "string", "minLength": 1 }, "body": { "type": "string" } }
+        }
+      }
+    },
+    "leak": {
+      "type": "object", "additionalProperties": false, "required": ["findings", "scanner_version"],
+      "properties": { "findings": { "type": "array", "maxItems": 0 }, "scanner_version": { "type": "string" } }
+    },
+    "requires_human": { "type": "boolean" }
+  }
+}

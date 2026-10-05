@@ -1,0 +1,23 @@
+{
+  "schema_version": "0.1",
+  "command": "init",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "public": "acme/widget",
+    "shadow": "acme/widget-shadow",
+    "created_shadow": true,
+    "adopted": false,
+    "resumed": false,
+    "mirrored_branches": [
+      "main"
+    ],
+    "mirrored_tags": [],
+    "overlay_created": true,
+    "default_branch_set": true,
+    "dry_run": false,
+    "actions": []
+  },
+  "warnings": [],
+  "error": null
+}

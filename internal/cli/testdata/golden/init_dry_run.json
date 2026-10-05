@@ -1,0 +1,27 @@
+{
+  "schema_version": "0.1",
+  "command": "init",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "public": "acme/widget",
+    "shadow": "acme/widget-shadow",
+    "created_shadow": true,
+    "adopted": false,
+    "resumed": false,
+    "mirrored_branches": [],
+    "mirrored_tags": [],
+    "overlay_created": false,
+    "default_branch_set": false,
+    "dry_run": true,
+    "actions": [
+      "create private repo acme/widget-shadow",
+      "mirror public branches and tags",
+      "create the ghostbranch overlay branch",
+      "make ghostbranch the default branch",
+      "register the pair"
+    ]
+  },
+  "warnings": [],
+  "error": null
+}

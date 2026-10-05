@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "feature start data",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "branch", "base", "checkout", "dry_run"],
+  "properties": {
+    "name": { "type": "string" },
+    "branch": { "type": "string" },
+    "base": { "$ref": "common.schema.json#/$defs/sha" },
+    "checkout": { "type": "string" },
+    "dry_run": { "type": "boolean" }
+  }
+}

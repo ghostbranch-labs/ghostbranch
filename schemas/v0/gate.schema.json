@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "gate data",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["feature", "feature_head", "public_main", "overlay", "candidate", "published_tree", "checks",
+               "failed_checks", "leak", "findings", "shadow_pr", "reused", "dry_run"],
+  "properties": {
+    "feature": { "type": "string" },
+    "feature_head": { "$ref": "common.schema.json#/$defs/sha" },
+    "public_main": { "$ref": "common.schema.json#/$defs/sha" },
+    "overlay": { "$ref": "common.schema.json#/$defs/sha" },
+    "candidate": { "$ref": "common.schema.json#/$defs/shaOrEmpty" },
+    "published_tree": { "$ref": "common.schema.json#/$defs/shaOrEmpty" },
+    "checks": { "enum": ["passed", "failed", "no_ci", "timeout", "not_run"] },
+    "failed_checks": { "type": "array", "items": { "type": "string" } },
+    "leak": { "enum": ["clean", "found"] },
+    "findings": { "type": "array", "items": { "$ref": "finding.schema.json" } },
+    "shadow_pr": { "type": "integer", "minimum": 0 },
+    "reused": { "type": "boolean" },
+    "dry_run": { "type": "boolean" }
+  }
+}

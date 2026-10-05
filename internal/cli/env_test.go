@@ -88,7 +88,6 @@ func (te *testEnv) shadowCommit(branch string, files map[string]string) {
 	testutil.Commit(te.t, gitx.New(te.forge.RepoDir("acme/widget-shadow")), branch, "work", files)
 }
 
-//nolint:unused // used by the golden tests in a later task
 func (te *testEnv) lastPlanID() string {
 	te.t.Helper()
 	entries, _ := os.ReadDir(filepath.Join(te.vars["GHOSTBRANCH_HOME"], "workspaces", "default", "plans"))
@@ -112,7 +111,6 @@ func withFeature(te *testEnv) {
 }
 func gatedFeature(te *testEnv) { withFeature(te); te.mustRun("gate", "feat-x") }
 
-//nolint:unused // used by the golden tests in a later task
 func withLeakyFeature(te *testEnv) {
 	initOnly(te)
 	te.mustRun("feature", "start", "feat-x")
