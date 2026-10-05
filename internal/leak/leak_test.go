@@ -97,3 +97,15 @@ func TestLinesAreOneBased(t *testing.T) {
 		}
 	}
 }
+
+func TestDefaultPathAllowlistDoesNotSkipPublishedFiles(t *testing.T) {
+	tok := testutil.FakeGitHubToken()
+	for _, path := range []string{"vendor/github.com/acme/y.go", "node_modules/x/a.js", "go.mod"} {
+		got, err := scanner(t).Scan(leak.Input{
+			Files: []leak.File{{Path: path, Content: []byte("TOKEN=" + tok + "\n")}},
+		})
+		if err != nil || len(got) == 0 {
+			t.Errorf("%s: want a finding, got %+v %v", path, got, err)
+		}
+	}
+}

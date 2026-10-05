@@ -8,6 +8,7 @@ import (
 	"runtime/debug"
 	"sort"
 
+	"github.com/zricethezav/gitleaks/v8/config"
 	"github.com/zricethezav/gitleaks/v8/detect"
 	"github.com/zricethezav/gitleaks/v8/report"
 
@@ -60,7 +61,43 @@ func NewGitleaks(set overlay.Set) (*Gitleaks, error) {
 	if err != nil {
 		return nil, err
 	}
+	dropPathAllowlists(d)
 	return &Gitleaks{det: d, set: set}, nil
+}
+
+// dropPathAllowlists removes every path allowlist entry from the detector's
+// global and per-rule allowlists. The default config skips go.mod, vendor/,
+// node_modules, images and more by path, but every published path must be
+// scanned. Commit, regex and stopword allowlist parts are kept. Allowlists are
+// rebuilt rather than edited because gitleaks compiles Paths on Validate.
+func dropPathAllowlists(d *detect.Detector) {
+	d.Config.Allowlists = withoutPaths(d.Config.Allowlists)
+	for id, r := range d.Config.Rules {
+		r.Allowlists = withoutPaths(r.Allowlists)
+		d.Config.Rules[id] = r
+	}
+}
+
+func withoutPaths(in []*config.Allowlist) []*config.Allowlist {
+	var out []*config.Allowlist
+	for _, a := range in {
+		if len(a.Paths) == 0 {
+			out = append(out, a)
+			continue
+		}
+		if a.MatchCondition == config.AllowlistMatchAnd {
+			continue // path was a required condition; without it, drop the whole entry
+		}
+		c := &config.Allowlist{
+			Description: a.Description, MatchCondition: a.MatchCondition,
+			Commits: a.Commits, RegexTarget: a.RegexTarget, Regexes: a.Regexes, StopWords: a.StopWords,
+		}
+		if c.Validate() != nil {
+			continue // nothing but paths was left
+		}
+		out = append(out, c)
+	}
+	return out
 }
 
 func (g *Gitleaks) Scan(in Input) ([]Finding, error) {
@@ -105,7 +142,7 @@ func (g *Gitleaks) Scan(in Input) ([]Finding, error) {
 // v8.30.1 takes the deprecated detect.Fragment alias, so the deprecation is
 // confined here until the API moves to sources.Fragment in v9.
 func (g *Gitleaks) detect(raw, path string) []report.Finding {
-	return g.det.Detect(detect.Fragment{Raw: raw, FilePath: path}) //nolint:staticcheck // see above
+	return g.det.Detect(detect.Fragment{Raw: raw, FilePath: path}) //nolint:staticcheck // detect.Fragment is deprecated until gitleaks v9; Detect still requires it
 }
 
 // Version names the scanner and its rule set, for plans.
