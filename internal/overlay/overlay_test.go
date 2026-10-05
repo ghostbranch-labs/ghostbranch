@@ -43,3 +43,16 @@ func TestExtraPatterns(t *testing.T) {
 		t.Fatalf("Patterns = %v", s.Patterns())
 	}
 }
+
+func TestNonASCIIPatterns(t *testing.T) {
+	s := overlay.NewSet("docs/café/**")
+	cases := map[string]bool{
+		"docs/café/notes.md": true,
+		"docs/cafe/notes.md": false,
+	}
+	for path, want := range cases {
+		if got := s.Match(path); got != want {
+			t.Errorf("Match(%q) = %v, want %v", path, got, want)
+		}
+	}
+}

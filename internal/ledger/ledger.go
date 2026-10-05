@@ -38,7 +38,7 @@ func Append(path string, e Entry) error {
 		return err
 	}
 	if _, err := f.Write(append(b, '\n')); err != nil {
-		_ = f.Close() //nolint:errcheck
+		_ = f.Close()
 		return err
 	}
 	return f.Close()
@@ -53,7 +53,7 @@ func Read(path string) ([]Entry, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close() //nolint:errcheck
+	defer func() { _ = f.Close() }()
 	var out []Entry
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 64*1024), 1024*1024)

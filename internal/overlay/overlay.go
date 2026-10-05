@@ -43,17 +43,19 @@ func (s Set) Patterns() []string { return append([]string(nil), s.patterns...) }
 func compile(pattern string) *regexp.Regexp {
 	var b strings.Builder
 	b.WriteString("^")
-	for i := 0; i < len(pattern); i++ {
-		switch c := pattern[i]; {
-		case c == '*' && i+1 < len(pattern) && pattern[i+1] == '*':
+	runes := []rune(pattern)
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
+		switch {
+		case r == '*' && i+1 < len(runes) && runes[i+1] == '*':
 			b.WriteString(".*")
 			i++
-		case c == '*':
+		case r == '*':
 			b.WriteString("[^/]*")
-		case c == '?':
+		case r == '?':
 			b.WriteString("[^/]")
 		default:
-			b.WriteString(regexp.QuoteMeta(string(c)))
+			b.WriteString(regexp.QuoteMeta(string(r)))
 		}
 	}
 	b.WriteString("$")
