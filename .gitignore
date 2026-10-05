@@ -1,0 +1,19 @@
+# Build output
+/bin/
+/dist/
+*.exe
+*.test
+
+# Test and coverage output
+*.out
+coverage.*
+
+# Local Go workspace files
+go.work
+go.work.sum
+
+.env
+
+.DS_Store
+.idea/
+.vscode/
