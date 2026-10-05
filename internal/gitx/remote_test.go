@@ -3,6 +3,7 @@ package gitx_test
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -94,5 +95,40 @@ func TestPushCustomNamespace(t *testing.T) {
 	}
 	if sha, _, _ := remote.Resolve(ctx, "refs/ghostbranch/features/x"); sha != c1 {
 		t.Fatal("custom ref not pushed")
+	}
+}
+
+// The user's global config must not rewrite remote URLs: insteadOf and
+// pushInsteadOf there could send a fetch or a push somewhere else.
+func TestGlobalConfigCannotRedirectRemotes(t *testing.T) {
+	ctx := context.Background()
+	remote, local, c1 := setupRemote(t)
+	decoy := testutil.BareRepo(t, filepath.Join(t.TempDir(), "decoy.git"))
+	d1 := testutil.Commit(t, decoy, "main", "decoy", map[string]string{"d.txt": "d\n"})
+	url := filepath.ToSlash(remote.Dir)
+	if err := local.AddRemote(ctx, "slashed", url); err != nil {
+		t.Fatal(err)
+	}
+	global := filepath.Join(t.TempDir(), "gitconfig")
+	cfg := "[url \"" + filepath.ToSlash(decoy.Dir) + "\"]\n\tinsteadOf = " + url + "\n\tpushInsteadOf = " + url + "\n"
+	if err := os.WriteFile(global, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", global)
+
+	if err := local.Fetch(ctx, "slashed", "+refs/heads/*:refs/remotes/slashed/*"); err != nil {
+		t.Fatal(err)
+	}
+	if sha, _, _ := local.Resolve(ctx, "refs/remotes/slashed/main"); sha != c1 {
+		t.Fatalf("fetched main = %s, want %s from the real remote (decoy main is %s)", sha, c1, d1)
+	}
+	if err := local.Push(ctx, "slashed", gitx.PushOptions{}, c1+":refs/heads/pushed"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := remote.Resolve(ctx, "refs/heads/pushed"); !ok {
+		t.Fatal("push did not reach the real remote")
+	}
+	if _, ok, _ := decoy.Resolve(ctx, "refs/heads/pushed"); ok {
+		t.Fatal("push was redirected to the decoy by global config")
 	}
 }

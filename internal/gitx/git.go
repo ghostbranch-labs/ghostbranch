@@ -95,7 +95,14 @@ func (g *Git) environ() []string {
 		}
 	}
 	cfg := append(g.overrides(), g.Config...)
-	env = append(env, "GIT_TERMINAL_PROMPT=0", "LC_ALL=C", "GIT_CONFIG_COUNT="+strconv.Itoa(len(cfg)))
+	// The user's global config (~/.gitconfig and the XDG file) is ignored
+	// wholesale by pointing GIT_CONFIG_GLOBAL at a file that does not exist:
+	// url.*.insteadOf, url.*.pushInsteadOf, core.sshCommand, http.proxy and
+	// the like there could redirect a push, bypass the token header, or hang
+	// on a prompt. System config stays: Git for Windows keeps its TLS CA
+	// settings there, and the overrides above neutralize the rest.
+	env = append(env, "GIT_CONFIG_GLOBAL="+filepath.Join(g.Dir, "ghostbranch-no-global-config"),
+		"GIT_TERMINAL_PROMPT=0", "LC_ALL=C", "GIT_CONFIG_COUNT="+strconv.Itoa(len(cfg)))
 	for i, kv := range cfg {
 		env = append(env, fmt.Sprintf("GIT_CONFIG_KEY_%d=%s", i, kv[0]), fmt.Sprintf("GIT_CONFIG_VALUE_%d=%s", i, kv[1]))
 	}

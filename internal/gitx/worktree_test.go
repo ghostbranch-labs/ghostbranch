@@ -87,12 +87,16 @@ func TestUserGitConfigCannotChangeContentOrRunHooks(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	global := filepath.Join(tmp, "gitconfig")
+	// The hostile config goes in the system scope, which git still reads:
+	// gitx ignores the global scope wholesale, so only the overrides stand
+	// between system config and the content git writes.
+	system := filepath.Join(tmp, "gitconfig")
 	cfg := "[core]\n\tautocrlf = true\n\thooksPath = " + filepath.ToSlash(hooks) + "\n[commit]\n\tgpgSign = true\n"
-	if err := os.WriteFile(global, []byte(cfg), 0o644); err != nil {
+	if err := os.WriteFile(system, []byte(cfg), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("GIT_CONFIG_GLOBAL", global)
+	t.Setenv("GIT_CONFIG_SYSTEM", system)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "0")
 
 	g := testutil.BareRepo(t, filepath.Join(tmp, "r.git"))
 	base := testutil.Commit(t, g, "main", "base", map[string]string{"lf.txt": "a\nb\nc\nd\ne\n"})
