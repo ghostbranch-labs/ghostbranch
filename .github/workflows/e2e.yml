@@ -1,0 +1,24 @@
+name: e2e
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-sandbox
+  cancel-in-progress: false
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: go test -tags e2e -count=1 -timeout 35m -v ./internal/e2e/
+        env:
+          GHOSTBRANCH_E2E_TOKEN: ${{ secrets.GHOSTBRANCH_E2E_TOKEN }}

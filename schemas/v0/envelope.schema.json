@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Ghostbranch command output",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "command", "ok", "exit_code", "data", "warnings", "error"],
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "command": { "enum": ["ghostbranch", "init", "sync", "feature start", "gate", "promote", "apply"] },
+    "ok": { "type": "boolean" },
+    "exit_code": { "type": "integer", "minimum": 0, "maximum": 6 },
+    "data": { "type": "object" },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "message"],
+        "properties": {
+          "code": { "enum": ["CONFIG_KEY_IGNORED", "PUBLIC_NOT_PUBLIC", "GATE_NOT_RECORDED", "CHECKS_LIMITED"] },
+          "message": { "type": "string" }
+        }
+      }
+    },
+    "error": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["code", "message", "field", "retryable", "details"],
+          "properties": {
+            "code": {
+              "enum": ["AUTH_MISSING", "FORGE_ERROR", "SHADOW_NOT_PRIVATE", "CONFIG_INVALID", "LOCKED", "INTERNAL",
+                       "BAD_FLAG", "MISSING_INPUT", "PAIR_AMBIGUOUS", "NAME_INVALID", "FEATURE_NOT_FOUND",
+                       "CHECKS_FAILED", "NO_CI", "CI_TIMEOUT", "LEAK_FOUND",
+                       "REBASE_CONFLICT", "SYNC_DIVERGED", "BRANCH_EXISTS", "OVERLAY_COLLISION", "SHADOW_NOT_EMPTY", "REF_MOVED",
+                       "APPROVAL_REQUIRED", "PLAN_STALE"]
+            },
+            "message": { "type": "string" },
+            "field": { "type": ["string", "null"] },
+            "retryable": { "type": "boolean" },
+            "details": { "type": "object" }
+          }
+        }
+      ]
+    }
+  },
+  "allOf": [
+    { "if": { "properties": { "ok": { "const": true } } },
+      "then": { "properties": { "exit_code": { "const": 0 }, "error": { "type": "null" } } } },
+    { "if": { "properties": { "ok": { "const": false } } },
+      "then": { "properties": { "exit_code": { "minimum": 1 }, "error": { "type": "object" } } } }
+  ]
+}

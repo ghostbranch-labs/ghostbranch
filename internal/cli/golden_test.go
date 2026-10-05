@@ -1,0 +1,180 @@
+package cli_test
+
+import (
+	"bufio"
+	"bytes"
+	"encoding/json"
+	"flag"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"testing"
+
+	"github.com/santhosh-tekuri/jsonschema/v6"
+
+	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
+	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
+	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
+)
+
+var update = flag.Bool("update", false, "rewrite golden files")
+
+var dataSchemas = map[string]string{
+	"init": "init.schema.json", "sync": "sync.schema.json", "feature start": "feature-start.schema.json",
+	"gate": "gate.schema.json", "promote": "promote.schema.json", "apply": "apply.schema.json",
+}
+
+func schema(t *testing.T, name string) *jsonschema.Schema {
+	t.Helper()
+	path, err := filepath.Abs(filepath.Join("..", "..", "schemas", "v0", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := jsonschema.NewCompiler()
+	c.AssertFormat()
+	s, err := c.Compile(path)
+	if err != nil {
+		t.Fatalf("compile %s: %v", name, err)
+	}
+	return s
+}
+
+func validate(t *testing.T, name string, raw []byte) {
+	t.Helper()
+	inst, err := jsonschema.UnmarshalJSON(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := schema(t, name).Validate(inst); err != nil {
+		t.Fatalf("%s does not match %s:\n%v\n%s", "output", name, err, raw)
+	}
+}
+
+var rootPath = regexp.MustCompile(`<ROOT>[^"]*`)
+
+// normalize replaces the temp dir with <ROOT> and uses / in those paths, so
+// goldens match on every OS.
+func normalize(out, root string) string {
+	esc, _ := json.Marshal(root)
+	out = strings.ReplaceAll(out, strings.Trim(string(esc), `"`), "<ROOT>")
+	out = strings.ReplaceAll(out, filepath.ToSlash(root), "<ROOT>")
+	return rootPath.ReplaceAllStringFunc(out, func(s string) string { return strings.ReplaceAll(s, `\\`, "/") })
+}
+
+func failing(string, string) []forge.Check {
+	return []forge.Check{{Name: "lint", Status: "completed", Conclusion: "failure"}}
+}
+
+func TestGoldenContract(t *testing.T) {
+	scenarios := []struct {
+		name string
+		prep func(*testEnv)
+		args []string
+		exit int
+	}{
+		{"init", nil, []string{"init", "acme/widget"}, 0},
+		{"init_dry_run", nil, []string{"init", "acme/widget", "--dry-run"}, 0},
+		{"sync_noop", initOnly, []string{"sync"}, 0},
+		{"sync_fast_forward", func(te *testEnv) {
+			initOnly(te)
+			testutil.Commit(te.t, te.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
+		}, []string{"sync"}, 0},
+		{"feature_start", initOnly, []string{"feature", "start", "feat-x"}, 0},
+		{"feature_start_exists", withFeature, []string{"feature", "start", "feat-x"}, 4},
+		{"gate", withFeature, []string{"gate", "feat-x"}, 0},
+		{"gate_checks_failed", func(te *testEnv) { withFeature(te); te.forge.Checks = failing }, []string{"gate", "feat-x"}, 3},
+		{"gate_leak", withLeakyFeature, []string{"gate", "feat-x"}, 3},
+		{"promote_plan", gatedFeature, []string{"promote", "feat-x", "-m", "Add feature", "--plan"}, 0},
+		{"promote_needs_human", func(te *testEnv) { gatedFeature(te); te.vars["GHOSTBRANCH_ACTOR"] = "agent:claude-code" },
+			[]string{"promote", "feat-x", "-m", "Add feature", "--yes"}, 5},
+		{"promote_publish", gatedFeature, []string{"promote", "feat-x", "-m", "Add feature", "--yes"}, 0},
+		{"apply_stale", func(te *testEnv) {
+			gatedFeature(te)
+			te.mustRun("promote", "feat-x", "-m", "Add feature", "--plan")
+			testutil.Commit(te.t, te.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
+		}, []string{"apply", "<PLAN>", "--yes"}, 6},
+		{"bad_flag", nil, []string{"gate"}, 2},
+		{"shadow_not_private", func(te *testEnv) { initOnly(te); te.forge.SetPrivate("acme/widget-shadow", false) }, []string{"sync"}, 1},
+	}
+	for _, s := range scenarios {
+		t.Run(s.name, func(t *testing.T) {
+			te := newTestEnv(t)
+			if s.prep != nil {
+				s.prep(te)
+			}
+			args := append([]string(nil), s.args...)
+			for i, a := range args {
+				if a == "<PLAN>" {
+					args[i] = te.lastPlanID()
+				}
+			}
+			code, out, errOut := te.run(append(args, "--json")...)
+			if code != s.exit {
+				t.Fatalf("exit %d, want %d\nstdout: %s\nstderr: %s", code, s.exit, out, errOut)
+			}
+			validate(t, "envelope.schema.json", []byte(out))
+			var env struct {
+				Command string          `json:"command"`
+				Data    json.RawMessage `json:"data"`
+			}
+			_ = json.Unmarshal([]byte(out), &env)
+			if string(env.Data) != "{}" {
+				validate(t, dataSchemas[env.Command], env.Data)
+			}
+			got := normalize(out, te.root)
+			golden := filepath.Join("testdata", "golden", s.name+".json")
+			if *update {
+				_ = os.MkdirAll(filepath.Dir(golden), 0o755)
+				if err := os.WriteFile(golden, []byte(got), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			want, err := os.ReadFile(golden)
+			if err != nil {
+				t.Fatalf("missing golden %s; run go test ./internal/cli -run Golden -update", golden)
+			}
+			if strings.ReplaceAll(string(want), "\r\n", "\n") != got {
+				t.Fatalf("output differs from %s\n--- got\n%s\n--- want\n%s", golden, got, want)
+			}
+		})
+	}
+}
+
+// Plans, feature.json and the ledger are part of the contract too.
+func TestArtifactsMatchTheirSchemas(t *testing.T) {
+	te := newTestEnv(t)
+	gatedFeature(te)
+	te.mustRun("promote", "feat-x", "-m", "Add feature", "--plan")
+	te.mustRun("apply", te.lastPlanID(), "--yes")
+	home := te.vars["GHOSTBRANCH_HOME"]
+
+	planRaw, err := os.ReadFile(filepath.Join(home, "workspaces", "default", "plans", te.lastPlanID()+".json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	validate(t, "plan.schema.json", planRaw)
+
+	sh := gitx.New(te.forge.RepoDir("acme/widget-shadow"))
+	meta, ok, err := sh.ShowFile(te.t.Context(), "refs/ghostbranch/features/feat-x", "feature.json")
+	if err != nil || !ok {
+		t.Fatalf("feature.json: %v", err)
+	}
+	validate(t, "feature.schema.json", meta)
+
+	f, err := os.Open(filepath.Join(home, "workspaces", "default", "ledger.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	sc := bufio.NewScanner(f)
+	n := 0
+	for sc.Scan() {
+		validate(t, "ledger-entry.schema.json", sc.Bytes())
+		n++
+	}
+	if n < 5 {
+		t.Fatalf("want at least 5 ledger lines (init, feature start, gate, promote, apply), got %d", n)
+	}
+}

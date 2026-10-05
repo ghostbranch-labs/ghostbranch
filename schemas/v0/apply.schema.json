@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "apply data",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["plan_id", "public_branch", "public_pr", "pr_url", "resumed", "dry_run"],
+  "properties": {
+    "plan_id": { "$ref": "common.schema.json#/$defs/planId" },
+    "public_branch": { "type": "string" },
+    "public_pr": { "type": "integer", "minimum": 0 },
+    "pr_url": { "type": "string" },
+    "resumed": { "type": "boolean" },
+    "dry_run": { "type": "boolean" }
+  }
+}

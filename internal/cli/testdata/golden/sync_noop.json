@@ -1,0 +1,17 @@
+{
+  "schema_version": "0.1",
+  "command": "sync",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "public": "acme/widget",
+    "shadow": "acme/widget-shadow",
+    "action": "noop",
+    "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+    "shadow_main_before": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+    "shadow_main_after": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+    "dry_run": false
+  },
+  "warnings": [],
+  "error": null
+}

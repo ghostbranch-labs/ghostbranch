@@ -1,0 +1,19 @@
+{
+  "schema_version": "0.1",
+  "command": "apply",
+  "ok": false,
+  "exit_code": 6,
+  "data": {},
+  "warnings": [],
+  "error": {
+    "code": "PLAN_STALE",
+    "message": "the repos changed since plan 20261005T120005Z-0c0d0e was made (public_main); make a new plan with ghostbranch promote",
+    "field": null,
+    "retryable": false,
+    "details": {
+      "moved": [
+        "public_main"
+      ]
+    }
+  }
+}

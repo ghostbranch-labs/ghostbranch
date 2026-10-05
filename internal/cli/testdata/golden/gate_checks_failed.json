@@ -1,0 +1,36 @@
+{
+  "schema_version": "0.1",
+  "command": "gate",
+  "ok": false,
+  "exit_code": 3,
+  "data": {
+    "feature": "feat-x",
+    "feature_head": "d7407485ce685c126afcfc258f0a9eeb0092d776",
+    "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+    "overlay": "dad19d310f1c463f1e34b172f5662f063d391e3a",
+    "candidate": "f9aecd69f102db10163aabfbb97bb04d1f0af744",
+    "published_tree": "ef9061717144a4bf03a0230d8f8926d019f2adeb",
+    "checks": "failed",
+    "failed_checks": [
+      "lint"
+    ],
+    "leak": "clean",
+    "findings": [],
+    "shadow_pr": 1,
+    "reused": false,
+    "dry_run": false
+  },
+  "warnings": [],
+  "error": {
+    "code": "CHECKS_FAILED",
+    "message": "checks failed on the gate candidate: lint",
+    "field": null,
+    "retryable": false,
+    "details": {
+      "failed": [
+        "lint"
+      ],
+      "shadow_pr": 1
+    }
+  }
+}

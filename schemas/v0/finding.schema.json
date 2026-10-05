@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Leak finding (never contains the secret)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["rule", "where"],
+  "properties": {
+    "rule": { "type": "string" },
+    "where": { "enum": ["tree", "commit_message", "author", "branch", "pr_title", "pr_body"] },
+    "path": { "type": "string" },
+    "line": { "type": "integer", "minimum": 1 },
+    "secret": { "const": "[REDACTED]" }
+  }
+}
