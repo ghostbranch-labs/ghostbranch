@@ -18,6 +18,9 @@ type Client struct {
 	c    *gh.Client
 	mu   sync.Mutex
 	user *forge.User
+
+	limMu   sync.Mutex
+	limited map[string]bool // repos whose checks came from the workflow-runs fallback
 }
 
 // New returns a client for api.github.com.
@@ -166,20 +169,9 @@ func (c *Client) ListChecks(ctx context.Context, full, sha string) ([]forge.Chec
 	if err != nil {
 		return nil, err
 	}
-	var out []forge.Check
-	opts := &gh.ListCheckRunsOptions{ListOptions: gh.ListOptions{PerPage: 100}}
-	for {
-		runs, resp, err := c.c.Checks.ListCheckRunsForRef(ctx, owner, name, sha, opts)
-		if err := wrap(resp, err); err != nil {
-			return nil, err
-		}
-		for _, r := range runs.CheckRuns {
-			out = append(out, forge.Check{Name: r.GetName(), Status: r.GetStatus(), Conclusion: r.GetConclusion()})
-		}
-		if resp.NextPage == 0 {
-			break
-		}
-		opts.Page = resp.NextPage
+	out, err := c.checkRuns(ctx, owner, name, full, sha)
+	if err != nil {
+		return nil, err
 	}
 	sopts := &gh.ListOptions{PerPage: 100}
 	for {
@@ -219,4 +211,88 @@ func (c *Client) CurrentUser(ctx context.Context) (forge.User, error) {
 	}
 	c.user = &forge.User{Login: u.GetLogin(), ID: u.GetID()}
 	return *c.user, nil
+}
+
+// ChecksLimited reports whether ListChecks had to fall back to workflow runs
+// for full because the token cannot read check runs. Third-party check apps
+// are invisible in that mode.
+func (c *Client) ChecksLimited(full string) bool {
+	c.limMu.Lock()
+	defer c.limMu.Unlock()
+	return c.limited[full]
+}
+
+func (c *Client) markLimited(full string) {
+	c.limMu.Lock()
+	defer c.limMu.Unlock()
+	if c.limited == nil {
+		c.limited = map[string]bool{}
+	}
+	c.limited[full] = true
+}
+
+// isForbidden reports a plain 403, as a fine-grained token gets for check
+// runs. Rate limits also arrive as 403 but are not permission problems.
+func isForbidden(resp *gh.Response, err error) bool {
+	if err == nil || resp == nil || resp.StatusCode != 403 {
+		return false
+	}
+	var rl *gh.RateLimitError
+	var arl *gh.AbuseRateLimitError
+	return !errors.As(err, &rl) && !errors.As(err, &arl)
+}
+
+// checkRuns lists check runs for sha. Fine-grained personal access tokens
+// cannot read them (403), so it then falls back to GitHub Actions workflow
+// runs for the commit.
+func (c *Client) checkRuns(ctx context.Context, owner, name, full, sha string) ([]forge.Check, error) {
+	var out []forge.Check
+	opts := &gh.ListCheckRunsOptions{ListOptions: gh.ListOptions{PerPage: 100}}
+	for {
+		runs, resp, err := c.c.Checks.ListCheckRunsForRef(ctx, owner, name, sha, opts)
+		if isForbidden(resp, err) {
+			return c.workflowRuns(ctx, owner, name, full, sha)
+		}
+		if err := wrap(resp, err); err != nil {
+			return nil, err
+		}
+		for _, r := range runs.CheckRuns {
+			out = append(out, forge.Check{Name: r.GetName(), Status: r.GetStatus(), Conclusion: r.GetConclusion()})
+		}
+		if resp.NextPage == 0 {
+			return out, nil
+		}
+		opts.Page = resp.NextPage
+	}
+}
+
+func (c *Client) workflowRuns(ctx context.Context, owner, name, full, sha string) ([]forge.Check, error) {
+	var out []forge.Check
+	opts := &gh.ListWorkflowRunsOptions{HeadSHA: sha, ListOptions: gh.ListOptions{PerPage: 100}}
+	for {
+		runs, resp, err := c.c.Actions.ListRepositoryWorkflowRuns(ctx, owner, name, opts)
+		if isForbidden(resp, err) {
+			return nil, fmt.Errorf("token cannot read checks: grant the fine-grained token \"Actions: read\" and "+
+				"\"Commit statuses: read\" on %s, or use a token with repo scope: %w", full, err)
+		}
+		if err := wrap(resp, err); err != nil {
+			return nil, err
+		}
+		for _, r := range runs.WorkflowRuns {
+			ch := forge.Check{Name: r.GetName(), Status: "in_progress", Conclusion: r.GetConclusion()}
+			if ch.Name == "" {
+				ch.Name = fmt.Sprintf("workflow %d", r.GetID())
+			}
+			if r.GetStatus() == "completed" {
+				ch.Status = "completed"
+			}
+			out = append(out, ch)
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	c.markLimited(full)
+	return out, nil
 }

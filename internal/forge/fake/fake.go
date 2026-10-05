@@ -22,6 +22,8 @@ type Forge struct {
 	User forge.User
 	// Checks scripts check results. Nil means one passing check, "ci".
 	Checks func(repo, sha string) []forge.Check
+	// LimitedChecks makes ChecksLimited report true for every repo.
+	LimitedChecks bool
 }
 
 // New stores bare repos under root.
@@ -186,4 +188,11 @@ func (f *Forge) CurrentUser(context.Context) (forge.User, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.User, nil
+}
+
+// ChecksLimited implements forge.CheckVisibility.
+func (f *Forge) ChecksLimited(string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.LimitedChecks
 }

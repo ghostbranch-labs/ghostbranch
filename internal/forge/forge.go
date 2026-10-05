@@ -79,3 +79,10 @@ func SplitName(full string) (string, string, error) {
 	}
 	return owner, name, nil
 }
+
+// CheckVisibility is an optional interface for forges that can see only part
+// of a repo's CI, for example a token that cannot read check runs.
+type CheckVisibility interface {
+	// ChecksLimited reports whether ListChecks for repo had reduced visibility.
+	ChecksLimited(repo string) bool
+}

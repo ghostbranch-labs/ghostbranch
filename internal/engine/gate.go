@@ -142,6 +142,10 @@ func (e *Engine) gate(ctx context.Context, pc *pairCtx, name string) (*GateResul
 	if err != nil {
 		return res, warns, err
 	}
+	if v, ok := e.Forge.(forge.CheckVisibility); ok && v.ChecksLimited(pc.pair.Shadow) {
+		warns = append(warns, contract.Warning{Code: contract.ChecksLimited,
+			Message: "the token cannot read check runs, so only GitHub Actions workflows and commit statuses were considered; checks from other CI apps were not seen"})
+	}
 	res.Checks, res.FailedChecks = out.status, out.failed
 	if err := e.recordGate(ctx, pc, m, metaSHA, res); err != nil {
 		return res, warns, err

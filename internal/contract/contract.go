@@ -145,6 +145,9 @@ const (
 	// GateNotRecorded means the gate's result could not be saved to the
 	// feature metadata; the result itself still stands.
 	GateNotRecorded WarningCode = "GATE_NOT_RECORDED"
+	// ChecksLimited means the token cannot read check runs, so the gate saw
+	// only GitHub Actions workflows and commit statuses.
+	ChecksLimited WarningCode = "CHECKS_LIMITED"
 )
 
 // Warning is a non-fatal notice returned alongside a result.

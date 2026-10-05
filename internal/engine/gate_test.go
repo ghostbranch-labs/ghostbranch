@@ -306,3 +306,24 @@ func TestGateCompletedChecksBeatTheTimeout(t *testing.T) {
 		})
 	}
 }
+
+func TestGateWarnsWhenCheckVisibilityIsLimited(t *testing.T) {
+	h := newHarness(t)
+	h.init()
+	h.startFeature("feat-x", map[string]string{"feature.txt": "new\n"})
+	h.forge.LimitedChecks = true
+
+	res, warns, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
+	if err != nil || res.Checks != feature.ChecksPassed {
+		t.Fatalf("gate = %+v %v", res, err)
+	}
+	found := false
+	for _, w := range warns {
+		if w.Code == contract.ChecksLimited && strings.Contains(w.Message, "GitHub Actions") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no CHECKS_LIMITED warning in %+v", warns)
+	}
+}

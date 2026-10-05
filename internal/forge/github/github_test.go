@@ -168,3 +168,125 @@ func TestPRsChecksAndDefaultBranch(t *testing.T) {
 		}
 	}
 }
+
+const patDenied = `{"message":"Resource not accessible by personal access token"}`
+
+func denyCheckRuns(mux *http.ServeMux) {
+	mux.HandleFunc("GET /repos/acme/s/commits/abc/check-runs", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(patDenied))
+	})
+}
+
+func noStatuses(mux *http.ServeMux) {
+	mux.HandleFunc("GET /repos/acme/s/commits/abc/status", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{"state": "success", "statuses": []map[string]any{
+			{"context": "legacy", "state": "success"}}})
+	})
+}
+
+func TestListChecksFallsBackToWorkflowRunsOn403(t *testing.T) {
+	mux := http.NewServeMux()
+	denyCheckRuns(mux)
+	noStatuses(mux)
+	mux.HandleFunc("GET /repos/acme/s/actions/runs", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("head_sha") != "abc" {
+			t.Errorf("runs query = %v", r.URL.Query())
+		}
+		writeJSON(w, map[string]any{"total_count": 3, "workflow_runs": []map[string]any{
+			{"id": 1, "name": "CI", "status": "completed", "conclusion": "success"},
+			{"id": 2, "name": "Lint", "status": "in_progress"},
+			{"id": 3, "name": "", "status": "queued"}}})
+	})
+	c := newClient(t, mux)
+	if c.ChecksLimited("acme/s") {
+		t.Fatal("limited before any call")
+	}
+	checks, err := c.ListChecks(context.Background(), "acme/s", "abc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]forge.Check{
+		"CI":         {Name: "CI", Status: "completed", Conclusion: "success"},
+		"Lint":       {Name: "Lint", Status: "in_progress"},
+		"workflow 3": {Name: "workflow 3", Status: "in_progress"},
+		"legacy":     {Name: "legacy", Status: "completed", Conclusion: "success"},
+	}
+	if len(checks) != len(want) {
+		t.Fatalf("checks = %+v", checks)
+	}
+	for _, ch := range checks {
+		if ch != want[ch.Name] {
+			t.Errorf("check %s = %+v, want %+v", ch.Name, ch, want[ch.Name])
+		}
+	}
+	if !c.ChecksLimited("acme/s") {
+		t.Error("ChecksLimited(acme/s) = false after fallback")
+	}
+	if c.ChecksLimited("acme/other") {
+		t.Error("ChecksLimited(acme/other) = true")
+	}
+}
+
+func TestListChecksWorkflowRunsPaging(t *testing.T) {
+	mux := http.NewServeMux()
+	denyCheckRuns(mux)
+	noStatuses(mux)
+	var srvURL string
+	mux.HandleFunc("GET /repos/acme/s/actions/runs", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("page") == "2" {
+			writeJSON(w, map[string]any{"workflow_runs": []map[string]any{
+				{"id": 2, "name": "B", "status": "completed", "conclusion": "failure"}}})
+			return
+		}
+		w.Header().Set("Link", `<`+srvURL+`/repos/acme/s/actions/runs?head_sha=abc&page=2&per_page=100>; rel="next"`)
+		writeJSON(w, map[string]any{"workflow_runs": []map[string]any{
+			{"id": 1, "name": "A", "status": "completed", "conclusion": "success"}}})
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	srvURL = srv.URL
+	c, err := ghforge.NewWithBaseURL("tok", srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checks, err := c.ListChecks(context.Background(), "acme/s", "abc")
+	if err != nil || len(checks) != 3 {
+		t.Fatalf("checks = %+v %v", checks, err)
+	}
+	if checks[0].Name != "A" || checks[1].Name != "B" || checks[1].Conclusion != "failure" {
+		t.Errorf("checks = %+v", checks)
+	}
+}
+
+func TestListChecksBothDeniedNamesTheFix(t *testing.T) {
+	mux := http.NewServeMux()
+	denyCheckRuns(mux)
+	noStatuses(mux)
+	mux.HandleFunc("GET /repos/acme/s/actions/runs", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(patDenied))
+	})
+	_, err := newClient(t, mux).ListChecks(context.Background(), "acme/s", "abc")
+	if err == nil || !strings.Contains(err.Error(), "Actions: read") || !strings.Contains(err.Error(), "acme/s") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestListChecksCheckRuns500DoesNotFallBack(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /repos/acme/s/commits/abc/check-runs", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	mux.HandleFunc("GET /repos/acme/s/actions/runs", func(w http.ResponseWriter, r *http.Request) {
+		t.Error("fell back on a 500")
+	})
+	c := newClient(t, mux)
+	_, err := c.ListChecks(context.Background(), "acme/s", "abc")
+	if !errors.Is(err, forge.ErrTransient) {
+		t.Fatalf("err = %v, want transient", err)
+	}
+	if c.ChecksLimited("acme/s") {
+		t.Error("limited after a 500")
+	}
+}
