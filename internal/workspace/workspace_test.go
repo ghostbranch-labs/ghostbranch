@@ -1,0 +1,139 @@
+package workspace_test
+
+import (
+	"errors"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
+	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
+)
+
+func env(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
+func home() (string, error)                       { return "/home/u", nil }
+
+func TestHomeDir(t *testing.T) {
+	cases := []struct {
+		goos string
+		env  map[string]string
+		want string
+	}{
+		{"windows", map[string]string{"GHOSTBRANCH_HOME": "/x"}, "/x"},
+		{"windows", map[string]string{"LOCALAPPDATA": `C:\Users\u\AppData\Local`}, filepath.Join(`C:\Users\u\AppData\Local`, "ghostbranch")},
+		{"darwin", nil, filepath.Join("/home/u", "Library", "Application Support", "ghostbranch")},
+		{"linux", map[string]string{"XDG_STATE_HOME": "/state"}, filepath.Join("/state", "ghostbranch")},
+		{"linux", nil, filepath.Join("/home/u", ".local", "state", "ghostbranch")},
+	}
+	for _, c := range cases {
+		got, err := workspace.HomeDir(env(c.env), c.goos, home)
+		if err != nil || got != c.want {
+			t.Errorf("%s %v: got %q %v, want %q", c.goos, c.env, got, err, c.want)
+		}
+	}
+	if _, err := workspace.HomeDir(env(nil), "windows", home); err == nil {
+		t.Error("windows without LOCALAPPDATA must fail")
+	}
+}
+
+func TestOpenSaveAddFind(t *testing.T) {
+	root := t.TempDir()
+	ws, err := workspace.Open(root, "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := workspace.Pair{Public: "acme/widget", Shadow: "acme/widget-shadow"}
+	if !ws.AddPair(p) || ws.AddPair(p) {
+		t.Fatal("AddPair must add once")
+	}
+	if err := ws.Save(); err != nil {
+		t.Fatal(err)
+	}
+	again, _ := workspace.Open(root, "default")
+	if got, ok := again.Find("acme/widget-shadow"); !ok || got != p {
+		t.Fatalf("Find by shadow = %+v %v", got, ok)
+	}
+	if got, ok := again.Find("ACME/Widget"); !ok || got != p {
+		t.Fatalf("Find is case-insensitive: %+v %v", got, ok)
+	}
+	if again.MirrorDir(p) != filepath.Join(root, "workspaces", "default", "pairs", "acme__widget", "mirror.git") {
+		t.Fatalf("MirrorDir = %s", again.MirrorDir(p))
+	}
+	if _, err := workspace.Open(root, "../evil"); contract.From(err).Code != contract.BadFlag {
+		t.Fatalf("bad workspace name: %v", err)
+	}
+}
+
+func TestLock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "p", "lock")
+	now := time.Now()
+	unlock, err := workspace.Lock(path, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := workspace.Lock(path, now); contract.From(err).Code != contract.Locked {
+		t.Fatalf("second lock: %v", err)
+	}
+	unlock()
+	unlock2, err := workspace.Lock(path, now)
+	if err != nil {
+		t.Fatalf("after unlock: %v", err)
+	}
+	unlock2()
+
+	// A lock older than StaleAfter is taken over.
+	_ = os.WriteFile(path, []byte("1 old\n"), 0o644)
+	old := now.Add(-workspace.StaleAfter - time.Minute)
+	_ = os.Chtimes(path, old, old)
+	unlock3, err := workspace.Lock(path, now)
+	if err != nil {
+		t.Fatalf("stale lock not taken over: %v", err)
+	}
+	unlock3()
+}
+
+func TestParseRemoteURL(t *testing.T) {
+	cases := map[string]string{
+		"https://github.com/acme/widget.git": "acme/widget",
+		"https://github.com/acme/widget":     "acme/widget",
+		"git@github.com:acme/widget.git":     "acme/widget",
+		"ssh://git@github.com/acme/widget":   "acme/widget",
+		"https://gitlab.com/acme/widget.git": "",
+		"/local/path.git":                    "",
+	}
+	for u, want := range cases {
+		got, ok := workspace.ParseRemoteURL(u)
+		if got != want || ok != (want != "") {
+			t.Errorf("ParseRemoteURL(%q) = %q %v", u, got, ok)
+		}
+	}
+}
+
+func TestResolve(t *testing.T) {
+	ws, _ := workspace.Open(t.TempDir(), "default")
+	_, err := ws.Resolve("", nil)
+	if contract.From(err).Code != contract.PairAmbiguous {
+		t.Fatalf("empty workspace: %v", err)
+	}
+	a := workspace.Pair{Public: "acme/a", Shadow: "acme/a-shadow"}
+	b := workspace.Pair{Public: "acme/b", Shadow: "acme/b-shadow"}
+	ws.AddPair(a)
+	if got, err := ws.Resolve("", nil); err != nil || got != a {
+		t.Fatalf("single pair: %+v %v", got, err)
+	}
+	ws.AddPair(b)
+	if _, err := ws.Resolve("", nil); contract.From(err).Code != contract.PairAmbiguous {
+		t.Fatalf("two pairs, no hint: %v", err)
+	}
+	if got, _ := ws.Resolve("", []string{"git@github.com:acme/b-shadow.git"}); got != b {
+		t.Fatalf("by cwd remote: %+v", got)
+	}
+	if got, _ := ws.Resolve("acme/a", []string{"git@github.com:acme/b.git"}); got != a {
+		t.Fatalf("--repo wins: %+v", got)
+	}
+	var ce *contract.Error
+	if _, err := ws.Resolve("acme/zzz", nil); !errors.As(err, &ce) || ce.Field != "repo" {
+		t.Fatalf("unknown --repo: %v", err)
+	}
+}
