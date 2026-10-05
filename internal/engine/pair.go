@@ -23,11 +23,11 @@ const (
 
 func publicRef(branch string) string   { return "refs/remotes/public/" + branch }
 func shadowRef(branch string) string   { return "refs/remotes/shadow/" + branch }
-func metaRef(name string) string       { return "refs/shadow-meta/features/" + name } //nolint:unused // used by later tasks
-func planRef(id string) string         { return "refs/shadow-meta/plans/" + id }      //nolint:unused // used by later tasks
-func remoteMetaRef(name string) string { return "refs/ghostbranch/features/" + name } //nolint:unused // used by later tasks
-func remotePlanRef(id string) string   { return "refs/ghostbranch/plans/" + id }      //nolint:unused // used by later tasks
-func gateBranch(name string) string    { return "ghostbranch/gate/" + name }          //nolint:unused // used by later tasks
+func metaRef(name string) string       { return "refs/shadow-meta/features/" + name }
+func planRef(id string) string         { return "refs/shadow-meta/plans/" + id } //nolint:unused // used by later tasks
+func remoteMetaRef(name string) string { return "refs/ghostbranch/features/" + name }
+func remotePlanRef(id string) string   { return "refs/ghostbranch/plans/" + id } //nolint:unused // used by later tasks
+func gateBranch(name string) string    { return "ghostbranch/gate/" + name }     //nolint:unused // used by later tasks
 
 // pairCtx is one operation's view of a pair: a fresh mirror and the lock.
 type pairCtx struct {
@@ -132,7 +132,7 @@ func (e *Engine) push(ctx context.Context, pc *pairCtx, remote string, opt gitx.
 // readConfig reads .ghostbranch.yml from the overlay branch, never from a
 // feature, and checks the overlay branch holds only overlay paths. It
 // returns the config and the overlay commit O.
-func (e *Engine) readConfig(ctx context.Context, pc *pairCtx) (config.Config, string, []contract.Warning, error) { //nolint:unused // used by later tasks
+func (e *Engine) readConfig(ctx context.Context, pc *pairCtx) (config.Config, string, []contract.Warning, error) {
 	g := pc.git
 	O, ok, err := g.Resolve(ctx, shadowRef(OverlayBranch))
 	if err != nil {
@@ -195,7 +195,7 @@ func (e *Engine) readMeta(ctx context.Context, pc *pairCtx, name string) (featur
 }
 
 // saveMeta writes a metadata commit (parent "" for a new feature) without pushing it.
-func (e *Engine) saveMeta(ctx context.Context, pc *pairCtx, m feature.Meta, parent string) (string, error) { //nolint:unused // used by later tasks
+func (e *Engine) saveMeta(ctx context.Context, pc *pairCtx, m feature.Meta, parent string) (string, error) {
 	g := pc.git
 	blob, err := g.HashObject(ctx, feature.Encode(m))
 	if err != nil {

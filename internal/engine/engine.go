@@ -84,7 +84,7 @@ func (e *Engine) gitConfig() [][2]string {
 	return [][2]string{{"http.https://github.com/.extraheader", "AUTHORIZATION: basic " + cred}}
 }
 
-func short(sha string) string { //nolint:unused // used by later tasks
+func short(sha string) string {
 	if len(sha) > 12 {
 		return sha[:12]
 	}
