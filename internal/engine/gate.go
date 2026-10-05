@@ -27,8 +27,9 @@ type GateResult struct {
 	Leak          string         `json:"leak"`
 	Findings      []leak.Finding `json:"findings"`
 	ShadowPR      int            `json:"shadow_pr"`
-	Reused        bool           `json:"reused"`
-	DryRun        bool           `json:"dry_run"`
+	// Reused is set by promote when it reuses a fresh green gate instead of re-running it.
+	Reused bool `json:"reused"`
+	DryRun bool `json:"dry_run"`
 }
 
 const gatePRBody = "Automated Ghostbranch gate candidate: the feature rebased onto public main, plus the overlay. " +

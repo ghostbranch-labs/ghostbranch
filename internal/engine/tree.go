@@ -79,7 +79,7 @@ func (e *Engine) candidate(ctx context.Context, g *gitx.Git, R, O, name string) 
 // assertPublish re-checks P before it may be published: its tree is the
 // gated tree, its only parent is public main, and it differs from the CI
 // candidate only in overlay paths.
-func assertPublish(ctx context.Context, g *gitx.Git, P, T, C, publicMain string, set overlay.Set) error { //nolint:unused // used by later tasks
+func assertPublish(ctx context.Context, g *gitx.Git, P, T, C, publicMain string, set overlay.Set) error {
 	tree, err := g.TreeOf(ctx, P)
 	if err != nil || tree != T {
 		return contract.Wrap(contract.Internal, err, "published tree %s does not match the gated tree %s", short(tree), short(T))
