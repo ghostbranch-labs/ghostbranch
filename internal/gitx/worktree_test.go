@@ -1,6 +1,7 @@
 package gitx_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -94,11 +95,10 @@ func TestUserGitConfigCannotChangeContentOrRunHooks(t *testing.T) {
 	t.Setenv("GIT_CONFIG_GLOBAL", global)
 
 	g := testutil.BareRepo(t, filepath.Join(tmp, "r.git"))
-	base := testutil.Commit(t, g, "main", "base", map[string]string{"lf.txt": "one\ntwo\n", "o.txt": "o\n"})
+	base := testutil.Commit(t, g, "main", "base", map[string]string{"lf.txt": "a\nb\nc\nd\ne\n"})
 	_ = g.UpdateRef(ctx, "refs/heads/feat", base)
-	feat := testutil.Commit(t, g, "feat", "feature", map[string]string{"lf.txt": "one\ntwo\nthree\n"})
-	main := testutil.Commit(t, g, "main", "upstream", map[string]string{"o.txt": "upstream\n"})
-	wantBlob, _ := g.MustResolve(ctx, feat+":lf.txt")
+	feat := testutil.Commit(t, g, "feat", "feature", map[string]string{"lf.txt": "A\nb\nc\nd\ne\n"})
+	main := testutil.Commit(t, g, "main", "upstream", map[string]string{"lf.txt": "a\nb\nc\nd\nE\n"})
 
 	wtDir := filepath.Join(tmp, "wt")
 	wt, err := g.WorktreeAdd(ctx, wtDir, feat)
@@ -110,7 +110,43 @@ func TestUserGitConfigCannotChangeContentOrRunHooks(t *testing.T) {
 		t.Fatalf("rebase under hostile user config: %v", err)
 	}
 	r, _ := wt.MustResolve(ctx, "HEAD")
-	if got, _ := g.MustResolve(ctx, r+":lf.txt"); got != wantBlob {
-		t.Fatalf("user config changed blob: %s != %s", got, wantBlob)
+	// Both sides edited lf.txt, so the rebase had to merge through the
+	// worktree. autocrlf=true would leak CRs into the result.
+	got, _, err := g.ShowFile(ctx, r, "lf.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "A\nb\nc\nd\nE\n" {
+		t.Fatalf("user config changed merged content: %q", got)
+	}
+	// The merged file was also written into the worktree: autocrlf=true
+	// would have smudged it to CRLF there.
+	onDisk, err := os.ReadFile(filepath.Join(wtDir, "lf.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(onDisk, []byte("\r")) {
+		t.Fatalf("worktree file has CR bytes: %q", onDisk)
+	}
+}
+
+func TestWorktreeRemoveFallbackRemovesUnregisteredDir(t *testing.T) {
+	ctx := context.Background()
+	g := testutil.BareRepo(t, filepath.Join(t.TempDir(), "r.git"))
+	dir := filepath.Join(t.TempDir(), "plain")
+	if err := os.MkdirAll(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sub", "f"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.WorktreeRemove(ctx, dir); err != nil {
+		t.Fatalf("fallback removal should succeed: %v", err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatal("directory should be gone")
+	}
+	if err := g.WorktreeRemove(ctx, dir); err != nil {
+		t.Fatalf("already-deleted dir should not error: %v", err)
 	}
 }

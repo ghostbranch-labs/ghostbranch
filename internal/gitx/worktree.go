@@ -2,6 +2,8 @@ package gitx
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -23,11 +25,22 @@ func (g *Git) WorktreeAdd(ctx context.Context, dir, rev string) (*Git, error) {
 // WorktreeRemove deletes the worktree at dir and prunes its metadata.
 func (g *Git) WorktreeRemove(ctx context.Context, dir string) error {
 	_, err := g.Run(ctx, "worktree", "remove", "--force", dir)
+	var rmErr error
 	if err != nil {
-		_ = os.RemoveAll(dir)
+		rmErr = os.RemoveAll(dir)
 	}
-	if _, perr := g.Run(ctx, "worktree", "prune"); perr != nil && err != nil {
-		return err
+	_, perr := g.Run(ctx, "worktree", "prune")
+	if err == nil {
+		return nil
+	}
+	if _, serr := os.Stat(dir); serr == nil {
+		if rmErr == nil {
+			rmErr = fmt.Errorf("directory %s still exists", dir)
+		}
+		return fmt.Errorf("remove worktree %s: %w", dir, errors.Join(err, rmErr))
+	}
+	if perr != nil {
+		return perr
 	}
 	return nil
 }
@@ -52,7 +65,9 @@ func (g *Git) Rebase(ctx context.Context, onto string, committer Identity) error
 		return nil
 	}
 	out, derr := rg.runRaw(ctx, nil, "diff", "--name-only", "--diff-filter=U", "-z")
-	_, _ = rg.Run(ctx, "rebase", "--abort")
+	if _, aerr := rg.Run(ctx, "rebase", "--abort"); aerr != nil {
+		return fmt.Errorf("rebase failed and abort failed, worktree may be mid-rebase: %w", errors.Join(err, aerr))
+	}
 	files := splitNUL(out)
 	if derr == nil && len(files) > 0 {
 		sort.Strings(files)
