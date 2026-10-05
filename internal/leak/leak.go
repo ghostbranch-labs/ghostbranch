@@ -169,20 +169,30 @@ const sniffLen = 8000
 // it is scanned with the same paths and line numbers. Other blobs with a NUL
 // in their first sniffLen bytes are binary; scanning printable runs inside
 // them is deferred to sub-project 3.
+//
+// A UTF-16 BOM is trusted only when NULs follow it. Latin-1 and other 8-bit
+// text can start with the same two bytes and has no NULs, so it is scanned
+// raw, BOM bytes included, as before UTF-16 support. Any NUL (rather than the
+// 40% pattern looksUTF16 needs without a BOM) is enough: UTF-16 that is
+// mostly non-Latin has few NULs, but any ASCII secret in it brings them.
 func decodeText(b []byte) (string, bool) {
+	sniff := func(b []byte) []byte {
+		if len(b) > sniffLen {
+			return b[:sniffLen]
+		}
+		return b
+	}
+	hasNUL := func(b []byte) bool { return bytes.IndexByte(sniff(b), 0) >= 0 }
 	switch {
 	case bytes.HasPrefix(b, []byte{0xEF, 0xBB, 0xBF}):
 		b = b[3:]
-	case bytes.HasPrefix(b, []byte{0xFF, 0xFE}):
+	case bytes.HasPrefix(b, []byte{0xFF, 0xFE}) && hasNUL(b[2:]):
 		return decodeUTF16(b[2:], false), true
-	case bytes.HasPrefix(b, []byte{0xFE, 0xFF}):
+	case bytes.HasPrefix(b, []byte{0xFE, 0xFF}) && hasNUL(b[2:]):
 		return decodeUTF16(b[2:], true), true
 	}
-	sample := b
-	if len(sample) > sniffLen {
-		sample = sample[:sniffLen]
-	}
-	if bytes.IndexByte(sample, 0) < 0 {
+	sample := sniff(b)
+	if !hasNUL(b) {
 		return string(b), true
 	}
 	if bigEndian, ok := looksUTF16(sample); ok {

@@ -191,3 +191,28 @@ func TestNULJustPastTheSniffWindowIsStillScanned(t *testing.T) {
 		t.Fatalf("want one finding on line 2, got %+v %v", got, err)
 	}
 }
+
+// A UTF-16 BOM alone does not make a file UTF-16: Latin-1 or other 8-bit text
+// can start with the same bytes. Without NULs after it, the file is scanned
+// raw, as it was before UTF-16 support.
+func TestBOMBytesWithoutUTF16ContentAreScannedRaw(t *testing.T) {
+	tok := testutil.FakeGitHubToken()
+	for _, bom := range []string{"\xff\xfe", "\xfe\xff"} {
+		got, err := scanner(t).Scan(leak.Input{Files: []leak.File{{Path: "latin1.env", Content: []byte(bom + "TOKEN=" + tok + "\n")}}})
+		if err != nil || len(got) != 1 || got[0].Line != 1 {
+			t.Errorf("BOM % x: want one finding on line 1, got %+v %v", bom, got, err)
+		}
+	}
+}
+
+// With a BOM, UTF-16 that is mostly non-Latin (so under the BOM-less 40%
+// threshold) is still decoded: an ASCII secret in UTF-16 always brings NULs.
+func TestUTF16WithBOMAndMostlyCJKIsScanned(t *testing.T) {
+	text := strings.Repeat("中文字符", 100) + "\nTOKEN=" + testutil.FakeGitHubToken() + "\n"
+	for _, be := range []bool{false, true} {
+		got, err := scanner(t).Scan(leak.Input{Files: []leak.File{{Path: "notes.txt", Content: utf16Bytes(text, be, true)}}})
+		if err != nil || len(got) != 1 || got[0].Line != 2 {
+			t.Errorf("bigEndian=%v: want one finding on line 2, got %+v %v", be, got, err)
+		}
+	}
+}
