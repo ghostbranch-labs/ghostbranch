@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"unicode/utf16"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
 	"github.com/ghostbranch-labs/ghostbranch/internal/overlay"
@@ -107,5 +108,86 @@ func TestDefaultPathAllowlistDoesNotSkipPublishedFiles(t *testing.T) {
 		if err != nil || len(got) == 0 {
 			t.Errorf("%s: want a finding, got %+v %v", path, got, err)
 		}
+	}
+}
+
+// utf16Bytes encodes s as UTF-16 in the given byte order, with an optional BOM.
+func utf16Bytes(s string, bigEndian, bom bool) []byte {
+	var out []byte
+	put := func(u uint16) {
+		if bigEndian {
+			out = append(out, byte(u>>8), byte(u))
+		} else {
+			out = append(out, byte(u), byte(u>>8))
+		}
+	}
+	if bom {
+		put(0xFEFF)
+	}
+	for _, u := range utf16.Encode([]rune(s)) {
+		put(u)
+	}
+	return out
+}
+
+func TestUTF16TextIsScanned(t *testing.T) {
+	tok := testutil.FakeGitHubToken()
+	text := "A=1\r\nB=2\r\nTOKEN=" + tok + "\r\n"
+	cases := []struct {
+		name           string
+		bigEndian, bom bool
+	}{
+		{"utf-16le with bom", false, true},
+		{"utf-16le without bom", false, false},
+		{"utf-16be with bom", true, true},
+		{"utf-16be without bom", true, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := scanner(t).Scan(leak.Input{
+				Files: []leak.File{{Path: ".env", Content: utf16Bytes(text, c.bigEndian, c.bom)}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got) == 0 {
+				t.Fatal("want a finding in UTF-16 text, got none")
+			}
+			for _, f := range got {
+				if f.Path != ".env" || f.Line != 3 || f.Secret != leak.Redacted {
+					t.Errorf("want a redacted finding on line 3 of .env, got %+v", f)
+				}
+			}
+		})
+	}
+}
+
+func TestUTF8BOMIsStripped(t *testing.T) {
+	tok := testutil.FakeGitHubToken()
+	content := append([]byte{0xEF, 0xBB, 0xBF}, []byte("TOKEN="+tok+"\n")...)
+	got, err := scanner(t).Scan(leak.Input{Files: []leak.File{{Path: "a.env", Content: content}}})
+	if err != nil || len(got) != 1 || got[0].Line != 1 {
+		t.Fatalf("got %+v %v", got, err)
+	}
+}
+
+func TestRealBinaryIsStillSkipped(t *testing.T) {
+	png := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'}
+	png = append(png, make([]byte, 64)...)
+	png = append(png, []byte(testutil.FakeGitHubToken())...)
+	got, err := scanner(t).Scan(leak.Input{Files: []leak.File{{Path: "x.png", Content: png}}})
+	if err != nil || len(got) != 0 {
+		t.Fatalf("got %+v %v", got, err)
+	}
+}
+
+func TestNULJustPastTheSniffWindowIsStillScanned(t *testing.T) {
+	tok := testutil.FakeGitHubToken()
+	content := []byte(strings.Repeat("a", 8000))
+	content = append(content, 0)
+	content = append(content, []byte("\nTOKEN="+tok+"\n")...)
+	got, err := scanner(t).Scan(leak.Input{Files: []leak.File{{Path: "big.txt", Content: content}}})
+	if err != nil || len(got) != 1 || got[0].Line != 2 {
+		t.Fatalf("want one finding on line 2, got %+v %v", got, err)
 	}
 }
