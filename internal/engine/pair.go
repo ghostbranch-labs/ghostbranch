@@ -27,7 +27,7 @@ func metaRef(name string) string       { return "refs/shadow-meta/features/" + n
 func planRef(id string) string         { return "refs/shadow-meta/plans/" + id } //nolint:unused // used by later tasks
 func remoteMetaRef(name string) string { return "refs/ghostbranch/features/" + name }
 func remotePlanRef(id string) string   { return "refs/ghostbranch/plans/" + id } //nolint:unused // used by later tasks
-func gateBranch(name string) string    { return "ghostbranch-gate/" + name }     //nolint:unused // used by later tasks
+func gateBranch(name string) string    { return "ghostbranch-gate/" + name }
 
 // pairCtx is one operation's view of a pair: a fresh mirror and the lock.
 type pairCtx struct {

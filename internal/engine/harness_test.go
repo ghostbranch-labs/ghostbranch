@@ -80,7 +80,7 @@ func (h *harness) init() {
 
 func (h *harness) shadowGit() *gitx.Git { return gitx.New(h.forge.RepoDir(shadowName)) }
 
-func (h *harness) publicRefs() map[string]string { //nolint:unused // used by later tests
+func (h *harness) publicRefs() map[string]string {
 	h.t.Helper()
 	refs, err := h.pubGit.Refs(h.ctx, "refs")
 	if err != nil {

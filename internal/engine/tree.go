@@ -13,7 +13,7 @@ import (
 
 // publishedTree is rev's tree minus overlay and strip paths: exactly the
 // tree promote publishes. It returns the tree SHA and its entries.
-func publishedTree(ctx context.Context, g *gitx.Git, rev string, set overlay.Set) (string, []gitx.TreeEntry, error) { //nolint:unused // used by later tasks
+func publishedTree(ctx context.Context, g *gitx.Git, rev string, set overlay.Set) (string, []gitx.TreeEntry, error) {
 	all, err := g.ListTree(ctx, rev)
 	if err != nil {
 		return "", nil, internalErr(err, "list the feature tree")
@@ -33,7 +33,7 @@ func publishedTree(ctx context.Context, g *gitx.Git, rev string, set overlay.Set
 
 // candidate builds C: R plus one commit that adds the overlay branch's
 // files, so CI runs with private workflows and config present.
-func (e *Engine) candidate(ctx context.Context, g *gitx.Git, R, O, name string) (string, error) { //nolint:unused // used by later tasks
+func (e *Engine) candidate(ctx context.Context, g *gitx.Git, R, O, name string) (string, error) {
 	rEntries, err := g.ListTree(ctx, R)
 	if err != nil {
 		return "", internalErr(err, "list the rebased tree")
@@ -110,7 +110,7 @@ func assertPublish(ctx context.Context, g *gitx.Git, P, T, C, publicMain string,
 
 // scan runs the leak scanner over published entries and texts. It returns
 // the findings (never nil) and the scanner version.
-func (e *Engine) scan(ctx context.Context, g *gitx.Git, set overlay.Set, entries []gitx.TreeEntry, texts []leak.Text) ([]leak.Finding, string, error) { //nolint:unused // used by later tasks
+func (e *Engine) scan(ctx context.Context, g *gitx.Git, set overlay.Set, entries []gitx.TreeEntry, texts []leak.Text) ([]leak.Finding, string, error) {
 	sc, err := e.NewScanner(set)
 	if err != nil {
 		return nil, "", internalErr(err, "start the leak scanner")

@@ -62,7 +62,7 @@ func (e *Engine) progressf(format string, args ...any) {
 }
 
 // bot is the identity for commits that only ever live in the shadow repo.
-func (e *Engine) bot() gitx.Identity { //nolint:unused // used by later tasks
+func (e *Engine) bot() gitx.Identity {
 	return gitx.Identity{Name: "ghostbranch", Email: "ghostbranch@invalid", When: e.now()}
 }
 
@@ -107,7 +107,7 @@ func internalErr(err error, what string) error {
 	return contract.Wrap(contract.Internal, err, "%s", what)
 }
 
-func leakErr(findings []leak.Finding) error { //nolint:unused // used by later tasks
+func leakErr(findings []leak.Finding) error {
 	return contract.New(contract.LeakFound,
 		"%d leak finding(s) in what would be published; nothing was pushed to the public repo", len(findings)).
 		WithDetails(map[string]any{"findings": findings})
