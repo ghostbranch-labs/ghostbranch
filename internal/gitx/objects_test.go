@@ -2,6 +2,8 @@ package gitx_test
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -106,5 +108,30 @@ func TestReadBlobsKeepsBytesExactly(t *testing.T) {
 	}
 	if string(got[sha]) != string(content) || string(got[other]) != "second" {
 		t.Fatalf("ReadBlobs = %q", got)
+	}
+}
+
+func TestCommitMessageIsReadExactlyAsStored(t *testing.T) {
+	ctx := context.Background()
+	tmp := t.TempDir()
+	system := filepath.Join(tmp, "gitconfig")
+	if err := os.WriteFile(system, []byte("[i18n]\n\tlogOutputEncoding = UTF-16\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_CONFIG_SYSTEM", system)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "0")
+	g := testutil.BareRepo(t, filepath.Join(tmp, "r.git"))
+	tree, err := g.MakeTree(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	who := gitx.Identity{Name: "Ada", Email: "ada@example.com", When: testutil.Base}
+	c, err := g.CommitTree(ctx, tree, nil, "subject\n\nbody line\n\nlast", who, who)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg, err := g.CommitMessage(ctx, c)
+	if err != nil || msg != "subject\n\nbody line\n\nlast\n" {
+		t.Fatalf("CommitMessage = %q %v", msg, err)
 	}
 }

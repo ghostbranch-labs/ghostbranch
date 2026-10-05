@@ -1,6 +1,8 @@
 package engine_test
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -127,5 +129,47 @@ func TestApplyRefusesAPlanWhoseGateIsNotGreen(t *testing.T) {
 		if p.remote == "public" {
 			t.Fatalf("pushed to public: %+v", p)
 		}
+	}
+}
+
+// apply re-scans the published commit's message as stored, byte for byte:
+// i18n.logOutputEncoding in the user's config must not re-encode it (here to
+// UTF-16) past the scanner.
+func TestApplyScansTheStoredCommitMessage(t *testing.T) {
+	h, id := planned(t)
+	pl, _, err := plan.Load(h.eng.WS.PlansDir(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Swap in a commit with the same tree and parent but a leaking message,
+	// as if the plan's commit had been tampered with after the promote scan.
+	sg := h.shadowGit()
+	tree, err := sg.TreeOf(h.ctx, pl.Publish.Commit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaky, err := sg.CommitTree(h.ctx, tree, []string{pl.Publish.Parent}, "Add feature\n\nTOKEN="+testutil.FakeGitHubToken()+"\n",
+		testutil.Author(1), testutil.Author(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sg.UpdateRef(h.ctx, "refs/ghostbranch/plans/"+id, leaky); err != nil {
+		t.Fatal(err)
+	}
+	pl.Publish.Commit = leaky
+	if _, err := plan.Save(h.eng.WS.PlansDir(), pl); err != nil {
+		t.Fatal(err)
+	}
+	system := filepath.Join(t.TempDir(), "gitconfig")
+	if err := os.WriteFile(system, []byte("[i18n]\n\tlogOutputEncoding = UTF-16\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_CONFIG_SYSTEM", system)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "0")
+
+	_, _, err = h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: id, Yes: true})
+	ce := wantCode(t, err, contract.LeakFound)
+	if _, ok, _ := h.pubGit.Resolve(h.ctx, "refs/heads/feat-x"); ok {
+		t.Fatalf("a leaking commit message was published: %v", ce)
 	}
 }

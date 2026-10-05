@@ -108,11 +108,11 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan) (*ApplyRe
 	if err != nil {
 		return nil, warns, internalErr(err, "list the published tree")
 	}
-	msg, err := g.Run(ctx, "log", "-1", "--format=%B", P)
+	msg, err := g.CommitMessage(ctx, P)
 	if err != nil {
 		return nil, warns, internalErr(err, "read the commit message")
 	}
-	findings, _, err := e.scan(ctx, g, set, entries, publishTexts(strings.TrimSpace(msg), pl.Publish.Author.Name,
+	findings, _, err := e.scan(ctx, g, set, entries, publishTexts(msg, pl.Publish.Author.Name,
 		pl.Publish.Author.Email, pl.Publish.TargetBranch, pl.Publish.PR.Title, pl.Publish.PR.Body))
 	if err != nil {
 		return nil, warns, err

@@ -93,6 +93,21 @@ func (g *Git) CommitTree(ctx context.Context, tree string, parents []string, mes
 	return cg.RunInput(ctx, strings.NewReader(strings.TrimRight(message, "\n")+"\n"), args...)
 }
 
+// CommitMessage returns a commit's message exactly as stored: the raw object
+// after the header's blank line. Unlike log --format=%B, no config (such as
+// i18n.logOutputEncoding) can re-encode it.
+func (g *Git) CommitMessage(ctx context.Context, sha string) (string, error) {
+	out, err := g.runRaw(ctx, nil, "cat-file", "commit", sha)
+	if err != nil {
+		return "", err
+	}
+	_, msg, ok := bytes.Cut(out, []byte("\n\n"))
+	if !ok {
+		return "", nil // a commit with an empty message has no body separator
+	}
+	return string(msg), nil
+}
+
 // ReadBlobs returns the content of each blob, keyed by SHA.
 func (g *Git) ReadBlobs(ctx context.Context, shas []string) (map[string][]byte, error) {
 	res := map[string][]byte{}
