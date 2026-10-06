@@ -11,7 +11,7 @@ import (
 
 // SchemaVersion versions the envelope and every data schema. It stays 0.x
 // until launch, and 0.x versions may break.
-const SchemaVersion = "0.1"
+const SchemaVersion = "0.2"
 
 // Exit codes. Agents branch on these, so they never change meaning.
 const (
@@ -36,11 +36,17 @@ const (
 	Locked           Code = "LOCKED"
 	Internal         Code = "INTERNAL"
 
+	TokenCannotPublish Code = "TOKEN_CANNOT_PUBLISH"
+	GuardUnsupported   Code = "GUARD_UNSUPPORTED"
+	PushBlocked        Code = "PUSH_BLOCKED"
+
 	BadFlag         Code = "BAD_FLAG"
 	MissingInput    Code = "MISSING_INPUT"
 	PairAmbiguous   Code = "PAIR_AMBIGUOUS"
 	NameInvalid     Code = "NAME_INVALID"
 	FeatureNotFound Code = "FEATURE_NOT_FOUND"
+
+	NotAPairCheckout Code = "NOT_A_PAIR_CHECKOUT"
 
 	ChecksFailed Code = "CHECKS_FAILED"
 	NoCI         Code = "NO_CI"
@@ -62,7 +68,9 @@ const (
 var exitCodes = map[Code]int{
 	AuthMissing: ExitFailure, ForgeError: ExitFailure, ShadowNotPrivate: ExitFailure,
 	ConfigInvalid: ExitFailure, Locked: ExitFailure, Internal: ExitFailure,
-	BadFlag: ExitUsage, MissingInput: ExitUsage, PairAmbiguous: ExitUsage,
+	TokenCannotPublish: ExitFailure, GuardUnsupported: ExitFailure, PushBlocked: ExitFailure,
+	NotAPairCheckout: ExitUsage,
+	BadFlag:          ExitUsage, MissingInput: ExitUsage, PairAmbiguous: ExitUsage,
 	NameInvalid: ExitUsage, FeatureNotFound: ExitUsage,
 	ChecksFailed: ExitGateFailed, NoCI: ExitGateFailed, CITimeout: ExitGateFailed, LeakFound: ExitGateFailed,
 	RebaseConflict: ExitConflict, SyncDiverged: ExitConflict, BranchExists: ExitConflict,
@@ -148,7 +156,19 @@ const (
 	// ChecksLimited means the token cannot read check runs, so the gate saw
 	// only GitHub Actions workflows and commit statuses.
 	ChecksLimited WarningCode = "CHECKS_LIMITED"
+	// ActorUnknown means GHOSTBRANCH_ACTOR was unset and the GitHub login
+	// could not be read, so the ledger records the actor as human:unknown.
+	ActorUnknown WarningCode = "ACTOR_UNKNOWN"
 )
+
+var warningCodes = []WarningCode{ConfigKeyIgnored, PublicNotPublic, GateNotRecorded, ChecksLimited, ActorUnknown}
+
+// AllWarnings lists every warning code, sorted.
+func AllWarnings() []WarningCode {
+	out := append([]WarningCode(nil), warningCodes...)
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
+}
 
 // Warning is a non-fatal notice returned alongside a result.
 type Warning struct {

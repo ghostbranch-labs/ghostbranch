@@ -1,10 +1,11 @@
 {
-  "schema_version": "0.1",
+  "schema_version": "0.2",
   "command": "sync",
   "ok": false,
   "exit_code": 1,
   "data": {},
   "warnings": [],
+  "next": [],
   "error": {
     "code": "SHADOW_NOT_PRIVATE",
     "message": "shadow repo acme/widget-shadow must be private and not a fork; refusing to run",

@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.1",
+  "schema_version": "0.2",
   "command": "promote",
   "ok": true,
   "exit_code": 0,
@@ -20,7 +20,7 @@
       "dry_run": false
     },
     "plan": {
-      "schema_version": "0.1",
+      "schema_version": "0.2",
       "id": "20261005T120005Z-0c0d0e",
       "kind": "promote",
       "actor": "human:octo",
@@ -64,5 +64,6 @@
     "dry_run": false
   },
   "warnings": [],
+  "next": [],
   "error": null
 }

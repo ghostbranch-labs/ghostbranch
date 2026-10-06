@@ -118,7 +118,7 @@ func commandName(cmd *cobra.Command) string {
 }
 
 func (a *app) render(err error) int {
-	env := contract.NewEnvelope(a.command, a.result, a.warnings, err)
+	env := contract.NewEnvelope(a.command, a.result, a.warnings, nil, err)
 	if a.jsonOut {
 		enc := json.NewEncoder(a.env.Stdout)
 		enc.SetEscapeHTML(false)

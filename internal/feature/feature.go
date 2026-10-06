@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	SchemaVersion = "0.1"
+	SchemaVersion = "0.2"
 	MetaFile      = "feature.json"
 )
 
