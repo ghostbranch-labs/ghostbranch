@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -15,6 +17,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge/fake"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
+	"github.com/ghostbranch-labs/ghostbranch/internal/grant"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
 	"github.com/ghostbranch-labs/ghostbranch/internal/overlay"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
@@ -46,6 +49,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	te.env = cli.Env{
 		Stdin:        strings.NewReader(""),
 		Getenv:       func(k string) string { return te.vars[k] },
+		UserHome:     func() (string, error) { return filepath.Join(root, "home-dir"), nil },
 		Now:          clock.Now,
 		Sleep:        clock.Sleep,
 		Rand:         &testutil.SeqReader{},
@@ -54,6 +58,9 @@ func newTestEnv(t *testing.T) *testEnv {
 		CwdRemotes:   func() []string { return nil },
 		NewScanner:   func(s overlay.Set) (leak.Scanner, error) { return leak.NewGitleaks(s) },
 		PollInterval: time.Second, SettleWindow: 5 * time.Second,
+		Executable: func() (string, error) { return filepath.Join(root, "bin", "ghostbranch"), nil },
+		Getwd:      func() (string, error) { return root, nil },
+		GuardState: func(string) (bool, bool) { return false, false },
 	}
 	return te
 }
@@ -111,8 +118,63 @@ func withFeature(te *testEnv) {
 }
 func gatedFeature(te *testEnv) { withFeature(te); te.mustRun("gate", "feat-x") }
 
+// grantAgents writes an agent grant for acme/widget, as `agents allow` would
+// after a person confirmed it. The binary has no way to skip that step.
+func grantAgents(te *testEnv) {
+	te.t.Helper()
+	ws := filepath.Join(te.vars["GHOSTBRANCH_HOME"], "workspaces", "default")
+	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	exp := now.Add(6 * time.Hour)
+	s := grant.NewStore(filepath.Join(ws, "grants.json"), filepath.Join(ws, "grants.lock"))
+	if _, err := s.Put(grant.Grant{ID: "g-0a0b0c", Public: "acme/widget", Shadow: "acme/widget-shadow",
+		CreatedAt: now, ExpiresAt: &exp, CreatedBy: "human:octo"}, now); err != nil {
+		te.t.Fatal(err)
+	}
+}
+
+func publishable(te *testEnv) { gatedFeature(te); grantAgents(te) }
+
 func withLeakyFeature(te *testEnv) {
 	initOnly(te)
 	te.mustRun("feature", "start", "feat-x")
 	te.shadowCommit("feat-x", map[string]string{"config.env": "TOKEN=" + testutil.FakeGitHubToken() + "\n"})
 }
+
+var codeLine = regexp.MustCompile(`press Enter: ([A-Z0-9]{6})`)
+
+// typist is a fake console with a person at it: it reads the code it is
+// shown and types back answer(code).
+type typist struct {
+	pr       *io.PipeReader
+	pw       *io.PipeWriter
+	answer   func(code string) string
+	seen     strings.Builder
+	answered bool
+}
+
+func newTypist(answer func(code string) string) *typist {
+	pr, pw := io.Pipe()
+	return &typist{pr: pr, pw: pw, answer: answer}
+}
+
+func (c *typist) Read(p []byte) (int, error) { return c.pr.Read(p) }
+func (c *typist) Write(p []byte) (int, error) {
+	c.seen.Write(p)
+	if m := codeLine.FindStringSubmatch(c.seen.String()); m != nil && !c.answered {
+		c.answered = true
+		line := c.answer(m[1])
+		go func() { _, _ = c.pw.Write([]byte(line)) }()
+	}
+	return len(p), nil
+}
+func (c *typist) Close() error { return c.pw.Close() }
+
+// atConsole makes the test env look like a person's terminal.
+func atConsole(te *testEnv, answer func(code string) string) *typist {
+	ty := newTypist(answer)
+	te.env.ConsoleUsable = true
+	te.env.OpenConsole = func() (io.ReadWriteCloser, error) { return ty, nil }
+	return ty
+}
+
+func typeTheCode(code string) string { return code + "\n" }

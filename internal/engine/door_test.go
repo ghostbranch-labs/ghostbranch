@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/ghostbranch-labs/ghostbranch/internal/approval"
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
@@ -29,7 +30,17 @@ func TestOnlyPromoteAndApplyReachThePublicRepo(t *testing.T) {
 		}
 		still(step)
 	}
-	_, _, err := h.eng.Sync(h.ctx, h.pair)
+	n := len(h.pushes)
+	_, _, err := h.eng.AgentsAllow(h.ctx, h.pair, engine.AgentsAllowOptions{})
+	run("agents allow", err, "")
+	_, _, err = h.eng.AgentsStatus(h.ctx, &h.pair)
+	run("agents status", err, "")
+	_, _, err = h.eng.AgentsRevoke(h.ctx, &h.pair, false)
+	run("agents revoke", err, "")
+	if len(h.pushes) != n {
+		t.Fatal("agents commands must never push")
+	}
+	_, _, err = h.eng.Sync(h.ctx, h.pair)
 	run("sync", err, "")
 	h.startFeature("good", map[string]string{"good.txt": "g\n"})
 	h.startFeature("leaky", map[string]string{"leak.env": "T=" + testutil.FakeGitHubToken() + "\n"})
@@ -60,17 +71,17 @@ func TestOnlyPromoteAndApplyReachThePublicRepo(t *testing.T) {
 
 	res, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "good", Message: "m", PlanOnly: true})
 	run("promote --plan", err, "")
-	h.eng.Actor = "agent:claude-code"
+	h.eng.Approver = nil
 	_, _, err = h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "good", Message: "m", Yes: true})
-	run("agent promote", err, contract.ApprovalRequired)
+	run("promote --yes without a console or grant", err, contract.ApprovalRequired)
 	_, _, err = h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: res.Plan.ID, Yes: true})
-	run("agent apply", err, contract.ApprovalRequired)
-	h.eng.Actor = "human:octo"
-	h.eng.Prompt = func(string) (bool, error) { return false, nil }
+	run("apply --yes without a console or grant", err, contract.ApprovalRequired)
+	h.eng.Approver = &approver{err: &approval.Refusal{Reason: approval.NotConfirmed}}
 	_, _, err = h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: res.Plan.ID})
 	run("declined apply", err, contract.ApprovalRequired)
+	h.eng.Approver = h.approver
 
-	if _, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: res.Plan.ID, Yes: true}); err != nil {
+	if _, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: res.Plan.ID}); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 	var public []pushEvent

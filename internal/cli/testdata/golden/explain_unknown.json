@@ -1,0 +1,16 @@
+{
+  "schema_version": "0.2",
+  "command": "explain",
+  "ok": false,
+  "exit_code": 2,
+  "data": {},
+  "warnings": [],
+  "next": [],
+  "error": {
+    "code": "BAD_FLAG",
+    "message": "unknown code \"NOPE\"; run ghostbranch explain --all",
+    "field": "code",
+    "retryable": false,
+    "details": {}
+  }
+}

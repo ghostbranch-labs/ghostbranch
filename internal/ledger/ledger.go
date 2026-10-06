@@ -21,7 +21,22 @@ type Entry struct {
 	PlanID    string    `json:"plan_id,omitempty"`
 	ExitCode  int       `json:"exit_code"`
 	ErrorCode string    `json:"error_code,omitempty"`
+	Approval  *Approval `json:"approval,omitempty"`
+	Grant     *GrantRef `json:"grant,omitempty"`
 	Summary   string    `json:"summary"`
+}
+
+// GrantRef names the grant an entry is about.
+type GrantRef struct {
+	ID        string     `json:"id"`
+	ExpiresAt *time.Time `json:"expires_at"`
+}
+
+// Approval records how a publish was approved.
+type Approval struct {
+	Kind      string `json:"kind"` // "console" or "grant"
+	GrantID   string `json:"grant_id,omitempty"`
+	CreatedBy string `json:"created_by,omitempty"`
 }
 
 // Append writes e as one JSON line.

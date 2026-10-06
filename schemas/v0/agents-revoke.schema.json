@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "agents revoke data",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["revoked", "preview"],
+  "properties": {
+    "revoked": { "type": "array", "items": { "$ref": "grants.schema.json#/$defs/grant" } },
+    "preview": { "oneOf": [{ "type": "null" }, { "$ref": "preview.schema.json" }] }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "guide data",
+  "oneOf": [
+    { "type": "object", "additionalProperties": false, "required": ["markdown"],
+      "properties": { "markdown": { "type": "string", "minLength": 1 } } },
+    { "type": "object", "additionalProperties": false, "required": ["target", "path", "action", "preview"],
+      "properties": {
+        "target": { "enum": ["claude", "codex"] },
+        "path": { "type": "string", "pattern": "SKILL\\.md$" },
+        "action": { "enum": ["installed", "updated", "unchanged", "removed", "absent"] },
+        "preview": { "oneOf": [{ "type": "null" }, { "$ref": "preview.schema.json" }] } } }
+  ]
+}

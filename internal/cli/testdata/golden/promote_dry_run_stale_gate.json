@@ -1,0 +1,29 @@
+{
+  "schema_version": "0.2",
+  "command": "promote",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "gate": null,
+    "plan": null,
+    "plan_path": "",
+    "findings": [],
+    "applied": null,
+    "preview": {
+      "fingerprint": {
+        "feature_head": "d7407485ce685c126afcfc258f0a9eeb0092d776",
+        "overlay": "10e5ddddc0fd64a7daaff38906e96962dcbd4a40",
+        "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7"
+      },
+      "ops": [
+        {
+          "feature": "feat-x",
+          "op": "run_gate"
+        }
+      ]
+    }
+  },
+  "warnings": [],
+  "next": [],
+  "error": null
+}

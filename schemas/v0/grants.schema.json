@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "grants.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "grants"],
+  "properties": {
+    "schema_version": { "const": "0.2" },
+    "grants": { "type": "array", "items": { "$ref": "#/$defs/grant" } }
+  },
+  "$defs": {
+    "grant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "public", "shadow", "created_at", "expires_at", "created_by"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^g-[0-9a-f]{6}$" },
+        "public": { "$ref": "common.schema.json#/$defs/repo" },
+        "shadow": { "$ref": "common.schema.json#/$defs/repo" },
+        "created_at": { "$ref": "common.schema.json#/$defs/time" },
+        "expires_at": { "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/time" }] },
+        "created_by": { "$ref": "common.schema.json#/$defs/actor" }
+      }
+    }
+  }
+}

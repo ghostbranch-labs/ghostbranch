@@ -27,7 +27,7 @@ func TestSyncNoopFastForwardAndDiverged(t *testing.T) {
 	h.eng.DryRun = true
 	testutil.Commit(t, h.pubGit, "main", "upstream 2", map[string]string{"up.txt": "2\n"})
 	res, _, err = h.eng.Sync(h.ctx, h.pair)
-	if err != nil || res.Action != "fast_forward" || !res.DryRun {
+	if err != nil || res.Action != "fast_forward" || res.Preview == nil {
 		t.Fatalf("dry ff: %+v %v", res, err)
 	}
 	if got, _ := h.shadowGit().MustResolve(h.ctx, "refs/heads/main"); got != newMain {

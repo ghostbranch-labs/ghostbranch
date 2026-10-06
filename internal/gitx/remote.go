@@ -3,6 +3,7 @@ package gitx
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -66,6 +67,14 @@ func (e *RejectedError) Error() string {
 	return fmt.Sprintf("push rejected for %s: %s", strings.Join(e.Refs, ", "), e.Detail)
 }
 
+// PermissionError means the remote refused the push because the credentials
+// may not write to it (GitHub answers 403).
+type PermissionError struct{ Detail string }
+
+func (e *PermissionError) Error() string { return "push not permitted: " + e.Detail }
+
+var permissionDenied = regexp.MustCompile(`(?i)(returned error: 403|permission to \S+ denied|write access to repository not granted)`)
+
 // Push pushes refspecs to remote. Refspec sources may be SHAs; destinations
 // must be full ref names.
 func (g *Git) Push(ctx context.Context, remote string, opt PushOptions, refspecs ...string) error {
@@ -114,6 +123,9 @@ func (g *Git) Push(ctx context.Context, remote string, opt PushOptions, refspecs
 		}
 		if len(refs) > 0 {
 			return &RejectedError{Refs: refs, Detail: strings.TrimSpace(ge.Stdout + "\n" + ge.Stderr)}
+		}
+		if permissionDenied.MatchString(ge.Stderr) {
+			return &PermissionError{Detail: strings.TrimSpace(ge.Stderr)}
 		}
 	}
 	return err

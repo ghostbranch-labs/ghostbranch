@@ -9,8 +9,10 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
+	"github.com/ghostbranch-labs/ghostbranch/internal/ledger"
 	"github.com/ghostbranch-labs/ghostbranch/internal/overlay"
 	"github.com/ghostbranch-labs/ghostbranch/internal/plan"
+	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
@@ -20,12 +22,13 @@ type ApplyOptions struct {
 }
 
 type ApplyResult struct {
-	PlanID       string `json:"plan_id"`
-	PublicBranch string `json:"public_branch"`
-	PublicPR     int    `json:"public_pr"`
-	PRURL        string `json:"pr_url"`
-	Resumed      bool   `json:"resumed"`
-	DryRun       bool   `json:"dry_run"`
+	PlanID       string           `json:"plan_id"`
+	PublicBranch string           `json:"public_branch"`
+	PublicPR     int              `json:"public_pr"`
+	PRURL        string           `json:"pr_url"`
+	Resumed      bool             `json:"resumed"`
+	Approval     *ledger.Approval `json:"approval"`
+	Preview      *preview.Preview `json:"preview"`
 }
 
 // Apply publishes a saved plan if the repos still match it. Every step is
@@ -38,9 +41,17 @@ func (e *Engine) Apply(ctx context.Context, opt ApplyOptions) (res *ApplyResult,
 		if res != nil && err == nil {
 			summary = fmt.Sprintf("published %s as PR #%d", res.PublicBranch, res.PublicPR)
 		}
-		e.record("apply", pair, pl.Feature, pl.ID, summary, err)
+		e.recordWith("apply", pair, pl.Feature, pl.ID, summary, err, func(ent *ledger.Entry) {
+			if res != nil {
+				ent.Approval = res.Approval
+			}
+		})
 	}()
 	if pl, _, err = plan.Load(e.WS.PlansDir(), opt.Plan); err != nil {
+		return nil, nil, err
+	}
+	// The plan file is local and unsigned: re-check where it would publish.
+	if err := feature.ValidateName(pl.Publish.TargetBranch, "plan"); err != nil {
 		return nil, nil, err
 	}
 	p, ok := e.WS.Find(pl.Pair.Public)
@@ -48,26 +59,54 @@ func (e *Engine) Apply(ctx context.Context, opt ApplyOptions) (res *ApplyResult,
 		return nil, nil, contract.New(contract.PairAmbiguous, "plan %s is for %s, which is not in workspace %q", pl.ID, pl.Pair.Public, e.WS.Name).WithField("plan")
 	}
 	pair = &p
-	if pl.RequiresHuman && needsHumanApprover(e.Actor) {
-		return nil, nil, e.approve(pl, nil, opt.Yes)
-	}
 	pc, err := e.open(ctx, "apply", p, true)
 	if err != nil {
 		return nil, nil, err
 	}
 	defer pc.unlock()
-	files, err := pc.git.DiffNames(ctx, pl.Publish.Parent, pl.Publish.Commit)
-	if err != nil {
-		return nil, nil, internalErr(err, "list the files going public")
-	}
-	if err := e.approve(pl, files, opt.Yes); err != nil {
-		return nil, nil, err
-	}
-	return e.apply(ctx, pc, pl)
+	return e.apply(ctx, pc, pl, opt.Yes)
 }
 
-func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan) (*ApplyResult, []contract.Warning, error) {
+// stale is the PLAN_STALE details: what moved, plus the feature, public
+// repo and public branch so the re-plan command can be named exactly.
+func stale(pl plan.Plan, moved []string) map[string]any {
+	return map[string]any{"moved": moved, "feature": pl.Feature, "public": pl.Pair.Public, "branch": pl.Publish.TargetBranch}
+}
+
+// branchExists refuses a publish to a public branch that is already at
+// another commit.
+func branchExists(branch, sha string) error {
+	return contract.New(contract.BranchExists,
+		"public branch %q already exists at another commit; promote under another name with --branch", branch).
+		WithField("branch").WithDetails(map[string]any{"branch": branch, "sha": sha})
+}
+
+// previewPublish adds the public steps a publish of P to branch still
+// needs: the push unless the branch is already at P, and the PR unless one
+// is open. A branch at another commit is refused, as the publish would be.
+func (e *Engine) previewPublish(ctx context.Context, pc *pairCtx, pv *preview.Preview, branch, P string) error {
+	existing, exists, _ := pc.git.Resolve(ctx, publicRef(branch))
+	if exists && existing != P {
+		return branchExists(branch, existing)
+	}
+	if !exists {
+		pv.Add(preview.PushRef(pc.pair.Public, "refs/heads/"+branch, "", P))
+	}
+	pr, err := e.Forge.FindOpenPR(ctx, pc.pair.Public, branch, "main")
+	if err != nil {
+		return forgeErr(err, "find the public PR")
+	}
+	if pr == nil {
+		pv.Add(preview.OpenPR(pc.pair.Public, branch, "main", false))
+	}
+	return nil
+}
+
+func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool) (*ApplyResult, []contract.Warning, error) {
 	g := pc.git
+	if def := pc.public.DefaultBranch; def != "" && strings.EqualFold(pl.Publish.TargetBranch, def) {
+		return nil, nil, contract.New(contract.NameInvalid, "plan %s would publish to the public default branch %q", pl.ID, def).WithField("plan")
+	}
 	cfg, O, warns, err := e.readConfig(ctx, pc)
 	if err != nil {
 		return nil, warns, err
@@ -86,19 +125,19 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan) (*ApplyRe
 	if moved := pl.Fingerprint.Moved(live); len(moved) > 0 {
 		return nil, warns, contract.New(contract.PlanStale,
 			"the repos changed since plan %s was made (%s); make a new plan with ghostbranch promote", pl.ID, strings.Join(moved, ", ")).
-			WithDetails(map[string]any{"moved": moved})
+			WithDetails(stale(pl, moved))
 	}
 	// The plan only stands while the recorded gate is green, fresh, and for
 	// the very candidate the plan was made from.
 	if !m.Gate.Passed() || m.Gate.Candidate != gateC || !m.Gate.FreshFor(head, pm, O) {
 		return nil, warns, contract.New(contract.PlanStale,
 			"the recorded gate for %q is no longer green for plan %s's candidate; run ghostbranch gate, then make a new plan", pl.Feature, pl.ID).
-			WithDetails(map[string]any{"moved": []string{"gate"}})
+			WithDetails(stale(pl, []string{"gate"}))
 	}
 	P, ok, _ := g.Resolve(ctx, planRef(pl.ID))
 	if !ok || P != pl.Publish.Commit {
 		return nil, warns, contract.New(contract.PlanStale, "plan %s's commit is missing from the shadow repo", pl.ID).
-			WithDetails(map[string]any{"moved": []string{"publish.commit"}})
+			WithDetails(stale(pl, []string{"publish.commit"}))
 	}
 	set := overlay.NewSet(cfg.LeakScan.Strip...)
 	if err := assertPublish(ctx, g, P, pl.Publish.Tree, pl.Fingerprint.GateCandidate, pm, set); err != nil {
@@ -122,13 +161,27 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan) (*ApplyRe
 	}
 
 	branch := pl.Publish.TargetBranch
-	res := &ApplyResult{PlanID: pl.ID, PublicBranch: branch, DryRun: e.DryRun}
+	res := &ApplyResult{PlanID: pl.ID, PublicBranch: branch}
+	existing, exists, _ := g.Resolve(ctx, publicRef(branch))
+	if exists && existing != P {
+		return res, warns, branchExists(branch, existing)
+	}
 	if e.DryRun {
+		pv := preview.New(map[string]string{"public_main": pm, "feature_head": head, "overlay": O, "gate_candidate": gateC})
+		if err := e.previewPublish(ctx, pc, pv, branch, P); err != nil {
+			return res, warns, err
+		}
+		res.Preview = pv
 		return res, warns, nil
 	}
-	existing, exists, _ := g.Resolve(ctx, publicRef(branch))
-	switch {
-	case !exists:
+	files, err := g.DiffNames(ctx, pl.Publish.Parent, P)
+	if err != nil {
+		return nil, warns, internalErr(err, "list the files going public")
+	}
+	if res.Approval, err = e.authorize(ctx, pc.pair, pl.ID, planSummary(pl, files), yes); err != nil {
+		return nil, warns, err
+	}
+	if !exists {
 		e.progressf("publishing %s to %s:%s", short(P), pc.pair.Public, branch)
 		opt := gitx.PushOptions{Leases: []gitx.Lease{{Ref: "refs/heads/" + branch}}}
 		if err := e.push(ctx, pc, remotePublic, opt, P+":refs/heads/"+branch); err != nil {
@@ -137,12 +190,8 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan) (*ApplyRe
 			}
 			return res, warns, err
 		}
-	case existing == P:
+	} else {
 		res.Resumed = true
-	default:
-		return res, warns, contract.New(contract.BranchExists,
-			"public branch %q already exists at another commit; promote under another name with --branch", branch).
-			WithField("branch").WithDetails(map[string]any{"branch": branch, "sha": existing})
 	}
 	pr, err := e.Forge.FindOpenPR(ctx, pc.pair.Public, branch, "main")
 	if err != nil {

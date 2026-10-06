@@ -10,12 +10,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 	"time"
 
+	"github.com/ghostbranch-labs/ghostbranch/internal/approval"
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
+	"github.com/ghostbranch-labs/ghostbranch/internal/grant"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
 	"github.com/ghostbranch-labs/ghostbranch/internal/ledger"
 	"github.com/ghostbranch-labs/ghostbranch/internal/overlay"
@@ -29,18 +30,22 @@ const (
 	OverlayBranch = "ghostbranch"
 )
 
-// Engine runs operations for one workspace. Prompt and Editor are nil when
-// there is no interactive terminal.
+// Engine runs operations for one workspace. Editor is nil when there is no
+// interactive terminal. Approver is nil when no person can be asked at a
+// console; Grants is nil when grants are not available (tests).
 type Engine struct {
-	Forge        forge.Forge
-	WS           *workspace.Workspace
-	Actor        string
-	Token        string
+	Forge forge.Forge
+	WS    *workspace.Workspace
+	Actor string
+	Token string
+	// TokenSource names where Token came from, for error messages.
+	TokenSource  string
 	Now          func() time.Time
 	Sleep        func(time.Duration)
 	Rand         io.Reader
 	Progress     io.Writer
-	Prompt       func(summary string) (bool, error)
+	Approver     approval.Approver
+	Grants       *grant.Store
 	Editor       func(initial string) (string, error)
 	NewScanner   func(overlay.Set) (leak.Scanner, error)
 	PollInterval time.Duration
@@ -49,15 +54,6 @@ type Engine struct {
 	// OnPush observes every push before it happens (tests).
 	OnPush func(op, remote string, refspecs []string)
 }
-
-// IsAgent reports whether actor is an agent ("agent:<name>").
-func IsAgent(actor string) bool { return strings.HasPrefix(actor, "agent:") }
-
-// needsHumanApprover reports whether actor may not approve a plan that
-// requires a human. Agents never may. Until sub-project 2 defines how an app
-// approves, an app ("app") is treated like an agent, so it cannot approve its
-// own plans either.
-func needsHumanApprover(actor string) bool { return IsAgent(actor) || actor == "app" }
 
 func (e *Engine) now() time.Time { return e.Now().UTC().Truncate(time.Second) }
 
@@ -122,6 +118,11 @@ func leakErr(findings []leak.Finding) error {
 // record appends to the ledger. Dry runs are not recorded. A ledger failure
 // is reported but never masks the command's own result.
 func (e *Engine) record(op string, pair *workspace.Pair, feat, planID, summary string, err error) {
+	e.recordWith(op, pair, feat, planID, summary, err, nil)
+}
+
+// recordWith is record with a hook to fill extra fields.
+func (e *Engine) recordWith(op string, pair *workspace.Pair, feat, planID, summary string, err error, mod func(*ledger.Entry)) {
 	if e.DryRun || e.WS == nil {
 		return
 	}
@@ -134,6 +135,9 @@ func (e *Engine) record(op string, pair *workspace.Pair, feat, planID, summary s
 		if ent.Summary == "" {
 			ent.Summary = ce.Message
 		}
+	}
+	if mod != nil {
+		mod(&ent)
 	}
 	if werr := ledger.Append(e.WS.LedgerPath(), ent); werr != nil {
 		e.progressf("warning: could not write the ledger: %v", werr)

@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.1",
+  "schema_version": "0.2",
   "command": "init",
   "ok": true,
   "exit_code": 0,
@@ -15,9 +15,9 @@
     "mirrored_tags": [],
     "overlay_created": true,
     "default_branch_set": true,
-    "dry_run": false,
-    "actions": []
+    "preview": null
   },
   "warnings": [],
+  "next": [],
   "error": null
 }

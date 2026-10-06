@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "explain data",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["entries"],
+  "properties": {
+    "entries": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["code", "kind", "exit_code", "summary", "causes", "what_to_do", "needs_human"],
+        "properties": {
+          "code": { "type": "string" },
+          "kind": { "enum": ["exit", "error", "warning"] },
+          "exit_code": { "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 0, "maximum": 6 }] },
+          "summary": { "type": "string", "minLength": 1 },
+          "causes": { "type": "array", "items": { "type": "string" } },
+          "what_to_do": { "type": "string", "minLength": 1 },
+          "needs_human": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

@@ -1,10 +1,15 @@
 package cli_test
 
 import (
+	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
 )
 
 func TestFullLoopThroughTheCLI(t *testing.T) {
@@ -19,6 +24,7 @@ func TestFullLoopThroughTheCLI(t *testing.T) {
 	if code != 0 || env["command"] != "gate" {
 		t.Fatalf("gate: %d %v", code, env)
 	}
+	grantAgents(te)
 	code, env = te.runJSON("promote", "feat-x", "-m", "Add feature", "--yes")
 	data, _ := env["data"].(map[string]any)
 	applied, _ := data["applied"].(map[string]any)
@@ -76,7 +82,7 @@ func TestPromoteWithoutYesAndNoTTYNeedsApproval(t *testing.T) {
 	te := newTestEnv(t)
 	gatedFeature(te)
 	code, _, errOut := te.run("promote", "feat-x", "-m", "Add feature")
-	if code != 5 || !strings.Contains(errOut, "ghostbranch apply") {
+	if code != 5 || !strings.Contains(errOut, "APPROVAL_REQUIRED") {
 		t.Fatalf("%d %q", code, errOut)
 	}
 }
@@ -94,5 +100,84 @@ func TestPlumbingFailureIsInternalNotUsage(t *testing.T) {
 	code, env := te.runJSON("sync")
 	if e, _ := env["error"].(map[string]any); code != 1 || e["code"] != "INTERNAL" {
 		t.Fatalf("%d %v", code, env)
+	}
+}
+
+func TestPlanIsAPreview(t *testing.T) {
+	te := newTestEnv(t)
+	initOnly(te)
+	testutil.Commit(t, te.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
+	code, out, _ := te.run("sync", "--plan")
+	if code != 0 || !strings.Contains(out, "Dry run; nothing was changed") || !strings.Contains(out, "refs/heads/main") {
+		t.Fatalf("%d %q", code, out)
+	}
+	code, env := te.runJSON("sync")
+	if data, _ := env["data"].(map[string]any); code != 0 || data["action"] != "fast_forward" || data["preview"] != nil {
+		t.Fatalf("the preview must not have synced: %d %v", code, env)
+	}
+}
+
+// DEFERRED (sp2): a malformed actor is reported before auth or network.
+func TestActorIsCheckedFirst(t *testing.T) {
+	te := newTestEnv(t)
+	delete(te.vars, "GHOSTBRANCH_TOKEN")
+	te.vars["GHOSTBRANCH_ACTOR"] = "robot"
+	code, env := te.runJSON("sync")
+	if e, _ := env["error"].(map[string]any); code != 2 || e["field"] != "GHOSTBRANCH_ACTOR" {
+		t.Fatalf("%d %v", code, env)
+	}
+}
+
+// DEFERRED (sp2): --json=true is honoured even when flag parsing fails.
+func TestJSONEqualsTrue(t *testing.T) {
+	te := newTestEnv(t)
+	code, out, _ := te.run("gate", "--json=true")
+	if code != 2 || !strings.HasPrefix(strings.TrimSpace(out), "{") {
+		t.Fatalf("%d %q", code, out)
+	}
+}
+
+func TestGuideNeedsNoTokenAndMatchesItsSchema(t *testing.T) {
+	te := newTestEnv(t)
+	delete(te.vars, "GHOSTBRANCH_TOKEN")
+	code, out, _ := te.run("guide", "--json")
+	if code != 0 {
+		t.Fatalf("guide must work without a token: %d", code)
+	}
+	var env struct{ Data json.RawMessage }
+	_ = json.Unmarshal([]byte(out), &env)
+	validate(t, "guide.schema.json", env.Data)
+	code, human, _ := te.run("guide")
+	if code != 0 || !strings.HasPrefix(human, "# Ghostbranch: guide for coding agents") {
+		t.Fatalf("%d %q", code, human[:60])
+	}
+	te.vars["CLAUDE_CONFIG_DIR"] = filepath.Join(te.root, "claude")
+	if code, env := te.runJSON("guide", "--install", "claude"); code != 0 {
+		t.Fatalf("install: %d %v", code, env)
+	}
+	if _, err := os.Stat(filepath.Join(te.root, "claude", "skills", "ghostbranch", "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+	if code, out, _ := te.run("explain", "LEAK_FOUND"); code != 0 || !strings.Contains(out, "LEAK_FOUND (error, exit 3)") {
+		t.Fatalf("%d %q", code, out)
+	}
+}
+
+func TestNewCommandsNeverPush(t *testing.T) {
+	hermeticGit(t)
+	te := newTestEnv(t)
+	initOnly(te)
+	pairCheckout(te)
+	te.vars["CLAUDE_CONFIG_DIR"] = filepath.Join(te.root, "claude")
+	var pushes []string
+	te.env.OnPush = func(op, remote string, _ []string) { pushes = append(pushes, op+" "+remote) }
+	before, _ := te.pubGit.Refs(context.Background(), "refs")
+	for _, args := range [][]string{{"guide"}, {"guide", "--install", "codex"}, {"explain", "--all"},
+		{"agents", "status"}, {"agents", "allow"}, {"agents", "revoke"}, {"guard", "install"}, {"guard", "status"}, {"guard", "uninstall"}} {
+		te.run(args...)
+	}
+	after, _ := te.pubGit.Refs(context.Background(), "refs")
+	if len(pushes) != 0 || !reflect.DeepEqual(before, after) {
+		t.Fatalf("pushes: %v", pushes)
 	}
 }

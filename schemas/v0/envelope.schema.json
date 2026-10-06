@@ -3,10 +3,10 @@
   "title": "Ghostbranch command output",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "command", "ok", "exit_code", "data", "warnings", "error"],
+  "required": ["schema_version", "command", "ok", "exit_code", "data", "warnings", "next", "error"],
   "properties": {
-    "schema_version": { "const": "0.1" },
-    "command": { "enum": ["ghostbranch", "init", "sync", "feature start", "gate", "promote", "apply"] },
+    "schema_version": { "const": "0.2" },
+    "command": { "enum": ["ghostbranch", "init", "sync", "feature start", "gate", "promote", "apply", "agents allow", "agents revoke", "agents status", "explain", "guide", "guard install", "guard uninstall", "guard status", "guard check"] },
     "ok": { "type": "boolean" },
     "exit_code": { "type": "integer", "minimum": 0, "maximum": 6 },
     "data": { "type": "object" },
@@ -17,8 +17,22 @@
         "additionalProperties": false,
         "required": ["code", "message"],
         "properties": {
-          "code": { "enum": ["CONFIG_KEY_IGNORED", "PUBLIC_NOT_PUBLIC", "GATE_NOT_RECORDED", "CHECKS_LIMITED"] },
+          "code": { "enum": ["CONFIG_KEY_IGNORED", "PUBLIC_NOT_PUBLIC", "GATE_NOT_RECORDED", "CHECKS_LIMITED", "ACTOR_UNKNOWN"] },
           "message": { "type": "string" }
+        }
+      }
+    },
+    "next": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["command", "why", "needs_human", "needs_input"],
+        "properties": {
+          "command": { "type": "array", "minItems": 2, "items": { "type": "string" } },
+          "why": { "type": "string" },
+          "needs_human": { "type": "boolean" },
+          "needs_input": { "type": "array", "items": { "type": "string" } }
         }
       }
     },
@@ -35,7 +49,8 @@
                        "BAD_FLAG", "MISSING_INPUT", "PAIR_AMBIGUOUS", "NAME_INVALID", "FEATURE_NOT_FOUND",
                        "CHECKS_FAILED", "NO_CI", "CI_TIMEOUT", "LEAK_FOUND",
                        "REBASE_CONFLICT", "SYNC_DIVERGED", "BRANCH_EXISTS", "OVERLAY_COLLISION", "SHADOW_NOT_EMPTY", "REF_MOVED",
-                       "APPROVAL_REQUIRED", "PLAN_STALE"]
+                       "APPROVAL_REQUIRED", "PLAN_STALE",
+                       "TOKEN_CANNOT_PUBLISH", "GUARD_UNSUPPORTED", "PUSH_BLOCKED", "NOT_A_PAIR_CHECKOUT"]
             },
             "message": { "type": "string" },
             "field": { "type": ["string", "null"] },

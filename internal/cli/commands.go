@@ -5,6 +5,7 @@ import (
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
+	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
 func (a *app) root() *cobra.Command {
@@ -16,7 +17,9 @@ and publishes a feature only through a gated promote: rebase on public main, gre
 scan of exactly what will go public.
 
 Every command takes --json for one machine-readable object on stdout. Exit codes:
-0 ok, 1 failure, 2 usage, 3 gate failed, 4 conflict, 5 needs human approval, 6 state changed since plan.`,
+0 ok, 1 failure, 2 usage, 3 gate failed, 4 conflict, 5 needs human approval, 6 state changed since plan.
+
+Coding agents: run "ghostbranch guide" first.`,
 		SilenceErrors: true,
 		SilenceUsage:  true,
 	}
@@ -25,13 +28,13 @@ Every command takes --json for one machine-readable object on stdout. Exit codes
 	pf.StringVar(&a.repo, "repo", "", "public or shadow repo (owner/name) to act on")
 	pf.StringVar(&a.workspace, "workspace", "", `workspace name (default $GHOSTBRANCH_WORKSPACE or "default")`)
 	pf.BoolVar(&a.nonInteractive, "non-interactive", false, "never prompt; missing input is an error")
-	pf.BoolVar(&a.dryRun, "dry-run", false, "show what would happen without writing to any repo")
+	pf.BoolVar(&a.dryRun, "dry-run", false, "preview exactly what would change, and change nothing")
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
 		return contract.New(contract.BadFlag, "%s", err.Error())
 	})
 	feature := &cobra.Command{Use: "feature", Short: "Work with features (private branches in the shadow repo)"}
 	feature.AddCommand(a.featureStartCmd())
-	root.AddCommand(a.initCmd(), a.syncCmd(), feature, a.gateCmd(), a.promoteCmd(), a.applyCmd())
+	root.AddCommand(a.initCmd(), a.syncCmd(), feature, a.gateCmd(), a.promoteCmd(), a.applyCmd(), a.agentsCmd(), a.explainCmd(), a.guideCmd(), a.guardCmd())
 	return root
 }
 
@@ -53,12 +56,16 @@ repo. Running it again resumes a partial setup.`,
 			}
 			o.Public = args[0]
 			res, w, err := e.Init(cmd.Context(), o)
+			if res != nil {
+				a.pairFull = workspace.Pair{Public: res.Public, Shadow: res.Shadow}
+			}
 			return done(a, res, w, err)
 		},
 	}
 	c.Flags().StringVar(&o.Shadow, "shadow", "", "shadow repo name (default <owner/repo>-shadow)")
 	c.Flags().BoolVar(&o.Adopt, "adopt", false, "take over an existing, empty or mirror-only, private repo")
 	c.Flags().BoolVar(&yes, "yes", false, "accepted for consistency; init never asks")
+	c.Flags().BoolVar(&a.dryRun, "plan", false, "preview exactly what would change, and change nothing (same as --dry-run)")
 	return c
 }
 
@@ -83,6 +90,7 @@ func (a *app) syncCmd() *cobra.Command {
 		},
 	}
 	c.Flags().BoolVar(&yes, "yes", false, "accepted for consistency; sync never asks")
+	c.Flags().BoolVar(&a.dryRun, "plan", false, "preview exactly what would change, and change nothing (same as --dry-run)")
 	return c
 }
 
@@ -107,11 +115,12 @@ func (a *app) featureStartCmd() *cobra.Command {
 		},
 	}
 	c.Flags().BoolVar(&yes, "yes", false, "accepted for consistency; feature start never asks")
+	c.Flags().BoolVar(&a.dryRun, "plan", false, "preview exactly what would change, and change nothing (same as --dry-run)")
 	return c
 }
 
 func (a *app) gateCmd() *cobra.Command {
-	return &cobra.Command{
+	c := &cobra.Command{
 		Use:   "gate <feature>",
 		Short: "Rebase on public main, scan for leaks, and run CI; report only",
 		Long: `gate rebases the feature onto public main, scans exactly what would be published for leaks,
@@ -131,6 +140,8 @@ every check. It records the result and never touches the public repo. Exit 3 mea
 			return done(a, res, w, err)
 		},
 	}
+	c.Flags().BoolVar(&a.dryRun, "plan", false, "preview exactly what would change, and change nothing (same as --dry-run)")
+	return c
 }
 
 func (a *app) promoteCmd() *cobra.Command {
@@ -140,14 +151,15 @@ func (a *app) promoteCmd() *cobra.Command {
 		Short: "Publish a gated feature to the public repo as a branch and PR",
 		Long: `promote reuses a fresh green gate (or runs one), builds one squash commit on public main with
 exactly the gated tree, scans it and its message, branch name and PR text for leaks, and saves a plan.
-With --plan it stops there. Otherwise it asks for confirmation (or takes --yes) and publishes.
-Agents and apps get exit 5 when the plan needs a human; a person then runs ghostbranch apply <plan> --yes.`,
+With --plan it stops there. Otherwise a person confirms by typing a code shown on the console, or, if they have allowed agents with "ghostbranch agents allow", --yes publishes. Without either it stops at the plan with exit 5.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// A flag value is a usage matter; reject it before touching the network.
-			// (`--mode --json` parses "--json" as the mode.)
-			if o.Mode != "squash" {
-				return contract.New(contract.BadFlag, "--mode %s is not supported in this version; use squash", o.Mode).WithField("mode")
+			o.Feature = args[0]
+			// Usage problems fail before any network work (`--mode --json`
+			// parses "--json" as the mode).
+			if err := engine.ValidatePromoteOptions(&o); err != nil {
+				a.ran = true
+				return err
 			}
 			e, err := a.engine(cmd.Context())
 			if err != nil {
@@ -157,7 +169,6 @@ Agents and apps get exit 5 when the plan needs a human; a person then runs ghost
 			if err != nil {
 				return err
 			}
-			o.Feature = args[0]
 			res, w, err := e.Promote(cmd.Context(), p, o)
 			return done(a, res, w, err)
 		},
@@ -169,7 +180,7 @@ Agents and apps get exit 5 when the plan needs a human; a person then runs ghost
 	f.StringVar(&o.Body, "body", "", "PR body (default: the rest of the message)")
 	f.StringVar(&o.Branch, "branch", "", "public branch name (default: the feature name)")
 	f.BoolVar(&o.PlanOnly, "plan", false, "save and print the plan without publishing")
-	f.BoolVar(&o.Yes, "yes", false, "publish without asking (agents and apps still need a human when require_human is set)")
+	f.BoolVar(&o.Yes, "yes", false, "publish under an agent grant (ghostbranch agents allow); on its own it never skips the console")
 	return c
 }
 
@@ -178,7 +189,7 @@ func (a *app) applyCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "apply <plan-id|plan.json>",
 		Short: "Publish a saved plan if the repos still match it",
-		Long:  `apply publishes a plan saved by promote. It refuses with exit 6 if public main, the feature, the overlay or the gate candidate moved since the plan was made. Re-running it finishes an interrupted publish.`,
+		Long:  `apply publishes a plan saved by promote. It refuses with exit 6 if public main, the feature, the overlay or the gate candidate moved since the plan was made. Re-running it finishes an interrupted publish. A person confirms on the console, or --yes publishes under an agent grant.`,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			e, err := a.engine(cmd.Context())
@@ -190,6 +201,6 @@ func (a *app) applyCmd() *cobra.Command {
 			return done(a, res, w, err)
 		},
 	}
-	c.Flags().BoolVar(&o.Yes, "yes", false, "publish without asking")
+	c.Flags().BoolVar(&o.Yes, "yes", false, "publish under an agent grant (ghostbranch agents allow); on its own it never skips the console")
 	return c
 }

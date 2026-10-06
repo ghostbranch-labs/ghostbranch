@@ -3,13 +3,23 @@
   "title": "apply data",
   "type": "object",
   "additionalProperties": false,
-  "required": ["plan_id", "public_branch", "public_pr", "pr_url", "resumed", "dry_run"],
+  "required": ["plan_id", "public_branch", "public_pr", "pr_url", "resumed", "approval", "preview"],
   "properties": {
     "plan_id": { "$ref": "common.schema.json#/$defs/planId" },
     "public_branch": { "type": "string" },
     "public_pr": { "type": "integer", "minimum": 0 },
     "pr_url": { "type": "string" },
     "resumed": { "type": "boolean" },
-    "dry_run": { "type": "boolean" }
+    "approval": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "object", "additionalProperties": false, "required": ["kind"],
+          "properties": {
+            "kind": { "enum": ["console", "grant"] },
+            "grant_id": { "type": "string", "pattern": "^g-[0-9a-f]{6}$" },
+            "created_by": { "$ref": "common.schema.json#/$defs/actor" } } }
+      ]
+    },
+    "preview": { "oneOf": [{ "type": "null" }, { "$ref": "preview.schema.json" }] }
   }
 }

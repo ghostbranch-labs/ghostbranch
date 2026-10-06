@@ -1,19 +1,41 @@
 {
-  "schema_version": "0.1",
+  "schema_version": "0.2",
   "command": "apply",
   "ok": false,
   "exit_code": 6,
   "data": {},
   "warnings": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "promote",
+        "feat-x",
+        "--mode",
+        "squash",
+        "--plan",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "the repos moved since the plan was made; make a new plan",
+      "needs_human": false,
+      "needs_input": [
+        "--message"
+      ]
+    }
+  ],
   "error": {
     "code": "PLAN_STALE",
     "message": "the repos changed since plan 20261005T120005Z-0c0d0e was made (public_main); make a new plan with ghostbranch promote",
     "field": null,
     "retryable": false,
     "details": {
+      "branch": "feat-x",
+      "feature": "feat-x",
       "moved": [
         "public_main"
-      ]
+      ],
+      "public": "acme/widget"
     }
   }
 }

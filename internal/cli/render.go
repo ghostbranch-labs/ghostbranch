@@ -3,9 +3,13 @@ package cli
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
+	"github.com/ghostbranch-labs/ghostbranch/internal/guard"
+	"github.com/ghostbranch-labs/ghostbranch/internal/guide"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
+	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
 )
 
 func short(sha string) string {
@@ -25,16 +29,66 @@ func findings(b *strings.Builder, fs []leak.Finding) {
 	}
 }
 
+func previewText(b *strings.Builder, p *preview.Preview) {
+	b.WriteString("Dry run; nothing was changed. This would:\n")
+	for _, line := range p.Describe() {
+		fmt.Fprintf(b, "  - %s\n", line)
+	}
+	if len(p.Ops) == 0 {
+		b.WriteString("  (nothing)\n")
+	}
+}
+
 // human renders a result for people. It never prints secret values.
 func human(r any) string {
 	var b strings.Builder
 	switch v := r.(type) {
-	case *engine.InitResult:
-		if v.DryRun {
-			b.WriteString("Dry run; nothing was changed. init would:\n")
-			for _, a := range v.Actions {
-				fmt.Fprintf(&b, "  - %s\n", a)
+	case *guide.Printed:
+		b.WriteString(v.Markdown)
+	case *guide.InstallResult:
+		if v.Preview != nil {
+			previewText(&b, v.Preview)
+			break
+		}
+		fmt.Fprintf(&b, "Skill for %s %s: %s\n", v.Target, v.Action, v.Path)
+	case *guard.Result:
+		if v.Preview != nil {
+			previewText(&b, v.Preview)
+			break
+		}
+		fmt.Fprintf(&b, "Guard %s in %s.\n", v.Action, v.Status.HooksDir)
+		if v.Status.Chained {
+			b.WriteString("  your existing pre-push hook still runs after it\n")
+		}
+	case *guard.Status:
+		if !v.Installed {
+			fmt.Fprintf(&b, "The guard is not installed in %s. Install it with: ghostbranch guard install\n", v.HooksDir)
+			break
+		}
+		fmt.Fprintf(&b, "The guard is installed in %s, covering %s via %s.\n", v.HooksDir, strings.Join(v.Publics, ", "), strings.Join(v.Remotes, ", "))
+		if !v.BinaryFound {
+			fmt.Fprintf(&b, "  warning: %s is gone, so public pushes are refused until you reinstall\n", v.Binary)
+		}
+	case *guard.CheckResult:
+		// It runs inside every public git push: a pass says nothing.
+	case *ExplainResult:
+		for _, e := range v.Entries {
+			exit := ""
+			if e.ExitCode != nil {
+				exit = fmt.Sprintf(", exit %d", *e.ExitCode)
 			}
+			fmt.Fprintf(&b, "%s (%s%s): %s\n", e.Code, e.Kind, exit, e.Summary)
+			for _, c := range e.Causes {
+				fmt.Fprintf(&b, "  cause: %s\n", c)
+			}
+			fmt.Fprintf(&b, "  what to do: %s\n", e.WhatToDo)
+			if e.NeedsHuman {
+				b.WriteString("  a person must act\n")
+			}
+		}
+	case *engine.InitResult:
+		if v.Preview != nil {
+			previewText(&b, v.Preview)
 			break
 		}
 		fmt.Fprintf(&b, "Shadow repo %s is ready for %s.\n", v.Shadow, v.Public)
@@ -45,22 +99,30 @@ func human(r any) string {
 			b.WriteString("  created the ghostbranch overlay branch (.ghostbranch.yml)\n")
 		}
 	case *engine.SyncResult:
-		prefix := ""
-		if v.DryRun {
-			prefix = "Dry run: "
+		if v.Preview != nil {
+			previewText(&b, v.Preview)
+			break
 		}
 		switch v.Action {
 		case "noop":
-			fmt.Fprintf(&b, "%sShadow main is up to date with public main (%s).\n", prefix, short(v.PublicMain))
+			fmt.Fprintf(&b, "Shadow main is up to date with public main (%s).\n", short(v.PublicMain))
 		case "fast_forward":
-			fmt.Fprintf(&b, "%sShadow main fast-forwarded %s -> %s.\n", prefix, short(v.ShadowMainBefore), short(v.PublicMain))
+			fmt.Fprintf(&b, "Shadow main fast-forwarded %s -> %s.\n", short(v.ShadowMainBefore), short(v.PublicMain))
 		default:
 			b.WriteString("Shadow main has diverged from public main; nothing was pushed.\n")
 		}
 	case *engine.FeatureStartResult:
+		if v.Preview != nil {
+			previewText(&b, v.Preview)
+			break
+		}
 		fmt.Fprintf(&b, "Started feature %s from shadow main %s.\nCheck it out with: %s\n", v.Name, short(v.Base), v.Checkout)
 	case *engine.GateResult:
 		fmt.Fprintf(&b, "Gate for %s: checks %s, leak scan %s.\n", v.Feature, v.Checks, v.Leak)
+		if v.Preview != nil {
+			previewText(&b, v.Preview)
+			break
+		}
 		if v.ShadowPR > 0 {
 			fmt.Fprintf(&b, "  candidate %s on shadow PR #%d\n", short(v.Candidate), v.ShadowPR)
 		}
@@ -70,20 +132,59 @@ func human(r any) string {
 		findings(&b, v.Findings)
 	case *engine.PromoteResult:
 		switch {
+		case v.Preview != nil:
+			previewText(&b, v.Preview)
 		case v.Applied != nil:
 			fmt.Fprintf(&b, "Published %s as PR #%d: %s\n", v.Applied.PublicBranch, v.Applied.PublicPR, v.Applied.PRURL)
 		case v.Plan != nil && v.PlanPath != "":
-			fmt.Fprintf(&b, "Plan %s saved to %s.\nPublish it with: ghostbranch apply %s --yes\n", v.Plan.ID, v.PlanPath, v.Plan.ID)
-		case v.Plan != nil:
-			fmt.Fprintf(&b, "Dry run: would publish %s as branch %s.\n", short(v.Plan.Publish.Commit), v.Plan.Publish.TargetBranch)
+			fmt.Fprintf(&b, "Plan %s saved to %s.\nPublish it with: ghostbranch apply %s\n", v.Plan.ID, v.PlanPath, v.Plan.ID)
 		}
 		findings(&b, v.Findings)
 	case *engine.ApplyResult:
-		if v.DryRun {
-			fmt.Fprintf(&b, "Dry run: plan %s still matches and would publish %s.\n", v.PlanID, v.PublicBranch)
+		if v.Preview != nil {
+			previewText(&b, v.Preview)
 			break
 		}
 		fmt.Fprintf(&b, "Published %s as PR #%d: %s\n", v.PublicBranch, v.PublicPR, v.PRURL)
+	case *engine.AgentsAllowResult:
+		if v.Preview != nil {
+			previewText(&b, v.Preview)
+			break
+		}
+		until := "until revoked"
+		if v.Grant.ExpiresAt != nil {
+			until = "until " + v.Grant.ExpiresAt.UTC().Format("2006-01-02 15:04 UTC")
+		}
+		fmt.Fprintf(&b, "Agents on this machine may publish to %s with --yes, %s.\nTake it back with: ghostbranch agents revoke --repo %s\n",
+			v.Grant.Public, until, v.Grant.Public)
+	case *engine.AgentsRevokeResult:
+		if v.Preview != nil {
+			previewText(&b, v.Preview)
+			break
+		}
+		if len(v.Revoked) == 0 {
+			b.WriteString("There was no agent grant to revoke.\n")
+		}
+		for _, g := range v.Revoked {
+			fmt.Fprintf(&b, "Agents may no longer publish to %s.\n", g.Public)
+		}
+	case *engine.AgentsStatusResult:
+		if len(v.Grants) == 0 {
+			b.WriteString("No agent grants on this machine.\n")
+		}
+		for _, g := range v.Grants {
+			switch {
+			case g.Expired:
+				fmt.Fprintf(&b, "%s: expired\n", g.Public)
+			case g.RemainingSeconds == nil:
+				fmt.Fprintf(&b, "%s: agents may publish, until revoked\n", g.Public)
+			default:
+				fmt.Fprintf(&b, "%s: agents may publish for %s more\n", g.Public, (time.Duration(*g.RemainingSeconds) * time.Second).String())
+			}
+		}
+		if v.Pair != "" {
+			fmt.Fprintf(&b, "The token from %s can publish to %s: %s\n", v.Token.Source, v.Pair, v.TokenCanPublish)
+		}
 	}
 	return b.String()
 }

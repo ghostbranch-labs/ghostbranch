@@ -1,0 +1,29 @@
+{
+  "schema_version": "0.2",
+  "command": "agents allow",
+  "ok": false,
+  "exit_code": 5,
+  "data": {},
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "agents",
+        "allow"
+      ],
+      "why": "a person must run this in their own terminal and type the code it shows",
+      "needs_human": true,
+      "needs_input": []
+    }
+  ],
+  "error": {
+    "code": "APPROVAL_REQUIRED",
+    "message": "making an agent grant needs a person to type a code at a console",
+    "field": null,
+    "retryable": false,
+    "details": {
+      "reason": "no_console"
+    }
+  }
+}

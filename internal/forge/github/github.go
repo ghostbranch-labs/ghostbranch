@@ -6,8 +6,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	gh "github.com/google/go-github/v92/github"
 
@@ -18,6 +21,10 @@ type Client struct {
 	c    *gh.Client
 	mu   sync.Mutex
 	user *forge.User
+
+	token   string
+	gitBase string       // https://github.com, or a test server
+	http    *http.Client // for git smart-HTTP probes
 
 	limMu   sync.Mutex
 	limited map[string]bool // repos whose checks came from the workflow-runs fallback
@@ -32,7 +39,7 @@ func New(token string) *Client {
 	}
 	// These options cannot fail, so the error is always nil.
 	c, _ := gh.NewClient(opts...)
-	return &Client{c: c}
+	return &Client{c: c, token: token, gitBase: "https://github.com", http: &http.Client{Timeout: 15 * time.Second}}
 }
 
 // NewWithBaseURL points the client at another API root (tests).
@@ -45,7 +52,7 @@ func NewWithBaseURL(token, baseURL string) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Client{c: c}, nil
+	return &Client{c: c, token: token, gitBase: "https://github.com", http: &http.Client{Timeout: 15 * time.Second}}, nil
 }
 
 func wrap(resp *gh.Response, err error) error {
@@ -295,4 +302,40 @@ func (c *Client) workflowRuns(ctx context.Context, owner, name, full, sha string
 	}
 	c.markLimited(full)
 	return out, nil
+}
+
+// WithGitBase points git smart-HTTP probes at another host (tests).
+func (c *Client) WithGitBase(base string) *Client {
+	c.gitBase = strings.TrimRight(base, "/")
+	return c
+}
+
+// PushAccess asks GitHub's git endpoint for push discovery. GitHub answers
+// 200 only when the token may write, and 403 when it may not. Nothing is
+// pushed. The REST permissions field is not used: it reflects the user's
+// role, not what a fine-grained token may do.
+func (c *Client) PushAccess(ctx context.Context, full string) forge.PushAccess {
+	if _, _, err := forge.SplitName(full); err != nil {
+		return forge.PushAccess{Can: "unknown"}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.gitBase+"/"+full+".git/info/refs?service=git-receive-pack", nil)
+	if err != nil {
+		return forge.PushAccess{Can: "unknown"}
+	}
+	if c.token != "" {
+		req.SetBasicAuth("x-access-token", c.token)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return forge.PushAccess{Can: "unknown"}
+	}
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return forge.PushAccess{Can: "true", HTTPStatus: resp.StatusCode}
+	case http.StatusForbidden:
+		return forge.PushAccess{Can: "false", HTTPStatus: resp.StatusCode}
+	}
+	return forge.PushAccess{Can: "unknown", HTTPStatus: resp.StatusCode}
 }

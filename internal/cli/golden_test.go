@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"os"
 	"path/filepath"
@@ -23,6 +24,9 @@ var update = flag.Bool("update", false, "rewrite golden files")
 var dataSchemas = map[string]string{
 	"init": "init.schema.json", "sync": "sync.schema.json", "feature start": "feature-start.schema.json",
 	"gate": "gate.schema.json", "promote": "promote.schema.json", "apply": "apply.schema.json",
+	"agents allow": "agents-allow.schema.json", "agents revoke": "agents-revoke.schema.json", "agents status": "agents-status.schema.json",
+	"explain": "explain.schema.json", "guide": "guide.schema.json",
+	"guard install": "guard.schema.json", "guard uninstall": "guard.schema.json", "guard status": "guard.schema.json", "guard check": "guard.schema.json",
 }
 
 func schema(t *testing.T, name string) *jsonschema.Schema {
@@ -88,14 +92,45 @@ func TestGoldenContract(t *testing.T) {
 		{"promote_plan", gatedFeature, []string{"promote", "feat-x", "-m", "Add feature", "--plan"}, 0},
 		{"promote_needs_human", func(te *testEnv) { gatedFeature(te); te.vars["GHOSTBRANCH_ACTOR"] = "agent:claude-code" },
 			[]string{"promote", "feat-x", "-m", "Add feature", "--yes"}, 5},
-		{"promote_publish", gatedFeature, []string{"promote", "feat-x", "-m", "Add feature", "--yes"}, 0},
+		{"promote_plan_under_grant", publishable, []string{"promote", "feat-x", "-m", "Add feature", "--plan"}, 0},
+		{"promote_grant_needs_yes", publishable, []string{"promote", "feat-x", "-m", "Add feature"}, 5},
+		{"promote_not_confirmed", func(te *testEnv) { gatedFeature(te); atConsole(te, func(string) string { return "n\n" }) },
+			[]string{"promote", "feat-x", "-m", "Add feature"}, 5},
+		{"promote_too_many_attempts", func(te *testEnv) { gatedFeature(te); atConsole(te, func(string) string { return "X\nY\nZ\n" }) },
+			[]string{"promote", "feat-x", "-m", "Add feature"}, 5},
+		{"promote_console_publish", func(te *testEnv) { gatedFeature(te); atConsole(te, typeTheCode) },
+			[]string{"promote", "feat-x", "-m", "Add feature"}, 0},
+		{"promote_publish", publishable, []string{"promote", "feat-x", "-m", "Add feature", "--yes"}, 0},
 		{"apply_stale", func(te *testEnv) {
 			gatedFeature(te)
 			te.mustRun("promote", "feat-x", "-m", "Add feature", "--plan")
 			testutil.Commit(te.t, te.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
 		}, []string{"apply", "<PLAN>", "--yes"}, 6},
+		{"sync_plan", func(te *testEnv) {
+			initOnly(te)
+			testutil.Commit(te.t, te.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
+		}, []string{"sync", "--plan"}, 0},
+		{"feature_start_plan", initOnly, []string{"feature", "start", "feat-x", "--plan"}, 0},
+		{"gate_plan", withFeature, []string{"gate", "feat-x", "--plan"}, 0},
+		{"promote_dry_run_stale_gate", withFeature, []string{"promote", "feat-x", "-m", "Add feature", "--dry-run"}, 0},
+		{"apply_dry_run", func(te *testEnv) {
+			gatedFeature(te)
+			te.mustRun("promote", "feat-x", "-m", "Add feature", "--plan")
+		}, []string{"apply", "<PLAN>", "--dry-run"}, 0},
 		{"bad_flag", nil, []string{"gate"}, 2},
 		{"shadow_not_private", func(te *testEnv) { initOnly(te); te.forge.SetPrivate("acme/widget-shadow", false) }, []string{"sync"}, 1},
+		{"agents_allow_no_console", initOnly, []string{"agents", "allow"}, 5},
+		{"agents_allow_plan", initOnly, []string{"agents", "allow", "--for", "24h", "--plan"}, 0},
+		{"agents_allow_bad_for", initOnly, []string{"agents", "allow", "--for", "7h"}, 2},
+		{"agents_status", func(te *testEnv) { initOnly(te); grantAgents(te) }, []string{"agents", "status"}, 0},
+		{"explain_code", nil, []string{"explain", "approval_required"}, 0},
+		{"explain_exit", nil, []string{"explain", "3"}, 0},
+		{"explain_unknown", nil, []string{"explain", "NOPE"}, 2},
+		{"guide_install_plan", func(te *testEnv) { te.vars["CLAUDE_CONFIG_DIR"] = filepath.Join(te.root, "claude") },
+			[]string{"guide", "--install", "claude", "--plan"}, 0},
+		{"agents_revoke", func(te *testEnv) { initOnly(te); grantAgents(te) }, []string{"agents", "revoke"}, 0},
+		{"actor_unknown", func(te *testEnv) { initOnly(te); te.forge.UserErr = errors.New("rate limited") }, []string{"sync"}, 0},
+		{"guard_not_a_checkout", initOnly, []string{"guard", "status"}, 2},
 	}
 	for _, s := range scenarios {
 		t.Run(s.name, func(t *testing.T) {
@@ -147,6 +182,7 @@ func TestArtifactsMatchTheirSchemas(t *testing.T) {
 	te := newTestEnv(t)
 	gatedFeature(te)
 	te.mustRun("promote", "feat-x", "-m", "Add feature", "--plan")
+	grantAgents(te)
 	te.mustRun("apply", te.lastPlanID(), "--yes")
 	home := te.vars["GHOSTBRANCH_HOME"]
 
@@ -177,4 +213,10 @@ func TestArtifactsMatchTheirSchemas(t *testing.T) {
 	if n < 5 {
 		t.Fatalf("want at least 5 ledger lines (init, feature start, gate, promote, apply), got %d", n)
 	}
+
+	grants, err := os.ReadFile(filepath.Join(home, "workspaces", "default", "grants.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	validate(t, "grants.schema.json", grants)
 }

@@ -21,6 +21,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/cli"
 	ghforge "github.com/ghostbranch-labs/ghostbranch/internal/forge/github"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
+	"github.com/ghostbranch-labs/ghostbranch/internal/grant"
 	"github.com/ghostbranch-labs/ghostbranch/internal/ledger"
 	"github.com/ghostbranch-labs/ghostbranch/internal/overlay"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
@@ -132,7 +133,7 @@ func TestSandboxLoop(t *testing.T) {
 		}
 		return os.Getenv(k)
 	}
-	env.StdinIsTTY = false
+	env.ConsoleUsable = false
 	run := func(want int, args ...string) map[string]any {
 		t.Helper()
 		var out bytes.Buffer
@@ -168,8 +169,26 @@ func TestSandboxLoop(t *testing.T) {
 	run(0, "feature", "start", feat)
 	commit(feat, map[string]string{"hello.txt": "hello from " + runID + "\n", ".ghostbranch/notes.md": "private notes\n"})
 	run(0, "gate", feat)
-	res := run(0, "promote", feat, "--mode", "squash", "-m", "Add hello for "+runID, "--yes")
-	applied := res["data"].(map[string]any)["applied"].(map[string]any)
+	res := run(0, "promote", feat, "--mode", "squash", "-m", "Add hello for "+runID, "--plan")
+	planID := res["data"].(map[string]any)["plan"].(map[string]any)["id"].(string)
+	m := run(5, "apply", planID, "--yes")
+	if d := m["error"].(map[string]any)["details"].(map[string]any); d["reason"] != "no_console" {
+		t.Fatalf("without a grant or a console, apply must stop: %v", m)
+	}
+	// A person's grant, written as `agents allow` writes it after the console
+	// code; the binary itself has no way to skip that step.
+	now := time.Now().UTC()
+	exp := now.Add(time.Hour)
+	ws := filepath.Join(home, "workspaces", "default")
+	if _, err := grant.NewStore(filepath.Join(ws, "grants.json"), filepath.Join(ws, "grants.lock")).Put(grant.Grant{
+		ID: "g-e2e000", Public: publicRepo, Shadow: shadowRepo, CreatedAt: now, ExpiresAt: &exp, CreatedBy: "human:e2e"}, now); err != nil {
+		t.Fatal(err)
+	}
+	res = run(0, "apply", planID, "--yes")
+	applied := res["data"].(map[string]any)
+	if applied["approval"].(map[string]any)["kind"] != "grant" {
+		t.Fatalf("approval = %v", applied["approval"])
+	}
 	if applied["public_pr"].(float64) < 1 {
 		t.Fatalf("no public PR: %v", applied)
 	}
@@ -197,7 +216,7 @@ func TestSandboxLoop(t *testing.T) {
 	leaky := "leak-" + runID
 	run(0, "feature", "start", leaky)
 	commit(leaky, map[string]string{"config.env": "TOKEN=" + testutil.FakeGitHubToken() + "\n"})
-	m := run(3, "gate", leaky)
+	m = run(3, "gate", leaky)
 	if m["error"].(map[string]any)["code"] != "LEAK_FOUND" {
 		t.Fatalf("want LEAK_FOUND: %v", m)
 	}

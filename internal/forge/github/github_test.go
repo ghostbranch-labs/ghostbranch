@@ -2,6 +2,7 @@ package github_test
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -288,5 +289,42 @@ func TestListChecksCheckRuns500DoesNotFallBack(t *testing.T) {
 	}
 	if c.ChecksLimited("acme/s") {
 		t.Error("limited after a 500")
+	}
+}
+
+func TestPushAccessProbesReceivePack(t *testing.T) {
+	var gotAuth, gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth, gotQuery = r.Header.Get("Authorization"), r.URL.RawQuery
+		switch r.URL.Path {
+		case "/acme/widget.git/info/refs":
+			w.WriteHeader(http.StatusForbidden)
+		case "/acme/widget-shadow.git/info/refs":
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	c := ghforge.New("tok").WithGitBase(srv.URL)
+	ctx := context.Background()
+	if a := c.PushAccess(ctx, "acme/widget"); a.Can != "false" || a.HTTPStatus != 403 {
+		t.Fatalf("public: %+v", a)
+	}
+	if gotQuery != "service=git-receive-pack" || gotAuth != "Basic "+base64.StdEncoding.EncodeToString([]byte("x-access-token:tok")) {
+		t.Fatalf("request: query %q auth %q", gotQuery, gotAuth)
+	}
+	if a := c.PushAccess(ctx, "acme/widget-shadow"); a.Can != "true" || a.HTTPStatus != 200 {
+		t.Fatalf("shadow: %+v", a)
+	}
+	if a := c.PushAccess(ctx, "acme/missing"); a.Can != "unknown" || a.HTTPStatus != 404 {
+		t.Fatalf("missing: %+v", a)
+	}
+	if a := c.PushAccess(ctx, "not-a-repo"); a.Can != "unknown" {
+		t.Fatalf("bad name: %+v", a)
+	}
+	srv.Close()
+	if a := c.PushAccess(ctx, "acme/widget"); a.Can != "unknown" || a.HTTPStatus != 0 {
+		t.Fatalf("network error: %+v", a)
 	}
 }

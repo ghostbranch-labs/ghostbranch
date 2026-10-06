@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "guard data",
+  "$defs": {
+    "status": {
+      "type": "object", "additionalProperties": false,
+      "required": ["hooks_dir", "installed", "chained", "remotes", "publics", "binary", "binary_found"],
+      "properties": {
+        "hooks_dir": { "type": "string" },
+        "installed": { "type": "boolean" },
+        "chained": { "type": "boolean" },
+        "remotes": { "type": "array", "items": { "type": "string" } },
+        "publics": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/repo" } },
+        "binary": { "type": "string" },
+        "binary_found": { "type": "boolean" }
+      }
+    }
+  },
+  "oneOf": [
+    { "$ref": "#/$defs/status" },
+    { "type": "object", "additionalProperties": false, "required": ["action", "status", "preview"],
+      "properties": {
+        "action": { "enum": ["installed", "updated", "unchanged", "removed", "absent"] },
+        "status": { "$ref": "#/$defs/status" },
+        "preview": { "oneOf": [{ "type": "null" }, { "$ref": "preview.schema.json" }] } } },
+    { "type": "object", "additionalProperties": false, "required": ["checked"],
+      "properties": { "checked": { "type": "integer", "minimum": 0 } } }
+  ]
+}

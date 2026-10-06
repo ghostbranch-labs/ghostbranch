@@ -19,11 +19,14 @@ type Forge struct {
 	prs   map[string][]forge.PR
 
 	// User is returned by CurrentUser.
-	User forge.User
+	User    forge.User
+	UserErr error // CurrentUser fails with it when set
 	// Checks scripts check results. Nil means one passing check, "ci".
 	Checks func(repo, sha string) []forge.Check
 	// LimitedChecks makes ChecksLimited report true for every repo.
 	LimitedChecks bool
+	// PushDenied makes PushAccess report "false" (403) for these repos.
+	PushDenied map[string]bool
 }
 
 // New stores bare repos under root.
@@ -187,6 +190,9 @@ func (f *Forge) ListChecks(_ context.Context, full, sha string) ([]forge.Check, 
 func (f *Forge) CurrentUser(context.Context) (forge.User, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.UserErr != nil {
+		return forge.User{}, f.UserErr
+	}
 	return f.User, nil
 }
 
@@ -195,4 +201,13 @@ func (f *Forge) ChecksLimited(string) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.LimitedChecks
+}
+
+func (f *Forge) PushAccess(_ context.Context, full string) forge.PushAccess {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.PushDenied[full] {
+		return forge.PushAccess{Can: "false", HTTPStatus: 403}
+	}
+	return forge.PushAccess{Can: "true", HTTPStatus: 200}
 }

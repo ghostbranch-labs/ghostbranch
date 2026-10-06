@@ -12,6 +12,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
 	"github.com/ghostbranch-labs/ghostbranch/internal/overlay"
+	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
@@ -28,8 +29,8 @@ type GateResult struct {
 	Findings      []leak.Finding `json:"findings"`
 	ShadowPR      int            `json:"shadow_pr"`
 	// Reused is set by promote when it reuses a fresh green gate instead of re-running it.
-	Reused bool `json:"reused"`
-	DryRun bool `json:"dry_run"`
+	Reused  bool             `json:"reused"`
+	Preview *preview.Preview `json:"preview"`
 }
 
 const gatePRBody = "Automated Ghostbranch gate candidate: the feature rebased onto public main, plus the overlay. " +
@@ -77,7 +78,7 @@ func (e *Engine) gate(ctx context.Context, pc *pairCtx, name string) (*GateResul
 		return nil, warns, internalErr(err, "read public main")
 	}
 	res := &GateResult{Feature: name, FeatureHead: head, PublicMain: pm, Overlay: O,
-		Checks: feature.ChecksNotRun, FailedChecks: []string{}, Leak: feature.LeakClean, Findings: []leak.Finding{}, DryRun: e.DryRun}
+		Checks: feature.ChecksNotRun, FailedChecks: []string{}, Leak: feature.LeakClean, Findings: []leak.Finding{}}
 	set := overlay.NewSet(cfg.LeakScan.Strip...)
 
 	e.progressf("rebasing %s onto public main %s", name, short(pm))
@@ -113,6 +114,18 @@ func (e *Engine) gate(ctx context.Context, pc *pairCtx, name string) (*GateResul
 		return res, warns, leakErr(findings)
 	}
 	if e.DryRun {
+		old, _, _ := g.Resolve(ctx, shadowRef(gateBranch(name)))
+		pv := preview.New(map[string]string{"public_main": pm, "feature_head": head, "overlay": O})
+		pv.Add(preview.PushRef(pc.pair.Shadow, "refs/heads/"+gateBranch(name), old, C))
+		pr, err := e.Forge.FindOpenPR(ctx, pc.pair.Shadow, gateBranch(name), "main")
+		if err != nil {
+			return res, warns, forgeErr(err, "find the gate PR")
+		}
+		if pr == nil {
+			pv.Add(preview.OpenPR(pc.pair.Shadow, gateBranch(name), "main", true))
+		}
+		pv.Add(preview.WaitChecks(pc.pair.Shadow, C), preview.PushRef(pc.pair.Shadow, remoteMetaRef(name), metaSHA, ""))
+		res.Preview = pv
 		return res, warns, nil
 	}
 

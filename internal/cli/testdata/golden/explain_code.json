@@ -1,0 +1,26 @@
+{
+  "schema_version": "0.2",
+  "command": "explain",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "entries": [
+      {
+        "code": "APPROVAL_REQUIRED",
+        "kind": "error",
+        "exit_code": 5,
+        "summary": "Publishing needs a person: a code typed at a console, or an agent grant.",
+        "causes": [
+          "no_console: no terminal a person can type into",
+          "not_confirmed, timeout, too_many_attempts: the person did not confirm",
+          "grant_needs_yes: a grant exists, but --yes was not passed"
+        ],
+        "what_to_do": "Stop and give the human the command in next. Never fake a terminal, answer the code, edit grants.json or run ghostbranch agents allow yourself.",
+        "needs_human": true
+      }
+    ]
+  },
+  "warnings": [],
+  "next": [],
+  "error": null
+}

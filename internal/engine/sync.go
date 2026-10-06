@@ -6,17 +6,18 @@ import (
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
+	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
 type SyncResult struct {
-	Public           string `json:"public"`
-	Shadow           string `json:"shadow"`
-	Action           string `json:"action"`
-	PublicMain       string `json:"public_main"`
-	ShadowMainBefore string `json:"shadow_main_before"`
-	ShadowMainAfter  string `json:"shadow_main_after"`
-	DryRun           bool   `json:"dry_run"`
+	Public           string           `json:"public"`
+	Shadow           string           `json:"shadow"`
+	Action           string           `json:"action"`
+	PublicMain       string           `json:"public_main"`
+	ShadowMainBefore string           `json:"shadow_main_before"`
+	ShadowMainAfter  string           `json:"shadow_main_after"`
+	Preview          *preview.Preview `json:"preview"`
 }
 
 // Sync fast-forwards shadow main to public main. It never force-pushes: a
@@ -43,9 +44,13 @@ func (e *Engine) Sync(ctx context.Context, p workspace.Pair) (res *SyncResult, w
 	if err != nil {
 		return nil, nil, internalErr(err, "read shadow main")
 	}
-	res = &SyncResult{Public: p.Public, Shadow: p.Shadow, PublicMain: pm, ShadowMainBefore: sm, ShadowMainAfter: sm, DryRun: e.DryRun}
+	res = &SyncResult{Public: p.Public, Shadow: p.Shadow, PublicMain: pm, ShadowMainBefore: sm, ShadowMainAfter: sm}
+	fp := map[string]string{"public_main": pm, "shadow_main": sm}
 	if ok && sm == pm {
 		res.Action = "noop"
+		if e.DryRun {
+			res.Preview = preview.New(fp)
+		}
 		return res, nil, nil
 	}
 	ff := !ok
@@ -62,6 +67,8 @@ func (e *Engine) Sync(ctx context.Context, p workspace.Pair) (res *SyncResult, w
 	}
 	res.Action = "fast_forward"
 	if e.DryRun {
+		res.Preview = preview.New(fp)
+		res.Preview.Add(preview.PushRef(p.Shadow, "refs/heads/main", sm, pm))
 		return res, nil, nil
 	}
 	e.progressf("fast-forwarding shadow main %s -> %s", short(sm), short(pm))

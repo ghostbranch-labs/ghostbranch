@@ -4,7 +4,7 @@
   "type": "object",
   "additionalProperties": false,
   "required": ["public", "shadow", "created_shadow", "adopted", "resumed", "mirrored_branches", "mirrored_tags",
-               "overlay_created", "default_branch_set", "dry_run", "actions"],
+               "overlay_created", "default_branch_set", "preview"],
   "properties": {
     "public": { "$ref": "common.schema.json#/$defs/repo" },
     "shadow": { "$ref": "common.schema.json#/$defs/repo" },
@@ -15,7 +15,6 @@
     "mirrored_tags": { "type": "array", "items": { "type": "string" } },
     "overlay_created": { "type": "boolean" },
     "default_branch_set": { "type": "boolean" },
-    "dry_run": { "type": "boolean" },
-    "actions": { "type": "array", "items": { "type": "string" } }
+    "preview": { "oneOf": [{ "type": "null" }, { "$ref": "preview.schema.json" }] }
   }
 }

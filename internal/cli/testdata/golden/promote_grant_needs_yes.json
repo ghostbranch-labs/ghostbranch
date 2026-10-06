@@ -1,0 +1,89 @@
+{
+  "schema_version": "0.2",
+  "command": "promote",
+  "ok": false,
+  "exit_code": 5,
+  "data": {
+    "gate": {
+      "feature": "feat-x",
+      "feature_head": "d7407485ce685c126afcfc258f0a9eeb0092d776",
+      "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+      "overlay": "10e5ddddc0fd64a7daaff38906e96962dcbd4a40",
+      "candidate": "d49d01dec389ef2590148b0e5e59dc80ebf3a0f3",
+      "published_tree": "ef9061717144a4bf03a0230d8f8926d019f2adeb",
+      "checks": "passed",
+      "failed_checks": [],
+      "leak": "clean",
+      "findings": [],
+      "shadow_pr": 0,
+      "reused": true,
+      "preview": null
+    },
+    "plan": {
+      "schema_version": "0.2",
+      "id": "20261005T120005Z-0c0d0e",
+      "kind": "promote",
+      "actor": "human:octo",
+      "created_at": "2026-10-05T12:00:05Z",
+      "pair": {
+        "public": "acme/widget",
+        "shadow": "acme/widget-shadow"
+      },
+      "feature": "feat-x",
+      "mode": "squash",
+      "fingerprint": {
+        "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+        "feature_head": "d7407485ce685c126afcfc258f0a9eeb0092d776",
+        "overlay": "10e5ddddc0fd64a7daaff38906e96962dcbd4a40",
+        "gate_candidate": "d49d01dec389ef2590148b0e5e59dc80ebf3a0f3"
+      },
+      "publish": {
+        "commit": "15dd9c9bcb7655bdb426fb4a24f440fc9c31fb65",
+        "tree": "ef9061717144a4bf03a0230d8f8926d019f2adeb",
+        "parent": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+        "author": {
+          "name": "octo",
+          "email": "42+octo@users.noreply.github.com",
+          "date": "2026-10-05T12:00:05Z"
+        },
+        "target_branch": "feat-x",
+        "pr": {
+          "title": "Add feature",
+          "body": ""
+        }
+      },
+      "leak": {
+        "findings": [],
+        "scanner_version": "gitleaks v8.30.1"
+      }
+    },
+    "plan_path": "<ROOT>/home/workspaces/default/plans/20261005T120005Z-0c0d0e.json",
+    "findings": [],
+    "applied": null,
+    "preview": null
+  },
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "apply",
+        "20261005T120005Z-0c0d0e",
+        "--yes"
+      ],
+      "why": "a person allowed agents to publish here; publish the saved plan with --yes",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
+  "error": {
+    "code": "APPROVAL_REQUIRED",
+    "message": "agents may publish here under a grant; pass --yes to do so; plan 20261005T120005Z-0c0d0e is saved",
+    "field": null,
+    "retryable": false,
+    "details": {
+      "plan_id": "20261005T120005Z-0c0d0e",
+      "reason": "grant_needs_yes"
+    }
+  }
+}

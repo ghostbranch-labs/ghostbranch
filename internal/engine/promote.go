@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
@@ -10,8 +11,10 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
+	"github.com/ghostbranch-labs/ghostbranch/internal/ledger"
 	"github.com/ghostbranch-labs/ghostbranch/internal/overlay"
 	"github.com/ghostbranch-labs/ghostbranch/internal/plan"
+	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
@@ -27,12 +30,12 @@ type PromoteOptions struct {
 }
 
 type PromoteResult struct {
-	Gate     *GateResult    `json:"gate"`
-	Plan     *plan.Plan     `json:"plan"`
-	PlanPath string         `json:"plan_path"`
-	Findings []leak.Finding `json:"findings"`
-	Applied  *ApplyResult   `json:"applied"`
-	DryRun   bool           `json:"dry_run"`
+	Gate     *GateResult      `json:"gate"`
+	Plan     *plan.Plan       `json:"plan"`
+	PlanPath string           `json:"plan_path"`
+	Findings []leak.Finding   `json:"findings"`
+	Applied  *ApplyResult     `json:"applied"`
+	Preview  *preview.Preview `json:"preview"`
 }
 
 const editorTemplate = "\n# Write the commit message for the public squash commit of feature %q.\n" +
@@ -51,15 +54,25 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 		} else if res != nil && res.Plan != nil {
 			summary = "plan " + res.Plan.ID + " saved"
 		}
-		e.record("promote", &p, opt.Feature, planID, summary, err)
+		e.recordWith("promote", &p, opt.Feature, planID, summary, err, func(ent *ledger.Entry) {
+			if res != nil && res.Applied != nil {
+				ent.Approval = res.Applied.Approval
+			}
+		})
 	}()
-	if opt.Mode == "" {
-		opt.Mode = "squash"
+	if err := ValidatePromoteOptions(&opt); err != nil {
+		return nil, nil, err
 	}
-	if opt.Mode != "squash" {
-		return nil, nil, contract.New(contract.BadFlag, "--mode %s is not supported in this version; use squash", opt.Mode).WithField("mode")
+	msg, err := e.message(opt)
+	if err != nil {
+		return nil, nil, err
 	}
-	res = &PromoteResult{Findings: []leak.Finding{}, DryRun: e.DryRun}
+	title, body := prTexts(msg, opt.Title, opt.Body)
+	branch := opt.Branch
+	if branch == "" {
+		branch = opt.Feature
+	}
+	res = &PromoteResult{Findings: []leak.Finding{}}
 	pc, err := e.open(ctx, "promote", p, true)
 	if err != nil {
 		return res, nil, err
@@ -89,11 +102,19 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	// one would make every plan stale.
 	tip, tipOK, _ := g.Resolve(ctx, shadowRef(gateBranch(opt.Feature)))
 	candidateLive := m.Gate != nil && m.Gate.Candidate != "" && tipOK && tip == m.Gate.Candidate
-	if m.Gate.Passed() && m.Gate.FreshFor(head, pm, O) && candidateLive {
+	fresh := m.Gate.Passed() && m.Gate.FreshFor(head, pm, O) && candidateLive
+	switch {
+	case fresh:
 		res.Gate = &GateResult{Feature: opt.Feature, FeatureHead: head, PublicMain: pm, Overlay: O,
 			Candidate: m.Gate.Candidate, PublishedTree: m.Gate.PublishedTree, Checks: m.Gate.Checks,
-			FailedChecks: []string{}, Leak: m.Gate.Leak, Findings: []leak.Finding{}, Reused: true, DryRun: e.DryRun}
-	} else {
+			FailedChecks: []string{}, Leak: m.Gate.Leak, Findings: []leak.Finding{}, Reused: true}
+	case e.DryRun:
+		// Running the gate would push; say so and stop, rather than return
+		// a plan whose checks never ran.
+		res.Preview = preview.New(map[string]string{"public_main": pm, "feature_head": head, "overlay": O})
+		res.Preview.Add(preview.RunGate(opt.Feature))
+		return res, warns, nil
+	default:
 		e.progressf("the gate for %s is missing or stale; running it", opt.Feature)
 		gr, gw, err := e.gate(ctx, pc, opt.Feature)
 		res.Gate = gr
@@ -114,26 +135,6 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	}
 	if T2 != T {
 		return res, warns, contract.New(contract.Internal, "the gated tree %s no longer matches its candidate (%s)", short(T), short(T2))
-	}
-
-	msg, err := e.message(opt)
-	if err != nil {
-		return res, warns, err
-	}
-	title, body := opt.Title, opt.Body
-	if title == "" {
-		t, b, _ := strings.Cut(msg, "\n")
-		title = strings.TrimSpace(t)
-		if body == "" {
-			body = strings.TrimSpace(b)
-		}
-	}
-	branch := opt.Branch
-	if branch == "" {
-		branch = opt.Feature
-	}
-	if err := feature.ValidateName(branch, "branch"); err != nil {
-		return res, warns, err
 	}
 
 	u, err := e.Forge.CurrentUser(ctx)
@@ -166,10 +167,21 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 		Publish: plan.Publish{Commit: P, Tree: T, Parent: pm,
 			Author:       plan.Identity{Name: who.Name, Email: who.Email, Date: who.When},
 			TargetBranch: branch, PR: plan.PR{Title: title, Body: body}},
-		Leak:          plan.Leak{Findings: []map[string]any{}, ScannerVersion: version},
-		RequiresHuman: cfg.Promote.RequireHuman}
+		Leak: plan.Leak{Findings: []map[string]any{}, ScannerVersion: version}}
 	res.Plan = &pl
 	if e.DryRun {
+		pv := preview.New(map[string]string{"public_main": pm, "feature_head": head, "overlay": O, "gate_candidate": C})
+		pv.Add(preview.PushRef(p.Shadow, remotePlanRef(planID), "", P))
+		if opt.PlanOnly {
+			// promote --plan stores the plan and stops; nothing public.
+			pv.Add(preview.WriteFile(filepath.Join(e.WS.PlansDir(), planID+".json")))
+			res.Preview = pv
+			return res, warns, nil
+		}
+		if err := e.previewPublish(ctx, pc, pv, branch, P); err != nil {
+			return res, warns, err
+		}
+		res.Preview = pv
 		return res, warns, nil
 	}
 	if err := e.push(ctx, pc, remoteShadow, gitx.PushOptions{Leases: []gitx.Lease{{Ref: remotePlanRef(planID)}}}, P+":"+remotePlanRef(planID)); err != nil {
@@ -182,16 +194,38 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	if opt.PlanOnly {
 		return res, warns, nil
 	}
-	files, err := g.DiffNames(ctx, pm, P)
-	if err != nil {
-		return res, warns, internalErr(err, "list the files going public")
-	}
-	if err := e.approve(pl, files, opt.Yes); err != nil {
-		return res, warns, err
-	}
-	ar, aw, err := e.apply(ctx, pc, pl)
+	ar, aw, err := e.apply(ctx, pc, pl, opt.Yes)
 	res.Applied = ar
 	return res, append(warns, aw...), err
+}
+
+// ValidatePromoteOptions checks everything about a promote that needs no
+// network, so a bad flag fails before any CI runs. It sets the default mode.
+func ValidatePromoteOptions(opt *PromoteOptions) error {
+	if opt.Mode == "" {
+		opt.Mode = "squash"
+	}
+	if opt.Mode != "squash" {
+		return contract.New(contract.BadFlag, "--mode %s is not supported in this version; use squash", opt.Mode).WithField("mode")
+	}
+	branch := opt.Branch
+	if branch == "" {
+		branch = opt.Feature
+	}
+	return feature.ValidateName(branch, "branch")
+}
+
+// prTexts derives the PR title and body: an explicit --title or --body wins,
+// and whatever is missing comes from the message. Both are trimmed.
+func prTexts(msg, title, body string) (string, string) {
+	t, b, _ := strings.Cut(msg, "\n")
+	if title = strings.TrimSpace(title); title == "" {
+		title = strings.TrimSpace(t)
+	}
+	if body = strings.TrimSpace(body); body == "" {
+		body = strings.TrimSpace(b)
+	}
+	return title, body
 }
 
 // message returns the squash commit message from -m, or from the editor on
@@ -230,50 +264,4 @@ func publishTexts(msg, name, email, branch, title, body string) []leak.Text {
 		{Where: "pr_title", Content: title},
 		{Where: "pr_body", Content: body},
 	}
-}
-
-// approve decides whether a plan may be applied now. Agents and apps never
-// approve plans that require a human.
-func (e *Engine) approve(pl plan.Plan, files []string, yes bool) error {
-	needs := func(why string) error {
-		return contract.New(contract.ApprovalRequired, "%s; plan %s is saved: run `ghostbranch apply %s --yes` to publish it", why, pl.ID, pl.ID).
-			WithDetails(map[string]any{"plan_id": pl.ID})
-	}
-	if pl.RequiresHuman && needsHumanApprover(e.Actor) {
-		return needs("this plan needs a human to approve it")
-	}
-	if yes {
-		return nil
-	}
-	if e.Prompt == nil {
-		return needs("confirmation is needed and there is no terminal to ask in")
-	}
-	ok, err := e.Prompt(planSummary(pl, files))
-	if err != nil {
-		return contract.Wrap(contract.MissingInput, err, "read the confirmation").WithField("confirmation")
-	}
-	if !ok {
-		return needs("not confirmed")
-	}
-	return nil
-}
-
-// planSummary is the "what goes public" view shown before confirming.
-func planSummary(pl plan.Plan, files []string) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "About to publish to %s:\n", pl.Pair.Public)
-	fmt.Fprintf(&b, "  branch   %s\n", pl.Publish.TargetBranch)
-	fmt.Fprintf(&b, "  commit   %s (parent %s)\n", short(pl.Publish.Commit), short(pl.Publish.Parent))
-	fmt.Fprintf(&b, "  author   %s <%s>\n", pl.Publish.Author.Name, pl.Publish.Author.Email)
-	fmt.Fprintf(&b, "  PR title %s\n", pl.Publish.PR.Title)
-	fmt.Fprintf(&b, "  files    %d changed\n", len(files))
-	for i, f := range files {
-		if i == 20 {
-			fmt.Fprintf(&b, "           … and %d more\n", len(files)-20)
-			break
-		}
-		fmt.Fprintf(&b, "           %s\n", f)
-	}
-	fmt.Fprintf(&b, "Plan %s", pl.ID)
-	return b.String()
 }

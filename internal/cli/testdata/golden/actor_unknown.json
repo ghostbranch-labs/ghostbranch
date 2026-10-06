@@ -1,0 +1,23 @@
+{
+  "schema_version": "0.2",
+  "command": "sync",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "public": "acme/widget",
+    "shadow": "acme/widget-shadow",
+    "action": "noop",
+    "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+    "shadow_main_before": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+    "shadow_main_after": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+    "preview": null
+  },
+  "warnings": [
+    {
+      "code": "ACTOR_UNKNOWN",
+      "message": "GHOSTBRANCH_ACTOR is unset and the GitHub login could not be read, so the ledger records human:unknown; set GHOSTBRANCH_ACTOR, for example agent:claude-code"
+    }
+  ],
+  "next": [],
+  "error": null
+}

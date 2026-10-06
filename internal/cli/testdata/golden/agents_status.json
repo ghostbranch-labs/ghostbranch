@@ -1,0 +1,29 @@
+{
+  "schema_version": "0.2",
+  "command": "agents status",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "pair": "acme/widget",
+    "grants": [
+      {
+        "id": "g-0a0b0c",
+        "public": "acme/widget",
+        "shadow": "acme/widget-shadow",
+        "created_at": "2026-10-05T12:00:00Z",
+        "expires_at": "2026-10-05T18:00:00Z",
+        "created_by": "human:octo",
+        "expired": false,
+        "remaining_seconds": 21600
+      }
+    ],
+    "token_can_publish": "true",
+    "token": {
+      "source": "GHOSTBRANCH_TOKEN",
+      "http_status": 200
+    }
+  },
+  "warnings": [],
+  "next": [],
+  "error": null
+}

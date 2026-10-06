@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "agents allow data",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["grant", "replaced", "preview"],
+  "properties": {
+    "grant": { "$ref": "grants.schema.json#/$defs/grant" },
+    "replaced": { "oneOf": [{ "type": "null" }, { "$ref": "grants.schema.json#/$defs/grant" }] },
+    "preview": { "oneOf": [{ "type": "null" }, { "$ref": "preview.schema.json" }] }
+  }
+}

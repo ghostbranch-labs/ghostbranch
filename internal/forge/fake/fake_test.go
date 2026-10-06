@@ -66,3 +66,15 @@ func TestFakeForgeBehavesLikeGitHub(t *testing.T) {
 		t.Fatalf("noreply = %s", forge.NoreplyEmail(u))
 	}
 }
+
+func TestPushAccess(t *testing.T) {
+	f := fake.New(t.TempDir())
+	f.PushDenied = map[string]bool{"acme/widget": true}
+	ctx := context.Background()
+	if a := f.PushAccess(ctx, "acme/widget"); a.Can != "false" || a.HTTPStatus != 403 {
+		t.Fatalf("%+v", a)
+	}
+	if a := f.PushAccess(ctx, "acme/widget-shadow"); a.Can != "true" || a.HTTPStatus != 200 {
+		t.Fatalf("%+v", a)
+	}
+}

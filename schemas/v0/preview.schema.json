@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "preview",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["fingerprint", "ops"],
+  "properties": {
+    "fingerprint": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "public_main": { "$ref": "common.schema.json#/$defs/shaOrEmpty" },
+        "shadow_main": { "$ref": "common.schema.json#/$defs/shaOrEmpty" },
+        "feature_head": { "$ref": "common.schema.json#/$defs/shaOrEmpty" },
+        "overlay": { "$ref": "common.schema.json#/$defs/shaOrEmpty" },
+        "gate_candidate": { "$ref": "common.schema.json#/$defs/shaOrEmpty" }
+      }
+    },
+    "ops": { "type": "array", "items": { "$ref": "#/$defs/op" } }
+  },
+  "$defs": {
+    "shaOrNull": { "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/sha" }] },
+    "repo": { "$ref": "common.schema.json#/$defs/repo" },
+    "op": {
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["op", "repo", "private"],
+          "properties": { "op": { "const": "create_repo" }, "repo": { "$ref": "#/$defs/repo" }, "private": { "const": true } } },
+        { "type": "object", "additionalProperties": false, "required": ["op", "repo", "ref", "from", "to"],
+          "properties": { "op": { "const": "push_ref" }, "repo": { "$ref": "#/$defs/repo" }, "ref": { "type": "string", "pattern": "^refs/" },
+                          "from": { "$ref": "#/$defs/shaOrNull" }, "to": { "$ref": "#/$defs/shaOrNull" } } },
+        { "type": "object", "additionalProperties": false, "required": ["op", "repo", "branch"],
+          "properties": { "op": { "const": "set_default_branch" }, "repo": { "$ref": "#/$defs/repo" }, "branch": { "type": "string" } } },
+        { "type": "object", "additionalProperties": false, "required": ["op", "repo", "head", "base", "draft"],
+          "properties": { "op": { "const": "open_pr" }, "repo": { "$ref": "#/$defs/repo" }, "head": { "type": "string" },
+                          "base": { "type": "string" }, "draft": { "type": "boolean" } } },
+        { "type": "object", "additionalProperties": false, "required": ["op", "repo", "sha"],
+          "properties": { "op": { "const": "wait_checks" }, "repo": { "$ref": "#/$defs/repo" }, "sha": { "$ref": "common.schema.json#/$defs/sha" } } },
+        { "type": "object", "additionalProperties": false, "required": ["op", "feature"],
+          "properties": { "op": { "const": "run_gate" }, "feature": { "type": "string" } } },
+        { "type": "object", "additionalProperties": false, "required": ["op", "public", "shadow"],
+          "properties": { "op": { "enum": ["register_pair", "revoke"] }, "public": { "$ref": "#/$defs/repo" }, "shadow": { "$ref": "#/$defs/repo" } } },
+        { "type": "object", "additionalProperties": false, "required": ["op", "public", "shadow", "expires_at"],
+          "properties": { "op": { "const": "grant" }, "public": { "$ref": "#/$defs/repo" }, "shadow": { "$ref": "#/$defs/repo" },
+                          "expires_at": { "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/time" }] } } },
+        { "type": "object", "additionalProperties": false, "required": ["op", "path"],
+          "properties": { "op": { "enum": ["write_file", "remove_file"] }, "path": { "type": "string", "minLength": 1 } } },
+        { "type": "object", "additionalProperties": false, "required": ["op", "from", "to"],
+          "properties": { "op": { "const": "move_file" }, "from": { "type": "string" }, "to": { "type": "string" } } }
+      ]
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "schema_version": "0.2",
+  "command": "guard status",
+  "ok": false,
+  "exit_code": 2,
+  "data": {},
+  "warnings": [],
+  "next": [],
+  "error": {
+    "code": "NOT_A_PAIR_CHECKOUT",
+    "message": "<ROOT> is not inside a git checkout",
+    "field": null,
+    "retryable": false,
+    "details": {}
+  }
+}

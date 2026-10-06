@@ -7,15 +7,16 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
+	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
 type FeatureStartResult struct {
-	Name     string `json:"name"`
-	Branch   string `json:"branch"`
-	Base     string `json:"base"`
-	Checkout string `json:"checkout"`
-	DryRun   bool   `json:"dry_run"`
+	Name     string           `json:"name"`
+	Branch   string           `json:"branch"`
+	Base     string           `json:"base"`
+	Checkout string           `json:"checkout"`
+	Preview  *preview.Preview `json:"preview"`
 }
 
 // FeatureStart creates a feature branch from shadow main and its metadata
@@ -40,8 +41,10 @@ func (e *Engine) FeatureStart(ctx context.Context, p workspace.Pair, name string
 	if err != nil {
 		return nil, warns, internalErr(err, "read shadow main")
 	}
-	res = &FeatureStartResult{Name: name, Branch: name, Base: base, Checkout: "git fetch && git switch " + name, DryRun: e.DryRun}
+	res = &FeatureStartResult{Name: name, Branch: name, Base: base, Checkout: "git fetch && git switch " + name}
 	if e.DryRun {
+		res.Preview = preview.New(map[string]string{"shadow_main": base})
+		res.Preview.Add(preview.PushRef(p.Shadow, "refs/heads/"+name, "", base), preview.PushRef(p.Shadow, remoteMetaRef(name), "", ""))
 		return res, warns, nil
 	}
 	m := feature.Meta{SchemaVersion: feature.SchemaVersion, Name: name, Branch: name, CreatedBy: e.Actor, CreatedAt: e.now(), Base: base}

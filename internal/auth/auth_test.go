@@ -30,3 +30,16 @@ func TestTokenOrder(t *testing.T) {
 		t.Fatalf("no token: %v", err)
 	}
 }
+
+func TestResolveNamesTheSource(t *testing.T) {
+	get := func(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
+	gh := func() (string, error) { return "t\n", nil }
+	for env, want := range map[string]string{"GHOSTBRANCH_TOKEN": "GHOSTBRANCH_TOKEN", "GH_TOKEN": "GH_TOKEN", "GITHUB_TOKEN": "GITHUB_TOKEN"} {
+		if v, src, err := auth.Resolve(get(map[string]string{env: " x "}), gh); err != nil || v != "x" || src != want {
+			t.Errorf("%s: %q %q %v", env, v, src, err)
+		}
+	}
+	if v, src, err := auth.Resolve(get(nil), gh); err != nil || v != "t" || src != "gh auth token" {
+		t.Errorf("gh: %q %q %v", v, src, err)
+	}
+}

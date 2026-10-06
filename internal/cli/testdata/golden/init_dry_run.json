@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.1",
+  "schema_version": "0.2",
   "command": "init",
   "ok": true,
   "exit_code": 0,
@@ -9,19 +9,50 @@
     "created_shadow": true,
     "adopted": false,
     "resumed": false,
-    "mirrored_branches": [],
+    "mirrored_branches": [
+      "main"
+    ],
     "mirrored_tags": [],
     "overlay_created": false,
     "default_branch_set": false,
-    "dry_run": true,
-    "actions": [
-      "create private repo acme/widget-shadow",
-      "mirror public branches and tags",
-      "create the ghostbranch overlay branch",
-      "make ghostbranch the default branch",
-      "register the pair"
-    ]
+    "preview": {
+      "fingerprint": {
+        "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7"
+      },
+      "ops": [
+        {
+          "op": "create_repo",
+          "private": true,
+          "repo": "acme/widget-shadow"
+        },
+        {
+          "from": null,
+          "op": "push_ref",
+          "ref": "refs/heads/main",
+          "repo": "acme/widget-shadow",
+          "to": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7"
+        },
+        {
+          "from": null,
+          "op": "push_ref",
+          "ref": "refs/heads/ghostbranch",
+          "repo": "acme/widget-shadow",
+          "to": null
+        },
+        {
+          "branch": "ghostbranch",
+          "op": "set_default_branch",
+          "repo": "acme/widget-shadow"
+        },
+        {
+          "op": "register_pair",
+          "public": "acme/widget",
+          "shadow": "acme/widget-shadow"
+        }
+      ]
+    }
   },
   "warnings": [],
+  "next": [],
   "error": null
 }

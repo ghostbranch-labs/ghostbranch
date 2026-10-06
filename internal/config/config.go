@@ -25,9 +25,8 @@ type Config struct {
 }
 
 type Promote struct {
-	Target       string
-	DefaultMode  string
-	RequireHuman bool
+	Target      string
+	DefaultMode string
 }
 
 type LeakScan struct {
@@ -44,7 +43,7 @@ type Gate struct {
 func Default() Config {
 	return Config{
 		Version:  1,
-		Promote:  Promote{Target: "pr", DefaultMode: "squash", RequireHuman: true},
+		Promote:  Promote{Target: "pr", DefaultMode: "squash"},
 		LeakScan: LeakScan{Strip: []string{".ghostbranch/**"}, Secrets: true},
 		Gate:     Gate{CIAppearTimeout: 10 * time.Minute, CITimeout: 60 * time.Minute},
 	}
@@ -52,7 +51,7 @@ func Default() Config {
 
 var honoured = map[string]bool{
 	"version": true, "public": true, "shadow": true,
-	"promote.target": true, "promote.default_mode": true, "promote.require_human": true,
+	"promote.target": true, "promote.default_mode": true,
 	"leak_scan.strip": true, "leak_scan.secrets": true,
 	"gate.ci_appear_timeout": true, "gate.ci_timeout": true,
 }
@@ -61,6 +60,12 @@ var honoured = map[string]bool{
 var ignoredRoots = []string{"sync", "ci", "agents", "promote.author_email", "leak_scan.markers", "leak_scan.block_patterns"}
 
 var repoName = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
+
+// replaced are keys earlier versions honoured; they are ignored with a
+// pointer to what replaced them.
+var replaced = map[string]string{
+	"promote.require_human": "promote.require_human is replaced by agent grants (ghostbranch agents allow) and is ignored",
+}
 
 // Parse reads and validates a config file.
 func Parse(data []byte) (Config, []contract.Warning, error) {
@@ -81,6 +86,8 @@ func Parse(data []byte) (Config, []contract.Warning, error) {
 	warned := map[string]bool{}
 	for _, k := range keys {
 		switch root := ignoredRoot(k); {
+		case replaced[k] != "":
+			warns = append(warns, contract.Warning{Code: contract.ConfigKeyIgnored, Message: replaced[k]})
 		case honoured[k]:
 			if err := set(&cfg, k, leaves[k]); err != nil {
 				return Config{}, nil, err
@@ -164,8 +171,6 @@ func set(cfg *Config, key string, v any) error {
 		cfg.Promote.Target, err = str()
 	case "promote.default_mode":
 		cfg.Promote.DefaultMode, err = str()
-	case "promote.require_human":
-		cfg.Promote.RequireHuman, err = boolean()
 	case "leak_scan.secrets":
 		cfg.LeakScan.Secrets, err = boolean()
 	case "leak_scan.strip":
@@ -218,7 +223,6 @@ shadow: %s
 promote:
   target: pr
   default_mode: squash
-  require_human: true
 
 leak_scan:
   strip: [".ghostbranch/**"]

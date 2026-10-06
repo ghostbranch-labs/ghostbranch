@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "agents status data",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["pair", "grants", "token_can_publish", "token"],
+  "properties": {
+    "pair": { "type": "string" },
+    "grants": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "public", "shadow", "created_at", "expires_at", "created_by", "expired", "remaining_seconds"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^g-[0-9a-f]{6}$" },
+          "public": { "$ref": "common.schema.json#/$defs/repo" },
+          "shadow": { "$ref": "common.schema.json#/$defs/repo" },
+          "created_at": { "$ref": "common.schema.json#/$defs/time" },
+          "expires_at": { "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/time" }] },
+          "created_by": { "$ref": "common.schema.json#/$defs/actor" },
+          "expired": { "type": "boolean" },
+          "remaining_seconds": { "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 0 }] }
+        }
+      }
+    },
+    "token_can_publish": { "enum": ["true", "false", "unknown"] },
+    "token": {
+      "type": "object", "additionalProperties": false, "required": ["source", "http_status"],
+      "properties": { "source": { "type": "string" }, "http_status": { "type": "integer" } }
+    }
+  }
+}

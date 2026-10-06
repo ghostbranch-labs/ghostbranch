@@ -14,7 +14,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 )
 
-const SchemaVersion = "0.1"
+const SchemaVersion = "0.2"
 
 type Pair struct {
 	Public string `json:"public"`
@@ -87,7 +87,6 @@ type Plan struct {
 	Fingerprint   Fingerprint `json:"fingerprint"`
 	Publish       Publish     `json:"publish"`
 	Leak          Leak        `json:"leak"`
-	RequiresHuman bool        `json:"requires_human"`
 }
 
 // NewID returns a time-sortable plan ID such as 20261005T123000Z-abcdef.
