@@ -212,15 +212,23 @@ func TestPromoteApprovalRules(t *testing.T) {
 			t.Fatalf("summary = %v", h.approver.asked)
 		}
 	})
+	// Review Focus 2: never "no grant", never "granted", even with a console.
 	t.Run("a corrupt grants file fails closed", func(t *testing.T) {
-		h := gated(t)
-		h.eng.Approver = nil
-		if err := os.WriteFile(h.eng.WS.GrantsPath(), []byte("{nope"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		_, err := promote(h, engine.PromoteOptions{Message: "m", Yes: true})
-		if ce := wantCode(t, err, contract.Internal); !strings.Contains(ce.Message, "grants") || published(h) {
-			t.Fatal(ce.Message)
+		for _, console := range []bool{false, true} {
+			h := gated(t)
+			if !console {
+				h.eng.Approver = nil
+			}
+			if err := os.WriteFile(h.eng.WS.GrantsPath(), []byte("{nope"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := promote(h, engine.PromoteOptions{Message: "m", Yes: true})
+			if ce := wantCode(t, err, contract.Internal); !strings.Contains(ce.Message, "grants.json") || published(h) {
+				t.Fatalf("console=%v: %s", console, ce.Message)
+			}
+			if len(h.approver.asked) != 0 {
+				t.Fatalf("console=%v: the console was asked despite an unreadable grants file", console)
+			}
 		}
 	})
 }

@@ -15,7 +15,8 @@
       "feature": "feat-x",
       "moved": [
         "public_main"
-      ]
+      ],
+      "public": "acme/widget"
     }
   }
 }

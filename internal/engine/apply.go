@@ -66,6 +66,12 @@ func (e *Engine) Apply(ctx context.Context, opt ApplyOptions) (res *ApplyResult,
 	return e.apply(ctx, pc, pl, opt.Yes)
 }
 
+// stale is the PLAN_STALE details: what moved, plus the feature and public
+// repo so the re-plan command can be named exactly.
+func stale(pl plan.Plan, moved []string) map[string]any {
+	return map[string]any{"moved": moved, "feature": pl.Feature, "public": pl.Pair.Public}
+}
+
 func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool) (*ApplyResult, []contract.Warning, error) {
 	g := pc.git
 	if def := pc.public.DefaultBranch; def != "" && strings.EqualFold(pl.Publish.TargetBranch, def) {
@@ -89,19 +95,19 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 	if moved := pl.Fingerprint.Moved(live); len(moved) > 0 {
 		return nil, warns, contract.New(contract.PlanStale,
 			"the repos changed since plan %s was made (%s); make a new plan with ghostbranch promote", pl.ID, strings.Join(moved, ", ")).
-			WithDetails(map[string]any{"moved": moved, "feature": pl.Feature})
+			WithDetails(stale(pl, moved))
 	}
 	// The plan only stands while the recorded gate is green, fresh, and for
 	// the very candidate the plan was made from.
 	if !m.Gate.Passed() || m.Gate.Candidate != gateC || !m.Gate.FreshFor(head, pm, O) {
 		return nil, warns, contract.New(contract.PlanStale,
 			"the recorded gate for %q is no longer green for plan %s's candidate; run ghostbranch gate, then make a new plan", pl.Feature, pl.ID).
-			WithDetails(map[string]any{"moved": []string{"gate"}, "feature": pl.Feature})
+			WithDetails(stale(pl, []string{"gate"}))
 	}
 	P, ok, _ := g.Resolve(ctx, planRef(pl.ID))
 	if !ok || P != pl.Publish.Commit {
 		return nil, warns, contract.New(contract.PlanStale, "plan %s's commit is missing from the shadow repo", pl.ID).
-			WithDetails(map[string]any{"moved": []string{"publish.commit"}})
+			WithDetails(stale(pl, []string{"publish.commit"}))
 	}
 	set := overlay.NewSet(cfg.LeakScan.Strip...)
 	if err := assertPublish(ctx, g, P, pl.Publish.Tree, pl.Fingerprint.GateCandidate, pm, set); err != nil {

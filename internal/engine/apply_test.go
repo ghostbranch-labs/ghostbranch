@@ -180,7 +180,25 @@ func TestApplyAsksOnlyAfterEveryCheck(t *testing.T) {
 	h, id := planned(t)
 	testutil.Commit(t, h.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
 	_, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: id})
-	if ce := wantCode(t, err, contract.PlanStale); ce.Details["feature"] != "feat-x" {
+	if ce := wantCode(t, err, contract.PlanStale); ce.Details["feature"] != "feat-x" || ce.Details["public"] != publicName {
+		t.Fatalf("details = %v", ce.Details)
+	}
+	if len(h.approver.asked) != 0 {
+		t.Fatal("the console must not be asked about a stale plan")
+	}
+}
+
+// Every PLAN_STALE names the feature and the public repo, so the next
+// command can be spelled out; this is the missing-plan-commit one.
+func TestApplyPlanStaleWhenThePlanCommitIsGone(t *testing.T) {
+	h, id := planned(t)
+	if err := h.shadowGit().DeleteRef(h.ctx, "refs/ghostbranch/plans/"+id); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: id, Yes: true})
+	ce := wantCode(t, err, contract.PlanStale)
+	if !reflect.DeepEqual(ce.Details["moved"], []string{"publish.commit"}) ||
+		ce.Details["feature"] != "feat-x" || ce.Details["public"] != publicName {
 		t.Fatalf("details = %v", ce.Details)
 	}
 	if len(h.approver.asked) != 0 {
