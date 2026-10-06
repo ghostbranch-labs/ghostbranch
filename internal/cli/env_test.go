@@ -19,7 +19,6 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/grant"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
-	"github.com/ghostbranch-labs/ghostbranch/internal/overlay"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
 )
 
@@ -56,7 +55,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		NewForge:     func(string) (forge.Forge, error) { return f, nil },
 		GHToken:      func() (string, error) { return "", errors.New("gh is not logged in") },
 		CwdRemotes:   func() []string { return nil },
-		NewScanner:   func(s overlay.Set) (leak.Scanner, error) { return leak.NewGitleaks(s) },
+		NewScanner:   func(r leak.Rules) (leak.Scanner, error) { return leak.NewGitleaks(r) },
 		PollInterval: time.Second, SettleWindow: 5 * time.Second,
 		Executable: func() (string, error) { return filepath.Join(root, "bin", "ghostbranch"), nil },
 		Getwd:      func() (string, error) { return root, nil },

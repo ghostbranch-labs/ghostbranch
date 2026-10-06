@@ -15,11 +15,13 @@
     "leak": "found",
     "findings": [
       {
+        "id": "f-7b1b6723317f",
         "rule": "github-pat",
         "where": "tree",
         "path": "config.env",
         "line": 1,
-        "secret": "[REDACTED]"
+        "secret": "[REDACTED]",
+        "waivable": true
       }
     ],
     "shadow_pr": 0,
@@ -36,11 +38,13 @@
     "details": {
       "findings": [
         {
+          "id": "f-7b1b6723317f",
           "rule": "github-pat",
           "where": "tree",
           "path": "config.env",
           "line": 1,
-          "secret": "[REDACTED]"
+          "secret": "[REDACTED]",
+          "waivable": true
         }
       ]
     }

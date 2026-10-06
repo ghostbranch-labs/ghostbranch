@@ -14,7 +14,6 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/grant"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
 	"github.com/ghostbranch-labs/ghostbranch/internal/ledger"
-	"github.com/ghostbranch-labs/ghostbranch/internal/overlay"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
@@ -86,7 +85,7 @@ func newHarness(t *testing.T) *harness {
 	h.eng = &engine.Engine{
 		Forge: f, WS: ws, Actor: "human:octo",
 		Now: h.clock.Now, Sleep: h.clock.Sleep, Rand: &testutil.SeqReader{}, Progress: io.Discard,
-		NewScanner:   func(s overlay.Set) (leak.Scanner, error) { return leak.NewGitleaks(s) },
+		NewScanner:   func(r leak.Rules) (leak.Scanner, error) { return leak.NewGitleaks(r) },
 		PollInterval: time.Second, SettleWindow: 5 * time.Second,
 		OnPush: func(op, remote string, specs []string) {
 			h.pushes = append(h.pushes, pushEvent{op, remote, specs})

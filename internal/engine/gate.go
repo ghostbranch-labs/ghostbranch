@@ -97,10 +97,12 @@ func (e *Engine) gate(ctx context.Context, pc *pairCtx, name string) (*GateResul
 	res.Candidate, res.PublishedTree = C, T
 
 	e.progressf("scanning the published tree for leaks")
-	findings, _, err := e.scan(ctx, g, set, entries, nil)
+	rep, _, err := e.scan(ctx, g, cfg, entries, pm, nil)
 	if err != nil {
 		return res, warns, err
 	}
+	findings := rep.Findings
+	warns = append(warns, rep.Warnings...)
 	if len(findings) > 0 {
 		res.Leak, res.Findings = feature.LeakFound, findings
 		if !e.DryRun {

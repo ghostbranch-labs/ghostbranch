@@ -149,10 +149,12 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	if err := assertPublish(ctx, g, P, T, C, pm, set); err != nil {
 		return res, warns, err
 	}
-	findings, version, err := e.scan(ctx, g, set, entries, publishTexts(msg, who.Name, who.Email, branch, title, body))
+	rep, version, err := e.scan(ctx, g, cfg, entries, pm, publishTexts(msg, who.Name, who.Email, branch, title, body))
 	if err != nil {
 		return res, warns, err
 	}
+	findings := rep.Findings
+	warns = append(warns, rep.Warnings...)
 	if len(findings) > 0 {
 		res.Findings = findings
 		return res, warns, leakErr(findings)

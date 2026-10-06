@@ -27,7 +27,6 @@ import (
 	ghforge "github.com/ghostbranch-labs/ghostbranch/internal/forge/github"
 	"github.com/ghostbranch-labs/ghostbranch/internal/grant"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
-	"github.com/ghostbranch-labs/ghostbranch/internal/overlay"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
@@ -51,7 +50,7 @@ type Env struct {
 	NewForge     func(token string) (forge.Forge, error)
 	GHToken      func() (string, error)
 	CwdRemotes   func() []string
-	NewScanner   func(overlay.Set) (leak.Scanner, error)
+	NewScanner   func(leak.Rules) (leak.Scanner, error)
 	PollInterval time.Duration
 	SettleWindow time.Duration
 	OnPush       func(op, remote string, refspecs []string)
@@ -73,7 +72,7 @@ func DefaultEnv() Env {
 		NewForge:     func(token string) (forge.Forge, error) { return ghforge.New(token), nil },
 		GHToken:      auth.GHCLI,
 		CwdRemotes:   cwdRemotes,
-		NewScanner:   func(s overlay.Set) (leak.Scanner, error) { return leak.NewGitleaks(s) },
+		NewScanner:   func(r leak.Rules) (leak.Scanner, error) { return leak.NewGitleaks(r) },
 		PollInterval: engine.DefaultPollInterval,
 		SettleWindow: engine.DefaultSettleWindow,
 		Executable:   os.Executable,

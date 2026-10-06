@@ -19,7 +19,6 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/grant"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
 	"github.com/ghostbranch-labs/ghostbranch/internal/ledger"
-	"github.com/ghostbranch-labs/ghostbranch/internal/overlay"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
@@ -47,7 +46,7 @@ type Engine struct {
 	Approver     approval.Approver
 	Grants       *grant.Store
 	Editor       func(initial string) (string, error)
-	NewScanner   func(overlay.Set) (leak.Scanner, error)
+	NewScanner   func(leak.Rules) (leak.Scanner, error)
 	PollInterval time.Duration
 	SettleWindow time.Duration
 	DryRun       bool

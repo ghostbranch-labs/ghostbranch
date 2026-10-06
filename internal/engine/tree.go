@@ -5,6 +5,7 @@ import (
 	"path"
 	"strings"
 
+	"github.com/ghostbranch-labs/ghostbranch/internal/config"
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
@@ -108,12 +109,26 @@ func assertPublish(ctx context.Context, g *gitx.Git, P, T, C, publicMain string,
 	return nil
 }
 
-// scan runs the leak scanner over published entries and texts. It returns
-// the findings (never nil) and the scanner version.
-func (e *Engine) scan(ctx context.Context, g *gitx.Git, set overlay.Set, entries []gitx.TreeEntry, texts []leak.Text) ([]leak.Finding, string, error) {
-	sc, err := e.NewScanner(set)
+// rules is the leak scan's view of the overlay config.
+func rules(cfg config.Config) leak.Rules {
+	return leak.Rules{Overlay: overlay.NewSet(cfg.LeakScan.Strip...), BlockPatterns: cfg.LeakScan.BlockPatterns, LargeFile: cfg.LeakScan.LargeFile}
+}
+
+// scan runs the leak scanner over published entries and texts. base is
+// public main: files that match it are not new or changed, so they raise no
+// warnings. Findings and warnings are never nil.
+func (e *Engine) scan(ctx context.Context, g *gitx.Git, cfg config.Config, entries []gitx.TreeEntry, base string, texts []leak.Text) (leak.Report, string, error) {
+	sc, err := e.NewScanner(rules(cfg))
 	if err != nil {
-		return nil, "", internalErr(err, "start the leak scanner")
+		return leak.Report{}, "", internalErr(err, "start the leak scanner")
+	}
+	old := map[string]string{}
+	baseEntries, err := g.ListTree(ctx, base)
+	if err != nil {
+		return leak.Report{}, "", internalErr(err, "list public main")
+	}
+	for _, en := range baseEntries {
+		old[en.Path] = en.SHA
 	}
 	paths := make([]string, 0, len(entries))
 	var shas []string
@@ -127,20 +142,23 @@ func (e *Engine) scan(ctx context.Context, g *gitx.Git, set overlay.Set, entries
 	}
 	blobs, err := g.ReadBlobs(ctx, shas)
 	if err != nil {
-		return nil, "", internalErr(err, "read files to scan")
+		return leak.Report{}, "", internalErr(err, "read files to scan")
 	}
 	var files []leak.File
 	for _, en := range entries {
 		if en.Type == "blob" {
-			files = append(files, leak.File{Path: en.Path, Content: blobs[en.SHA]})
+			files = append(files, leak.File{Path: en.Path, Content: blobs[en.SHA], Changed: old[en.Path] != en.SHA})
 		}
 	}
-	findings, err := sc.Scan(leak.Input{Paths: paths, Files: files, Texts: texts})
+	rep, err := sc.Scan(leak.Input{Paths: paths, Files: files, Texts: texts})
 	if err != nil {
-		return nil, "", internalErr(err, "leak scan")
+		return leak.Report{}, "", internalErr(err, "leak scan")
 	}
-	if findings == nil {
-		findings = []leak.Finding{}
+	if rep.Findings == nil {
+		rep.Findings = []leak.Finding{}
 	}
-	return findings, sc.Version(), nil
+	if rep.Warnings == nil {
+		rep.Warnings = []contract.Warning{}
+	}
+	return rep, sc.Version(), nil
 }

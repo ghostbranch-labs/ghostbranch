@@ -151,11 +151,13 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 	if err != nil {
 		return nil, warns, internalErr(err, "read the commit message")
 	}
-	findings, _, err := e.scan(ctx, g, set, entries, publishTexts(msg, pl.Publish.Author.Name,
+	rep, _, err := e.scan(ctx, g, cfg, entries, pm, publishTexts(msg, pl.Publish.Author.Name,
 		pl.Publish.Author.Email, pl.Publish.TargetBranch, pl.Publish.PR.Title, pl.Publish.PR.Body))
 	if err != nil {
 		return nil, warns, err
 	}
+	findings := rep.Findings
+	warns = append(warns, rep.Warnings...)
 	if len(findings) > 0 {
 		return nil, warns, leakErr(findings)
 	}

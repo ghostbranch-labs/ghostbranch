@@ -19,13 +19,24 @@ func short(sha string) string {
 	return sha
 }
 
+// location is where a finding is: path:line, the path, or the text field.
+func location(f leak.Finding) string {
+	switch {
+	case f.Path != "" && f.Line > 0:
+		return fmt.Sprintf("%s:%d", f.Path, f.Line)
+	case f.Path != "":
+		return f.Path
+	}
+	return f.Where
+}
+
 func findings(b *strings.Builder, fs []leak.Finding) {
 	for _, f := range fs {
-		loc := f.Where
-		if f.Path != "" {
-			loc = fmt.Sprintf("%s:%d", f.Path, f.Line)
+		what := f.Rule
+		if f.Match != "" {
+			what += fmt.Sprintf(" %q", f.Match)
 		}
-		fmt.Fprintf(b, "  leak: %s in %s\n", f.Rule, loc)
+		fmt.Fprintf(b, "  leak %s: %s in %s\n", f.ID, what, location(f))
 	}
 }
 
