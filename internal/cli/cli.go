@@ -55,6 +55,10 @@ type Env struct {
 	PollInterval time.Duration
 	SettleWindow time.Duration
 	OnPush       func(op, remote string, refspecs []string)
+	// Executable is this binary's path; the pre-push hook embeds it.
+	Executable func() (string, error)
+	// Getwd is the directory guard commands act on.
+	Getwd func() (string, error)
 }
 
 // DefaultEnv is the real process environment.
@@ -69,6 +73,8 @@ func DefaultEnv() Env {
 		NewScanner:   func(s overlay.Set) (leak.Scanner, error) { return leak.NewGitleaks(s) },
 		PollInterval: engine.DefaultPollInterval,
 		SettleWindow: engine.DefaultSettleWindow,
+		Executable:   os.Executable,
+		Getwd:        os.Getwd,
 	}
 }
 

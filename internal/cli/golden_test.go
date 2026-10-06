@@ -26,6 +26,7 @@ var dataSchemas = map[string]string{
 	"gate": "gate.schema.json", "promote": "promote.schema.json", "apply": "apply.schema.json",
 	"agents allow": "agents-allow.schema.json", "agents revoke": "agents-revoke.schema.json", "agents status": "agents-status.schema.json",
 	"explain": "explain.schema.json", "guide": "guide.schema.json",
+	"guard install": "guard.schema.json", "guard uninstall": "guard.schema.json", "guard status": "guard.schema.json", "guard check": "guard.schema.json",
 }
 
 func schema(t *testing.T, name string) *jsonschema.Schema {
@@ -121,6 +122,7 @@ func TestGoldenContract(t *testing.T) {
 			[]string{"guide", "--install", "claude", "--plan"}, 0},
 		{"agents_revoke", func(te *testEnv) { initOnly(te); grantAgents(te) }, []string{"agents", "revoke"}, 0},
 		{"actor_unknown", func(te *testEnv) { initOnly(te); te.forge.UserErr = errors.New("rate limited") }, []string{"sync"}, 0},
+		{"guard_not_a_checkout", initOnly, []string{"guard", "status"}, 2},
 	}
 	for _, s := range scenarios {
 		t.Run(s.name, func(t *testing.T) {

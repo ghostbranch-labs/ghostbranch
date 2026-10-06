@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
+	"github.com/ghostbranch-labs/ghostbranch/internal/guard"
 	"github.com/ghostbranch-labs/ghostbranch/internal/guide"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
 	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
@@ -50,6 +51,26 @@ func human(r any) string {
 			break
 		}
 		fmt.Fprintf(&b, "Skill for %s %s: %s\n", v.Target, v.Action, v.Path)
+	case *guard.Result:
+		if v.Preview != nil {
+			previewText(&b, v.Preview)
+			break
+		}
+		fmt.Fprintf(&b, "Guard %s in %s.\n", v.Action, v.Status.HooksDir)
+		if v.Status.Chained {
+			b.WriteString("  your existing pre-push hook still runs after it\n")
+		}
+	case *guard.Status:
+		if !v.Installed {
+			fmt.Fprintf(&b, "The guard is not installed in %s. Install it with: ghostbranch guard install\n", v.HooksDir)
+			break
+		}
+		fmt.Fprintf(&b, "The guard is installed in %s, covering %s via %s.\n", v.HooksDir, strings.Join(v.Publics, ", "), strings.Join(v.Remotes, ", "))
+		if !v.BinaryFound {
+			fmt.Fprintf(&b, "  warning: %s is gone, so public pushes are refused until you reinstall\n", v.Binary)
+		}
+	case *guard.CheckResult:
+		fmt.Fprintf(&b, "guard: %d ref(s) checked; nothing private is being pushed.\n", v.Checked)
 	case *ExplainResult:
 		for _, e := range v.Entries {
 			exit := ""

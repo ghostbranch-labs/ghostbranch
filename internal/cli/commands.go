@@ -33,7 +33,7 @@ Coding agents: run "ghostbranch guide" first.`,
 	})
 	feature := &cobra.Command{Use: "feature", Short: "Work with features (private branches in the shadow repo)"}
 	feature.AddCommand(a.featureStartCmd())
-	root.AddCommand(a.initCmd(), a.syncCmd(), feature, a.gateCmd(), a.promoteCmd(), a.applyCmd(), a.agentsCmd(), a.explainCmd(), a.guideCmd())
+	root.AddCommand(a.initCmd(), a.syncCmd(), feature, a.gateCmd(), a.promoteCmd(), a.applyCmd(), a.agentsCmd(), a.explainCmd(), a.guideCmd(), a.guardCmd())
 	return root
 }
 
