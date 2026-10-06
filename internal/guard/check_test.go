@@ -2,6 +2,7 @@ package guard_test
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -12,6 +13,28 @@ import (
 )
 
 const zero = "0000000000000000000000000000000000000000"
+
+// brokenObjects is a checkout whose git fails (say, a safe.directory refusal).
+type brokenObjects struct{}
+
+func (brokenObjects) Resolve(context.Context, string) (string, bool, error) {
+	return "", false, errors.New("git: exit status 128")
+}
+
+func (brokenObjects) IsAncestor(context.Context, string, string) (bool, error) {
+	return false, errors.New("git: exit status 128")
+}
+
+// A git error while reading the checkout must fail the check, never let the
+// push through as if the feature's commits were absent.
+func TestCheckFailsClosedOnGitErrors(t *testing.T) {
+	f := guard.Facts{Names: map[string]bool{"feat-x": true}, Heads: map[string]string{"feat-x": strings.Repeat("a", 40)}}
+	line := guard.Line{LocalRef: "HEAD", LocalSHA: strings.Repeat("b", 40), RemoteRef: "refs/heads/main", RemoteSHA: zero}
+	blocks, err := guard.Check(context.Background(), brokenObjects{}, []guard.Line{line}, f)
+	if err == nil {
+		t.Fatalf("a git error must be an error, got blocks %v", blocks)
+	}
+}
 
 // mirror builds a repo laid out like the engine's mirror; it also serves as
 // the checkout, so every object exists in both.

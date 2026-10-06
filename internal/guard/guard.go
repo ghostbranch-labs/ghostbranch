@@ -51,7 +51,9 @@ GB_PUBLIC=@PUBLIC@
 chained="$(dirname "$0")/pre-push.ghostbranch-chained"
 
 norm() {
-	printf '%s' "$1" | tr 'A-Z' 'a-z' | sed -e 's#/*$##' -e 's#\.git$##'
+	printf '%s' "$1" | tr 'A-Z' 'a-z' | sed -E -e 's#/*$##' -e 's#\.git$##' \
+		-e 's#^((ssh|https?)://[^/]*):[0-9]+/#\1/#' \
+		-e 's#^((ssh|https?)://([^/@]*@)?)ssh\.github\.com/#\1github.com/#'
 }
 
 public=no
@@ -80,7 +82,7 @@ fi
 
 input=$(mktemp "${TMPDIR:-/tmp}/ghostbranch-pre-push.XXXXXX") || exit 1
 trap 'rm -f "$input"' EXIT
-cat > "$input"
+cat > "$input" || exit 1
 "$bin" guard check --workspace "$GB_WORKSPACE" "$1" "$2" < "$input" || exit 1
 if [ -x "$chained" ]; then
 	"$chained" "$@" < "$input"
@@ -110,12 +112,22 @@ func Script(h Hook) string {
 	).Replace(scriptTemplate)
 }
 
-var slugPattern = regexp.MustCompile(`github\.com[:/]([a-z0-9_.-]+/[a-z0-9_.-]+)$`)
+var (
+	slugPattern = regexp.MustCompile(`github\.com[:/]([a-z0-9_.-]+/[a-z0-9_.-]+)$`)
+	// For scheme URLs only: a port after the host, and GitHub's SSH-over-443
+	// host. The scp form (git@github.com:owner/repo) is left alone, since a
+	// numeric owner there is not a port. The hook script's norm runs the
+	// same two expressions.
+	portPattern    = regexp.MustCompile(`^((ssh|https?)://[^/]*):[0-9]+/`)
+	sshHostPattern = regexp.MustCompile(`^((ssh|https?)://([^/@]*@)?)ssh\.github\.com/`)
+)
 
 // Slug returns lowercase owner/repo for a GitHub URL in any common form. It
 // normalizes the way the hook script's norm does.
 func Slug(url string) (string, bool) {
 	s := strings.TrimSuffix(strings.TrimRight(strings.ToLower(strings.TrimSpace(url)), "/"), ".git")
+	s = portPattern.ReplaceAllString(s, "${1}/")
+	s = sshHostPattern.ReplaceAllString(s, "${1}github.com/")
 	m := slugPattern.FindStringSubmatch(s)
 	if m == nil {
 		return "", false
@@ -276,10 +288,39 @@ func Inspect(c *Checkout) (Status, error) {
 	return st, nil
 }
 
+// huskyDir reports whether any component of the hooks path is .husky. Husky
+// dispatches on the hook's own file name and regenerates its hooks on npm
+// install, so a chained Husky hook would silently stop running.
+func huskyDir(p string) bool {
+	for _, part := range strings.Split(filepath.ToSlash(filepath.Clean(p)), "/") {
+		if strings.EqualFold(part, ".husky") {
+			return true
+		}
+	}
+	return false
+}
+
 // Install puts the guard in front of the checkout's pre-push hook. An
 // existing hook that is not ours is kept and chained; ours is rewritten in
 // place, so the guard never chains to itself.
 func Install(ctx context.Context, c *Checkout, h Hook, dryRun bool) (Result, error) {
+	old, exists, err := readFile(c.hookPath())
+	if err != nil {
+		return Result{}, contract.Wrap(contract.Internal, err, "read %s", c.hookPath())
+	}
+	ours := strings.Contains(old, Marker)
+	if huskyDir(c.HooksDir) || (exists && !ours && strings.Contains(strings.ToLower(old), "husky")) {
+		return Result{}, contract.New(contract.GuardUnsupported,
+			"this checkout's hooks are managed by Husky, which runs hooks by their own file name and rewrites them on install, so the guard cannot run in front of them")
+	}
+	_, chainedExists, err := readFile(c.chainedPath())
+	if err != nil {
+		return Result{}, contract.Wrap(contract.Internal, err, "read %s", c.chainedPath())
+	}
+	if !exists && chainedExists {
+		return Result{}, contract.New(contract.GuardUnsupported,
+			"%s exists but %s does not, so installing would run an unknown file as your pre-push hook; move it away first", c.chainedPath(), c.hookPath())
+	}
 	bad, err := c.committable(ctx)
 	if err != nil {
 		return Result{}, contract.Wrap(contract.Internal, err, "check whether the hooks directory is ignored")
@@ -289,11 +330,6 @@ func Install(ctx context.Context, c *Checkout, h Hook, dryRun bool) (Result, err
 			"the hooks directory %s is in the working tree and not git-ignored, so the hook could be committed; ignore it or point core.hooksPath elsewhere", c.HooksDir)
 	}
 	script := Script(h)
-	old, exists, err := readFile(c.hookPath())
-	if err != nil {
-		return Result{}, contract.Wrap(contract.Internal, err, "read %s", c.hookPath())
-	}
-	ours := strings.Contains(old, Marker)
 	pv := preview.New(nil)
 	res := Result{Action: "installed"}
 	switch {
@@ -305,7 +341,7 @@ func Install(ctx context.Context, c *Checkout, h Hook, dryRun bool) (Result, err
 		res.Action = "updated"
 		pv.Add(preview.WriteFile(c.hookPath()))
 	default:
-		if _, taken, _ := readFile(c.chainedPath()); taken {
+		if chainedExists {
 			return Result{}, contract.New(contract.GuardUnsupported, "both %s and %s exist; move one of them away first", c.hookPath(), c.chainedPath())
 		}
 		pv.Add(preview.MoveFile(c.hookPath(), c.chainedPath()), preview.WriteFile(c.hookPath()))

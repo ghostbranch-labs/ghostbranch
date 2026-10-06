@@ -38,7 +38,8 @@ type Facts struct {
 	Heads map[string]string // feature -> shadow head, for features with commits not in public main
 }
 
-// LoadFacts reads features from the engine's mirror, offline.
+// LoadFacts reads features from the engine's mirror, offline. Any git error
+// is returned, so the check fails closed.
 func LoadFacts(ctx context.Context, mirror *gitx.Git) (Facts, error) {
 	f := Facts{Names: map[string]bool{}, Heads: map[string]string{}}
 	metas, err := mirror.Refs(ctx, "refs/shadow-meta/features")
@@ -53,11 +54,18 @@ func LoadFacts(ctx context.Context, mirror *gitx.Git) (Facts, error) {
 		name := strings.TrimPrefix(ref, "refs/shadow-meta/features/")
 		f.Names[name] = true
 		head, ok, err := mirror.Resolve(ctx, "refs/remotes/shadow/"+name)
-		if err != nil || !ok {
+		if err != nil {
+			return f, err
+		}
+		if !ok {
 			continue
 		}
 		if hasPM {
-			if in, err := mirror.IsAncestor(ctx, head, pm); err == nil && in {
+			in, err := mirror.IsAncestor(ctx, head, pm)
+			if err != nil {
+				return f, err
+			}
+			if in {
 				continue
 			}
 		}
@@ -92,9 +100,44 @@ func reserved(ref string, f Facts) string {
 	return ""
 }
 
+// Objects reads commits from a repository.
+type Objects interface {
+	Resolve(ctx context.Context, rev string) (string, bool, error)
+	IsAncestor(ctx context.Context, a, b string) (bool, error)
+}
+
+// Resolve returns the object rev names, with ok=false when there is none.
+// It runs plain git, so the user's config (safe.directory and the like)
+// applies.
+func (c *Checkout) Resolve(ctx context.Context, rev string) (string, bool, error) {
+	out, code, err := run(ctx, c.Dir, "rev-parse", "--verify", "--quiet", rev+"^{object}")
+	switch {
+	case code == 1:
+		return "", false, nil
+	case err != nil:
+		return "", false, err
+	}
+	return out, true, nil
+}
+
+// IsAncestor reports whether a is an ancestor of b (or equal to it). Any
+// git failure, a missing object included, is an error.
+func (c *Checkout) IsAncestor(ctx context.Context, a, b string) (bool, error) {
+	_, code, err := run(ctx, c.Dir, "merge-base", "--is-ancestor", a, b)
+	switch {
+	case code == 0 && err == nil:
+		return true, nil
+	case code == 1:
+		return false, nil
+	}
+	return false, err
+}
+
 // Check returns the pushed refs that would put feature work in the public
-// repo (spec §11.4): by name, or by containing a feature's commits.
-func Check(ctx context.Context, checkout *gitx.Git, lines []Line, f Facts) ([]Block, error) {
+// repo (spec §11.4): by name, or by containing a feature's commits. Any git
+// error fails the check: a guard that waves pushes through when git breaks
+// is worse than none.
+func Check(ctx context.Context, checkout Objects, lines []Line, f Facts) ([]Block, error) {
 	names := make([]string, 0, len(f.Heads))
 	for n := range f.Heads {
 		names = append(names, n)
@@ -114,7 +157,11 @@ func Check(ctx context.Context, checkout *gitx.Git, lines []Line, f Facts) ([]Bl
 				break
 			}
 			head := f.Heads[n]
-			if _, ok, err := checkout.Resolve(ctx, head); err != nil || !ok {
+			_, ok, err := checkout.Resolve(ctx, head)
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
 				continue // this clone never had the feature's commits
 			}
 			in, err := checkout.IsAncestor(ctx, head, l.LocalSHA)
