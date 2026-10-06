@@ -22,6 +22,7 @@ func TestEveryCodeHasItsExitCode(t *testing.T) {
 		contract.OverlayCollision: 4, contract.ShadowNotEmpty: 4, contract.RefMoved: 4,
 		contract.ApprovalRequired: 5,
 		contract.PlanStale:        6,
+		contract.MarkerInvalid:    3, contract.WaiverUnknown: 2,
 	}
 	all := contract.AllCodes()
 	if len(all) != len(want) {
@@ -57,7 +58,7 @@ func TestSuccessEnvelopeShape(t *testing.T) {
 	if err := json.Unmarshal(b, &m); err != nil {
 		t.Fatal(err)
 	}
-	if m["schema_version"] != "0.2" || m["ok"] != true || m["exit_code"] != float64(0) ||
+	if m["schema_version"] != "0.3" || m["ok"] != true || m["exit_code"] != float64(0) ||
 		m["command"] != "sync" || m["error"] != nil {
 		t.Fatalf("bad envelope: %s", b)
 	}
@@ -95,5 +96,16 @@ func TestEnvelopeNext(t *testing.T) {
 	b, _ = json.Marshal(contract.NewEnvelope("promote", nil, nil, n, nil))
 	if !strings.Contains(string(b), `"next":[{"command":["ghostbranch","apply","x"],"why":"w","needs_human":true,"needs_input":[]}]`) {
 		t.Fatalf("needs_input must be [] when empty: %s", b)
+	}
+}
+
+func TestWarningDetailsAreOptional(t *testing.T) {
+	plain, _ := json.Marshal(contract.Warning{Code: contract.LargeFile, Message: "m"})
+	if strings.Contains(string(plain), "details") {
+		t.Fatalf("empty details must be omitted: %s", plain)
+	}
+	full, _ := json.Marshal(contract.Warning{Code: contract.LargeFile, Message: "m", Details: map[string]any{"paths": []string{"a.bin"}}})
+	if !strings.Contains(string(full), `"details":{"paths":["a.bin"]}`) {
+		t.Fatalf("details missing: %s", full)
 	}
 }

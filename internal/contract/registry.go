@@ -75,7 +75,16 @@ var errorDocs = map[Code]Doc{
 	ChecksFailed:     {Summary: "CI failed on the gate candidate.", WhatToDo: "Fix the failing checks listed in details.failed, push to the feature branch, and gate again."},
 	NoCI:             {Summary: "No CI checks appeared on the gate candidate.", Causes: []string{"Actions is disabled in the shadow repo", "no workflow triggers on pull_request or push"}, WhatToDo: "Enable Actions or add a workflow, then gate again."},
 	CITimeout:        {Summary: "CI did not finish in time.", WhatToDo: "Gate again, or raise gate.ci_timeout in .ghostbranch.yml."},
-	LeakFound:        {Summary: "The leak scan found something in what would be published.", WhatToDo: "Remove the leaked content from the feature (see details.findings) and gate again. Agents never waive findings."},
+	LeakFound: {Summary: "The leak scan found something in what would be published.",
+		WhatToDo: "Remove the content in details.findings from the feature and gate again. If a person judges a finding in details.waivable a false positive, they run the waivers add command in next. Agents never waive findings or edit waivers.json."},
+	MarkerInvalid: {Summary: "A file has BEGIN-INTERNAL/END-INTERNAL markers that cannot be stripped safely.",
+		Causes: []string{"unmatched_begin: a begin marker with no end", "unmatched_end: an end marker with no begin",
+			"nested: a begin marker inside an open section", "malformed: a comment that starts with a marker token but has more text",
+			"unsupported_encoding: markers in a UTF-16 or UTF-32 file"},
+		WhatToDo: "Fix the marker lines at details.problems on the feature branch, push it to the shadow repo, and gate again. Never delete only the marker lines: the internal lines would then be published."},
+	WaiverUnknown: {Summary: "waivers add named an id that is not a waivable finding in what the gate would publish now.",
+		Causes:   []string{"the content changed, so the finding has a new id", "the finding is in the commit message, branch or PR text, which is never waivable", "a typo"},
+		WhatToDo: "Gate again and use the ids in error.details.waivable."},
 	RebaseConflict:   {Summary: "The feature does not rebase cleanly onto public main.", WhatToDo: "Rebase the feature branch onto public main yourself, resolve the files in details.files, push, and gate again."},
 	SyncDiverged:     {Summary: "Shadow main has commits that public main does not.", WhatToDo: "A person investigates; Ghostbranch never force-pushes shadow main.", NeedsHuman: true},
 	BranchExists:     {Summary: "The name is already taken in the shadow or public repo.", WhatToDo: "Use another feature name, or promote with --branch <other-name>."},
@@ -88,11 +97,15 @@ var errorDocs = map[Code]Doc{
 }
 
 var warningDocs = map[WarningCode]Doc{
-	ConfigKeyIgnored: {Summary: ".ghostbranch.yml has a key this version does not use.", WhatToDo: "Nothing is required; remove the key to silence the warning."},
-	PublicNotPublic:  {Summary: "The public repo is private.", WhatToDo: "Ghostbranch is meant for public repos; check you named the right repo."},
-	GateNotRecorded:  {Summary: "The gate result could not be saved to the feature metadata; the result itself stands.", WhatToDo: "Gate again before promoting."},
-	ChecksLimited:    {Summary: "The token cannot read check runs, so only GitHub Actions workflows and commit statuses were considered.", WhatToDo: "Use a token that can read checks if you rely on CI apps other than Actions."},
-	ActorUnknown:     {Summary: "GHOSTBRANCH_ACTOR is unset and the GitHub login could not be read; the ledger records human:unknown.", WhatToDo: "Set GHOSTBRANCH_ACTOR, for example agent:claude-code."},
+	ConfigKeyIgnored:  {Summary: ".ghostbranch.yml has a key this version does not use.", WhatToDo: "Nothing is required; remove the key to silence the warning."},
+	PublicNotPublic:   {Summary: "The public repo is private.", WhatToDo: "Ghostbranch is meant for public repos; check you named the right repo."},
+	GateNotRecorded:   {Summary: "The gate result could not be saved to the feature metadata; the result itself stands.", WhatToDo: "Gate again before promoting."},
+	ChecksLimited:     {Summary: "The token cannot read check runs, so only GitHub Actions workflows and commit statuses were considered.", WhatToDo: "Use a token that can read checks if you rely on CI apps other than Actions."},
+	ActorUnknown:      {Summary: "GHOSTBRANCH_ACTOR is unset and the GitHub login could not be read; the ledger records human:unknown.", WhatToDo: "Set GHOSTBRANCH_ACTOR, for example agent:claude-code."},
+	WorkflowChanged:   {Summary: "Workflow files under .github/workflows are new or changed in what would be published.", WhatToDo: "A person checks the workflow changes in details.paths before approving the publish."},
+	LargeFile:         {Summary: "New or changed files are larger than leak_scan.large_file.", WhatToDo: "Check that the files in details.paths are meant to go public."},
+	BinaryFile:        {Summary: "New or changed binary files would be published.", WhatToDo: "Check that the files in details.paths are meant to go public; they were scanned only through their printable text."},
+	WaiversUnreadable: {Summary: "waivers.json could not be read, so no waiver applied and every finding blocked.", WhatToDo: "A person fixes the file or clears it with ghostbranch waivers revoke --all.", NeedsHuman: true},
 }
 
 func intp(n int) *int { return &n }

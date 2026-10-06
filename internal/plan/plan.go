@@ -14,7 +14,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 )
 
-const SchemaVersion = "0.2"
+const SchemaVersion = "0.3"
 
 type Pair struct {
 	Public string `json:"public"`
