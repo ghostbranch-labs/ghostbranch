@@ -10,20 +10,21 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
 	"github.com/ghostbranch-labs/ghostbranch/internal/overlay"
+	"github.com/ghostbranch-labs/ghostbranch/internal/strip"
 )
 
-// publishedTree is rev's tree minus overlay and strip paths: exactly the
-// tree promote publishes. It returns the tree SHA and its entries.
-func publishedTree(ctx context.Context, g *gitx.Git, rev string, set overlay.Set) (string, []gitx.TreeEntry, error) {
+// publishedTree is rev's tree minus overlay and strip paths, with internal
+// sections cut out of its files: exactly the tree promote publishes. It
+// returns the tree SHA and its entries, or MARKER_INVALID.
+func publishedTree(ctx context.Context, g *gitx.Git, rev string, cfg config.Config) (string, []gitx.TreeEntry, error) {
 	all, err := g.ListTree(ctx, rev)
 	if err != nil {
 		return "", nil, internalErr(err, "list the feature tree")
 	}
-	keep := make([]gitx.TreeEntry, 0, len(all))
-	for _, en := range all {
-		if !set.Match(en.Path) {
-			keep = append(keep, en)
-		}
+	m := strip.Markers{Begin: cfg.LeakScan.Markers.Begin, End: cfg.LeakScan.Markers.End}
+	keep, err := strip.Tree(ctx, g, all, overlay.NewSet(cfg.LeakScan.Strip...), m)
+	if err != nil {
+		return "", nil, err
 	}
 	t, err := g.MakeTree(ctx, keep)
 	if err != nil {
@@ -32,9 +33,11 @@ func publishedTree(ctx context.Context, g *gitx.Git, rev string, set overlay.Set
 	return t, keep, nil
 }
 
-// candidate builds C: R plus one commit that adds the overlay branch's
-// files, so CI runs with private workflows and config present.
-func (e *Engine) candidate(ctx context.Context, g *gitx.Git, R, O, name string) (string, error) {
+// candidate builds C: one commit on R whose tree is T plus the overlay
+// branch's files, so CI runs on exactly what publishes, with private
+// workflows and config present. Clashes are checked against R, which
+// still holds every public and feature path.
+func (e *Engine) candidate(ctx context.Context, g *gitx.Git, R string, tEntries []gitx.TreeEntry, O, name string) (string, error) {
 	rEntries, err := g.ListTree(ctx, R)
 	if err != nil {
 		return "", internalErr(err, "list the rebased tree")
@@ -65,7 +68,7 @@ func (e *Engine) candidate(ctx context.Context, g *gitx.Git, R, O, name string) 
 			"the feature already has paths the overlay adds: %s", strings.Join(clash, ", ")).
 			WithDetails(map[string]any{"paths": clash})
 	}
-	tree, err := g.MakeTree(ctx, append(append([]gitx.TreeEntry{}, rEntries...), oEntries...))
+	tree, err := g.MakeTree(ctx, append(append([]gitx.TreeEntry{}, tEntries...), oEntries...))
 	if err != nil {
 		return "", internalErr(err, "write the candidate tree")
 	}

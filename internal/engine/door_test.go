@@ -45,6 +45,7 @@ func TestOnlyPromoteAndApplyReachThePublicRepo(t *testing.T) {
 	h.startFeature("good", map[string]string{"good.txt": "g\n"})
 	h.startFeature("leaky", map[string]string{"leak.env": "T=" + testutil.FakeGitHubToken() + "\n"})
 	h.startFeature("red", map[string]string{"red.txt": "r\n"})
+	h.startFeature("marked", map[string]string{"m.go": "// BEGIN-INTERNAL\n"})
 
 	h.eng.DryRun = true
 	_, _, err = h.eng.Gate(h.ctx, h.pair, "good")
@@ -59,6 +60,10 @@ func TestOnlyPromoteAndApplyReachThePublicRepo(t *testing.T) {
 	run("gate leaky", err, contract.LeakFound)
 	_, _, err = h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "leaky", Message: "m", Yes: true})
 	run("promote leaky", err, contract.LeakFound)
+	_, _, err = h.eng.Gate(h.ctx, h.pair, "marked")
+	run("gate marked", err, contract.MarkerInvalid)
+	_, _, err = h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "marked", Message: "m", Yes: true})
+	run("promote marked", err, contract.MarkerInvalid)
 
 	h.forge.Checks = func(string, string) []forge.Check {
 		return []forge.Check{{Name: "ci", Status: "completed", Conclusion: "failure"}}

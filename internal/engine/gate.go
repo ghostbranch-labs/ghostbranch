@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/ghostbranch-labs/ghostbranch/internal/config"
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
-	"github.com/ghostbranch-labs/ghostbranch/internal/overlay"
 	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
@@ -55,7 +55,25 @@ func (e *Engine) Gate(ctx context.Context, p workspace.Pair, name string) (res *
 	return e.gate(ctx, pc, name)
 }
 
-func (e *Engine) gate(ctx context.Context, pc *pairCtx, name string) (*GateResult, []contract.Warning, error) {
+// built is what the gate would publish right now: the feature rebased onto
+// public main (R), stripped (T) and scanned. Gate and waivers add share it.
+type built struct {
+	cfg     config.Config
+	meta    feature.Meta
+	metaSHA string
+	head    string
+	pm      string
+	O       string
+	R       string
+	T       string
+	entries []gitx.TreeEntry
+	report  leak.Report
+}
+
+// build resolves the feature and public main, rebases, strips and scans.
+// Once the feature and public main are resolved it returns them even when a
+// later step fails, so callers can report what they ran against.
+func (e *Engine) build(ctx context.Context, pc *pairCtx, name string) (*built, []contract.Warning, error) {
 	g := pc.git
 	cfg, O, warns, err := e.readConfig(ctx, pc)
 	if err != nil {
@@ -77,32 +95,42 @@ func (e *Engine) gate(ctx context.Context, pc *pairCtx, name string) (*GateResul
 	if err != nil {
 		return nil, warns, internalErr(err, "read public main")
 	}
+	b := &built{cfg: cfg, meta: m, metaSHA: metaSHA, head: head, pm: pm, O: O}
+	e.progressf("rebasing %s onto public main %s", name, short(pm))
+	if b.R, err = e.rebase(ctx, pc, head, pm); err != nil {
+		return b, warns, err
+	}
+	if b.T, b.entries, err = publishedTree(ctx, g, b.R, cfg); err != nil {
+		if ce := contract.From(err); ce.Code == contract.MarkerInvalid {
+			ce.Details["feature"] = name
+		}
+		return b, warns, err
+	}
+	e.progressf("scanning the published tree for leaks")
+	if b.report, _, err = e.scan(ctx, g, cfg, b.entries, pm, nil); err != nil {
+		return b, warns, err
+	}
+	return b, addWarnings(warns, b.report.Warnings...), nil
+}
+
+func (e *Engine) gate(ctx context.Context, pc *pairCtx, name string) (*GateResult, []contract.Warning, error) {
+	g := pc.git
+	b, warns, err := e.build(ctx, pc, name)
+	if b == nil {
+		return nil, warns, err
+	}
+	cfg, m, metaSHA, head, pm, O := b.cfg, b.meta, b.metaSHA, b.head, b.pm, b.O
 	res := &GateResult{Feature: name, FeatureHead: head, PublicMain: pm, Overlay: O,
 		Checks: feature.ChecksNotRun, FailedChecks: []string{}, Leak: feature.LeakClean, Findings: []leak.Finding{}}
-	set := overlay.NewSet(cfg.LeakScan.Strip...)
-
-	e.progressf("rebasing %s onto public main %s", name, short(pm))
-	R, err := e.rebase(ctx, pc, head, pm)
 	if err != nil {
 		return res, warns, err
 	}
-	T, entries, err := publishedTree(ctx, g, R, set)
+	C, err := e.candidate(ctx, g, b.R, b.entries, O, name)
 	if err != nil {
 		return res, warns, err
 	}
-	C, err := e.candidate(ctx, g, R, O, name)
-	if err != nil {
-		return res, warns, err
-	}
-	res.Candidate, res.PublishedTree = C, T
-
-	e.progressf("scanning the published tree for leaks")
-	rep, _, err := e.scan(ctx, g, cfg, entries, pm, nil)
-	if err != nil {
-		return res, warns, err
-	}
-	findings := rep.Findings
-	warns = addWarnings(warns, rep.Warnings...)
+	res.Candidate, res.PublishedTree = C, b.T
+	findings := b.report.Findings
 	if len(findings) > 0 {
 		res.Leak, res.Findings = feature.LeakFound, findings
 		if !e.DryRun {

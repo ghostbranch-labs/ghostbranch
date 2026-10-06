@@ -103,6 +103,17 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	tip, tipOK, _ := g.Resolve(ctx, shadowRef(gateBranch(opt.Feature)))
 	candidateLive := m.Gate != nil && m.Gate.Candidate != "" && tipOK && tip == m.Gate.Candidate
 	fresh := m.Gate.Passed() && m.Gate.FreshFor(head, pm, O) && candidateLive
+	if fresh {
+		// A gate recorded by a binary that stripped differently (an upgrade
+		// that added internal markers) is stale: gate again rather than
+		// publish a tree this binary would not build.
+		R, err := g.MustResolve(ctx, m.Gate.Candidate+"^")
+		if err != nil {
+			fresh = false
+		} else if T2, _, err := publishedTree(ctx, g, R, cfg); err != nil || T2 != m.Gate.PublishedTree {
+			fresh = false
+		}
+	}
 	switch {
 	case fresh:
 		res.Gate = &GateResult{Feature: opt.Feature, FeatureHead: head, PublicMain: pm, Overlay: O,
@@ -129,7 +140,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	if err != nil {
 		return res, warns, internalErr(err, "read the rebased feature")
 	}
-	T2, entries, err := publishedTree(ctx, g, R, set)
+	T2, entries, err := publishedTree(ctx, g, R, cfg)
 	if err != nil {
 		return res, warns, err
 	}

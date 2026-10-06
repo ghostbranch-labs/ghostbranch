@@ -53,10 +53,13 @@ func TestGatePassesAndRecordsTheResult(t *testing.T) {
 		t.Fatalf("gate branch %s != candidate %s", got, res.Candidate)
 	}
 	cPaths := paths(t, h, res.Candidate)
-	for _, want := range []string{".ghostbranch.yml", ".ghostbranch/README.md", ".ghostbranch/notes.md", "feature.txt"} {
+	for _, want := range []string{".ghostbranch.yml", ".ghostbranch/README.md", "feature.txt"} {
 		if !contains(cPaths, want) {
 			t.Errorf("candidate is missing %s: %v", want, cPaths)
 		}
+	}
+	if contains(cPaths, ".ghostbranch/notes.md") {
+		t.Error("the feature's private notes reached the CI candidate")
 	}
 	tPaths := mirrorPaths(t, h, res.PublishedTree)
 	if !reflect.DeepEqual(tPaths, []string{".github/workflows/ci.yml", "README.md", "feature.txt"}) {
