@@ -215,7 +215,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	}
 	ar, aw, err := e.apply(ctx, pc, pl, opt.Yes)
 	res.Applied = ar
-	return res, append(warns, aw...), err
+	return res, addWarnings(warns, aw...), err
 }
 
 // ValidatePromoteOptions checks everything about a promote that needs no

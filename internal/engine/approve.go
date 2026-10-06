@@ -104,7 +104,7 @@ func planSummary(pl plan.Plan, files []string, author string, waived []WaivedFin
 		fmt.Fprintf(&b, "           %s\n", f)
 	}
 	for _, w := range waived {
-		fmt.Fprintf(&b, "  waived   %s %s in %s (%s)\n", w.ID, w.Rule, location(w.Finding), w.Reason)
+		fmt.Fprintf(&b, "  waived   %s %s in %s (%s)\n", w.ID, w.Rule, Location(w.Finding), w.Reason)
 	}
 	for _, w := range warnings {
 		fmt.Fprintf(&b, "  warning  %s\n", w.Message)

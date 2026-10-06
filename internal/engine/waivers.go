@@ -54,8 +54,8 @@ func findingIDs(ws []WaivedFinding) []string {
 	return out
 }
 
-// location is where a finding is: path:line, the path, or the text field.
-func location(f leak.Finding) string {
+// Location is where a finding is: path:line, the path, or the text field.
+func Location(f leak.Finding) string {
 	switch {
 	case f.Path != "" && f.Line > 0:
 		return fmt.Sprintf("%s:%d", f.Path, f.Line)

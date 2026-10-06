@@ -13,6 +13,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
 	"github.com/ghostbranch-labs/ghostbranch/internal/plan"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
+	"github.com/ghostbranch-labs/ghostbranch/internal/waiver"
 )
 
 func fixture() map[string]string {
@@ -184,7 +185,12 @@ func TestFileWarningsReachThePlanAndTheApprover(t *testing.T) {
 	if _, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: pr.Plan.ID}); err != nil {
 		t.Fatal(err)
 	}
-	if asked := h.approver.asked[len(h.approver.asked)-1]; !strings.Contains(asked, ".github/workflows/release.yml") {
+	var warnLine bool
+	asked := h.approver.asked[len(h.approver.asked)-1]
+	for _, l := range strings.Split(asked, "\n") {
+		warnLine = warnLine || (strings.HasPrefix(l, "  warning  ") && strings.Contains(l, ".github/workflows/release.yml"))
+	}
+	if !warnLine {
 		t.Fatalf("the approval summary must show the workflow warning:\n%s", asked)
 	}
 }
@@ -196,4 +202,58 @@ func hasWarning(ws []contract.Warning, code contract.WarningCode) bool {
 		}
 	}
 	return false
+}
+
+func TestPromoteReportsAFileWarningOnce(t *testing.T) {
+	h := newHarness(t)
+	h.init()
+	h.startFeature("feat-x", map[string]string{".github/workflows/release.yml": "on: push\n"})
+	if _, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x"); err != nil {
+		t.Fatal(err)
+	}
+	pr, warns, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Message: "Add release", Yes: true})
+	if err != nil || pr.Applied == nil {
+		t.Fatalf("promote = %+v %v", pr, err)
+	}
+	n := 0
+	for _, w := range warns {
+		if w.Code == contract.WorkflowChanged {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("want one WORKFLOW_CHANGED, got %d in %+v", n, warns)
+	}
+}
+
+// A waiver covers exactly the finding it was made for: every field of the
+// match must agree.
+func TestAWaiverThatDiffersInOneFieldDoesNotApply(t *testing.T) {
+	cases := map[string]func(w *waiver.Waiver){
+		"match hash": func(w *waiver.Waiver) { w.MatchSHA256 = strings.Repeat("0", 64) },
+		"rule":       func(w *waiver.Waiver) { w.Rule = "other-rule" },
+		"path":       func(w *waiver.Waiver) { w.Path = "test/other.txt" },
+		"where":      func(w *waiver.Waiver) { w.Where = "path" },
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			h.init()
+			h.startFeature("feat-x", fixture())
+			res, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
+			_ = wantCode(t, err, contract.LeakFound)
+			f := res.Findings[0]
+			w := waiver.Waiver{ID: f.ID, Public: publicName, Rule: f.Rule, Where: f.Where, Path: f.Path,
+				MatchSHA256: f.MatchSHA256, Reason: "r", CreatedAt: h.clock.Now(), CreatedBy: "human:octo"}
+			mutate(&w)
+			if err := h.eng.Waivers.Add([]waiver.Waiver{w}, h.clock.Now()); err != nil {
+				t.Fatal(err)
+			}
+			res, _, err = h.eng.Gate(h.ctx, h.pair, "feat-x")
+			_ = wantCode(t, err, contract.LeakFound)
+			if len(res.Findings) != 1 || len(res.Waived) != 0 {
+				t.Fatalf("gate = %+v", res)
+			}
+		})
+	}
 }
