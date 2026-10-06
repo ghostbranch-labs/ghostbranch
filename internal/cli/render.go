@@ -171,6 +171,26 @@ func human(r any) string {
 		for _, g := range v.Revoked {
 			fmt.Fprintf(&b, "Agents may no longer publish to %s.\n", g.Public)
 		}
+	case *engine.WaiversAddResult:
+		if v.Preview != nil {
+			previewText(&b, v.Preview)
+			break
+		}
+		fmt.Fprintf(&b, "Waived %d finding(s) in %s.\n", len(v.Waivers), v.Feature)
+	case *engine.WaiversListResult:
+		if len(v.Waivers) == 0 {
+			b.WriteString("No waivers.\n")
+			break
+		}
+		for _, w := range v.Waivers {
+			fmt.Fprintf(&b, "%s  %s  %s in %s: %s (%s, %s)\n", w.ID, w.Public, w.Rule, w.Path, w.Reason, w.CreatedBy, w.CreatedAt.Format(time.RFC3339))
+		}
+	case *engine.WaiversRevokeResult:
+		if v.Preview != nil {
+			previewText(&b, v.Preview)
+			break
+		}
+		fmt.Fprintf(&b, "Revoked %d waiver(s).\n", len(v.Revoked))
 	case *engine.AgentsStatusResult:
 		if len(v.Grants) == 0 {
 			b.WriteString("No agent grants on this machine.\n")

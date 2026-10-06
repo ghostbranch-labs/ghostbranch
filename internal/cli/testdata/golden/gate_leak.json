@@ -30,7 +30,36 @@
     "preview": null
   },
   "warnings": [],
-  "next": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "gate",
+        "feat-x",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "after fixing the content on the feature branch in the shadow repo, gate again",
+      "needs_human": false,
+      "needs_input": []
+    },
+    {
+      "command": [
+        "ghostbranch",
+        "waivers",
+        "add",
+        "feat-x",
+        "f-7b1b6723317f",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "only if a person judges these findings false positives: they review them at their console and give a reason",
+      "needs_human": true,
+      "needs_input": [
+        "--reason"
+      ]
+    }
+  ],
   "error": {
     "code": "LEAK_FOUND",
     "message": "1 leak finding(s) in what would be published; nothing was pushed to the public repo",

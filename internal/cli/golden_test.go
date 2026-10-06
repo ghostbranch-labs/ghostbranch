@@ -25,6 +25,7 @@ var dataSchemas = map[string]string{
 	"init": "init.schema.json", "sync": "sync.schema.json", "feature start": "feature-start.schema.json",
 	"gate": "gate.schema.json", "promote": "promote.schema.json", "apply": "apply.schema.json",
 	"agents allow": "agents-allow.schema.json", "agents revoke": "agents-revoke.schema.json", "agents status": "agents-status.schema.json",
+	"waivers add": "waivers-add.schema.json", "waivers list": "waivers-list.schema.json", "waivers revoke": "waivers-revoke.schema.json",
 	"explain": "explain.schema.json", "guide": "guide.schema.json",
 	"guard install": "guard.schema.json", "guard uninstall": "guard.schema.json", "guard status": "guard.schema.json", "guard check": "guard.schema.json",
 }
@@ -131,6 +132,18 @@ func TestGoldenContract(t *testing.T) {
 		{"agents_revoke", func(te *testEnv) { initOnly(te); grantAgents(te) }, []string{"agents", "revoke"}, 0},
 		{"actor_unknown", func(te *testEnv) { initOnly(te); te.forge.UserErr = errors.New("rate limited") }, []string{"sync"}, 0},
 		{"guard_not_a_checkout", initOnly, []string{"guard", "status"}, 2},
+		{"gate_marker_invalid", func(te *testEnv) {
+			initOnly(te)
+			te.mustRun("feature", "start", "feat-x")
+			te.shadowCommit("feat-x", map[string]string{"app.go": "ok\n// BEGIN-INTERNAL\nx\n"})
+		}, []string{"gate", "feat-x"}, 3},
+		{"gate_waived", waiveLeak, []string{"gate", "feat-x"}, 0},
+		{"waivers_add_no_console", leakyWithID, []string{"waivers", "add", "feat-x", "<FINDING>", "--reason", "test fixture"}, 5},
+		{"waivers_add_plan", leakyWithID, []string{"waivers", "add", "feat-x", "<FINDING>", "--reason", "test fixture", "--plan"}, 0},
+		{"waivers_add_unknown", leakyWithID, []string{"waivers", "add", "feat-x", "f-000000000000", "--reason", "x", "--plan"}, 2},
+		{"waivers_add_missing_reason", initOnly, []string{"waivers", "add", "feat-x", "f-000000000000"}, 2},
+		{"waivers_list", waiveLeak, []string{"waivers", "list"}, 0},
+		{"waivers_revoke", waiveLeak, []string{"waivers", "revoke", "<FINDING>"}, 0},
 	}
 	for _, s := range scenarios {
 		t.Run(s.name, func(t *testing.T) {
@@ -142,6 +155,9 @@ func TestGoldenContract(t *testing.T) {
 			for i, a := range args {
 				if a == "<PLAN>" {
 					args[i] = te.lastPlanID()
+				}
+				if a == "<FINDING>" {
+					args[i] = te.finding
 				}
 			}
 			code, out, errOut := te.run(append(args, "--json")...)
@@ -219,4 +235,36 @@ func TestArtifactsMatchTheirSchemas(t *testing.T) {
 		t.Fatal(err)
 	}
 	validate(t, "grants.schema.json", grants)
+}
+
+func TestWaiverArtifactsMatchTheirSchemas(t *testing.T) {
+	te := newTestEnv(t)
+	waiveLeak(te)
+	raw, err := os.ReadFile(te.waiversFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	validate(t, "waivers.schema.json", raw)
+	te.mustRun("gate", "feat-x")
+	te.mustRun("promote", "feat-x", "-m", "Add config", "--plan")
+	planRaw, err := os.ReadFile(filepath.Join(te.vars["GHOSTBRANCH_HOME"], "workspaces", "default", "plans", te.lastPlanID()+".json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	validate(t, "plan.schema.json", planRaw)
+	if !strings.Contains(string(planRaw), te.finding) {
+		t.Fatal("the plan does not record the waived finding")
+	}
+	f, err := os.Open(filepath.Join(te.vars["GHOSTBRANCH_HOME"], "workspaces", "default", "ledger.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		validate(t, "ledger-entry.schema.json", sc.Bytes())
+	}
+	if err := sc.Err(); err != nil {
+		t.Fatal(err)
+	}
 }

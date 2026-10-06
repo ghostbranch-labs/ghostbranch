@@ -1,0 +1,39 @@
+{
+  "schema_version": "0.3",
+  "command": "waivers add",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "feature": "feat-x",
+    "waivers": [
+      {
+        "id": "f-7b1b6723317f",
+        "public": "acme/widget",
+        "rule": "github-pat",
+        "where": "tree",
+        "path": "config.env",
+        "match_sha256": "76375e21aaeadbb33067f84087af1bb4f81a039c0f0e3ab2b684e20858af07ad",
+        "reason": "test fixture",
+        "created_at": "2026-10-05T12:00:00Z",
+        "created_by": "human:octo"
+      }
+    ],
+    "preview": {
+      "fingerprint": {
+        "feature_head": "4d1d49322a3efd3fda9f092af6dd0ddce5b0a824",
+        "overlay": "b1428c4f99dd9fdcd40de6d3f9aea25809d4dfea",
+        "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7"
+      },
+      "ops": [
+        {
+          "id": "f-7b1b6723317f",
+          "op": "waive",
+          "public": "acme/widget"
+        }
+      ]
+    }
+  },
+  "warnings": [],
+  "next": [],
+  "error": null
+}

@@ -82,6 +82,8 @@ func (a *app) next(err error) []contract.Next {
 				return []contract.Next{{Command: a.again(true), NeedsHuman: true,
 					Why: "a person must run this in their own terminal and type the code it shows"}}
 			}
+		case contract.LeakFound, contract.MarkerInvalid:
+			return a.leakNext(ce)
 		case contract.PlanStale:
 			f, _ := ce.Details["feature"].(string)
 			pub, _ := ce.Details["public"].(string)
@@ -176,4 +178,27 @@ func guardState(public string) (bool, bool) {
 	}
 	st, err := guard.Inspect(co)
 	return true, err == nil && st.Installed
+}
+
+// leakNext is what to do about LEAK_FOUND or MARKER_INVALID: fix the
+// content and run again; and, for waivable findings a person judges false
+// positives, that person waives them at their console.
+func (a *app) leakNext(ce *contract.Error) []contract.Next {
+	f, _ := ce.Details["feature"].(string)
+	var out []contract.Next
+	switch a.command {
+	case "promote":
+		out = append(out, contract.Next{Command: a.again(false), Why: "after fixing the content on the feature branch in the shadow repo, run this again"})
+	case "gate", "waivers add":
+		if f != "" {
+			out = append(out, contract.Next{Command: a.scoped("gate", f), Why: "after fixing the content on the feature branch in the shadow repo, gate again"})
+		}
+	}
+	ids, _ := ce.Details["waivable"].([]string)
+	if ce.Code == contract.LeakFound && f != "" && len(ids) > 0 {
+		out = append(out, contract.Next{Command: a.scoped(append([]string{"waivers", "add", f}, ids...)...), NeedsHuman: true,
+			NeedsInput: []string{"--reason"},
+			Why:        "only if a person judges these findings false positives: they review them at their console and give a reason"})
+	}
+	return out
 }

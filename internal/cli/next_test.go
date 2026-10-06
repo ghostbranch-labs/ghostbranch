@@ -132,3 +132,33 @@ func TestNextSuggestsTheGuardInAnUnguardedCheckout(t *testing.T) {
 		t.Fatal("no guard suggestion once it is installed")
 	}
 }
+
+func TestNextHandsWaivableLeaksToAPerson(t *testing.T) {
+	te := newTestEnv(t)
+	leakyWithID(te)
+	_, m := te.runJSON("gate", "feat-x")
+	next, _ := m["next"].([]any)
+	if len(next) != 2 {
+		t.Fatalf("next = %v", next)
+	}
+	fix, waive := next[0].(map[string]any), next[1].(map[string]any)
+	if !reflect.DeepEqual(fix["command"], []any{"ghostbranch", "gate", "feat-x", "--repo", "acme/widget"}) || fix["needs_human"] != false {
+		t.Fatalf("fix = %v", fix)
+	}
+	if !reflect.DeepEqual(waive["command"], []any{"ghostbranch", "waivers", "add", "feat-x", te.finding, "--repo", "acme/widget"}) ||
+		waive["needs_human"] != true || !reflect.DeepEqual(waive["needs_input"], []any{"--reason"}) {
+		t.Fatalf("waive = %v", waive)
+	}
+}
+
+func TestNextForBadMarkersOnlyFixes(t *testing.T) {
+	te := newTestEnv(t)
+	initOnly(te)
+	te.mustRun("feature", "start", "feat-x")
+	te.shadowCommit("feat-x", map[string]string{"app.go": "// END-INTERNAL\n"})
+	_, m := te.runJSON("gate", "feat-x")
+	next, _ := m["next"].([]any)
+	if len(next) != 1 || next[0].(map[string]any)["needs_human"] != false {
+		t.Fatalf("next = %v", next)
+	}
+}
