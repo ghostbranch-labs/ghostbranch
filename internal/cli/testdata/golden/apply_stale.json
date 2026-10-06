@@ -30,6 +30,7 @@
     "field": null,
     "retryable": false,
     "details": {
+      "branch": "feat-x",
       "feature": "feat-x",
       "moved": [
         "public_main"

@@ -67,10 +67,10 @@ func (e *Engine) Apply(ctx context.Context, opt ApplyOptions) (res *ApplyResult,
 	return e.apply(ctx, pc, pl, opt.Yes)
 }
 
-// stale is the PLAN_STALE details: what moved, plus the feature and public
-// repo so the re-plan command can be named exactly.
+// stale is the PLAN_STALE details: what moved, plus the feature, public
+// repo and public branch so the re-plan command can be named exactly.
 func stale(pl plan.Plan, moved []string) map[string]any {
-	return map[string]any{"moved": moved, "feature": pl.Feature, "public": pl.Pair.Public}
+	return map[string]any{"moved": moved, "feature": pl.Feature, "public": pl.Pair.Public, "branch": pl.Publish.TargetBranch}
 }
 
 // branchExists refuses a publish to a public branch that is already at

@@ -131,7 +131,7 @@ func (e *Engine) push(ctx context.Context, pc *pairCtx, remote string, opt gitx.
 		}
 		return contract.Wrap(contract.TokenCannotPublish, err,
 			"the token from %s cannot push to the public repo; publish from a terminal whose token can write to it", src).
-			WithField(src).WithDetails(map[string]any{"remote": remote, "token_source": src})
+			WithField("token").WithDetails(map[string]any{"remote": remote, "token_source": src})
 	}
 	if err != nil {
 		return remoteErr(err, "push to the "+remote+" repo")

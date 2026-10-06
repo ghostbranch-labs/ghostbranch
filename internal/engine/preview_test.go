@@ -2,10 +2,12 @@ package engine_test
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
+	"github.com/ghostbranch-labs/ghostbranch/internal/plan"
 	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
 )
@@ -91,6 +93,31 @@ func TestPromoteAndApplyPreviewsWithAFreshGate(t *testing.T) {
 	}
 	if len(h.pushes) != pushes {
 		t.Fatal("apply --dry-run pushed")
+	}
+}
+
+// promote --plan --dry-run previews only what promote --plan does: the plan
+// commit in the shadow repo and the plan file. Nothing public.
+func TestPromotePlanOnlyPreviewListsOnlyThePlan(t *testing.T) {
+	h := gated(t)
+	pushes, entries := len(h.pushes), len(h.ledger())
+	h.eng.DryRun = true
+	res, err := promote(h, engine.PromoteOptions{Message: "m", PlanOnly: true})
+	h.eng.DryRun = false
+	if err != nil || res.Plan == nil || !reflect.DeepEqual(opNames(res.Preview), []string{"push_ref", "write_file"}) {
+		t.Fatalf("promote --plan preview: %+v %v", res, err)
+	}
+	if got := res.Preview.Ops[0]; got["repo"] != shadowName || got["to"] != res.Plan.Publish.Commit {
+		t.Fatalf("plan push op = %v", got)
+	}
+	if path, _ := res.Preview.Ops[1]["path"].(string); !strings.HasSuffix(path, res.Plan.ID+".json") {
+		t.Fatalf("write_file op = %v", res.Preview.Ops[1])
+	}
+	if len(h.pushes) != pushes || len(h.ledger()) != entries || res.PlanPath != "" {
+		t.Fatal("promote --plan --dry-run pushed, recorded or saved something")
+	}
+	if _, _, err := plan.Load(h.eng.WS.PlansDir(), res.Plan.ID); err == nil {
+		t.Fatal("promote --plan --dry-run saved the plan")
 	}
 }
 

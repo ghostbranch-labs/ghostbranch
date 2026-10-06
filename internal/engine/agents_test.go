@@ -24,7 +24,8 @@ func TestAgentsAllowNeedsAPersonAtAConsole(t *testing.T) {
 	h.init()
 	h.eng.Approver = nil
 	_, _, err := h.eng.AgentsAllow(h.ctx, h.pair, engine.AgentsAllowOptions{})
-	if ce := wantCode(t, err, contract.ApprovalRequired); ce.Details["reason"] != "no_console" || ce.Details["plan_id"] != nil {
+	if ce := wantCode(t, err, contract.ApprovalRequired); ce.Details["reason"] != "no_console" || ce.Details["plan_id"] != nil ||
+		ce.Message != "making an agent grant needs a person to type a code at a console" {
 		t.Fatalf("details = %v", ce.Details)
 	}
 	if gs, _ := h.eng.Grants.Load(); len(gs) != 0 {
@@ -121,6 +122,23 @@ func TestAgentsRevokeAndStatus(t *testing.T) {
 	}
 	if _, ok, _ := h.eng.Grants.Valid(publicName, shadowName, h.clock.Now()); ok {
 		t.Fatal("still granted")
+	}
+}
+
+// Review Focus 2: an unreadable grants file fails before the person is
+// asked for a code that could never be saved.
+func TestAgentsAllowWithACorruptGrantsFileAsksNoOne(t *testing.T) {
+	h := newHarness(t)
+	h.init()
+	if err := os.WriteFile(h.eng.WS.GrantsPath(), []byte("{nope"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := h.eng.AgentsAllow(h.ctx, h.pair, engine.AgentsAllowOptions{})
+	if ce := wantCode(t, err, contract.Internal); !strings.Contains(ce.Message, "grants.json") {
+		t.Fatalf("message = %s", ce.Message)
+	}
+	if len(h.approver.asked) != 0 {
+		t.Fatal("the person was asked for a code despite an unreadable grants file")
 	}
 }
 

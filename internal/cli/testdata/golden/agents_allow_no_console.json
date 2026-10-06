@@ -20,7 +20,7 @@
   ],
   "error": {
     "code": "APPROVAL_REQUIRED",
-    "message": "publishing needs a person to type a code at a console, or an agent grant (ghostbranch agents allow)",
+    "message": "making an agent grant needs a person to type a code at a console",
     "field": null,
     "retryable": false,
     "details": {

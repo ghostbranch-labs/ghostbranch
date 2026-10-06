@@ -22,12 +22,19 @@ var approvalWhy = map[approval.Reason]string{
 	approval.GrantNeedsYes:   "agents may publish here under a grant; pass --yes to do so",
 }
 
+// grantNoConsole is no_console for agents allow, which publishes nothing.
+const grantNoConsole = "making an agent grant needs a person to type a code at a console"
+
 // needsApproval is APPROVAL_REQUIRED with its machine-readable reason. A
 // planID of "" is for approvals that have no plan (agents allow).
 func needsApproval(planID string, r approval.Reason) error {
 	details := map[string]any{"reason": string(r)}
 	if planID == "" {
-		return contract.New(contract.ApprovalRequired, "%s", approvalWhy[r]).WithDetails(details)
+		why := approvalWhy[r]
+		if r == approval.NoConsole {
+			why = grantNoConsole
+		}
+		return contract.New(contract.ApprovalRequired, "%s", why).WithDetails(details)
 	}
 	details["plan_id"] = planID
 	return contract.New(contract.ApprovalRequired, "%s; plan %s is saved", approvalWhy[r], planID).WithDetails(details)

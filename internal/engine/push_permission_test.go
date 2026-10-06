@@ -27,7 +27,7 @@ func TestPublicPushWithoutWriteAccessIsTokenCannotPublish(t *testing.T) {
 	e := &Engine{TokenSource: "GHOSTBRANCH_TOKEN"}
 	err := e.push(ctx, &pairCtx{op: "apply", git: g}, remotePublic, gitx.PushOptions{}, sha+":refs/heads/x")
 	ce := contract.From(err)
-	if ce == nil || ce.Code != contract.TokenCannotPublish || ce.Field != "GHOSTBRANCH_TOKEN" || ce.Details["token_source"] != "GHOSTBRANCH_TOKEN" {
+	if ce == nil || ce.Code != contract.TokenCannotPublish || ce.Field != "token" || ce.Details["token_source"] != "GHOSTBRANCH_TOKEN" {
 		t.Fatalf("public: %v", err)
 	}
 	err = e.push(ctx, &pairCtx{op: "gate", git: g}, remoteShadow, gitx.PushOptions{}, sha+":refs/heads/x")

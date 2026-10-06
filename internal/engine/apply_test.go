@@ -180,7 +180,7 @@ func TestApplyAsksOnlyAfterEveryCheck(t *testing.T) {
 	h, id := planned(t)
 	testutil.Commit(t, h.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
 	_, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: id})
-	if ce := wantCode(t, err, contract.PlanStale); ce.Details["feature"] != "feat-x" || ce.Details["public"] != publicName {
+	if ce := wantCode(t, err, contract.PlanStale); ce.Details["feature"] != "feat-x" || ce.Details["public"] != publicName || ce.Details["branch"] != "feat-x" {
 		t.Fatalf("details = %v", ce.Details)
 	}
 	if len(h.approver.asked) != 0 {

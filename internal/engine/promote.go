@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
@@ -171,6 +172,12 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	if e.DryRun {
 		pv := preview.New(map[string]string{"public_main": pm, "feature_head": head, "overlay": O, "gate_candidate": C})
 		pv.Add(preview.PushRef(p.Shadow, remotePlanRef(planID), "", P))
+		if opt.PlanOnly {
+			// promote --plan stores the plan and stops; nothing public.
+			pv.Add(preview.WriteFile(filepath.Join(e.WS.PlansDir(), planID+".json")))
+			res.Preview = pv
+			return res, warns, nil
+		}
 		if err := e.previewPublish(ctx, pc, pv, branch, P); err != nil {
 			return res, warns, err
 		}

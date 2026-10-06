@@ -176,7 +176,7 @@ func TestPromoteApprovalRules(t *testing.T) {
 		h.eng.Approver = nil
 		h.grant(time.Hour)
 		h.clock.Sleep(2 * time.Hour)
-		if _, err := promote(h, engine.PromoteOptions{Message: "m", Yes: true}); reasonOf(t, err) != "no_console" {
+		if _, err := promote(h, engine.PromoteOptions{Message: "m", Yes: true}); reasonOf(t, err) != "no_console" || published(h) {
 			t.Fatal(err)
 		}
 	})
@@ -203,6 +203,9 @@ func TestPromoteApprovalRules(t *testing.T) {
 		h.approver.err = errors.New("console vanished")
 		_, err := promote(h, engine.PromoteOptions{Message: "m"})
 		_ = wantCode(t, err, contract.Internal)
+		if published(h) {
+			t.Fatal("a console failure must not publish")
+		}
 	})
 	t.Run("the console shows the branch and the files going public", func(t *testing.T) {
 		h := gated(t)
