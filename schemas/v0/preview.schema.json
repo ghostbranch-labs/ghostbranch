@@ -45,7 +45,11 @@
         { "type": "object", "additionalProperties": false, "required": ["op", "path"],
           "properties": { "op": { "enum": ["write_file", "remove_file"] }, "path": { "type": "string", "minLength": 1 } } },
         { "type": "object", "additionalProperties": false, "required": ["op", "from", "to"],
-          "properties": { "op": { "const": "move_file" }, "from": { "type": "string" }, "to": { "type": "string" } } }
+          "properties": { "op": { "const": "move_file" }, "from": { "type": "string" }, "to": { "type": "string" } } },
+        { "type": "object", "additionalProperties": false, "required": ["op", "public", "id"],
+          "properties": { "op": { "const": "waive" }, "public": { "$ref": "#/$defs/repo" }, "id": { "type": "string", "pattern": "^f-[0-9a-f]{12}$" } } },
+        { "type": "object", "additionalProperties": false, "required": ["op", "public", "id"],
+          "properties": { "op": { "const": "unwaive" }, "public": { "$ref": "#/$defs/repo" }, "id": { "type": "string", "pattern": "^f-[0-9a-f]{12}$" } } }
       ]
     }
   }

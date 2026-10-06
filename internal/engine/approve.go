@@ -112,3 +112,10 @@ func planSummary(pl plan.Plan, files []string, author string, waived []WaivedFin
 	fmt.Fprintf(&b, "Plan %s", pl.ID)
 	return b.String()
 }
+
+// noConsole is APPROVAL_REQUIRED for an action with no plan that only a
+// person at a console may take; what names the action.
+func noConsole(what string) error {
+	return contract.New(contract.ApprovalRequired, "%s needs a person to type a code at a console", what).
+		WithDetails(map[string]any{"reason": string(approval.NoConsole)})
+}

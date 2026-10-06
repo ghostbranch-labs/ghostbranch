@@ -113,6 +113,10 @@ func (p *Preview) Describe() []string {
 			line = fmt.Sprintf("allow agents to publish to %s %s", o["public"], until)
 		case "revoke":
 			line = fmt.Sprintf("revoke the agent grant for %s", o["public"])
+		case "waive":
+			line = fmt.Sprintf("waive leak finding %s for %s", o["id"], o["public"])
+		case "unwaive":
+			line = fmt.Sprintf("revoke the waiver for leak finding %s on %s", o["id"], o["public"])
 		case "write_file":
 			line = fmt.Sprintf("write %s", o["path"])
 		case "remove_file":
@@ -126,3 +130,6 @@ func (p *Preview) Describe() []string {
 	}
 	return out
 }
+
+func Waive(public, id string) Op   { return Op{"op": "waive", "public": public, "id": id} }
+func Unwaive(public, id string) Op { return Op{"op": "unwaive", "public": public, "id": id} }
