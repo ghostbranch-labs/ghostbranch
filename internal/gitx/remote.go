@@ -73,7 +73,7 @@ type PermissionError struct{ Detail string }
 
 func (e *PermissionError) Error() string { return "push not permitted: " + e.Detail }
 
-var permissionDenied = regexp.MustCompile(`(?i)(returned error: 403|permission to S+ denied|write access to repository not granted)`)
+var permissionDenied = regexp.MustCompile(`(?i)(returned error: 403|permission to \S+ denied|write access to repository not granted)`)
 
 // Push pushes refspecs to remote. Refspec sources may be SHAs; destinations
 // must be full ref names.
