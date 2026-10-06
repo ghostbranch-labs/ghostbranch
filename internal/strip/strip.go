@@ -67,9 +67,10 @@ func unwrap(s string) (string, bool) {
 }
 
 // classify says whether a line is exactly token, after whitespace and at
-// most one comment wrapper. A comment that starts with the token and then
-// has more text is malformed: the person most likely meant a marker, and
-// guessing wrong would publish the internal lines.
+// most one comment wrapper. A line that is not exact but looks meant as a
+// marker is malformed, because guessing wrong would publish the internal
+// lines: a comment that starts with the token and then has more text, or a
+// near miss (see nearMiss).
 func classify(line, token string) kind {
 	s, wrapped := unwrap(strings.TrimSpace(line))
 	switch {
@@ -77,8 +78,46 @@ func classify(line, token string) kind {
 		return exact
 	case wrapped && len(s) > len(token) && strings.HasPrefix(s, token) && strings.ContainsRune(" \t:", rune(s[len(token)])):
 		return malformed
+	case nearMiss(strings.TrimSpace(line), token):
+		return malformed
 	}
 	return notMarker
+}
+
+// The comment punctuation a near miss may start with, and the comment
+// closers it may end with.
+const leadPunct = "/*#-;%<!{ \t"
+
+var closers = []string{"*/}", "-->", "*/"}
+
+// nearMiss reports a line that, once any leading run of comment punctuation
+// and whitespace and any trailing comment closers are removed, starts with
+// token followed by the end of the line, whitespace or ':'. That catches a
+// marker on the first or last line of a multi-line comment, and doubled
+// prefixes such as "///" or "##". Text before the token, or a longer token,
+// is not a near miss.
+func nearMiss(s, token string) bool {
+	for cut := true; cut; {
+		cut = false
+		s = strings.TrimRight(s, " \t")
+		for _, c := range closers {
+			if strings.HasSuffix(s, c) {
+				s, cut = s[:len(s)-len(c)], true
+				break
+			}
+		}
+	}
+	// A token may itself start with punctuation, so try it at every point
+	// of the leading run rather than only after it.
+	for i := 0; i <= len(s); i++ {
+		if rest, ok := strings.CutPrefix(s[i:], token); ok && (rest == "" || strings.ContainsRune(" \t:", rune(rest[0]))) {
+			return true
+		}
+		if i == len(s) || !strings.ContainsRune(leadPunct, rune(s[i])) {
+			return false
+		}
+	}
+	return false
 }
 
 func splitLines(b []byte) [][]byte {
@@ -97,12 +136,21 @@ func splitLines(b []byte) [][]byte {
 // Cut removes every internal section from one blob: whole lines, from a
 // begin marker line through its end marker line, line endings included.
 // Every other byte is kept, a UTF-8 BOM included. Binaries pass through.
-// Markers in UTF-16 or UTF-32 text are a problem, because the strip cannot
-// re-encode those safely. On a problem the input comes back unchanged.
+// Markers in UTF-16 or UTF-32 text, or in printable runs of a blob read as
+// binary, are a problem, because the strip cannot re-encode those
+// safely. On a problem the input comes back unchanged.
 func Cut(b []byte, m Markers) ([]byte, bool, *Problem) {
 	text, enc := leak.Decode(b)
 	switch enc {
 	case leak.Binary:
+		// A binary is never edited, but text the decoder could not read
+		// (BOM-less UTF-16 that is mostly non-Latin, or a stray NUL) still
+		// shows its markers as printable runs.
+		for _, run := range strings.Split(leak.Runs(b), "\n") {
+			if classify(run, m.Begin) != notMarker || classify(run, m.End) != notMarker {
+				return b, false, &Problem{Line: 1, Problem: "unsupported_encoding"}
+			}
+		}
 		return b, false, nil
 	case leak.UTF16, leak.UTF32:
 		for i, ln := range strings.Split(text, "\n") {

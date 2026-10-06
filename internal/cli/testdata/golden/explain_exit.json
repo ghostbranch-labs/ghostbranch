@@ -50,8 +50,8 @@
           "unmatched_begin: a begin marker with no end",
           "unmatched_end: an end marker with no begin",
           "nested: a begin marker inside an open section",
-          "malformed: a comment that starts with a marker token but has more text",
-          "unsupported_encoding: markers in a UTF-16 or UTF-32 file"
+          "malformed: a line that looks like a marker but is not exactly one (more text, a doubled prefix, or a multi-line comment)",
+          "unsupported_encoding: markers in a UTF-16 or UTF-32 file, or in a file read as binary"
         ],
         "what_to_do": "Fix the marker lines at details.problems on the feature branch, push it to the shadow repo, and gate again. Never delete only the marker lines: the internal lines would then be published.",
         "needs_human": false
