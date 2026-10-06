@@ -140,14 +140,15 @@ func (a *app) promoteCmd() *cobra.Command {
 		Short: "Publish a gated feature to the public repo as a branch and PR",
 		Long: `promote reuses a fresh green gate (or runs one), builds one squash commit on public main with
 exactly the gated tree, scans it and its message, branch name and PR text for leaks, and saves a plan.
-With --plan it stops there. Otherwise it asks for confirmation (or takes --yes) and publishes.
-Agents and apps get exit 5 when the plan needs a human; a person then runs ghostbranch apply <plan> --yes.`,
+With --plan it stops there. Otherwise a person confirms by typing a code shown on the console, or, if they have allowed agents with "ghostbranch agents allow", --yes publishes. Without either it stops at the plan with exit 5.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// A flag value is a usage matter; reject it before touching the network.
-			// (`--mode --json` parses "--json" as the mode.)
-			if o.Mode != "squash" {
-				return contract.New(contract.BadFlag, "--mode %s is not supported in this version; use squash", o.Mode).WithField("mode")
+			o.Feature = args[0]
+			// Usage problems fail before any network work (`--mode --json`
+			// parses "--json" as the mode).
+			if err := engine.ValidatePromoteOptions(&o); err != nil {
+				a.ran = true
+				return err
 			}
 			e, err := a.engine(cmd.Context())
 			if err != nil {
@@ -157,7 +158,6 @@ Agents and apps get exit 5 when the plan needs a human; a person then runs ghost
 			if err != nil {
 				return err
 			}
-			o.Feature = args[0]
 			res, w, err := e.Promote(cmd.Context(), p, o)
 			return done(a, res, w, err)
 		},
@@ -169,7 +169,7 @@ Agents and apps get exit 5 when the plan needs a human; a person then runs ghost
 	f.StringVar(&o.Body, "body", "", "PR body (default: the rest of the message)")
 	f.StringVar(&o.Branch, "branch", "", "public branch name (default: the feature name)")
 	f.BoolVar(&o.PlanOnly, "plan", false, "save and print the plan without publishing")
-	f.BoolVar(&o.Yes, "yes", false, "publish without asking (agents and apps still need a human when require_human is set)")
+	f.BoolVar(&o.Yes, "yes", false, "publish under an agent grant (ghostbranch agents allow); on its own it never skips the console")
 	return c
 }
 
@@ -178,7 +178,7 @@ func (a *app) applyCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "apply <plan-id|plan.json>",
 		Short: "Publish a saved plan if the repos still match it",
-		Long:  `apply publishes a plan saved by promote. It refuses with exit 6 if public main, the feature, the overlay or the gate candidate moved since the plan was made. Re-running it finishes an interrupted publish.`,
+		Long:  `apply publishes a plan saved by promote. It refuses with exit 6 if public main, the feature, the overlay or the gate candidate moved since the plan was made. Re-running it finishes an interrupted publish. A person confirms on the console, or --yes publishes under an agent grant.`,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			e, err := a.engine(cmd.Context())
@@ -190,6 +190,6 @@ func (a *app) applyCmd() *cobra.Command {
 			return done(a, res, w, err)
 		},
 	}
-	c.Flags().BoolVar(&o.Yes, "yes", false, "publish without asking")
+	c.Flags().BoolVar(&o.Yes, "yes", false, "publish under an agent grant (ghostbranch agents allow); on its own it never skips the console")
 	return c
 }

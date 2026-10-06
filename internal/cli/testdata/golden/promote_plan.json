@@ -8,8 +8,8 @@
       "feature": "feat-x",
       "feature_head": "d7407485ce685c126afcfc258f0a9eeb0092d776",
       "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
-      "overlay": "dad19d310f1c463f1e34b172f5662f063d391e3a",
-      "candidate": "f9aecd69f102db10163aabfbb97bb04d1f0af744",
+      "overlay": "10e5ddddc0fd64a7daaff38906e96962dcbd4a40",
+      "candidate": "d49d01dec389ef2590148b0e5e59dc80ebf3a0f3",
       "published_tree": "ef9061717144a4bf03a0230d8f8926d019f2adeb",
       "checks": "passed",
       "failed_checks": [],
@@ -34,8 +34,8 @@
       "fingerprint": {
         "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
         "feature_head": "d7407485ce685c126afcfc258f0a9eeb0092d776",
-        "overlay": "dad19d310f1c463f1e34b172f5662f063d391e3a",
-        "gate_candidate": "f9aecd69f102db10163aabfbb97bb04d1f0af744"
+        "overlay": "10e5ddddc0fd64a7daaff38906e96962dcbd4a40",
+        "gate_candidate": "d49d01dec389ef2590148b0e5e59dc80ebf3a0f3"
       },
       "publish": {
         "commit": "15dd9c9bcb7655bdb426fb4a24f440fc9c31fb65",
@@ -55,8 +55,7 @@
       "leak": {
         "findings": [],
         "scanner_version": "gitleaks v8.30.1"
-      },
-      "requires_human": true
+      }
     },
     "plan_path": "<ROOT>/home/workspaces/default/plans/20261005T120005Z-0c0d0e.json",
     "findings": [],

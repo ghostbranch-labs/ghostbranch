@@ -19,6 +19,7 @@ func TestFullLoopThroughTheCLI(t *testing.T) {
 	if code != 0 || env["command"] != "gate" {
 		t.Fatalf("gate: %d %v", code, env)
 	}
+	grantAgents(te)
 	code, env = te.runJSON("promote", "feat-x", "-m", "Add feature", "--yes")
 	data, _ := env["data"].(map[string]any)
 	applied, _ := data["applied"].(map[string]any)
@@ -76,7 +77,7 @@ func TestPromoteWithoutYesAndNoTTYNeedsApproval(t *testing.T) {
 	te := newTestEnv(t)
 	gatedFeature(te)
 	code, _, errOut := te.run("promote", "feat-x", "-m", "Add feature")
-	if code != 5 || !strings.Contains(errOut, "ghostbranch apply") {
+	if code != 5 || !strings.Contains(errOut, "APPROVAL_REQUIRED") {
 		t.Fatalf("%d %q", code, errOut)
 	}
 }

@@ -23,6 +23,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	ghforge "github.com/ghostbranch-labs/ghostbranch/internal/forge/github"
+	"github.com/ghostbranch-labs/ghostbranch/internal/grant"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
 	"github.com/ghostbranch-labs/ghostbranch/internal/overlay"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
@@ -192,8 +193,9 @@ func (a *app) engine(ctx context.Context) (*engine.Engine, error) {
 		NewScanner: a.env.NewScanner, PollInterval: a.env.PollInterval, SettleWindow: a.env.SettleWindow,
 		DryRun: a.dryRun, OnPush: a.env.OnPush}
 	if a.env.StdinIsTTY && !a.nonInteractive {
-		e.Prompt, e.Editor = a.prompt, a.editor
+		e.Editor = a.editor
 	}
+	e.Grants = grant.NewStore(ws.GrantsPath(), ws.GrantsLockPath())
 	return e, nil
 }
 

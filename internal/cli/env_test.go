@@ -15,6 +15,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge/fake"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
+	"github.com/ghostbranch-labs/ghostbranch/internal/grant"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
 	"github.com/ghostbranch-labs/ghostbranch/internal/overlay"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
@@ -110,6 +111,22 @@ func withFeature(te *testEnv) {
 	te.shadowCommit("feat-x", map[string]string{"feature.txt": "new\n"})
 }
 func gatedFeature(te *testEnv) { withFeature(te); te.mustRun("gate", "feat-x") }
+
+// grantAgents writes an agent grant for acme/widget, as `agents allow` would
+// after a person confirmed it. The binary has no way to skip that step.
+func grantAgents(te *testEnv) {
+	te.t.Helper()
+	ws := filepath.Join(te.vars["GHOSTBRANCH_HOME"], "workspaces", "default")
+	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	exp := now.Add(6 * time.Hour)
+	s := grant.NewStore(filepath.Join(ws, "grants.json"), filepath.Join(ws, "grants.lock"))
+	if _, err := s.Put(grant.Grant{ID: "g-0a0b0c", Public: "acme/widget", Shadow: "acme/widget-shadow",
+		CreatedAt: now, ExpiresAt: &exp, CreatedBy: "human:octo"}, now); err != nil {
+		te.t.Fatal(err)
+	}
+}
+
+func publishable(te *testEnv) { gatedFeature(te); grantAgents(te) }
 
 func withLeakyFeature(te *testEnv) {
 	initOnly(te)

@@ -21,7 +21,15 @@ type Entry struct {
 	PlanID    string    `json:"plan_id,omitempty"`
 	ExitCode  int       `json:"exit_code"`
 	ErrorCode string    `json:"error_code,omitempty"`
+	Approval  *Approval `json:"approval,omitempty"`
 	Summary   string    `json:"summary"`
+}
+
+// Approval records how a publish was approved.
+type Approval struct {
+	Kind      string `json:"kind"` // "console" or "grant"
+	GrantID   string `json:"grant_id,omitempty"`
+	CreatedBy string `json:"created_by,omitempty"`
 }
 
 // Append writes e as one JSON line.

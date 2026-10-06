@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,8 +20,15 @@ func TestRenderRoundTripsToDefaults(t *testing.T) {
 	if !reflect.DeepEqual(cfg, want) {
 		t.Fatalf("got %+v\nwant %+v", cfg, want)
 	}
-	if cfg.Gate.CIAppearTimeout != 10*time.Minute || cfg.Gate.CITimeout != 60*time.Minute || !cfg.Promote.RequireHuman {
+	if cfg.Gate.CIAppearTimeout != 10*time.Minute || cfg.Gate.CITimeout != 60*time.Minute {
 		t.Fatalf("defaults wrong: %+v", cfg)
+	}
+}
+
+func TestRequireHumanIsReplacedByGrants(t *testing.T) {
+	_, warns, err := config.Parse([]byte("version: 1\npublic: acme/widget\nshadow: acme/widget-shadow\npromote:\n  require_human: false\n"))
+	if err != nil || len(warns) != 1 || warns[0].Code != contract.ConfigKeyIgnored || !strings.Contains(warns[0].Message, "agents allow") {
+		t.Fatalf("%v %v", warns, err)
 	}
 }
 

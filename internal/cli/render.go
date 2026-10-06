@@ -73,7 +73,7 @@ func human(r any) string {
 		case v.Applied != nil:
 			fmt.Fprintf(&b, "Published %s as PR #%d: %s\n", v.Applied.PublicBranch, v.Applied.PublicPR, v.Applied.PRURL)
 		case v.Plan != nil && v.PlanPath != "":
-			fmt.Fprintf(&b, "Plan %s saved to %s.\nPublish it with: ghostbranch apply %s --yes\n", v.Plan.ID, v.PlanPath, v.Plan.ID)
+			fmt.Fprintf(&b, "Plan %s saved to %s.\nPublish it with: ghostbranch apply %s\n", v.Plan.ID, v.PlanPath, v.Plan.ID)
 		case v.Plan != nil:
 			fmt.Fprintf(&b, "Dry run: would publish %s as branch %s.\n", short(v.Plan.Publish.Commit), v.Plan.Publish.TargetBranch)
 		}

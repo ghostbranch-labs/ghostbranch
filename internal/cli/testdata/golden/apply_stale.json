@@ -12,6 +12,7 @@
     "field": null,
     "retryable": false,
     "details": {
+      "feature": "feat-x",
       "moved": [
         "public_main"
       ]

@@ -13,6 +13,14 @@
     "plan_id": { "$ref": "common.schema.json#/$defs/planId" },
     "exit_code": { "type": "integer", "minimum": 0, "maximum": 6 },
     "error_code": { "type": "string" },
+    "approval": {
+      "type": "object", "additionalProperties": false, "required": ["kind"],
+      "properties": {
+        "kind": { "enum": ["console", "grant"] },
+        "grant_id": { "type": "string", "pattern": "^g-[0-9a-f]{6}$" },
+        "created_by": { "$ref": "common.schema.json#/$defs/actor" }
+      }
+    },
     "summary": { "type": "string" }
   }
 }

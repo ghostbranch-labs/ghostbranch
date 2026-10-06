@@ -4,7 +4,7 @@
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "id", "kind", "actor", "created_at", "pair", "feature", "mode", "fingerprint",
-               "publish", "leak", "requires_human"],
+               "publish", "leak"],
   "properties": {
     "schema_version": { "const": "0.2" },
     "id": { "$ref": "common.schema.json#/$defs/planId" },
@@ -52,7 +52,6 @@
     "leak": {
       "type": "object", "additionalProperties": false, "required": ["findings", "scanner_version"],
       "properties": { "findings": { "type": "array", "maxItems": 0 }, "scanner_version": { "type": "string" } }
-    },
-    "requires_human": { "type": "boolean" }
+    }
   }
 }

@@ -2,11 +2,14 @@ package engine_test
 
 import (
 	"errors"
+	"os"
 	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/ghostbranch-labs/ghostbranch/internal/approval"
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
@@ -45,7 +48,7 @@ func TestPromotePlanOnlyWritesAPlanAndTouchesNothingPublic(t *testing.T) {
 	pubMain, _ := h.pubGit.MustResolve(h.ctx, "refs/heads/main")
 	if p.Publish.Parent != pubMain || p.Publish.Tree != res.Gate.PublishedTree || p.Publish.TargetBranch != "feat-x" ||
 		p.Publish.Author.Email != "42+octo@users.noreply.github.com" || p.Publish.PR.Title != "Add feature" ||
-		p.Publish.PR.Body != "It does things." || !p.RequiresHuman {
+		p.Publish.PR.Body != "It does things." {
 		t.Fatalf("plan = %+v", p)
 	}
 	saved, _, err := plan.Load(h.eng.WS.PlansDir(), p.ID)
@@ -115,64 +118,147 @@ func TestPromoteReusesAFreshGate(t *testing.T) {
 }
 
 func TestPromoteApprovalRules(t *testing.T) {
-	t.Run("agent needs a human, then a human applies", func(t *testing.T) {
+	published := func(h *harness) bool { _, ok, _ := h.pubGit.Resolve(h.ctx, "refs/heads/feat-x"); return ok }
+	reasonOf := func(t *testing.T, err error) string {
+		t.Helper()
+		r, _ := wantCode(t, err, contract.ApprovalRequired).Details["reason"].(string)
+		return r
+	}
+	t.Run("--yes without a grant or a console stops at the plan", func(t *testing.T) {
 		h := gated(t)
-		h.eng.Actor = "agent:claude-code"
+		h.eng.Approver = nil
 		res, err := promote(h, engine.PromoteOptions{Message: "m", Yes: true})
-		_ = wantCode(t, err, contract.ApprovalRequired)
-		if _, ok, _ := h.pubGit.Resolve(h.ctx, "refs/heads/feat-x"); ok || res.Plan == nil {
-			t.Fatal("agent promote must stop at the plan")
+		if r := reasonOf(t, err); r != "no_console" || published(h) || res.Plan == nil {
+			t.Fatalf("reason %q, published %v", r, published(h))
 		}
-		_, _, err = h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: res.Plan.ID, Yes: true})
-		_ = wantCode(t, err, contract.ApprovalRequired)
-		h.eng.Actor = "human:octo"
-		if _, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: res.Plan.ID, Yes: true}); err != nil {
-			t.Fatalf("human apply: %v", err)
+		if id := contract.From(err).Details["plan_id"]; id != res.Plan.ID {
+			t.Fatalf("details.plan_id = %v", id)
 		}
 	})
-	// Until sub-project 2 defines app approval, an app is treated like an
-	// agent: it cannot approve a plan that requires a human, even its own.
-	t.Run("app needs a human too", func(t *testing.T) {
+	t.Run("the actor label plays no part", func(t *testing.T) {
+		for _, actor := range []string{"human:octo", "agent:claude-code", "app"} {
+			h := gated(t)
+			h.eng.Actor, h.eng.Approver = actor, nil
+			if _, err := promote(h, engine.PromoteOptions{Message: "m", Yes: true}); reasonOf(t, err) != "no_console" {
+				t.Fatalf("%s without a console: %v", actor, err)
+			}
+			h = gated(t)
+			h.eng.Actor = actor
+			if _, err := promote(h, engine.PromoteOptions{Message: "m"}); err != nil || !published(h) {
+				t.Fatalf("%s confirmed at the console: %v", actor, err)
+			}
+		}
+	})
+	t.Run("a grant plus --yes publishes without asking", func(t *testing.T) {
 		h := gated(t)
-		h.eng.Actor = "app"
+		h.eng.Approver = nil
+		h.grant(6 * time.Hour)
 		res, err := promote(h, engine.PromoteOptions{Message: "m", Yes: true})
-		_ = wantCode(t, err, contract.ApprovalRequired)
-		if _, ok, _ := h.pubGit.Resolve(h.ctx, "refs/heads/feat-x"); ok || res.Plan == nil {
-			t.Fatal("app promote must stop at the plan")
+		if err != nil || !published(h) || res.Applied.Approval == nil || res.Applied.Approval.Kind != "grant" ||
+			res.Applied.Approval.GrantID != "g-000001" || res.Applied.Approval.CreatedBy != "human:octo" {
+			t.Fatalf("promote = %+v %v", res, err)
 		}
-		_, _, err = h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: res.Plan.ID, Yes: true})
-		_ = wantCode(t, err, contract.ApprovalRequired)
-		if _, ok, _ := h.pubGit.Resolve(h.ctx, "refs/heads/feat-x"); ok {
-			t.Fatal("app must not approve its own plan")
-		}
-	})
-	t.Run("a failed confirmation read names the field", func(t *testing.T) {
-		h := gated(t)
-		h.eng.Prompt = func(string) (bool, error) { return false, errors.New("stdin closed") }
-		_, err := promote(h, engine.PromoteOptions{Message: "m"})
-		if ce := wantCode(t, err, contract.MissingInput); ce.Field != "confirmation" {
-			t.Fatalf("field = %q", ce.Field)
+		es := h.ledger()
+		if last := es[len(es)-1]; last.Op != "promote" || last.Approval == nil || last.Approval.Kind != "grant" {
+			t.Fatalf("ledger = %+v", last)
 		}
 	})
-	t.Run("no tty and no --yes", func(t *testing.T) {
+	t.Run("a grant without --yes and no console asks for --yes", func(t *testing.T) {
 		h := gated(t)
-		_, err := promote(h, engine.PromoteOptions{Message: "m"})
-		_ = wantCode(t, err, contract.ApprovalRequired)
-	})
-	t.Run("prompt declined, then accepted", func(t *testing.T) {
-		h := gated(t)
-		var summary string
-		h.eng.Prompt = func(s string) (bool, error) { summary = s; return false, nil }
-		_, err := promote(h, engine.PromoteOptions{Message: "m"})
-		_ = wantCode(t, err, contract.ApprovalRequired)
-		if !strings.Contains(summary, "feat-x") || !strings.Contains(summary, "feature.txt") {
-			t.Fatalf("summary must show the branch and the files going public:\n%s", summary)
-		}
-		h.eng.Prompt = func(string) (bool, error) { return true, nil }
-		if _, err := promote(h, engine.PromoteOptions{Message: "m"}); err != nil {
+		h.eng.Approver = nil
+		h.grant(6 * time.Hour)
+		if _, err := promote(h, engine.PromoteOptions{Message: "m"}); reasonOf(t, err) != "grant_needs_yes" || published(h) {
 			t.Fatal(err)
 		}
 	})
+	t.Run("an expired grant counts for nothing", func(t *testing.T) {
+		h := gated(t)
+		h.eng.Approver = nil
+		h.grant(time.Hour)
+		h.clock.Sleep(2 * time.Hour)
+		if _, err := promote(h, engine.PromoteOptions{Message: "m", Yes: true}); reasonOf(t, err) != "no_console" {
+			t.Fatal(err)
+		}
+	})
+	t.Run("--yes at a console still asks", func(t *testing.T) {
+		h := gated(t)
+		if _, err := promote(h, engine.PromoteOptions{Message: "m", Yes: true}); err != nil {
+			t.Fatal(err)
+		}
+		if len(h.approver.asked) != 1 {
+			t.Fatal("--yes without a grant must not skip the console")
+		}
+	})
+	t.Run("console refusals pass their reason through", func(t *testing.T) {
+		for _, r := range []approval.Reason{approval.NotConfirmed, approval.Timeout, approval.TooManyAttempts} {
+			h := gated(t)
+			h.approver.err = &approval.Refusal{Reason: r}
+			if _, err := promote(h, engine.PromoteOptions{Message: "m"}); reasonOf(t, err) != string(r) || published(h) {
+				t.Fatalf("%s: %v", r, err)
+			}
+		}
+	})
+	t.Run("a console failure is INTERNAL", func(t *testing.T) {
+		h := gated(t)
+		h.approver.err = errors.New("console vanished")
+		_, err := promote(h, engine.PromoteOptions{Message: "m"})
+		_ = wantCode(t, err, contract.Internal)
+	})
+	t.Run("the console shows the branch and the files going public", func(t *testing.T) {
+		h := gated(t)
+		h.approver.err = &approval.Refusal{Reason: approval.NotConfirmed}
+		_, _ = promote(h, engine.PromoteOptions{Message: "m"})
+		if len(h.approver.asked) != 1 || !strings.Contains(h.approver.asked[0], "feat-x") || !strings.Contains(h.approver.asked[0], "feature.txt") {
+			t.Fatalf("summary = %v", h.approver.asked)
+		}
+	})
+	t.Run("a corrupt grants file fails closed", func(t *testing.T) {
+		h := gated(t)
+		h.eng.Approver = nil
+		if err := os.WriteFile(h.eng.WS.GrantsPath(), []byte("{nope"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := promote(h, engine.PromoteOptions{Message: "m", Yes: true})
+		if ce := wantCode(t, err, contract.Internal); !strings.Contains(ce.Message, "grants") || published(h) {
+			t.Fatal(ce.Message)
+		}
+	})
+}
+
+// DEFERRED (sp2): input problems are reported before the gate can run.
+func TestPromoteChecksInputBeforeAnyCI(t *testing.T) {
+	h := gated(t)
+	testutil.Commit(t, h.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"}) // the gate is now stale
+	var calls atomic.Int32
+	h.forge.Checks = func(string, string) []forge.Check { calls.Add(1); return nil }
+	pushes := len(h.pushes)
+	for _, c := range []struct {
+		o    engine.PromoteOptions
+		code contract.Code
+	}{
+		{engine.PromoteOptions{}, contract.MissingInput},
+		{engine.PromoteOptions{Message: "m", Branch: "main"}, contract.NameInvalid},
+		{engine.PromoteOptions{Message: "m", Mode: "preserve"}, contract.BadFlag},
+	} {
+		_, err := promote(h, c.o)
+		_ = wantCode(t, err, c.code)
+	}
+	if calls.Load() != 0 || len(h.pushes) != pushes {
+		t.Fatal("input errors must be reported before any gate or push")
+	}
+}
+
+// DEFERRED (sp2): --title alone keeps the body; both are trimmed.
+func TestPromoteTitleAndBody(t *testing.T) {
+	h := gated(t)
+	res, err := promote(h, engine.PromoteOptions{Message: "Subject\n\nBody text", Title: "  Custom title  ", PlanOnly: true})
+	if err != nil || res.Plan.Publish.PR.Title != "Custom title" || res.Plan.Publish.PR.Body != "Body text" {
+		t.Fatalf("plan PR = %+v %v", res.Plan.Publish.PR, err)
+	}
+	res, err = promote(h, engine.PromoteOptions{Message: "Subject", Body: "  only body  ", PlanOnly: true})
+	if err != nil || res.Plan.Publish.PR.Title != "Subject" || res.Plan.Publish.PR.Body != "only body" {
+		t.Fatalf("plan PR = %+v %v", res.Plan.Publish.PR, err)
+	}
 }
 
 func TestPromoteInputErrors(t *testing.T) {

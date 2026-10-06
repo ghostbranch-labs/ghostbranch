@@ -1,10 +1,6 @@
 package cli
 
 import (
-	"bufio"
-	"errors"
-	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"runtime"
@@ -12,16 +8,6 @@ import (
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 )
-
-func (a *app) prompt(summary string) (bool, error) {
-	_, _ = fmt.Fprintf(a.env.Stderr, "%s\nProceed? [y/N] ", summary)
-	line, err := bufio.NewReader(a.env.Stdin).ReadString('\n')
-	if err != nil && !errors.Is(err, io.EOF) {
-		return false, err
-	}
-	ans := strings.ToLower(strings.TrimSpace(line))
-	return ans == "y" || ans == "yes", nil
-}
 
 func (a *app) editor(initial string) (string, error) {
 	f, err := os.CreateTemp("", "ghostbranch-message-*.txt")

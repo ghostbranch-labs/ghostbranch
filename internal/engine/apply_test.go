@@ -1,6 +1,7 @@
 package engine_test
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -171,5 +172,43 @@ func TestApplyScansTheStoredCommitMessage(t *testing.T) {
 	ce := wantCode(t, err, contract.LeakFound)
 	if _, ok, _ := h.pubGit.Resolve(h.ctx, "refs/heads/feat-x"); ok {
 		t.Fatalf("a leaking commit message was published: %v", ce)
+	}
+}
+
+// DEFERRED (sp2): approval is asked only after the plan is verified.
+func TestApplyAsksOnlyAfterEveryCheck(t *testing.T) {
+	h, id := planned(t)
+	testutil.Commit(t, h.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
+	_, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: id})
+	if ce := wantCode(t, err, contract.PlanStale); ce.Details["feature"] != "feat-x" {
+		t.Fatalf("details = %v", ce.Details)
+	}
+	if len(h.approver.asked) != 0 {
+		t.Fatal("the console must not be asked about a stale plan")
+	}
+}
+
+// DEFERRED (sp2): the local plan file is not trusted about where it publishes.
+func TestApplyRejectsATamperedTargetBranch(t *testing.T) {
+	h, id := planned(t)
+	path := filepath.Join(h.eng.WS.PlansDir(), id+".json")
+	// "Main" passes ValidateName and is caught as the public default branch.
+	for _, bad := range []string{"main", "Main", "ghostbranch", "a/../b", ""} {
+		pl, _, err := plan.Load(h.eng.WS.PlansDir(), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pl.Publish.TargetBranch = bad
+		b, _ := json.Marshal(pl)
+		if err := os.WriteFile(path, b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_, _, err = h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: id, Yes: true})
+		if ce := wantCode(t, err, contract.NameInvalid); ce.Field != "plan" {
+			t.Fatalf("%q: field = %q", bad, ce.Field)
+		}
+	}
+	if len(h.approver.asked) != 0 {
+		t.Fatal("a tampered plan must be refused before asking anyone")
 	}
 }

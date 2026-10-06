@@ -87,7 +87,6 @@ type Plan struct {
 	Fingerprint   Fingerprint `json:"fingerprint"`
 	Publish       Publish     `json:"publish"`
 	Leak          Leak        `json:"leak"`
-	RequiresHuman bool        `json:"requires_human"`
 }
 
 // NewID returns a time-sortable plan ID such as 20261005T123000Z-abcdef.

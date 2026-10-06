@@ -88,7 +88,7 @@ func TestGoldenContract(t *testing.T) {
 		{"promote_plan", gatedFeature, []string{"promote", "feat-x", "-m", "Add feature", "--plan"}, 0},
 		{"promote_needs_human", func(te *testEnv) { gatedFeature(te); te.vars["GHOSTBRANCH_ACTOR"] = "agent:claude-code" },
 			[]string{"promote", "feat-x", "-m", "Add feature", "--yes"}, 5},
-		{"promote_publish", gatedFeature, []string{"promote", "feat-x", "-m", "Add feature", "--yes"}, 0},
+		{"promote_publish", publishable, []string{"promote", "feat-x", "-m", "Add feature", "--yes"}, 0},
 		{"apply_stale", func(te *testEnv) {
 			gatedFeature(te)
 			te.mustRun("promote", "feat-x", "-m", "Add feature", "--plan")
@@ -147,6 +147,7 @@ func TestArtifactsMatchTheirSchemas(t *testing.T) {
 	te := newTestEnv(t)
 	gatedFeature(te)
 	te.mustRun("promote", "feat-x", "-m", "Add feature", "--plan")
+	grantAgents(te)
 	te.mustRun("apply", te.lastPlanID(), "--yes")
 	home := te.vars["GHOSTBRANCH_HOME"]
 

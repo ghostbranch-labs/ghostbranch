@@ -11,6 +11,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge/fake"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
+	"github.com/ghostbranch-labs/ghostbranch/internal/grant"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
 	"github.com/ghostbranch-labs/ghostbranch/internal/ledger"
 	"github.com/ghostbranch-labs/ghostbranch/internal/overlay"
@@ -29,14 +30,37 @@ type pushEvent struct {
 }
 
 type harness struct {
-	t      *testing.T
-	ctx    context.Context
-	forge  *fake.Forge
-	eng    *engine.Engine
-	clock  *testutil.Clock
-	pair   workspace.Pair
-	pubGit *gitx.Git
-	pushes []pushEvent
+	t        *testing.T
+	ctx      context.Context
+	forge    *fake.Forge
+	eng      *engine.Engine
+	clock    *testutil.Clock
+	pair     workspace.Pair
+	pubGit   *gitx.Git
+	pushes   []pushEvent
+	approver *approver
+}
+
+// approver is a fake console: it records every summary and answers err.
+type approver struct {
+	err   error
+	asked []string
+}
+
+func (a *approver) Confirm(_ context.Context, summary string) error {
+	a.asked = append(a.asked, summary)
+	return a.err
+}
+
+// grant writes an agent grant for the pair that lasts d from now.
+func (h *harness) grant(d time.Duration) {
+	h.t.Helper()
+	now := h.clock.Now()
+	exp := now.Add(d)
+	if _, err := h.eng.Grants.Put(grant.Grant{ID: "g-000001", Public: publicName, Shadow: shadowName,
+		CreatedAt: now, ExpiresAt: &exp, CreatedBy: "human:octo"}, now); err != nil {
+		h.t.Fatal(err)
+	}
 }
 
 func newHarness(t *testing.T) *harness {
@@ -68,6 +92,9 @@ func newHarness(t *testing.T) *harness {
 			h.pushes = append(h.pushes, pushEvent{op, remote, specs})
 		},
 	}
+	h.approver = &approver{}
+	h.eng.Approver = h.approver
+	h.eng.Grants = grant.NewStore(ws.GrantsPath(), ws.GrantsLockPath())
 	return h
 }
 
