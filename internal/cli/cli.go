@@ -154,7 +154,7 @@ var actorPattern = regexp.MustCompile(`^(human:\S+|app|agent:\S+)$`)
 
 func (a *app) engine(ctx context.Context) (*engine.Engine, error) {
 	a.ran = true
-	token, err := auth.Token(a.env.Getenv, a.env.GHToken)
+	token, tokenSource, err := auth.Resolve(a.env.Getenv, a.env.GHToken)
 	if err != nil {
 		return nil, err
 	}
@@ -187,7 +187,7 @@ func (a *app) engine(ctx context.Context) (*engine.Engine, error) {
 			actor = "human:" + u.Login
 		}
 	}
-	e := &engine.Engine{Forge: f, WS: ws, Actor: actor, Token: token,
+	e := &engine.Engine{Forge: f, WS: ws, Actor: actor, Token: token, TokenSource: tokenSource,
 		Now: a.env.Now, Sleep: a.env.Sleep, Rand: a.env.Rand, Progress: a.env.Stderr,
 		NewScanner: a.env.NewScanner, PollInterval: a.env.PollInterval, SettleWindow: a.env.SettleWindow,
 		DryRun: a.dryRun, OnPush: a.env.OnPush}

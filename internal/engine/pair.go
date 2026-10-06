@@ -123,6 +123,16 @@ func (e *Engine) push(ctx context.Context, pc *pairCtx, remote string, opt gitx.
 		return contract.Wrap(contract.RefMoved, err, "a ref changed on the %s repo while this ran; re-run the command", remote).
 			WithDetails(map[string]any{"refs": rej.Refs})
 	}
+	var perm *gitx.PermissionError
+	if remote == remotePublic && errors.As(err, &perm) {
+		src := e.TokenSource
+		if src == "" {
+			src = "the configured token"
+		}
+		return contract.Wrap(contract.TokenCannotPublish, err,
+			"the token from %s cannot push to the public repo; publish from a terminal whose token can write to it", src).
+			WithField(src).WithDetails(map[string]any{"remote": remote, "token_source": src})
+	}
 	if err != nil {
 		return remoteErr(err, "push to the "+remote+" repo")
 	}

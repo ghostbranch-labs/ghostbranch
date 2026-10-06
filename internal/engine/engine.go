@@ -32,10 +32,12 @@ const (
 // Engine runs operations for one workspace. Prompt and Editor are nil when
 // there is no interactive terminal.
 type Engine struct {
-	Forge        forge.Forge
-	WS           *workspace.Workspace
-	Actor        string
-	Token        string
+	Forge forge.Forge
+	WS    *workspace.Workspace
+	Actor string
+	Token string
+	// TokenSource names where Token came from, for error messages.
+	TokenSource  string
 	Now          func() time.Time
 	Sleep        func(time.Duration)
 	Rand         io.Reader
