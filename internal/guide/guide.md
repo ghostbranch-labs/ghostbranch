@@ -32,6 +32,20 @@ main, green CI, and a leak scan of exactly what will be published.
 - Want to see what a command would do? Add `--plan` (or `--dry-run`): it returns the exact
   operations and changes nothing.
 
+## When the gate finds a leak
+
+- **Exit 3, `LEAK_FOUND`:** `error.details.findings` lists what would leak. Remove it from the
+  feature branch, push to the shadow repo, and gate again (the first command in `next`).
+- If a finding in `error.details.waivable` is a false positive (a fake key in a test fixture, say),
+  **stop and give the person the `waivers add` command from `next`**. They check the finding at
+  their console, give the reason, and type the code. Findings in the commit message, branch or PR
+  text are never waivable: change the text.
+- **Exit 3, `MARKER_INVALID`:** fix the `BEGIN-INTERNAL` / `END-INTERNAL` lines named in
+  `error.details.problems`. Never delete only the marker lines: the internal lines would then be
+  published.
+- The warnings `WORKFLOW_CHANGED`, `LARGE_FILE` and `BINARY_FILE` don't block. Mention them to the
+  person when you hand over a publish.
+
 ## Never
 
 - Never push a feature branch, `ghostbranch`, or a `ghostbranch-gate/*` branch to the public repo
@@ -40,7 +54,7 @@ main, green CI, and a leak scan of exactly what will be published.
 - Never fake a terminal, read or type a console code, or run `ghostbranch agents allow`. Those are
   the person's.
 - Never edit `grants.json`, plan files or `.ghostbranch.yml` to get past a check.
-- Never try to waive or hide a leak-scan finding.
+- Never run `ghostbranch waivers add`, edit `waivers.json`, or otherwise hide a leak-scan finding.
 
 You may *suggest* these to the person, never run them yourself:
 
@@ -85,6 +99,15 @@ project's `.claude/settings.local.json`:
 ```
 
 Keep that file out of commits.
+
+## Internal sections (for people)
+
+Lines between a `BEGIN-INTERNAL` line and an `END-INTERNAL` line are removed from every published
+file, and the gate's CI runs on the stripped files, so it tests exactly what goes public. Put each
+marker on its own line, in the file's comment syntax: `// BEGIN-INTERNAL`, `# END-INTERNAL`,
+`<!-- BEGIN-INTERNAL -->`. A comment that starts with a marker and adds text, such as
+`// BEGIN-INTERNAL billing`, fails the gate rather than guess. Change the tokens with
+`leak_scan.markers` in `.ghostbranch.yml`.
 
 ## Strict isolation (for people)
 

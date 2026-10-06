@@ -112,3 +112,12 @@ func TestInstallAndUninstall(t *testing.T) {
 		}
 	}
 }
+
+func TestGuideTellsAgentsToHandWaiversToAPerson(t *testing.T) {
+	g := guide.Render(contract.Registry())
+	for _, want := range []string{"## When the gate finds a leak", "waivers add", "waivers.json", "MARKER_INVALID", "## Internal sections (for people)"} {
+		if !strings.Contains(g, want) {
+			t.Errorf("the guide lacks %q", want)
+		}
+	}
+}
