@@ -7,7 +7,7 @@
   "properties": {
     "ts": { "$ref": "common.schema.json#/$defs/time" },
     "actor": { "$ref": "common.schema.json#/$defs/actor" },
-    "op": { "enum": ["init", "sync", "feature start", "gate", "promote", "apply"] },
+    "op": { "enum": ["init", "sync", "feature start", "gate", "promote", "apply", "agents allow", "agents revoke", "grant_created", "grant_replaced", "grant_revoked"] },
     "pair": { "$ref": "common.schema.json#/$defs/repo" },
     "feature": { "type": "string" },
     "plan_id": { "$ref": "common.schema.json#/$defs/planId" },
@@ -19,6 +19,13 @@
         "kind": { "enum": ["console", "grant"] },
         "grant_id": { "type": "string", "pattern": "^g-[0-9a-f]{6}$" },
         "created_by": { "$ref": "common.schema.json#/$defs/actor" }
+      }
+    },
+    "grant": {
+      "type": "object", "additionalProperties": false, "required": ["id", "expires_at"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^g-[0-9a-f]{6}$" },
+        "expires_at": { "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/time" }] }
       }
     },
     "summary": { "type": "string" }
