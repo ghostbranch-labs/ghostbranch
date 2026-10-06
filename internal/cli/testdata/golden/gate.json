@@ -19,6 +19,24 @@
     "preview": null
   },
   "warnings": [],
-  "next": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "promote",
+        "feat-x",
+        "--mode",
+        "squash",
+        "--plan",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "the gate passed; plan the publish",
+      "needs_human": false,
+      "needs_input": [
+        "--message"
+      ]
+    }
+  ],
   "error": null
 }

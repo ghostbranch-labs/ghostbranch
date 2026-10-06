@@ -5,7 +5,19 @@
   "exit_code": 5,
   "data": {},
   "warnings": [],
-  "next": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "agents",
+        "allow",
+        "--json"
+      ],
+      "why": "a person must run this in their own terminal and type the code it shows",
+      "needs_human": true,
+      "needs_input": []
+    }
+  ],
   "error": {
     "code": "APPROVAL_REQUIRED",
     "message": "publishing needs a person to type a code at a console, or an agent grant (ghostbranch agents allow)",

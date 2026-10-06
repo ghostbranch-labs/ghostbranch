@@ -63,6 +63,17 @@
     "preview": null
   },
   "warnings": [],
-  "next": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "apply",
+        "20261005T120005Z-0c0d0e"
+      ],
+      "why": "publish the plan: a person runs this in their own terminal and types the code it shows (or allows agents first with ghostbranch agents allow)",
+      "needs_human": true,
+      "needs_input": []
+    }
+  ],
   "error": null
 }

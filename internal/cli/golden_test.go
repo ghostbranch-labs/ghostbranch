@@ -92,6 +92,8 @@ func TestGoldenContract(t *testing.T) {
 		{"promote_plan", gatedFeature, []string{"promote", "feat-x", "-m", "Add feature", "--plan"}, 0},
 		{"promote_needs_human", func(te *testEnv) { gatedFeature(te); te.vars["GHOSTBRANCH_ACTOR"] = "agent:claude-code" },
 			[]string{"promote", "feat-x", "-m", "Add feature", "--yes"}, 5},
+		{"promote_plan_under_grant", publishable, []string{"promote", "feat-x", "-m", "Add feature", "--plan"}, 0},
+		{"promote_grant_needs_yes", publishable, []string{"promote", "feat-x", "-m", "Add feature"}, 5},
 		{"promote_publish", publishable, []string{"promote", "feat-x", "-m", "Add feature", "--yes"}, 0},
 		{"apply_stale", func(te *testEnv) {
 			gatedFeature(te)

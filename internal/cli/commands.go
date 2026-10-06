@@ -5,6 +5,7 @@ import (
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
+	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
 func (a *app) root() *cobra.Command {
@@ -55,6 +56,9 @@ repo. Running it again resumes a partial setup.`,
 			}
 			o.Public = args[0]
 			res, w, err := e.Init(cmd.Context(), o)
+			if res != nil {
+				a.pairFull = workspace.Pair{Public: res.Public, Shadow: res.Shadow}
+			}
 			return done(a, res, w, err)
 		},
 	}

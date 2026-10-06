@@ -60,6 +60,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		PollInterval: time.Second, SettleWindow: 5 * time.Second,
 		Executable: func() (string, error) { return filepath.Join(root, "bin", "ghostbranch"), nil },
 		Getwd:      func() (string, error) { return root, nil },
+		GuardState: func(string) (bool, bool) { return false, false },
 	}
 	return te
 }

@@ -63,7 +63,18 @@
     "preview": null
   },
   "warnings": [],
-  "next": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "apply",
+        "20261005T120005Z-0c0d0e"
+      ],
+      "why": "publish the plan: a person runs this in their own terminal and types the code it shows (or allows agents first with ghostbranch agents allow)",
+      "needs_human": true,
+      "needs_input": []
+    }
+  ],
   "error": {
     "code": "APPROVAL_REQUIRED",
     "message": "publishing needs a person to type a code at a console, or an agent grant (ghostbranch agents allow); plan 20261005T120005Z-0c0d0e is saved",

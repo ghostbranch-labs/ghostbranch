@@ -59,6 +59,9 @@ type Env struct {
 	Executable func() (string, error)
 	// Getwd is the directory guard commands act on.
 	Getwd func() (string, error)
+	// GuardState reports whether the current directory is a checkout of the
+	// public repo and whether the guard is installed there (for next).
+	GuardState func(public string) (inCheckout, installed bool)
 }
 
 // DefaultEnv is the real process environment.
@@ -75,6 +78,7 @@ func DefaultEnv() Env {
 		SettleWindow: engine.DefaultSettleWindow,
 		Executable:   os.Executable,
 		Getwd:        os.Getwd,
+		GuardState:   guardState,
 	}
 }
 
@@ -135,7 +139,8 @@ func commandName(cmd *cobra.Command) string {
 }
 
 func (a *app) render(err error) int {
-	env := contract.NewEnvelope(a.command, a.result, a.warnings, nil, err)
+	next := a.next(err)
+	env := contract.NewEnvelope(a.command, a.result, a.warnings, next, err)
 	if a.jsonOut {
 		enc := json.NewEncoder(a.env.Stdout)
 		enc.SetEscapeHTML(false)
@@ -151,8 +156,41 @@ func (a *app) render(err error) int {
 	}
 	if env.Error != nil {
 		_, _ = fmt.Fprintf(a.env.Stderr, "error: %s [%s]\n", env.Error.Message, env.Error.Code)
+		printNext(a.env.Stderr, next)
+	} else {
+		printNext(a.env.Stdout, next)
 	}
 	return env.ExitCode
+}
+
+func printNext(w io.Writer, next []contract.Next) {
+	if len(next) == 0 {
+		return
+	}
+	_, _ = fmt.Fprintln(w, "Next:")
+	for _, n := range next {
+		line := shellJoin(n.Command)
+		for _, in := range n.NeedsInput {
+			line += " " + in + " <" + strings.TrimLeft(in, "-") + ">"
+		}
+		who := ""
+		if n.NeedsHuman {
+			who = " (a person must run this)"
+		}
+		_, _ = fmt.Fprintf(w, "  %s%s\n    %s\n", line, who, n.Why)
+	}
+}
+
+// shellJoin quotes arguments with spaces or quotes, for display only.
+func shellJoin(argv []string) string {
+	out := make([]string, len(argv))
+	for i, s := range argv {
+		if s == "" || strings.ContainsAny(s, " \t\"'") {
+			s = `"` + strings.ReplaceAll(s, `"`, `\"`) + `"`
+		}
+		out[i] = s
+	}
+	return strings.Join(out, " ")
 }
 
 // done records a command's result. r may be nil.

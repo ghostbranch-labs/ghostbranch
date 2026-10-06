@@ -11,6 +11,19 @@
     "preview": null
   },
   "warnings": [],
-  "next": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "gate",
+        "feat-x",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "push work to the feature branch in the shadow repo, then gate it",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
   "error": null
 }
