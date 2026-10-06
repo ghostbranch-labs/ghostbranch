@@ -73,3 +73,23 @@ func TestAgentsAllowThroughTheCLI(t *testing.T) {
 		t.Fatalf("revoke: %d %v", code, env)
 	}
 }
+
+// --non-interactive means never ask: even with a usable console, nothing is
+// shown there and the publish needs approval.
+func TestNonInteractiveNeverAsksAtTheConsole(t *testing.T) {
+	te := newTestEnv(t)
+	gatedFeature(te)
+	ty := atConsole(te, typeTheCode)
+	code, env := te.runJSON("promote", "feat-x", "-m", "Add feature", "--non-interactive")
+	e, _ := env["error"].(map[string]any)
+	d, _ := e["details"].(map[string]any)
+	if code != 5 || d["reason"] != "no_console" {
+		t.Fatalf("%d %v", code, env)
+	}
+	if ty.seen.Len() != 0 {
+		t.Fatalf("the console was used:\n%s", ty.seen.String())
+	}
+	if _, ok, _ := te.pubGit.Resolve(context.Background(), "refs/heads/feat-x"); ok {
+		t.Fatal("published without a person")
+	}
+}
