@@ -53,6 +53,21 @@ You may *suggest* these to the person, never run them yourself:
 
 {{ERROR_CODES}}
 
+## The pre-push guard (for people)
+
+`ghostbranch guard install` adds a pre-push hook to your checkout that refuses to push Ghostbranch
+feature work to the public repo. Its limits:
+
+- It needs git 2.31 or later, and it refuses checkouts whose hooks are managed by Husky.
+- An existing pre-push hook keeps running, under the name `pre-push.ghostbranch-chained`; a hook
+  that decides what to do from its own file name may not run as before.
+- It recognizes GitHub remotes by URL; an SSH host alias (for example `git@github-work:…`) is not
+  recognized.
+- It knows features from the local mirror. Feature work pushed under another branch name is caught
+  only if the mirror has seen it, so run `ghostbranch sync` now and then. A branch named after a
+  feature is always caught.
+- It covers only the checkout it is installed in, and `git push --no-verify` skips it.
+
 ## Strict isolation (for people)
 
 The console code, grants and the guard stop mistakes. They do not stop a determined agent: an agent
