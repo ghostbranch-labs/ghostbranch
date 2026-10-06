@@ -62,7 +62,10 @@ func (c *Challenger) Confirm(ctx context.Context, summary string) error {
 	if err != nil {
 		return refuse(approval.NoConsole)
 	}
-	defer func() { _ = dev.Close() }()
+	// On Windows a pending console read blocks Close until the person types
+	// another line, so Confirm never waits for the close. The reader goroutine
+	// and the handle are released when the process exits.
+	defer func() { go func() { _ = dev.Close() }() }()
 	code, err := NewCode(c.Rand)
 	if err != nil {
 		return err
@@ -80,8 +83,8 @@ func (c *Challenger) Confirm(ctx context.Context, summary string) error {
 	_, _ = fmt.Fprintf(dev, "%s\n\nTo confirm, type this code and press Enter: %s\nLeave it empty, or type n, to cancel.\n", summary, code)
 
 	// The reader goroutine closes lines at EOF, so a closed channel means
-	// "nothing more will be typed". It may stay blocked after a timeout or
-	// cancel; Close unblocks it where the OS allows, and the process ends soon.
+	// "nothing more will be typed". After a decision, timeout or cancel it may
+	// stay blocked in Read until the process exits.
 	lines := make(chan string, 1)
 	go func() {
 		defer close(lines)

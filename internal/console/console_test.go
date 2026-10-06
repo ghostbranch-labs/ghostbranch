@@ -94,6 +94,67 @@ func TestChallengeTimesOut(t *testing.T) {
 	}
 }
 
+// stuckDevice simulates Windows: a pending Read blocks Close, and Close only
+// returns once the gate is released (as if the person typed another line).
+type stuckDevice struct {
+	r    *io.PipeReader
+	gate chan struct{}
+}
+
+func (d *stuckDevice) Read(p []byte) (int, error)  { return d.r.Read(p) }
+func (d *stuckDevice) Write(p []byte) (int, error) { return len(p), nil }
+func (d *stuckDevice) Close() error {
+	<-d.gate
+	return d.r.Close()
+}
+
+// confirmWithStuckDevice runs Confirm against a device whose Close blocks, with
+// the pipe delivering typed and then staying open. It fails if Confirm does not
+// return within 2s.
+func confirmWithStuckDevice(t *testing.T, ctx context.Context, typed string, after func(time.Duration) <-chan time.Time) error {
+	t.Helper()
+	r, w := io.Pipe()
+	d := &stuckDevice{r: r, gate: make(chan struct{})}
+	t.Cleanup(func() { close(d.gate); _ = w.Close() })
+	if typed != "" {
+		go func() { _, _ = w.Write([]byte(typed)) }()
+	}
+	c := &console.Challenger{Open: func() (io.ReadWriteCloser, error) { return d, nil }, Rand: &testutil.SeqReader{}, After: after}
+	done := make(chan error, 1)
+	go func() { done <- c.Confirm(ctx, "s") }()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(2 * time.Second):
+		t.Fatal("Confirm did not return: it waited on closing the console device")
+		return nil
+	}
+}
+
+func TestConfirmDoesNotWaitOnClose(t *testing.T) {
+	if err := confirmWithStuckDevice(t, context.Background(), "ABCDEF\n", nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTimeoutDoesNotWaitOnClose(t *testing.T) {
+	fired := make(chan time.Time, 1)
+	fired <- time.Time{}
+	err := confirmWithStuckDevice(t, context.Background(), "", func(time.Duration) <-chan time.Time { return fired })
+	if reason(err) != approval.Timeout {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestCancelledContextReturnsPromptly(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := confirmWithStuckDevice(t, ctx, "", nil)
+	if !errors.Is(err, context.Canceled) || reason(err) != "" {
+		t.Fatalf("got %v", err)
+	}
+}
+
 func TestChallengeWithoutADeviceIsNoConsole(t *testing.T) {
 	c := &console.Challenger{Open: func() (io.ReadWriteCloser, error) { return nil, errors.New("no tty") }, Rand: &testutil.SeqReader{}}
 	if err := c.Confirm(context.Background(), "s"); reason(err) != approval.NoConsole {
