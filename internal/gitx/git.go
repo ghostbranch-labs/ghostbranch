@@ -81,7 +81,8 @@ var isolated = sync.OnceValues(func() (isolation, error) {
 
 // overrides neutralize user and system config that would change content
 // (autocrlf, attributes), block non-interactive runs (signing, credential
-// prompts), or run user code (hooks).
+// prompts), run user code (hooks, fsmonitor), or resolve conflicts from
+// recorded resolutions (rerere).
 func overrides(iso isolation) [][2]string {
 	return [][2]string{
 		{"core.autocrlf", "false"},
@@ -97,6 +98,8 @@ func overrides(iso isolation) [][2]string {
 		{"rebase.autoStash", "false"},
 		{"rebase.updateRefs", "false"},
 		{"gc.auto", "0"},
+		{"core.fsmonitor", "false"},
+		{"rerere.enabled", "false"},
 	}
 }
 

@@ -135,3 +135,22 @@ func TestCommitMessageIsReadExactlyAsStored(t *testing.T) {
 		t.Fatalf("CommitMessage = %q %v", msg, err)
 	}
 }
+
+func TestCommitIdentities(t *testing.T) {
+	ctx := context.Background()
+	g := testutil.BareRepo(t, filepath.Join(t.TempDir(), "r.git"))
+	tree, err := g.MakeTree(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := gitx.Identity{Name: "Ada Lovelace", Email: "ada@corp.internal", When: testutil.Base}
+	c := gitx.Identity{Name: "Bot", Email: "bot@example.com", When: testutil.Base}
+	sha, err := g.CommitTree(ctx, tree, nil, "m", a, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	author, committer, err := g.CommitIdentities(ctx, sha)
+	if err != nil || author != "Ada Lovelace <ada@corp.internal>" || committer != "Bot <bot@example.com>" {
+		t.Fatalf("CommitIdentities = %q, %q, %v", author, committer, err)
+	}
+}
