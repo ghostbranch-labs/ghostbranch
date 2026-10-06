@@ -141,6 +141,21 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 		return nil, warns, contract.New(contract.PlanStale, "plan %s's commit is missing from the shadow repo", pl.ID).
 			WithDetails(stale(pl, []string{"publish.commit"}))
 	}
+	// P matching C proves nothing if C itself kept internal sections (a plan
+	// from a binary that did not strip, or a forged one): derive the
+	// published tree again from the candidate's parent.
+	T2, _, err := publishedTree(ctx, g, gateC+"^", cfg)
+	if err != nil {
+		if ce := contract.From(err); ce.Code == contract.MarkerInvalid {
+			ce.Details["feature"] = pl.Feature
+		}
+		return nil, warns, err
+	}
+	if T2 != pl.Publish.Tree {
+		return nil, warns, contract.New(contract.PlanStale,
+			"plan %s was not built with this version's strip of internal sections; make a new plan with ghostbranch promote", pl.ID).
+			WithDetails(stale(pl, []string{"publish.tree"}))
+	}
 	set := overlay.NewSet(cfg.LeakScan.Strip...)
 	if err := assertPublish(ctx, g, P, pl.Publish.Tree, pl.Fingerprint.GateCandidate, pm, set); err != nil {
 		return nil, warns, err
@@ -215,6 +230,7 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 		res.Resumed = true
 	}
 	res.PublicPR, res.PRURL = pr.Number, pr.URL
+	m.SchemaVersion = feature.SchemaVersion
 	m.Promoted = &feature.Promoted{PublicPR: pr.Number, PlanID: pl.ID}
 	if err := e.updateMeta(ctx, pc, m, metaSHA); err != nil {
 		return res, warns, err

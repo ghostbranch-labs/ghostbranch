@@ -3,12 +3,14 @@ package engine_test
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
+	"github.com/ghostbranch-labs/ghostbranch/internal/plan"
 	"github.com/ghostbranch-labs/ghostbranch/internal/strip"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
 )
@@ -56,9 +58,9 @@ func TestGateStopsOnInvalidMarkersBeforeAnyPush(t *testing.T) {
 	}
 }
 
-// forgeRecordedTree rewrites a feature's recorded gate in the shadow repo,
-// as a binary that stripped differently would have left it.
-func forgeRecordedTree(t *testing.T, h *harness, name, tree string) {
+// forgeMeta rewrites a feature's metadata in the shadow repo, as another
+// binary (or a hand edit) would have left it.
+func forgeMeta(t *testing.T, h *harness, name string, edit func(*feature.Meta)) {
 	t.Helper()
 	sh := h.shadowGit()
 	ref := "refs/ghostbranch/features/" + name
@@ -70,7 +72,7 @@ func forgeRecordedTree(t *testing.T, h *harness, name, tree string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m.Gate.PublishedTree = tree
+	edit(&m)
 	blob, err := sh.HashObject(h.ctx, feature.Encode(m))
 	if err != nil {
 		t.Fatal(err)
@@ -101,6 +103,13 @@ func forgeRecordedTree(t *testing.T, h *harness, name, tree string) {
 	}
 }
 
+// forgeRecordedTree rewrites a feature's recorded gate in the shadow repo,
+// as a binary that stripped differently would have left it.
+func forgeRecordedTree(t *testing.T, h *harness, name, tree string) {
+	t.Helper()
+	forgeMeta(t, h, name, func(m *feature.Meta) { m.Gate.PublishedTree = tree })
+}
+
 // Review Focus 1: a gate recorded by the SP2 binary kept the internal lines
 // in its published tree. Promote must re-gate, never publish that tree.
 func TestPromoteRegatesWhenTheRecordedTreeDiffers(t *testing.T) {
@@ -119,6 +128,121 @@ func TestPromoteRegatesWhenTheRecordedTreeDiffers(t *testing.T) {
 	res, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Message: "m", PlanOnly: true})
 	if err != nil || res.Gate.Reused || res.Plan.Publish.Tree != gr.PublishedTree {
 		t.Fatalf("promote = %+v %v; want a fresh gate and the stripped tree %s", res.Gate, err, gr.PublishedTree)
+	}
+}
+
+// withFile returns entries with path's blob replaced by sha.
+func withFile(t *testing.T, entries []gitx.TreeEntry, path, sha string) []gitx.TreeEntry {
+	t.Helper()
+	out := append([]gitx.TreeEntry{}, entries...)
+	for i := range out {
+		if out[i].Path == path {
+			out[i].SHA = sha
+			return out
+		}
+	}
+	t.Fatalf("%s not in tree", path)
+	return nil
+}
+
+// A plan made by the SP2 binary has an unstripped candidate and publish
+// tree: P matches C apart from overlay paths and the recorded gate is green,
+// so only re-deriving T from the candidate's parent catches it. Forged here
+// end to end: gate branch, feature metadata, plan ref and plan file.
+func TestApplyRefusesAPlanWhoseTreeWasNotStripped(t *testing.T) {
+	h := newHarness(t)
+	h.init()
+	h.startFeature("feat-x", map[string]string{"app.go": internalSrc})
+	res, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Message: "Add app", PlanOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pl, _, err := plan.Load(h.eng.WS.PlansDir(), res.Plan.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sh := h.shadowGit()
+	C := pl.Fingerprint.GateCandidate
+	R, err := sh.MustResolve(h.ctx, C+"^")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rFile, err := sh.ListTree(h.ctx, R)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var internalBlob string
+	for _, en := range rFile {
+		if en.Path == "app.go" {
+			internalBlob = en.SHA
+		}
+	}
+	cEntries, err := sh.ListTree(h.ctx, C)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cTree, err := sh.MakeTree(h.ctx, withFile(t, cEntries, "app.go", internalBlob))
+	if err != nil {
+		t.Fatal(err)
+	}
+	C2, err := sh.CommitTree(h.ctx, cTree, []string{R}, "candidate", testutil.Author(1), testutil.Author(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pEntries, err := sh.ListTree(h.ctx, pl.Publish.Commit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	T2, err := sh.MakeTree(h.ctx, withFile(t, pEntries, "app.go", internalBlob))
+	if err != nil {
+		t.Fatal(err)
+	}
+	P2, err := sh.CommitTree(h.ctx, T2, []string{pl.Publish.Parent}, "Add app", testutil.Author(1), testutil.Author(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sh.UpdateRef(h.ctx, "refs/heads/ghostbranch-gate/feat-x", C2); err != nil {
+		t.Fatal(err)
+	}
+	forgeMeta(t, h, "feat-x", func(m *feature.Meta) { m.Gate.Candidate, m.Gate.PublishedTree = C2, T2 })
+	if err := sh.UpdateRef(h.ctx, "refs/ghostbranch/plans/"+pl.ID, P2); err != nil {
+		t.Fatal(err)
+	}
+	pl.Fingerprint.GateCandidate, pl.Publish.Commit, pl.Publish.Tree = C2, P2, T2
+	if _, err := plan.Save(h.eng.WS.PlansDir(), pl); err != nil {
+		t.Fatal(err)
+	}
+	before := h.publicRefs()
+
+	_, _, err = h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: pl.ID, Yes: true})
+	ce := wantCode(t, err, contract.PlanStale)
+	if !reflect.DeepEqual(ce.Details["moved"], []string{"publish.tree"}) || ce.Details["feature"] != "feat-x" {
+		t.Fatalf("details = %+v", ce.Details)
+	}
+	if !reflect.DeepEqual(h.publicRefs(), before) || len(h.forge.PRs(publicName)) != 0 {
+		t.Fatal("an unstripped plan reached the public repo")
+	}
+}
+
+// Applying rewrites feature.json at the current schema version.
+func TestApplyStampsTheMetaSchemaVersion(t *testing.T) {
+	h := newHarness(t)
+	h.init()
+	h.startFeature("feat-x", map[string]string{"app.go": publicSrc})
+	if _, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x"); err != nil {
+		t.Fatal(err)
+	}
+	forgeMeta(t, h, "feat-x", func(m *feature.Meta) { m.SchemaVersion = "0.2" })
+	if _, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Message: "Add app", Yes: true}); err != nil {
+		t.Fatal(err)
+	}
+	raw, _, err := h.shadowGit().ShowFile(h.ctx, "refs/ghostbranch/features/feat-x", feature.MetaFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := feature.Decode(raw)
+	if err != nil || m.Promoted == nil || m.SchemaVersion != feature.SchemaVersion {
+		t.Fatalf("meta = %+v %v; want promoted at schema %s", m, err, feature.SchemaVersion)
 	}
 }
 
