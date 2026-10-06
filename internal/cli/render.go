@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
+	"github.com/ghostbranch-labs/ghostbranch/internal/guide"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
 	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
 )
@@ -41,6 +42,29 @@ func previewText(b *strings.Builder, p *preview.Preview) {
 func human(r any) string {
 	var b strings.Builder
 	switch v := r.(type) {
+	case *guide.Printed:
+		b.WriteString(v.Markdown)
+	case *guide.InstallResult:
+		if v.Preview != nil {
+			previewText(&b, v.Preview)
+			break
+		}
+		fmt.Fprintf(&b, "Skill for %s %s: %s\n", v.Target, v.Action, v.Path)
+	case *ExplainResult:
+		for _, e := range v.Entries {
+			exit := ""
+			if e.ExitCode != nil {
+				exit = fmt.Sprintf(", exit %d", *e.ExitCode)
+			}
+			fmt.Fprintf(&b, "%s (%s%s): %s\n", e.Code, e.Kind, exit, e.Summary)
+			for _, c := range e.Causes {
+				fmt.Fprintf(&b, "  cause: %s\n", c)
+			}
+			fmt.Fprintf(&b, "  what to do: %s\n", e.WhatToDo)
+			if e.NeedsHuman {
+				b.WriteString("  a person must act\n")
+			}
+		}
 	case *engine.InitResult:
 		if v.Preview != nil {
 			previewText(&b, v.Preview)

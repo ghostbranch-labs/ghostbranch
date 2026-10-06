@@ -1,6 +1,7 @@
 package cli_test
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -130,6 +131,32 @@ func TestJSONEqualsTrue(t *testing.T) {
 	te := newTestEnv(t)
 	code, out, _ := te.run("gate", "--json=true")
 	if code != 2 || !strings.HasPrefix(strings.TrimSpace(out), "{") {
+		t.Fatalf("%d %q", code, out)
+	}
+}
+
+func TestGuideNeedsNoTokenAndMatchesItsSchema(t *testing.T) {
+	te := newTestEnv(t)
+	delete(te.vars, "GHOSTBRANCH_TOKEN")
+	code, out, _ := te.run("guide", "--json")
+	if code != 0 {
+		t.Fatalf("guide must work without a token: %d", code)
+	}
+	var env struct{ Data json.RawMessage }
+	_ = json.Unmarshal([]byte(out), &env)
+	validate(t, "guide.schema.json", env.Data)
+	code, human, _ := te.run("guide")
+	if code != 0 || !strings.HasPrefix(human, "# Ghostbranch: guide for coding agents") {
+		t.Fatalf("%d %q", code, human[:60])
+	}
+	te.vars["CLAUDE_CONFIG_DIR"] = filepath.Join(te.root, "claude")
+	if code, env := te.runJSON("guide", "--install", "claude"); code != 0 {
+		t.Fatalf("install: %d %v", code, env)
+	}
+	if _, err := os.Stat(filepath.Join(te.root, "claude", "skills", "ghostbranch", "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+	if code, out, _ := te.run("explain", "LEAK_FOUND"); code != 0 || !strings.Contains(out, "LEAK_FOUND (error, exit 3)") {
 		t.Fatalf("%d %q", code, out)
 	}
 }

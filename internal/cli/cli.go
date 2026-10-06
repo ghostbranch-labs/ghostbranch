@@ -38,6 +38,8 @@ type Env struct {
 	Stderr io.Writer
 	Stdin  io.Reader
 	Getenv func(string) string
+	// UserHome is the home directory user-level skills go under.
+	UserHome func() (string, error)
 	// ConsoleUsable is console.Usable(os.Stdin, os.Stderr): stdin and stderr
 	// are real terminals, so a person could be asked at the console.
 	ConsoleUsable bool
@@ -58,7 +60,7 @@ type Env struct {
 // DefaultEnv is the real process environment.
 func DefaultEnv() Env {
 	return Env{
-		Stdout: os.Stdout, Stderr: os.Stderr, Stdin: os.Stdin, Getenv: os.Getenv,
+		Stdout: os.Stdout, Stderr: os.Stderr, Stdin: os.Stdin, Getenv: os.Getenv, UserHome: os.UserHomeDir,
 		ConsoleUsable: console.Usable(os.Stdin, os.Stderr), OpenConsole: console.Open,
 		Now: time.Now, Sleep: time.Sleep, Rand: rand.Reader,
 		NewForge:     func(token string) (forge.Forge, error) { return ghforge.New(token), nil },

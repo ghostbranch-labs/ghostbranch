@@ -1,0 +1,61 @@
+{
+  "schema_version": "0.2",
+  "command": "explain",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "entries": [
+      {
+        "code": "3",
+        "kind": "exit",
+        "exit_code": 3,
+        "summary": "The gate failed: CI failed or did not run, or the leak scan found something.",
+        "causes": [],
+        "what_to_do": "Fix the feature (code, tests or leaked content) and gate again. Never try to work around the leak scan.",
+        "needs_human": false
+      },
+      {
+        "code": "CHECKS_FAILED",
+        "kind": "error",
+        "exit_code": 3,
+        "summary": "CI failed on the gate candidate.",
+        "causes": [],
+        "what_to_do": "Fix the failing checks listed in details.failed, push to the feature branch, and gate again.",
+        "needs_human": false
+      },
+      {
+        "code": "CI_TIMEOUT",
+        "kind": "error",
+        "exit_code": 3,
+        "summary": "CI did not finish in time.",
+        "causes": [],
+        "what_to_do": "Gate again, or raise gate.ci_timeout in .ghostbranch.yml.",
+        "needs_human": false
+      },
+      {
+        "code": "LEAK_FOUND",
+        "kind": "error",
+        "exit_code": 3,
+        "summary": "The leak scan found something in what would be published.",
+        "causes": [],
+        "what_to_do": "Remove the leaked content from the feature (see details.findings) and gate again. Agents never waive findings.",
+        "needs_human": false
+      },
+      {
+        "code": "NO_CI",
+        "kind": "error",
+        "exit_code": 3,
+        "summary": "No CI checks appeared on the gate candidate.",
+        "causes": [
+          "Actions is disabled in the shadow repo",
+          "no workflow triggers on pull_request or push"
+        ],
+        "what_to_do": "Enable Actions or add a workflow, then gate again.",
+        "needs_human": false
+      }
+    ]
+  },
+  "warnings": [],
+  "next": [],
+  "error": null
+}

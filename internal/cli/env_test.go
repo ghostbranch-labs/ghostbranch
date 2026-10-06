@@ -49,6 +49,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	te.env = cli.Env{
 		Stdin:        strings.NewReader(""),
 		Getenv:       func(k string) string { return te.vars[k] },
+		UserHome:     func() (string, error) { return filepath.Join(root, "home-dir"), nil },
 		Now:          clock.Now,
 		Sleep:        clock.Sleep,
 		Rand:         &testutil.SeqReader{},

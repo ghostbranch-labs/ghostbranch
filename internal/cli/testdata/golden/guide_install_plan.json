@@ -1,0 +1,23 @@
+{
+  "schema_version": "0.2",
+  "command": "guide",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "target": "claude",
+    "path": "<ROOT>/claude/skills/ghostbranch/SKILL.md",
+    "action": "installed",
+    "preview": {
+      "fingerprint": {},
+      "ops": [
+        {
+          "op": "write_file",
+          "path": "<ROOT>/claude/skills/ghostbranch/SKILL.md"
+        }
+      ]
+    }
+  },
+  "warnings": [],
+  "next": [],
+  "error": null
+}

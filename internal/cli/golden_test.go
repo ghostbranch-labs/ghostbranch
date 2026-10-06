@@ -25,6 +25,7 @@ var dataSchemas = map[string]string{
 	"init": "init.schema.json", "sync": "sync.schema.json", "feature start": "feature-start.schema.json",
 	"gate": "gate.schema.json", "promote": "promote.schema.json", "apply": "apply.schema.json",
 	"agents allow": "agents-allow.schema.json", "agents revoke": "agents-revoke.schema.json", "agents status": "agents-status.schema.json",
+	"explain": "explain.schema.json", "guide": "guide.schema.json",
 }
 
 func schema(t *testing.T, name string) *jsonschema.Schema {
@@ -113,6 +114,11 @@ func TestGoldenContract(t *testing.T) {
 		{"agents_allow_plan", initOnly, []string{"agents", "allow", "--for", "24h", "--plan"}, 0},
 		{"agents_allow_bad_for", initOnly, []string{"agents", "allow", "--for", "7h"}, 2},
 		{"agents_status", func(te *testEnv) { initOnly(te); grantAgents(te) }, []string{"agents", "status"}, 0},
+		{"explain_code", nil, []string{"explain", "approval_required"}, 0},
+		{"explain_exit", nil, []string{"explain", "3"}, 0},
+		{"explain_unknown", nil, []string{"explain", "NOPE"}, 2},
+		{"guide_install_plan", func(te *testEnv) { te.vars["CLAUDE_CONFIG_DIR"] = filepath.Join(te.root, "claude") },
+			[]string{"guide", "--install", "claude", "--plan"}, 0},
 		{"agents_revoke", func(te *testEnv) { initOnly(te); grantAgents(te) }, []string{"agents", "revoke"}, 0},
 		{"actor_unknown", func(te *testEnv) { initOnly(te); te.forge.UserErr = errors.New("rate limited") }, []string{"sync"}, 0},
 	}
