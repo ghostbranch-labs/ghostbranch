@@ -264,8 +264,22 @@ func TestInstallRefusesACommittableHooksDir(t *testing.T) {
 	outside := filepath.ToSlash(t.TempDir())
 	gitIn(t, dir, "config", "core.hooksPath", outside)
 	c, _ = guard.Open(ctx, dir)
-	if res, err := guard.Install(ctx, c, hook, false); err != nil || res.Status.HooksDir != filepath.Clean(filepath.FromSlash(outside)) {
+	res, err := guard.Install(ctx, c, hook, false)
+	if err != nil || res.Action != "installed" {
 		t.Fatalf("hooks dir outside the tree: %+v %v", res, err)
+	}
+	// git reports the resolved path; on macOS t.TempDir() sits under the
+	// /var -> /private/var symlink, so compare both sides resolved.
+	want, err := filepath.EvalSymlinks(filepath.FromSlash(outside))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := filepath.EvalSymlinks(res.Status.HooksDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("hooks dir = %q, want %q", got, want)
 	}
 }
 
