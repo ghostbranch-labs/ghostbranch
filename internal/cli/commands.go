@@ -16,7 +16,9 @@ and publishes a feature only through a gated promote: rebase on public main, gre
 scan of exactly what will go public.
 
 Every command takes --json for one machine-readable object on stdout. Exit codes:
-0 ok, 1 failure, 2 usage, 3 gate failed, 4 conflict, 5 needs human approval, 6 state changed since plan.`,
+0 ok, 1 failure, 2 usage, 3 gate failed, 4 conflict, 5 needs human approval, 6 state changed since plan.
+
+Coding agents: run "ghostbranch guide" first.`,
 		SilenceErrors: true,
 		SilenceUsage:  true,
 	}
@@ -31,7 +33,7 @@ Every command takes --json for one machine-readable object on stdout. Exit codes
 	})
 	feature := &cobra.Command{Use: "feature", Short: "Work with features (private branches in the shadow repo)"}
 	feature.AddCommand(a.featureStartCmd())
-	root.AddCommand(a.initCmd(), a.syncCmd(), feature, a.gateCmd(), a.promoteCmd(), a.applyCmd())
+	root.AddCommand(a.initCmd(), a.syncCmd(), feature, a.gateCmd(), a.promoteCmd(), a.applyCmd(), a.agentsCmd())
 	return root
 }
 

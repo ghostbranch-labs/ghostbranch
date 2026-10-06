@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"os"
 	"path/filepath"
@@ -23,6 +24,7 @@ var update = flag.Bool("update", false, "rewrite golden files")
 var dataSchemas = map[string]string{
 	"init": "init.schema.json", "sync": "sync.schema.json", "feature start": "feature-start.schema.json",
 	"gate": "gate.schema.json", "promote": "promote.schema.json", "apply": "apply.schema.json",
+	"agents allow": "agents-allow.schema.json", "agents revoke": "agents-revoke.schema.json", "agents status": "agents-status.schema.json",
 }
 
 func schema(t *testing.T, name string) *jsonschema.Schema {
@@ -107,6 +109,12 @@ func TestGoldenContract(t *testing.T) {
 		}, []string{"apply", "<PLAN>", "--dry-run"}, 0},
 		{"bad_flag", nil, []string{"gate"}, 2},
 		{"shadow_not_private", func(te *testEnv) { initOnly(te); te.forge.SetPrivate("acme/widget-shadow", false) }, []string{"sync"}, 1},
+		{"agents_allow_no_console", initOnly, []string{"agents", "allow"}, 5},
+		{"agents_allow_plan", initOnly, []string{"agents", "allow", "--for", "24h", "--plan"}, 0},
+		{"agents_allow_bad_for", initOnly, []string{"agents", "allow", "--for", "7h"}, 2},
+		{"agents_status", func(te *testEnv) { initOnly(te); grantAgents(te) }, []string{"agents", "status"}, 0},
+		{"agents_revoke", func(te *testEnv) { initOnly(te); grantAgents(te) }, []string{"agents", "revoke"}, 0},
+		{"actor_unknown", func(te *testEnv) { initOnly(te); te.forge.UserErr = errors.New("rate limited") }, []string{"sync"}, 0},
 	}
 	for _, s := range scenarios {
 		t.Run(s.name, func(t *testing.T) {

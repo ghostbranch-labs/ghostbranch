@@ -132,7 +132,7 @@ func TestSandboxLoop(t *testing.T) {
 		}
 		return os.Getenv(k)
 	}
-	env.StdinIsTTY = false
+	env.ConsoleUsable = false
 	run := func(want int, args ...string) map[string]any {
 		t.Helper()
 		var out bytes.Buffer

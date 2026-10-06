@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
@@ -100,6 +101,45 @@ func human(r any) string {
 			break
 		}
 		fmt.Fprintf(&b, "Published %s as PR #%d: %s\n", v.PublicBranch, v.PublicPR, v.PRURL)
+	case *engine.AgentsAllowResult:
+		if v.Preview != nil {
+			previewText(&b, v.Preview)
+			break
+		}
+		until := "until revoked"
+		if v.Grant.ExpiresAt != nil {
+			until = "until " + v.Grant.ExpiresAt.UTC().Format("2006-01-02 15:04 UTC")
+		}
+		fmt.Fprintf(&b, "Agents on this machine may publish to %s with --yes, %s.\nTake it back with: ghostbranch agents revoke --repo %s\n",
+			v.Grant.Public, until, v.Grant.Public)
+	case *engine.AgentsRevokeResult:
+		if v.Preview != nil {
+			previewText(&b, v.Preview)
+			break
+		}
+		if len(v.Revoked) == 0 {
+			b.WriteString("There was no agent grant to revoke.\n")
+		}
+		for _, g := range v.Revoked {
+			fmt.Fprintf(&b, "Agents may no longer publish to %s.\n", g.Public)
+		}
+	case *engine.AgentsStatusResult:
+		if len(v.Grants) == 0 {
+			b.WriteString("No agent grants on this machine.\n")
+		}
+		for _, g := range v.Grants {
+			switch {
+			case g.Expired:
+				fmt.Fprintf(&b, "%s: expired\n", g.Public)
+			case g.RemainingSeconds == nil:
+				fmt.Fprintf(&b, "%s: agents may publish, until revoked\n", g.Public)
+			default:
+				fmt.Fprintf(&b, "%s: agents may publish for %s more\n", g.Public, (time.Duration(*g.RemainingSeconds) * time.Second).String())
+			}
+		}
+		if v.Pair != "" {
+			fmt.Fprintf(&b, "The token from %s can publish to %s: %s\n", v.Token.Source, v.Pair, v.TokenCanPublish)
+		}
 	}
 	return b.String()
 }

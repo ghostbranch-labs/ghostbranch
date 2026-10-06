@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -133,3 +135,42 @@ func withLeakyFeature(te *testEnv) {
 	te.mustRun("feature", "start", "feat-x")
 	te.shadowCommit("feat-x", map[string]string{"config.env": "TOKEN=" + testutil.FakeGitHubToken() + "\n"})
 }
+
+var codeLine = regexp.MustCompile(`press Enter: ([A-Z0-9]{6})`)
+
+// typist is a fake console with a person at it: it reads the code it is
+// shown and types back answer(code).
+type typist struct {
+	pr       *io.PipeReader
+	pw       *io.PipeWriter
+	answer   func(code string) string
+	seen     strings.Builder
+	answered bool
+}
+
+func newTypist(answer func(code string) string) *typist {
+	pr, pw := io.Pipe()
+	return &typist{pr: pr, pw: pw, answer: answer}
+}
+
+func (c *typist) Read(p []byte) (int, error) { return c.pr.Read(p) }
+func (c *typist) Write(p []byte) (int, error) {
+	c.seen.Write(p)
+	if m := codeLine.FindStringSubmatch(c.seen.String()); m != nil && !c.answered {
+		c.answered = true
+		line := c.answer(m[1])
+		go func() { _, _ = c.pw.Write([]byte(line)) }()
+	}
+	return len(p), nil
+}
+func (c *typist) Close() error { return c.pw.Close() }
+
+// atConsole makes the test env look like a person's terminal.
+func atConsole(te *testEnv, answer func(code string) string) *typist {
+	ty := newTypist(answer)
+	te.env.ConsoleUsable = true
+	te.env.OpenConsole = func() (io.ReadWriteCloser, error) { return ty, nil }
+	return ty
+}
+
+func typeTheCode(code string) string { return code + "\n" }

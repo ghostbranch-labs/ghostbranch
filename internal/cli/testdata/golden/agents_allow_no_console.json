@@ -1,0 +1,18 @@
+{
+  "schema_version": "0.2",
+  "command": "agents allow",
+  "ok": false,
+  "exit_code": 5,
+  "data": {},
+  "warnings": [],
+  "next": [],
+  "error": {
+    "code": "APPROVAL_REQUIRED",
+    "message": "publishing needs a person to type a code at a console, or an agent grant (ghostbranch agents allow)",
+    "field": null,
+    "retryable": false,
+    "details": {
+      "reason": "no_console"
+    }
+  }
+}

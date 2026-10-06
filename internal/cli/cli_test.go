@@ -113,3 +113,23 @@ func TestPlanIsAPreview(t *testing.T) {
 		t.Fatalf("the preview must not have synced: %d %v", code, env)
 	}
 }
+
+// DEFERRED (sp2): a malformed actor is reported before auth or network.
+func TestActorIsCheckedFirst(t *testing.T) {
+	te := newTestEnv(t)
+	delete(te.vars, "GHOSTBRANCH_TOKEN")
+	te.vars["GHOSTBRANCH_ACTOR"] = "robot"
+	code, env := te.runJSON("sync")
+	if e, _ := env["error"].(map[string]any); code != 2 || e["field"] != "GHOSTBRANCH_ACTOR" {
+		t.Fatalf("%d %v", code, env)
+	}
+}
+
+// DEFERRED (sp2): --json=true is honoured even when flag parsing fails.
+func TestJSONEqualsTrue(t *testing.T) {
+	te := newTestEnv(t)
+	code, out, _ := te.run("gate", "--json=true")
+	if code != 2 || !strings.HasPrefix(strings.TrimSpace(out), "{") {
+		t.Fatalf("%d %q", code, out)
+	}
+}

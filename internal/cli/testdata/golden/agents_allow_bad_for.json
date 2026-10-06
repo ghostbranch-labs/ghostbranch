@@ -1,0 +1,16 @@
+{
+  "schema_version": "0.2",
+  "command": "agents allow",
+  "ok": false,
+  "exit_code": 2,
+  "data": {},
+  "warnings": [],
+  "next": [],
+  "error": {
+    "code": "BAD_FLAG",
+    "message": "--for must be 6h, 24h or 30d, or pass --until-revoked; got \"7h\"",
+    "field": "for",
+    "retryable": false,
+    "details": {}
+  }
+}
