@@ -25,6 +25,9 @@ main, green CI, and a leak scan of exactly what will be published.
   for another way.
 - Exit 6: the repos moved, so plan again. Exit 3: fix the code or remove the leaked content, then
   gate again. Exit 4: resolve the conflict the error names.
+- Set `GHOSTBRANCH_ACTOR=agent:<your-name>` (for example `agent:claude-code`) on every
+  `ghostbranch` command, so the ledger records that an agent acted. It is a label only; it never
+  grants or blocks anything.
 - Don't know a code? `ghostbranch explain <CODE> --json`.
 - Want to see what a command would do? Add `--plan` (or `--dry-run`): it returns the exact
   operations and changes nothing.
@@ -69,6 +72,19 @@ feature work to the public repo. Its limits:
 - It covers only the checkout it is installed in, and `git push --no-verify` skips it.
 - It reads Ghostbranch's state from the default location unless `GHOSTBRANCH_HOME` is set where git
   runs the hook.
+
+## Agent grants in Claude Code (for people)
+
+An agent grant (`ghostbranch agents allow`) lets agents publish with `--yes`, but Claude Code may
+still block an agent from running `ghostbranch apply … --yes` as self-approval. If you want the
+agent to publish under the grant, also allow the command in Claude Code, for example in the
+project's `.claude/settings.local.json`:
+
+```json
+{ "permissions": { "allow": ["Bash(ghostbranch apply:*)"] } }
+```
+
+Keep that file out of commits.
 
 ## Strict isolation (for people)
 
