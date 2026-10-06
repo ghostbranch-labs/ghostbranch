@@ -23,7 +23,10 @@ type Entry struct {
 	ErrorCode string    `json:"error_code,omitempty"`
 	Approval  *Approval `json:"approval,omitempty"`
 	Grant     *GrantRef `json:"grant,omitempty"`
-	Summary   string    `json:"summary"`
+	// Waivers are the finding ids an entry waived, revoked or relied on.
+	Waivers []string `json:"waivers,omitempty"`
+	Reason  string   `json:"reason,omitempty"`
+	Summary string   `json:"summary"`
 }
 
 // GrantRef names the grant an entry is about.

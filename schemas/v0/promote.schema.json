@@ -3,12 +3,13 @@
   "title": "promote data",
   "type": "object",
   "additionalProperties": false,
-  "required": ["gate", "plan", "plan_path", "findings", "applied", "preview"],
+  "required": ["gate", "plan", "plan_path", "findings", "waived", "applied", "preview"],
   "properties": {
     "gate": { "oneOf": [{ "type": "null" }, { "$ref": "gate.schema.json" }] },
     "plan": { "oneOf": [{ "type": "null" }, { "$ref": "plan.schema.json" }] },
     "plan_path": { "type": "string" },
     "findings": { "type": "array", "items": { "$ref": "finding.schema.json" } },
+    "waived": { "type": "array", "items": { "$ref": "waived.schema.json" } },
     "applied": { "oneOf": [{ "type": "null" }, { "$ref": "apply.schema.json" }] },
     "preview": { "oneOf": [{ "type": "null" }, { "$ref": "preview.schema.json" }] }
   }

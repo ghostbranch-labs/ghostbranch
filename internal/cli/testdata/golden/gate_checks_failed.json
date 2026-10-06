@@ -16,6 +16,7 @@
     ],
     "leak": "clean",
     "findings": [],
+    "waived": [],
     "shadow_pr": 1,
     "reused": false,
     "preview": null

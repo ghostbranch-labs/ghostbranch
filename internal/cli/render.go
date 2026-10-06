@@ -141,6 +141,7 @@ func human(r any) string {
 			fmt.Fprintf(&b, "  failed check: %s\n", c)
 		}
 		findings(&b, v.Findings)
+		waivedLines(&b, v.Waived)
 	case *engine.PromoteResult:
 		switch {
 		case v.Preview != nil:
@@ -151,6 +152,7 @@ func human(r any) string {
 			fmt.Fprintf(&b, "Plan %s saved to %s.\nPublish it with: ghostbranch apply %s\n", v.Plan.ID, v.PlanPath, v.Plan.ID)
 		}
 		findings(&b, v.Findings)
+		waivedLines(&b, v.Waived)
 	case *engine.ApplyResult:
 		if v.Preview != nil {
 			previewText(&b, v.Preview)
@@ -198,4 +200,10 @@ func human(r any) string {
 		}
 	}
 	return b.String()
+}
+
+func waivedLines(b *strings.Builder, ws []engine.WaivedFinding) {
+	for _, w := range ws {
+		fmt.Fprintf(b, "  waived %s: %s in %s (%s)\n", w.ID, w.Rule, location(w.Finding), w.Reason)
+	}
 }

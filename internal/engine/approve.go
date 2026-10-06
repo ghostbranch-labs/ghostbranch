@@ -87,12 +87,13 @@ func (e *Engine) authorize(ctx context.Context, p workspace.Pair, planID, summar
 }
 
 // planSummary is the "what goes public" view shown before confirming.
-func planSummary(pl plan.Plan, files []string) string {
+// author is read from the commit itself, not the plan file.
+func planSummary(pl plan.Plan, files []string, author string, waived []WaivedFinding, warnings []contract.Warning) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "About to publish to %s:\n", pl.Pair.Public)
 	fmt.Fprintf(&b, "  branch   %s\n", pl.Publish.TargetBranch)
 	fmt.Fprintf(&b, "  commit   %s (parent %s)\n", short(pl.Publish.Commit), short(pl.Publish.Parent))
-	fmt.Fprintf(&b, "  author   %s <%s>\n", pl.Publish.Author.Name, pl.Publish.Author.Email)
+	fmt.Fprintf(&b, "  author   %s\n", author)
 	fmt.Fprintf(&b, "  PR title %s\n", pl.Publish.PR.Title)
 	fmt.Fprintf(&b, "  files    %d changed\n", len(files))
 	for i, f := range files {
@@ -101,6 +102,12 @@ func planSummary(pl plan.Plan, files []string) string {
 			break
 		}
 		fmt.Fprintf(&b, "           %s\n", f)
+	}
+	for _, w := range waived {
+		fmt.Fprintf(&b, "  waived   %s %s in %s (%s)\n", w.ID, w.Rule, location(w.Finding), w.Reason)
+	}
+	for _, w := range warnings {
+		fmt.Fprintf(&b, "  warning  %s\n", w.Message)
 	}
 	fmt.Fprintf(&b, "Plan %s", pl.ID)
 	return b.String()

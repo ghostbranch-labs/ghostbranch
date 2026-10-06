@@ -19,6 +19,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/grant"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
 	"github.com/ghostbranch-labs/ghostbranch/internal/ledger"
+	"github.com/ghostbranch-labs/ghostbranch/internal/waiver"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
@@ -45,6 +46,7 @@ type Engine struct {
 	Progress     io.Writer
 	Approver     approval.Approver
 	Grants       *grant.Store
+	Waivers      *waiver.Store
 	Editor       func(initial string) (string, error)
 	NewScanner   func(leak.Rules) (leak.Scanner, error)
 	PollInterval time.Duration
@@ -108,10 +110,18 @@ func internalErr(err error, what string) error {
 	return contract.Wrap(contract.Internal, err, "%s", what)
 }
 
-func leakErr(findings []leak.Finding) error {
+func leakErr(feat string, findings []leak.Finding) error {
+	waivable, notWaivable := []string{}, []string{}
+	for _, f := range findings {
+		if f.Waivable {
+			waivable = append(waivable, f.ID)
+		} else {
+			notWaivable = append(notWaivable, f.ID)
+		}
+	}
 	return contract.New(contract.LeakFound,
 		"%d leak finding(s) in what would be published; nothing was pushed to the public repo", len(findings)).
-		WithDetails(map[string]any{"findings": findings})
+		WithDetails(map[string]any{"feature": feat, "findings": findings, "waivable": waivable, "not_waivable": notWaivable})
 }
 
 // record appends to the ledger. Dry runs are not recorded. A ledger failure

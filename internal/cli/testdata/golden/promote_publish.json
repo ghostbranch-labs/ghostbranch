@@ -15,6 +15,7 @@
       "failed_checks": [],
       "leak": "clean",
       "findings": [],
+      "waived": [],
       "shadow_pr": 0,
       "reused": true,
       "preview": null
@@ -54,11 +55,14 @@
       },
       "leak": {
         "findings": [],
+        "waived": [],
+        "warnings": [],
         "scanner_version": "gitleaks v8.30.1"
       }
     },
     "plan_path": "<ROOT>/home/workspaces/default/plans/20261005T120005Z-0c0d0e.json",
     "findings": [],
+    "waived": [],
     "applied": {
       "plan_id": "20261005T120005Z-0c0d0e",
       "public_branch": "feat-x",
@@ -70,6 +74,7 @@
         "grant_id": "g-0a0b0c",
         "created_by": "human:octo"
       },
+      "waived": [],
       "preview": null
     },
     "preview": null

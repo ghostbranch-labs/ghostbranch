@@ -27,6 +27,7 @@ import (
 	ghforge "github.com/ghostbranch-labs/ghostbranch/internal/forge/github"
 	"github.com/ghostbranch-labs/ghostbranch/internal/grant"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
+	"github.com/ghostbranch-labs/ghostbranch/internal/waiver"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
@@ -268,7 +269,8 @@ func (a *app) engine(ctx context.Context) (*engine.Engine, error) {
 	e := &engine.Engine{Forge: f, WS: ws, Actor: actor, Token: token, TokenSource: source,
 		Now: a.env.Now, Sleep: a.env.Sleep, Rand: a.env.Rand, Progress: a.env.Stderr,
 		NewScanner: a.env.NewScanner, PollInterval: a.env.PollInterval, SettleWindow: a.env.SettleWindow,
-		DryRun: a.dryRun, OnPush: a.env.OnPush, Grants: grant.NewStore(ws.GrantsPath(), ws.GrantsLockPath())}
+		DryRun: a.dryRun, OnPush: a.env.OnPush, Grants: grant.NewStore(ws.GrantsPath(), ws.GrantsLockPath()),
+		Waivers: waiver.NewStore(ws.WaiversPath(), ws.WaiversLockPath())}
 	if a.env.ConsoleUsable && !a.nonInteractive {
 		e.Editor = a.editor
 		if a.env.OpenConsole != nil {

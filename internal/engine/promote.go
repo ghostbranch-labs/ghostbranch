@@ -34,6 +34,7 @@ type PromoteResult struct {
 	Plan     *plan.Plan       `json:"plan"`
 	PlanPath string           `json:"plan_path"`
 	Findings []leak.Finding   `json:"findings"`
+	Waived   []WaivedFinding  `json:"waived"`
 	Applied  *ApplyResult     `json:"applied"`
 	Preview  *preview.Preview `json:"preview"`
 }
@@ -55,6 +56,9 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 			summary = "plan " + res.Plan.ID + " saved"
 		}
 		e.recordWith("promote", &p, opt.Feature, planID, summary, err, func(ent *ledger.Entry) {
+			if res != nil {
+				ent.Waivers = findingIDs(res.Waived)
+			}
 			if res != nil && res.Applied != nil {
 				ent.Approval = res.Applied.Approval
 			}
@@ -72,7 +76,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	if branch == "" {
 		branch = opt.Feature
 	}
-	res = &PromoteResult{Findings: []leak.Finding{}}
+	res = &PromoteResult{Findings: []leak.Finding{}, Waived: []WaivedFinding{}}
 	pc, err := e.open(ctx, "promote", p, true)
 	if err != nil {
 		return res, nil, err
@@ -118,7 +122,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	case fresh:
 		res.Gate = &GateResult{Feature: opt.Feature, FeatureHead: head, PublicMain: pm, Overlay: O,
 			Candidate: m.Gate.Candidate, PublishedTree: m.Gate.PublishedTree, Checks: m.Gate.Checks,
-			FailedChecks: []string{}, Leak: m.Gate.Leak, Findings: []leak.Finding{}, Reused: true}
+			FailedChecks: []string{}, Leak: m.Gate.Leak, Findings: []leak.Finding{}, Waived: []WaivedFinding{}, Reused: true}
 	case e.DryRun:
 		// Running the gate would push; say so and stop, rather than return
 		// a plan whose checks never ran.
@@ -160,15 +164,17 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	if err := assertPublish(ctx, g, P, T, C, pm, set); err != nil {
 		return res, warns, err
 	}
-	rep, version, err := e.scan(ctx, g, cfg, entries, pm, publishTexts(msg, who.Name, who.Email, branch, title, body))
+	ident := who.Name + " <" + who.Email + ">"
+	rep, version, err := e.scan(ctx, g, cfg, entries, pm, publishTexts(msg, ident, ident, branch, title, body))
 	if err != nil {
 		return res, warns, err
 	}
-	findings := rep.Findings
-	warns = addWarnings(warns, rep.Warnings...)
-	if len(findings) > 0 {
-		res.Findings = findings
-		return res, warns, leakErr(findings)
+	blocking, waived, ww := e.splitFindings(p, rep.Findings)
+	warns = addWarnings(addWarnings(warns, rep.Warnings...), ww...)
+	res.Waived = waived
+	if len(blocking) > 0 {
+		res.Findings = blocking
+		return res, warns, leakErr(opt.Feature, blocking)
 	}
 
 	if planID, err = plan.NewID(e.now(), e.Rand); err != nil {
@@ -180,7 +186,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 		Publish: plan.Publish{Commit: P, Tree: T, Parent: pm,
 			Author:       plan.Identity{Name: who.Name, Email: who.Email, Date: who.When},
 			TargetBranch: branch, PR: plan.PR{Title: title, Body: body}},
-		Leak: plan.Leak{Findings: []map[string]any{}, ScannerVersion: version}}
+		Leak: plan.Leak{Findings: []map[string]any{}, Waived: planWaived(waived), Warnings: append([]contract.Warning{}, rep.Warnings...), ScannerVersion: version}}
 	res.Plan = &pl
 	if e.DryRun {
 		pv := preview.New(map[string]string{"public_main": pm, "feature_head": head, "overlay": O, "gate_candidate": C})
@@ -269,10 +275,12 @@ func (e *Engine) message(opt PromoteOptions) (string, error) {
 }
 
 // publishTexts is every piece of text that goes public besides the tree.
-func publishTexts(msg, name, email, branch, title, body string) []leak.Text {
+// author and committer are "Name <email>".
+func publishTexts(msg, author, committer, branch, title, body string) []leak.Text {
 	return []leak.Text{
 		{Where: "commit_message", Content: msg},
-		{Where: "author", Content: name + " <" + email + ">"},
+		{Where: "author", Content: author},
+		{Where: "committer", Content: committer},
 		{Where: "branch", Content: branch},
 		{Where: "pr_title", Content: title},
 		{Where: "pr_body", Content: body},

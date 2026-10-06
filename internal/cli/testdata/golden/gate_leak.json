@@ -24,6 +24,7 @@
         "waivable": true
       }
     ],
+    "waived": [],
     "shadow_pr": 0,
     "reused": false,
     "preview": null
@@ -36,6 +37,7 @@
     "field": null,
     "retryable": false,
     "details": {
+      "feature": "feat-x",
       "findings": [
         {
           "id": "f-7b1b6723317f",
@@ -46,6 +48,10 @@
           "secret": "[REDACTED]",
           "waivable": true
         }
+      ],
+      "not_waivable": [],
+      "waivable": [
+        "f-7b1b6723317f"
       ]
     }
   }

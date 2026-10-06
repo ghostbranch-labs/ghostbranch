@@ -8,6 +8,7 @@
     "plan": null,
     "plan_path": "",
     "findings": [],
+    "waived": [],
     "applied": null,
     "preview": {
       "fingerprint": {

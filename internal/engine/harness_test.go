@@ -2,11 +2,14 @@ package engine_test
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/ghostbranch-labs/ghostbranch/internal/config"
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge/fake"
@@ -15,6 +18,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
 	"github.com/ghostbranch-labs/ghostbranch/internal/ledger"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
+	"github.com/ghostbranch-labs/ghostbranch/internal/waiver"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
@@ -94,6 +98,7 @@ func newHarness(t *testing.T) *harness {
 	h.approver = &approver{}
 	h.eng.Approver = h.approver
 	h.eng.Grants = grant.NewStore(ws.GrantsPath(), ws.GrantsLockPath())
+	h.eng.Waivers = waiver.NewStore(ws.WaiversPath(), ws.WaiversLockPath())
 	return h
 }
 
@@ -137,4 +142,28 @@ func wantCode(t *testing.T, err error, want contract.Code) *contract.Error {
 		t.Fatalf("want %s, got %v", want, err)
 	}
 	return contract.From(err)
+}
+
+// waive stores a waiver for f, as `waivers add` does after a person typed
+// the code. The binary has no other way to make one.
+func (h *harness) waive(f leak.Finding, reason string) {
+	h.t.Helper()
+	now := h.clock.Now()
+	if err := h.eng.Waivers.Add([]waiver.Waiver{{ID: f.ID, Public: publicName, Rule: f.Rule, Where: f.Where, Path: f.Path,
+		MatchSHA256: f.MatchSHA256, Reason: reason, CreatedAt: now, CreatedBy: "human:octo"}}, now); err != nil {
+		h.t.Fatal(err)
+	}
+}
+
+// setBlockPatterns commits block patterns to the overlay config.
+func (h *harness) setBlockPatterns(patterns ...string) {
+	h.t.Helper()
+	quoted := make([]string, len(patterns))
+	for i, p := range patterns {
+		b, _ := json.Marshal(p)
+		quoted[i] = string(b)
+	}
+	cfg := strings.Replace(string(config.Render(publicName, shadowName)), "block_patterns: []",
+		"block_patterns: ["+strings.Join(quoted, ", ")+"]", 1)
+	testutil.Commit(h.t, h.shadowGit(), engine.OverlayBranch, "block patterns", map[string]string{".ghostbranch.yml": cfg})
 }

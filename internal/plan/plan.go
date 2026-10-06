@@ -68,11 +68,22 @@ type Publish struct {
 	PR           PR       `json:"pr"`
 }
 
+// Waived is a finding the plan was approved with because a person waived it.
+type Waived struct {
+	ID     string `json:"id"`
+	Rule   string `json:"rule"`
+	Where  string `json:"where"`
+	Path   string `json:"path"`
+	Reason string `json:"reason"`
+}
+
 // Leak is the scan result the plan was approved with. A plan only exists
-// when Findings is empty.
+// when nothing blocks; waived findings and warnings are recorded.
 type Leak struct {
-	Findings       []map[string]any `json:"findings"`
-	ScannerVersion string           `json:"scanner_version"`
+	Findings       []map[string]any   `json:"findings"`
+	Waived         []Waived           `json:"waived"`
+	Warnings       []contract.Warning `json:"warnings"`
+	ScannerVersion string             `json:"scanner_version"`
 }
 
 type Plan struct {

@@ -28,6 +28,7 @@ type ApplyResult struct {
 	PRURL        string           `json:"pr_url"`
 	Resumed      bool             `json:"resumed"`
 	Approval     *ledger.Approval `json:"approval"`
+	Waived       []WaivedFinding  `json:"waived"`
 	Preview      *preview.Preview `json:"preview"`
 }
 
@@ -44,6 +45,7 @@ func (e *Engine) Apply(ctx context.Context, opt ApplyOptions) (res *ApplyResult,
 		e.recordWith("apply", pair, pl.Feature, pl.ID, summary, err, func(ent *ledger.Entry) {
 			if res != nil {
 				ent.Approval = res.Approval
+				ent.Waivers = findingIDs(res.Waived)
 			}
 		})
 	}()
@@ -151,19 +153,23 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 	if err != nil {
 		return nil, warns, internalErr(err, "read the commit message")
 	}
-	rep, _, err := e.scan(ctx, g, cfg, entries, pm, publishTexts(msg, pl.Publish.Author.Name,
-		pl.Publish.Author.Email, pl.Publish.TargetBranch, pl.Publish.PR.Title, pl.Publish.PR.Body))
+	author, committer, err := g.CommitIdentities(ctx, P)
+	if err != nil {
+		return nil, warns, internalErr(err, "read the published commit's author and committer")
+	}
+	rep, _, err := e.scan(ctx, g, cfg, entries, pm, publishTexts(msg, author, committer,
+		pl.Publish.TargetBranch, pl.Publish.PR.Title, pl.Publish.PR.Body))
 	if err != nil {
 		return nil, warns, err
 	}
-	findings := rep.Findings
-	warns = addWarnings(warns, rep.Warnings...)
-	if len(findings) > 0 {
-		return nil, warns, leakErr(findings)
+	blocking, waived, ww := e.splitFindings(pc.pair, rep.Findings)
+	warns = addWarnings(addWarnings(warns, rep.Warnings...), ww...)
+	if len(blocking) > 0 {
+		return nil, warns, leakErr(pl.Feature, blocking)
 	}
 
 	branch := pl.Publish.TargetBranch
-	res := &ApplyResult{PlanID: pl.ID, PublicBranch: branch}
+	res := &ApplyResult{PlanID: pl.ID, PublicBranch: branch, Waived: waived}
 	existing, exists, _ := g.Resolve(ctx, publicRef(branch))
 	if exists && existing != P {
 		return res, warns, branchExists(branch, existing)
@@ -180,7 +186,7 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 	if err != nil {
 		return nil, warns, internalErr(err, "list the files going public")
 	}
-	if res.Approval, err = e.authorize(ctx, pc.pair, pl.ID, planSummary(pl, files), yes); err != nil {
+	if res.Approval, err = e.authorize(ctx, pc.pair, pl.ID, planSummary(pl, files, author, waived, rep.Warnings), yes); err != nil {
 		return nil, warns, err
 	}
 	if !exists {

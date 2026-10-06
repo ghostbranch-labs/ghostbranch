@@ -14,6 +14,7 @@
     "failed_checks": [],
     "leak": "clean",
     "findings": [],
+    "waived": [],
     "shadow_pr": 0,
     "reused": false,
     "preview": {

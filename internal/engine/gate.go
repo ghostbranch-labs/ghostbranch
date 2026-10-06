@@ -12,22 +12,24 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
+	"github.com/ghostbranch-labs/ghostbranch/internal/ledger"
 	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
 type GateResult struct {
-	Feature       string         `json:"feature"`
-	FeatureHead   string         `json:"feature_head"`
-	PublicMain    string         `json:"public_main"`
-	Overlay       string         `json:"overlay"`
-	Candidate     string         `json:"candidate"`
-	PublishedTree string         `json:"published_tree"`
-	Checks        string         `json:"checks"`
-	FailedChecks  []string       `json:"failed_checks"`
-	Leak          string         `json:"leak"`
-	Findings      []leak.Finding `json:"findings"`
-	ShadowPR      int            `json:"shadow_pr"`
+	Feature       string          `json:"feature"`
+	FeatureHead   string          `json:"feature_head"`
+	PublicMain    string          `json:"public_main"`
+	Overlay       string          `json:"overlay"`
+	Candidate     string          `json:"candidate"`
+	PublishedTree string          `json:"published_tree"`
+	Checks        string          `json:"checks"`
+	FailedChecks  []string        `json:"failed_checks"`
+	Leak          string          `json:"leak"`
+	Findings      []leak.Finding  `json:"findings"`
+	Waived        []WaivedFinding `json:"waived"`
+	ShadowPR      int             `json:"shadow_pr"`
 	// Reused is set by promote when it reuses a fresh green gate instead of re-running it.
 	Reused  bool             `json:"reused"`
 	Preview *preview.Preview `json:"preview"`
@@ -45,7 +47,11 @@ func (e *Engine) Gate(ctx context.Context, p workspace.Pair, name string) (res *
 		if res != nil {
 			summary = fmt.Sprintf("checks %s, leak %s, candidate %s", res.Checks, res.Leak, short(res.Candidate))
 		}
-		e.record("gate", &p, name, "", summary, err)
+		e.recordWith("gate", &p, name, "", summary, err, func(ent *ledger.Entry) {
+			if res != nil {
+				ent.Waivers = findingIDs(res.Waived)
+			}
+		})
 	}()
 	pc, err := e.open(ctx, "gate", p, true)
 	if err != nil {
@@ -121,7 +127,7 @@ func (e *Engine) gate(ctx context.Context, pc *pairCtx, name string) (*GateResul
 	}
 	cfg, m, metaSHA, head, pm, O := b.cfg, b.meta, b.metaSHA, b.head, b.pm, b.O
 	res := &GateResult{Feature: name, FeatureHead: head, PublicMain: pm, Overlay: O,
-		Checks: feature.ChecksNotRun, FailedChecks: []string{}, Leak: feature.LeakClean, Findings: []leak.Finding{}}
+		Checks: feature.ChecksNotRun, FailedChecks: []string{}, Leak: feature.LeakClean, Findings: []leak.Finding{}, Waived: []WaivedFinding{}}
 	if err != nil {
 		return res, warns, err
 	}
@@ -130,9 +136,11 @@ func (e *Engine) gate(ctx context.Context, pc *pairCtx, name string) (*GateResul
 		return res, warns, err
 	}
 	res.Candidate, res.PublishedTree = C, b.T
-	findings := b.report.Findings
-	if len(findings) > 0 {
-		res.Leak, res.Findings = feature.LeakFound, findings
+	blocking, waived, ww := e.splitFindings(pc.pair, b.report.Findings)
+	warns = addWarnings(warns, ww...)
+	res.Waived = waived
+	if len(blocking) > 0 {
+		res.Leak, res.Findings = feature.LeakFound, blocking
 		if !e.DryRun {
 			// The leak is the result that matters: a failure to record it
 			// must not replace LEAK_FOUND with a lesser error.
@@ -141,7 +149,7 @@ func (e *Engine) gate(ctx context.Context, pc *pairCtx, name string) (*GateResul
 					Message: "the gate result could not be recorded in the feature metadata: " + contract.From(err).Message})
 			}
 		}
-		return res, warns, leakErr(findings)
+		return res, warns, leakErr(name, blocking)
 	}
 	if e.DryRun {
 		old, _, _ := g.Resolve(ctx, shadowRef(gateBranch(name)))
@@ -207,6 +215,7 @@ func (e *Engine) gate(ctx context.Context, pc *pairCtx, name string) (*GateResul
 }
 
 func (e *Engine) recordGate(ctx context.Context, pc *pairCtx, m feature.Meta, metaSHA string, res *GateResult) error {
+	m.SchemaVersion = feature.SchemaVersion
 	m.Gate = &feature.Gate{FeatureHead: res.FeatureHead, PublicMain: res.PublicMain, Overlay: res.Overlay,
 		Candidate: res.Candidate, PublishedTree: res.PublishedTree, Checks: res.Checks, Leak: res.Leak, At: e.now()}
 	return e.updateMeta(ctx, pc, m, metaSHA)

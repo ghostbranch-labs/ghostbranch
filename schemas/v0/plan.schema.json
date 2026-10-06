@@ -50,8 +50,16 @@
       }
     },
     "leak": {
-      "type": "object", "additionalProperties": false, "required": ["findings", "scanner_version"],
-      "properties": { "findings": { "type": "array", "maxItems": 0 }, "scanner_version": { "type": "string" } }
+      "type": "object", "additionalProperties": false, "required": ["findings", "waived", "warnings", "scanner_version"],
+      "properties": {
+        "findings": { "type": "array", "maxItems": 0 },
+        "waived": { "type": "array", "items": { "type": "object", "additionalProperties": false,
+          "required": ["id", "rule", "where", "path", "reason"],
+          "properties": { "id": { "type": "string", "pattern": "^f-[0-9a-f]{12}$" }, "rule": { "type": "string" },
+            "where": { "enum": ["tree", "path"] }, "path": { "type": "string" }, "reason": { "type": "string" } } } },
+        "warnings": { "type": "array", "items": { "type": "object", "required": ["code", "message"] } },
+        "scanner_version": { "type": "string" }
+      }
     }
   }
 }

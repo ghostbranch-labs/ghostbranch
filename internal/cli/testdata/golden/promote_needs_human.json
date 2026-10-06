@@ -15,6 +15,7 @@
       "failed_checks": [],
       "leak": "clean",
       "findings": [],
+      "waived": [],
       "shadow_pr": 0,
       "reused": true,
       "preview": null
@@ -54,11 +55,14 @@
       },
       "leak": {
         "findings": [],
+        "waived": [],
+        "warnings": [],
         "scanner_version": "gitleaks v8.30.1"
       }
     },
     "plan_path": "<ROOT>/home/workspaces/default/plans/20261005T120005Z-0c0d0e.json",
     "findings": [],
+    "waived": [],
     "applied": null,
     "preview": null
   },

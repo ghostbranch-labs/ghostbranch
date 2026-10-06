@@ -21,6 +21,8 @@
         "created_by": { "$ref": "common.schema.json#/$defs/actor" }
       }
     },
+    "waivers": { "type": "array", "items": { "type": "string", "pattern": "^f-[0-9a-f]{12}$" } },
+    "reason": { "type": "string" },
     "grant": {
       "type": "object", "additionalProperties": false, "required": ["id", "expires_at"],
       "properties": {
