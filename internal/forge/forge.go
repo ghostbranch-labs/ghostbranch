@@ -86,3 +86,16 @@ type CheckVisibility interface {
 	// ChecksLimited reports whether ListChecks for repo had reduced visibility.
 	ChecksLimited(repo string) bool
 }
+
+// PushAccess is whether the current token may push to a repo, from a probe
+// that pushes nothing. Can is "true", "false" or "unknown".
+type PushAccess struct {
+	Can        string `json:"can"`
+	HTTPStatus int    `json:"http_status"`
+}
+
+// PushProber is an optional interface for forges that can tell whether the
+// token may push to a repo without pushing.
+type PushProber interface {
+	PushAccess(ctx context.Context, full string) PushAccess
+}
