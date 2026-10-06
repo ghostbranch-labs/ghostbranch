@@ -79,6 +79,10 @@ func (a *app) waiversRevokeCmd() *cobra.Command {
 		Use:   "revoke <id>... | --all",
 		Short: "Revoke waivers for this repo, or every waiver with --all; needs no console",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if all && a.repo != "" {
+				a.ran = true
+				return contract.New(contract.BadFlag, "--all revokes every waiver in the workspace; drop --repo, or name ids").WithField("repo")
+			}
 			e, err := a.engine(cmd.Context())
 			if err != nil {
 				return err
