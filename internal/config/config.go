@@ -175,6 +175,11 @@ func set(cfg *Config, key string, v any) error {
 		if !ok || s == "" || strings.ContainsAny(s, " \t\r\n") {
 			return "", invalid(key, "must be a non-empty string without spaces")
 		}
+		if strings.Trim(s, "/*#-;%<!{}>") == "" {
+			// A token of comment punctuation would match the wrappers
+			// around every marker, or ordinary comment lines.
+			return "", invalid(key, "must contain a letter or digit")
+		}
 		return s, nil
 	}
 	var err error

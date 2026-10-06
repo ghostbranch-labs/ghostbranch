@@ -75,6 +75,9 @@ func TestInvalidConfigs(t *testing.T) {
 		"empty marker":      base + "leak_scan:\n  markers:\n    begin: \"\"\n",
 		"spaced marker":     base + "leak_scan:\n  markers:\n    begin: \"BEGIN INTERNAL\"\n",
 		"same markers":      base + "leak_scan:\n  markers:\n    begin: X\n    end: X\n",
+		"slash marker":      base + "leak_scan:\n  markers:\n    begin: \"//\"\n",
+		"punct marker":      base + "leak_scan:\n  markers:\n    end: \"<!--}>\"\n",
+		"star marker":       base + "leak_scan:\n  markers:\n    begin: \"*/\"\n",
 		"bad regex":         base + "leak_scan:\n  block_patterns: [\"ok\", \"(unclosed\"]\n",
 		"pattern not text":  base + "leak_scan:\n  block_patterns: [3]\n",
 		"patterns not list": base + "leak_scan:\n  block_patterns: JIRA\n",
@@ -89,6 +92,14 @@ func TestInvalidConfigs(t *testing.T) {
 	_, _, err := config.Parse([]byte(base + "promte:\n  target: pr\n"))
 	if contract.From(err).Field != "promte.target" {
 		t.Errorf("unknown key error must name the key, got %+v", contract.From(err))
+	}
+	_, _, err = config.Parse([]byte(base + "leak_scan:\n  markers:\n    end: \"#;%\"\n"))
+	if ce := contract.From(err); ce == nil || ce.Field != "leak_scan.markers.end" || !strings.Contains(ce.Message, "must contain a letter or digit") {
+		t.Errorf("a punctuation-only marker must be named, got %+v", ce)
+	}
+	_, _, err = config.Parse([]byte(base + "leak_scan:\n  markers:\n    begin: \"@@1\"\n"))
+	if err != nil {
+		t.Errorf("a marker with a digit is valid, got %v", err)
 	}
 	_, _, err = config.Parse([]byte(base + "leak_scan:\n  block_patterns: [\"ok\", \"(unclosed\"]\n"))
 	if contract.From(err).Field != "leak_scan.block_patterns[1]" {
