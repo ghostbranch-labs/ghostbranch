@@ -1,8 +1,11 @@
 package cli_test
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
+
+	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
 )
 
 func nextOf(t *testing.T, env map[string]any) []map[string]any {
@@ -51,10 +54,68 @@ func TestNextWalksTheLoop(t *testing.T) {
 	if a := argv(n[0]); a[len(a)-1] != "--yes" || n[0]["needs_human"] != false {
 		t.Fatalf("under a grant: %v", n)
 	}
+	// grant_needs_yes leaves a saved plan: publish that, rather than run the
+	// promote again.
 	_, env = te.runJSON("promote", "feat-x", "-m", "Add feature")
 	n = nextOf(t, env)
-	if a := argv(n[0]); !reflect.DeepEqual(a, []string{"ghostbranch", "promote", "feat-x", "-m", "Add feature", "--json", "--yes"}) || n[0]["needs_human"] != false {
+	if a := argv(n[0]); len(n) != 1 || !reflect.DeepEqual(a, []string{"ghostbranch", "apply", te.lastPlanID(), "--yes"}) || n[0]["needs_human"] != false {
 		t.Fatalf("grant_needs_yes: %v", n)
+	}
+}
+
+// A command a person must run goes to their own terminal: without
+// --non-interactive (which hides the console) and without --json.
+func TestNextForAPersonDropsAgentFlags(t *testing.T) {
+	te := newTestEnv(t)
+	initOnly(te)
+	for _, args := range [][]string{
+		{"agents", "allow", "--non-interactive", "--json"},
+		{"agents", "allow", "--json=true", "--non-interactive", "--for", "24h"},
+	} {
+		_, out, errOut := te.run(args...)
+		var env map[string]any
+		if err := json.Unmarshal([]byte(out), &env); err != nil {
+			t.Fatalf("%v: %v\n%s", args, err, errOut)
+		}
+		n := nextOf(t, env)
+		want := []string{"ghostbranch", "agents", "allow"}
+		if len(args) > 4 {
+			want = append(want, "--for", "24h")
+		}
+		if len(n) != 1 || !reflect.DeepEqual(argv(n[0]), want) || n[0]["needs_human"] != true {
+			t.Fatalf("%v: next = %v", args, n)
+		}
+	}
+}
+
+// Every suggestion names the workspace this run used, wherever it came from.
+func TestNextCarriesTheWorkspace(t *testing.T) {
+	te := newTestEnv(t)
+	te.vars["GHOSTBRANCH_WORKSPACE"] = "other"
+	te.env.GuardState = func(public string) (bool, bool) { return public == "acme/widget", false }
+	initOnly(te)
+	_, env := te.runJSON("feature", "start", "feat-x")
+	n := nextOf(t, env)
+	if len(n) != 2 || !reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "gate", "feat-x", "--repo", "acme/widget", "--workspace", "other"}) ||
+		!reflect.DeepEqual(argv(n[1]), []string{"ghostbranch", "guard", "install", "--workspace", "other"}) {
+		t.Fatalf("next = %v", n)
+	}
+	_, env = te.runJSON("agents", "allow")
+	if n := nextOf(t, env); len(n) != 1 || !reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "agents", "allow", "--workspace", "other"}) {
+		t.Fatalf("agents allow next = %v", n)
+	}
+}
+
+// A stale plan for another public branch is re-planned for that branch.
+func TestNextReplansForThePlansBranch(t *testing.T) {
+	te := newTestEnv(t)
+	gatedFeature(te)
+	te.mustRun("promote", "feat-x", "-m", "Add feature", "--branch", "public-name", "--plan")
+	testutil.Commit(t, te.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
+	_, env := te.runJSON("apply", te.lastPlanID())
+	n := nextOf(t, env)
+	if len(n) != 1 || !reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "promote", "feat-x", "--mode", "squash", "--plan", "--repo", "acme/widget", "--branch", "public-name"}) {
+		t.Fatalf("next = %v", n)
 	}
 }
 

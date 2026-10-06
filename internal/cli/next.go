@@ -10,11 +10,22 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/guard"
 )
 
-// gb is a ghostbranch argv, with --workspace when this run used one.
+// usedWorkspace is the workspace this run acted in: the engine's when there
+// is one, otherwise the one the flags and environment name.
+func (a *app) usedWorkspace() string {
+	if a.eng != nil && a.eng.WS != nil {
+		return a.eng.WS.Name
+	}
+	return a.workspaceName()
+}
+
+// gb is a ghostbranch argv, with --workspace unless this run used the
+// default workspace (it may have come from $GHOSTBRANCH_WORKSPACE, which the
+// next shell need not have).
 func (a *app) gb(args ...string) []string {
 	out := append([]string{"ghostbranch"}, args...)
-	if a.workspace != "" {
-		out = append(out, "--workspace", a.workspace)
+	if ws := a.usedWorkspace(); ws != "default" {
+		out = append(out, "--workspace", ws)
 	}
 	return out
 }
@@ -27,9 +38,28 @@ func (a *app) scoped(args ...string) []string {
 	return a.gb(args...)
 }
 
-// again is this run's own argv, plus extra flags.
-func (a *app) again(extra ...string) []string {
-	return append(append([]string{"ghostbranch"}, a.args...), extra...)
+// again is this run's own argv plus extra flags, with --workspace when gb
+// would add it. For a person (forHuman) it drops --non-interactive, which
+// hides the console they need, and --json: they run it in their own
+// terminal.
+func (a *app) again(forHuman bool, extra ...string) []string {
+	out := []string{"ghostbranch"}
+	hasWS := false
+	for _, arg := range a.args {
+		if arg == "--workspace" || strings.HasPrefix(arg, "--workspace=") {
+			hasWS = true
+		}
+		if forHuman && (arg == "--json" || strings.HasPrefix(arg, "--json=") ||
+			arg == "--non-interactive" || strings.HasPrefix(arg, "--non-interactive=")) {
+			continue
+		}
+		out = append(out, arg)
+	}
+	out = append(out, extra...)
+	if ws := a.usedWorkspace(); !hasWS && ws != "default" {
+		out = append(out, "--workspace", ws)
+	}
+	return out
 }
 
 // next is spec section 9.3: what to run now, exactly as given. Flags the
@@ -41,19 +71,27 @@ func (a *app) next(err error) []contract.Next {
 			reason, _ := ce.Details["reason"].(string)
 			planID, _ := ce.Details["plan_id"].(string)
 			switch {
+			case reason == "grant_needs_yes" && planID != "":
+				// The plan is saved: publish it rather than build it again.
+				return []contract.Next{{Command: a.gb("apply", planID, "--yes"), Why: "a person allowed agents to publish here; publish the saved plan with --yes"}}
 			case reason == "grant_needs_yes":
-				return []contract.Next{{Command: a.again("--yes"), Why: "a person allowed agents to publish here; repeat with --yes"}}
+				return []contract.Next{{Command: a.again(false, "--yes"), Why: "a person allowed agents to publish here; repeat with --yes"}}
 			case planID != "":
 				return []contract.Next{a.applyNext(planID, false)}
 			default:
-				return []contract.Next{{Command: a.again(), NeedsHuman: true,
+				return []contract.Next{{Command: a.again(true), NeedsHuman: true,
 					Why: "a person must run this in their own terminal and type the code it shows"}}
 			}
 		case contract.PlanStale:
 			f, _ := ce.Details["feature"].(string)
 			pub, _ := ce.Details["public"].(string)
+			branch, _ := ce.Details["branch"].(string)
 			if f != "" && pub != "" {
-				return []contract.Next{{Command: a.gb("promote", f, "--mode", "squash", "--plan", "--repo", pub),
+				args := []string{"promote", f, "--mode", "squash", "--plan", "--repo", pub}
+				if branch != "" && branch != f {
+					args = append(args, "--branch", branch)
+				}
+				return []contract.Next{{Command: a.gb(args...),
 					Why: "the repos moved since the plan was made; make a new plan", NeedsInput: []string{"--message"}}}
 			}
 		}
@@ -111,7 +149,7 @@ func (a *app) guardNext() []contract.Next {
 	if in, installed := a.env.GuardState(a.pairFull.Public); !in || installed {
 		return nil
 	}
-	return []contract.Next{{Command: []string{"ghostbranch", "guard", "install"}, NeedsHuman: true,
+	return []contract.Next{{Command: a.gb("guard", "install"), NeedsHuman: true,
 		Why: "block pushing feature work to the public remote from this checkout; the person decides whether to install it"}}
 }
 

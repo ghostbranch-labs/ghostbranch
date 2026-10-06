@@ -223,6 +223,12 @@ func (a *app) openWorkspace() (*workspace.Workspace, error) {
 	if err != nil {
 		return nil, contract.Wrap(contract.Internal, err, "find the state directory")
 	}
+	return workspace.Open(home, a.workspaceName())
+}
+
+// workspaceName is the workspace this run uses: --workspace, else
+// $GHOSTBRANCH_WORKSPACE, else "default".
+func (a *app) workspaceName() string {
 	name := a.workspace
 	if name == "" {
 		name = a.env.Getenv("GHOSTBRANCH_WORKSPACE")
@@ -230,7 +236,7 @@ func (a *app) openWorkspace() (*workspace.Workspace, error) {
 	if name == "" {
 		name = "default"
 	}
-	return workspace.Open(home, name)
+	return name
 }
 
 func (a *app) engine(ctx context.Context) (*engine.Engine, error) {

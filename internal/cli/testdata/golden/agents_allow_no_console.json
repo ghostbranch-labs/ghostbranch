@@ -10,8 +10,7 @@
       "command": [
         "ghostbranch",
         "agents",
-        "allow",
-        "--json"
+        "allow"
       ],
       "why": "a person must run this in their own terminal and type the code it shows",
       "needs_human": true,

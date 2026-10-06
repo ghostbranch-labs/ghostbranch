@@ -67,14 +67,11 @@
     {
       "command": [
         "ghostbranch",
-        "promote",
-        "feat-x",
-        "-m",
-        "Add feature",
-        "--json",
+        "apply",
+        "20261005T120005Z-0c0d0e",
         "--yes"
       ],
-      "why": "a person allowed agents to publish here; repeat with --yes",
+      "why": "a person allowed agents to publish here; publish the saved plan with --yes",
       "needs_human": false,
       "needs_input": []
     }
