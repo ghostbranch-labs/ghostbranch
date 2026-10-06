@@ -4,10 +4,8 @@
 package leak
 
 import (
-	"bytes"
 	"runtime/debug"
 	"sort"
-	"unicode/utf16"
 
 	"github.com/zricethezav/gitleaks/v8/config"
 	"github.com/zricethezav/gitleaks/v8/detect"
@@ -109,9 +107,9 @@ func (g *Gitleaks) Scan(in Input) ([]Finding, error) {
 		}
 	}
 	for _, f := range in.Files {
-		text, ok := decodeText(f.Content)
-		if !ok {
-			continue
+		text, enc := Decode(f.Content)
+		if enc == Binary {
+			continue // printable runs are scanned from Task 5 on
 		}
 		for _, lf := range g.detect(text, f.Path) {
 			// gitleaks StartLine is 0-based; findings are 1-based.
@@ -157,92 +155,4 @@ func (g *Gitleaks) Version() string {
 		}
 	}
 	return "gitleaks (unknown version)"
-}
-
-// sniffLen is how much of a blob is inspected to classify it, like git's
-// own binary detection.
-const sniffLen = 8000
-
-// decodeText returns a blob's content as text to scan, and false for a binary
-// blob that should be skipped. A UTF-8 BOM is stripped. UTF-16 text, which is
-// NUL-interleaved and would otherwise look binary, is transcoded to UTF-8 so
-// it is scanned with the same paths and line numbers. Other blobs with a NUL
-// in their first sniffLen bytes are binary; scanning printable runs inside
-// them is deferred to sub-project 3.
-//
-// A UTF-16 BOM is trusted only when NULs follow it. Latin-1 and other 8-bit
-// text can start with the same two bytes and has no NULs, so it is scanned
-// raw, BOM bytes included, as before UTF-16 support. Any NUL (rather than the
-// 40% pattern looksUTF16 needs without a BOM) is enough: UTF-16 that is
-// mostly non-Latin has few NULs, but any ASCII secret in it brings them.
-func decodeText(b []byte) (string, bool) {
-	sniff := func(b []byte) []byte {
-		if len(b) > sniffLen {
-			return b[:sniffLen]
-		}
-		return b
-	}
-	hasNUL := func(b []byte) bool { return bytes.IndexByte(sniff(b), 0) >= 0 }
-	switch {
-	case bytes.HasPrefix(b, []byte{0xEF, 0xBB, 0xBF}):
-		b = b[3:]
-	case bytes.HasPrefix(b, []byte{0xFF, 0xFE}) && hasNUL(b[2:]):
-		return decodeUTF16(b[2:], false), true
-	case bytes.HasPrefix(b, []byte{0xFE, 0xFF}) && hasNUL(b[2:]):
-		return decodeUTF16(b[2:], true), true
-	}
-	sample := sniff(b)
-	if !hasNUL(b) {
-		return string(b), true
-	}
-	if bigEndian, ok := looksUTF16(sample); ok {
-		return decodeUTF16(b, bigEndian), true
-	}
-	return "", false
-}
-
-// looksUTF16 detects BOM-less UTF-16 by its alternating NULs. Text that is
-// mostly ASCII or Latin-1 has a NUL in the high byte of nearly every code
-// unit: the odd-indexed bytes for little-endian, the even-indexed ones for
-// big-endian. The sample is UTF-16 when over 40% of the bytes on one side
-// are NUL and at most 5% on the other side are. The 40% floor leaves room for
-// non-Latin characters mixed in; the 5% ceiling rejects binaries, whose NULs
-// fall on both sides (and UTF-32, whose NULs fill both sides).
-func looksUTF16(sample []byte) (bigEndian, ok bool) {
-	units := len(sample) / 2
-	if units == 0 {
-		return false, false
-	}
-	var evenNUL, oddNUL int
-	for i := 0; i+1 < len(sample); i += 2 {
-		if sample[i] == 0 {
-			evenNUL++
-		}
-		if sample[i+1] == 0 {
-			oddNUL++
-		}
-	}
-	mostly := func(n int) bool { return n*10 > units*4 } // > 40%
-	hardly := func(n int) bool { return n*20 <= units }  // <= 5%
-	switch {
-	case mostly(oddNUL) && hardly(evenNUL):
-		return false, true
-	case mostly(evenNUL) && hardly(oddNUL):
-		return true, true
-	}
-	return false, false
-}
-
-// decodeUTF16 transcodes UTF-16 to UTF-8. A trailing odd byte is dropped and
-// unpaired surrogates become U+FFFD; neither stops the rest being scanned.
-func decodeUTF16(b []byte, bigEndian bool) string {
-	u := make([]uint16, len(b)/2)
-	for i := range u {
-		lo, hi := b[2*i], b[2*i+1]
-		if bigEndian {
-			lo, hi = hi, lo
-		}
-		u[i] = uint16(lo) | uint16(hi)<<8
-	}
-	return string(utf16.Decode(u))
 }
