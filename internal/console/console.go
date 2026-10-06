@@ -80,6 +80,9 @@ func (c *Challenger) Confirm(ctx context.Context, summary string) error {
 	if after == nil {
 		after = time.After
 	}
+	// Anything typed before the code appears (an Enter during a long gate)
+	// must not count as an answer.
+	flush(dev)
 	_, _ = fmt.Fprintf(dev, "%s\n\nTo confirm, type this code and press Enter: %s\nLeave it empty, or type n, to cancel.\n", summary, code)
 
 	// The reader goroutine closes lines at EOF, so a closed channel means
