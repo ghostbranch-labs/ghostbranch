@@ -40,9 +40,12 @@ main, green CI, and a leak scan of exactly what will be published.
   **stop and give the person the `waivers add` command from `next`**. They check the finding at
   their console, give the reason, and type the code. Findings in the commit message, branch or PR
   text are never waivable: change the text.
-- **Exit 3, `MARKER_INVALID`:** fix the `BEGIN-INTERNAL` / `END-INTERNAL` lines named in
-  `error.details.problems`. Never delete only the marker lines: the internal lines would then be
-  published.
+- **Exit 3, `MARKER_INVALID`:** `error.details.problems` names each bad marker line. If it is clear
+  which lines are meant to be internal, restore the marker pair (for example, add the missing
+  `END-INTERNAL` line). Never delete, rewrite or move marker lines or the internal lines between
+  them to make the gate pass; if it is not clear, stop and ask the person.
+- Never change `leak_scan` (`markers`, `block_patterns`, `strip`) in `.ghostbranch.yml` to get past
+  a finding; that is the person's call.
 - The warnings `WORKFLOW_CHANGED`, `LARGE_FILE` and `BINARY_FILE` don't block. Mention them to the
   person when you hand over a publish.
 
@@ -106,8 +109,8 @@ Lines between a `BEGIN-INTERNAL` line and an `END-INTERNAL` line are removed fro
 file, and the gate's CI runs on the stripped files, so it tests exactly what goes public. Put each
 marker on its own line, in the file's comment syntax: `// BEGIN-INTERNAL`, `# END-INTERNAL`,
 `<!-- BEGIN-INTERNAL -->`. A comment that starts with a marker and adds text, such as
-`// BEGIN-INTERNAL billing`, fails the gate rather than guess. Change the tokens with
-`leak_scan.markers` in `.ghostbranch.yml`.
+`// BEGIN-INTERNAL billing`, fails the gate rather than guess. A person can change the
+tokens with `leak_scan.markers` in `.ghostbranch.yml`.
 
 ## Strict isolation (for people)
 

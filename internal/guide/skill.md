@@ -10,5 +10,8 @@ Before using `ghostbranch`, run `ghostbranch guide` and follow it. It matches th
 
 In short: always pass `--json`, act on `exit_code` and `next`, and when `next` says
 `needs_human: true`, stop and give the person that command. Never push feature work to the public
-repo with git, never skip git hooks, and never run `ghostbranch agents allow` yourself. When the gate finds a leak, fix it or give the person the `waivers add` command from `next`; never run it yourself. Set
-`GHOSTBRANCH_ACTOR=agent:claude-code` (or your agent's name) on every `ghostbranch` command.
+repo with git, never skip git hooks, and never run `ghostbranch agents allow` yourself.
+When the gate finds a leak, fix it or give the person the `waivers add` command from `next`;
+never run it yourself, and never edit `waivers.json`, marker lines or `.ghostbranch.yml` to get past
+it. Set `GHOSTBRANCH_ACTOR=agent:claude-code` (or your agent's name) on every `ghostbranch`
+command.
