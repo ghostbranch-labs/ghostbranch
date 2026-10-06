@@ -162,3 +162,22 @@ func (e *Engine) scan(ctx context.Context, g *gitx.Git, cfg config.Config, entri
 	}
 	return rep, sc.Version(), nil
 }
+
+// addWarnings appends more to dst, skipping any warning that dst already
+// holds with the same code and message (a gate that promote ran itself and
+// promote's own scan raise the same file warnings).
+func addWarnings(dst []contract.Warning, more ...contract.Warning) []contract.Warning {
+	for _, w := range more {
+		dup := false
+		for _, d := range dst {
+			if d.Code == w.Code && d.Message == w.Message {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			dst = append(dst, w)
+		}
+	}
+	return dst
+}

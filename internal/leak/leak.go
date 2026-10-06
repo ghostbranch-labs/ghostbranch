@@ -235,7 +235,11 @@ func (g *Gitleaks) text(s, where, path string, lines bool) []Finding {
 func (g *Gitleaks) blocked(s string) []string {
 	var out []string
 	for _, re := range g.patterns {
-		out = append(out, re.FindAllString(s, -1)...)
+		for _, m := range re.FindAllString(s, -1) {
+			if m != "" { // a pattern that can match nothing must not block everything
+				out = append(out, m)
+			}
+		}
 	}
 	return out
 }

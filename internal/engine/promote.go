@@ -118,7 +118,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 		e.progressf("the gate for %s is missing or stale; running it", opt.Feature)
 		gr, gw, err := e.gate(ctx, pc, opt.Feature)
 		res.Gate = gr
-		warns = append(warns, gw...)
+		warns = addWarnings(warns, gw...)
 		if err != nil {
 			return res, warns, err
 		}
@@ -154,7 +154,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 		return res, warns, err
 	}
 	findings := rep.Findings
-	warns = append(warns, rep.Warnings...)
+	warns = addWarnings(warns, rep.Warnings...)
 	if len(findings) > 0 {
 		res.Findings = findings
 		return res, warns, leakErr(findings)

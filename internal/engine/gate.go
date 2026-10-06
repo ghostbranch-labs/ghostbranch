@@ -102,7 +102,7 @@ func (e *Engine) gate(ctx context.Context, pc *pairCtx, name string) (*GateResul
 		return res, warns, err
 	}
 	findings := rep.Findings
-	warns = append(warns, rep.Warnings...)
+	warns = addWarnings(warns, rep.Warnings...)
 	if len(findings) > 0 {
 		res.Leak, res.Findings = feature.LeakFound, findings
 		if !e.DryRun {

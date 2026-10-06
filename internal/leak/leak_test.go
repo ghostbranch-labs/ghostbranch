@@ -350,3 +350,14 @@ func TestNoSecretOrHintInJSON(t *testing.T) {
 		t.Fatalf("serialized findings leak the secret or hint: %s", b)
 	}
 }
+
+func TestEmptyBlockPatternMatchesAreIgnored(t *testing.T) {
+	rep, err := scanner(t, "x*").Scan(leak.Input{Paths: []string{"a.dat"}, Files: []leak.File{{Path: "a.dat", Content: []byte("abc\n")}}})
+	if err != nil || len(rep.Findings) != 0 {
+		t.Fatalf("empty matches must not block: %+v %v", rep.Findings, err)
+	}
+	rep, err = scanner(t, "x*").Scan(leak.Input{Paths: []string{"a.dat"}, Files: []leak.File{{Path: "a.dat", Content: []byte("xx\n")}}})
+	if err != nil || len(rep.Findings) != 1 || rep.Findings[0].Match != "xx" {
+		t.Fatalf("want one finding for xx: %+v %v", rep.Findings, err)
+	}
+}

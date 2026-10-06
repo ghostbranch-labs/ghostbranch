@@ -157,7 +157,7 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 		return nil, warns, err
 	}
 	findings := rep.Findings
-	warns = append(warns, rep.Warnings...)
+	warns = addWarnings(warns, rep.Warnings...)
 	if len(findings) > 0 {
 		return nil, warns, leakErr(findings)
 	}
