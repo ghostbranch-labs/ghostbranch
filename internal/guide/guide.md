@@ -106,10 +106,11 @@ Keep that file out of commits.
 ## Internal sections (for people)
 
 Lines between a `BEGIN-INTERNAL` line and an `END-INTERNAL` line are removed from every published
-file, and the gate's CI runs on the stripped files, so it tests exactly what goes public. Put each
-marker on its own line, in the file's comment syntax: `// BEGIN-INTERNAL`, `# END-INTERNAL`,
+file, and the gate's CI runs on the stripped files, so it tests exactly what goes public. Markers are
+matched ignoring case. Put each marker on its own line, in the file's comment syntax: `// BEGIN-INTERNAL`, `# END-INTERNAL`,
 `<!-- BEGIN-INTERNAL -->`. A line that looks like a marker but is not exactly one fails the
-gate rather than guess: a comment that adds text (`// BEGIN-INTERNAL billing`), a doubled
+gate rather than guess: a comment that adds text or punctuation after the marker
+(`// BEGIN-INTERNAL billing`, `// BEGIN-INTERNAL.`), a doubled
 prefix (`/// BEGIN-INTERNAL`, `## END-INTERNAL`), or a marker inside a multi-line comment
 (`/* BEGIN-INTERNAL` on one line, `*/` on another). So do markers in a UTF-16 or UTF-32 file,
 or in one Git reads as binary. A person can change the tokens with `leak_scan.markers` in

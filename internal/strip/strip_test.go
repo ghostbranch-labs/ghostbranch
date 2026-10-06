@@ -54,6 +54,18 @@ func TestCut(t *testing.T) {
 		{name: "triple slash", in: "/// BEGIN-INTERNAL\nx\n/// END-INTERNAL\n", problem: "malformed", line: 1},
 		{name: "double hash", in: "a\n## BEGIN-INTERNAL\nx\n## END-INTERNAL\n", problem: "malformed", line: 2},
 		{name: "doubled block comment opener", in: "/** END-INTERNAL */\n", problem: "malformed", line: 1},
+		{name: "lower case markers", in: "a\n// begin-internal\nsecret\n// end-internal\nb\n", want: "a\nb\n"},
+		{name: "mixed case markers", in: "a\n# Begin-Internal\nsecret\n# End-Internal\nb\n", want: "a\nb\n"},
+		{name: "begin with a period", in: "// BEGIN-INTERNAL.\nx\n// END-INTERNAL\n", problem: "malformed", line: 1},
+		{name: "begin with a comma", in: "a\n// BEGIN-INTERNAL,\nx\n// END-INTERNAL\n", problem: "malformed", line: 2},
+		{name: "block comment with a semicolon", in: "/* BEGIN-INTERNAL; */\nx\n/* END-INTERNAL */\n", problem: "malformed", line: 1},
+		{name: "begin with parentheses", in: "// BEGIN-INTERNAL(billing)\nx\n// END-INTERNAL\n", problem: "malformed", line: 1},
+		{name: "begin then a non-breaking space and text", in: "// BEGIN-INTERNAL billing\nx\n// END-INTERNAL\n", problem: "malformed", line: 1},
+		{name: "end with a period, lower case", in: "// begin-internal\nx\n// end-internal.\n", problem: "malformed", line: 3},
+		{name: "multi-line comment, punctuation after token", in: "/* BEGIN-INTERNAL.\nx\n*/\n", problem: "malformed", line: 1},
+		{name: "longer token with underscore", in: "// BEGIN-INTERNAL_X\n", want: "// BEGIN-INTERNAL_X\n"},
+		{name: "longer token with dash", in: "// BEGIN-INTERNAL-X\n", want: "// BEGIN-INTERNAL-X\n"},
+		{name: "longer token with digit", in: "// BEGIN-INTERNAL2\n", want: "// BEGIN-INTERNAL2\n"},
 		{name: "unmatched begin", in: "a\n// BEGIN-INTERNAL\nx\n", problem: "unmatched_begin", line: 2},
 		{name: "unmatched end", in: "a\n// END-INTERNAL\n", problem: "unmatched_end", line: 2},
 		{name: "nested", in: "// BEGIN-INTERNAL\n// BEGIN-INTERNAL\n// END-INTERNAL\n// END-INTERNAL\n", problem: "nested", line: 2},
@@ -102,7 +114,8 @@ func TestCutRefusesMarkersInBinaries(t *testing.T) {
 		cjk = append(cjk, byte(u), byte(u>>8))
 	}
 	strayNUL := []byte("a\x00b\n// BEGIN-INTERNAL\nsecret\n// END-INTERNAL\nc\n")
-	for name, b := range map[string][]byte{"utf-16 cjk": cjk, "stray nul": strayNUL} {
+	lowerNUL := []byte("a\x00b\n// begin-internal.\nsecret\n// end-internal\nc\n")
+	for name, b := range map[string][]byte{"utf-16 cjk": cjk, "stray nul": strayNUL, "stray nul, lower case": lowerNUL} {
 		t.Run(name, func(t *testing.T) {
 			out, changed, p := strip.Cut(b, markers)
 			if p == nil || p.Problem != "unsupported_encoding" || p.Line != 1 || changed || string(out) != string(b) {
@@ -115,6 +128,13 @@ func TestCutRefusesMarkersInBinaries(t *testing.T) {
 func TestCustomTokens(t *testing.T) {
 	out, changed, p := strip.Cut([]byte("a\n// @@private\nx\n// @@end\n"), strip.Markers{Begin: "@@private", End: "@@end"})
 	if p != nil || !changed || string(out) != "a\n" {
+		t.Fatalf("Cut = %q %v %+v", out, changed, p)
+	}
+}
+
+func TestCustomTokensIgnoreCase(t *testing.T) {
+	out, changed, p := strip.Cut([]byte("a\n// @@PRIVATE\nx\n// @@End\nb\n"), strip.Markers{Begin: "@@private", End: "@@end"})
+	if p != nil || !changed || string(out) != "a\nb\n" {
 		t.Fatalf("Cut = %q %v %+v", out, changed, p)
 	}
 }

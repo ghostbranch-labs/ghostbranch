@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
@@ -66,17 +67,42 @@ func unwrap(s string) (string, bool) {
 	return s, false
 }
 
-// classify says whether a line is exactly token, after whitespace and at
-// most one comment wrapper. A line that is not exact but looks meant as a
-// marker is malformed, because guessing wrong would publish the internal
-// lines: a comment that starts with the token and then has more text, or a
-// near miss (see nearMiss).
+// tokenAt reports whether s starts with token, ignoring case, and returns
+// what follows it.
+func tokenAt(s, token string) (string, bool) {
+	if len(s) < len(token) || !strings.EqualFold(s[:len(token)], token) {
+		return "", false
+	}
+	return s[len(token):], true
+}
+
+// endsWord reports whether rest continues the token as a longer word: it
+// starts with an ASCII letter or digit, '-' or '_'. Anything else, including
+// the end of the line, ends the token.
+func endsWord(rest string) bool {
+	if rest == "" {
+		return true
+	}
+	r, _ := utf8.DecodeRuneInString(rest)
+	switch {
+	case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+		return false
+	}
+	return true
+}
+
+// classify says whether a line is exactly token (ignoring case), after
+// whitespace and at most one comment wrapper. A line that is not exact but
+// looks meant as a marker is malformed, because guessing wrong would publish
+// the internal lines: a comment that starts with the token and then has
+// anything but more word characters, or a near miss (see nearMiss).
 func classify(line, token string) kind {
 	s, wrapped := unwrap(strings.TrimSpace(line))
+	rest, ok := tokenAt(s, token)
 	switch {
-	case s == token:
+	case ok && rest == "":
 		return exact
-	case wrapped && len(s) > len(token) && strings.HasPrefix(s, token) && strings.ContainsRune(" \t:", rune(s[len(token)])):
+	case wrapped && ok && endsWord(rest):
 		return malformed
 	case nearMiss(strings.TrimSpace(line), token):
 		return malformed
@@ -92,7 +118,8 @@ var closers = []string{"*/}", "-->", "*/"}
 
 // nearMiss reports a line that, once any leading run of comment punctuation
 // and whitespace and any trailing comment closers are removed, starts with
-// token followed by the end of the line, whitespace or ':'. That catches a
+// token (ignoring case) followed by the end of the line or any character
+// but an ASCII letter or digit, '-' or '_'. That catches a
 // marker on the first or last line of a multi-line comment, and doubled
 // prefixes such as "///" or "##". Text before the token, or a longer token,
 // is not a near miss.
@@ -110,7 +137,7 @@ func nearMiss(s, token string) bool {
 	// A token may itself start with punctuation, so try it at every point
 	// of the leading run rather than only after it.
 	for i := 0; i <= len(s); i++ {
-		if rest, ok := strings.CutPrefix(s[i:], token); ok && (rest == "" || strings.ContainsRune(" \t:", rune(rest[0]))) {
+		if rest, ok := tokenAt(s[i:], token); ok && endsWord(rest) {
 			return true
 		}
 		if i == len(s) || !strings.ContainsRune(leadPunct, rune(s[i])) {
