@@ -3,9 +3,11 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,9 +31,18 @@ type Promote struct {
 	DefaultMode string
 }
 
+// Markers are the tokens that open and close an internal section.
+type Markers struct {
+	Begin string
+	End   string
+}
+
 type LeakScan struct {
-	Strip   []string
-	Secrets bool
+	Strip         []string
+	Secrets       bool
+	Markers       Markers
+	BlockPatterns []string
+	LargeFile     int64
 }
 
 type Gate struct {
@@ -42,10 +53,11 @@ type Gate struct {
 // Default is the configuration init writes.
 func Default() Config {
 	return Config{
-		Version:  1,
-		Promote:  Promote{Target: "pr", DefaultMode: "squash"},
-		LeakScan: LeakScan{Strip: []string{".ghostbranch/**"}, Secrets: true},
-		Gate:     Gate{CIAppearTimeout: 10 * time.Minute, CITimeout: 60 * time.Minute},
+		Version: 1,
+		Promote: Promote{Target: "pr", DefaultMode: "squash"},
+		LeakScan: LeakScan{Strip: []string{".ghostbranch/**"}, Secrets: true,
+			Markers: Markers{Begin: "BEGIN-INTERNAL", End: "END-INTERNAL"}, BlockPatterns: []string{}, LargeFile: 5 << 20},
+		Gate: Gate{CIAppearTimeout: 10 * time.Minute, CITimeout: 60 * time.Minute},
 	}
 }
 
@@ -53,11 +65,13 @@ var honoured = map[string]bool{
 	"version": true, "public": true, "shadow": true,
 	"promote.target": true, "promote.default_mode": true,
 	"leak_scan.strip": true, "leak_scan.secrets": true,
+	"leak_scan.markers.begin": true, "leak_scan.markers.end": true,
+	"leak_scan.block_patterns": true, "leak_scan.large_file": true,
 	"gate.ci_appear_timeout": true, "gate.ci_timeout": true,
 }
 
 // ignoredRoots are product-spec keys that later sub-projects implement.
-var ignoredRoots = []string{"sync", "ci", "agents", "promote.author_email", "leak_scan.markers", "leak_scan.block_patterns"}
+var ignoredRoots = []string{"sync", "ci", "agents"}
 
 var repoName = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 
@@ -65,6 +79,7 @@ var repoName = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 // pointer to what replaced them.
 var replaced = map[string]string{
 	"promote.require_human": "promote.require_human is replaced by agent grants (ghostbranch agents allow) and is ignored",
+	"promote.author_email":  "promote.author_email arrives with preserve mode and is ignored",
 }
 
 // Parse reads and validates a config file.
@@ -155,6 +170,18 @@ func set(cfg *Config, key string, v any) error {
 		}
 		return d, nil
 	}
+	token := func() (string, error) {
+		s, ok := v.(string)
+		if !ok || s == "" || strings.ContainsAny(s, " \t\r\n") {
+			return "", invalid(key, "must be a non-empty string without spaces")
+		}
+		if strings.Trim(s, "/*#-;%<!{}>") == "" {
+			// A token of comment punctuation would match the wrappers
+			// around every marker, or ordinary comment lines.
+			return "", invalid(key, "must contain a letter or digit")
+		}
+		return s, nil
+	}
 	var err error
 	switch key {
 	case "version":
@@ -186,12 +213,71 @@ func set(cfg *Config, key string, v any) error {
 			}
 			cfg.LeakScan.Strip = append(cfg.LeakScan.Strip, s)
 		}
+	case "leak_scan.markers.begin":
+		cfg.LeakScan.Markers.Begin, err = token()
+	case "leak_scan.markers.end":
+		cfg.LeakScan.Markers.End, err = token()
+	case "leak_scan.block_patterns":
+		list, ok := v.([]any)
+		if !ok {
+			return invalid(key, "must be a list of regular expressions")
+		}
+		cfg.LeakScan.BlockPatterns = []string{}
+		for i, item := range list {
+			field := fmt.Sprintf("%s[%d]", key, i)
+			s, ok := item.(string)
+			if !ok || s == "" {
+				return invalid(field, "must be a non-empty string")
+			}
+			if _, rerr := regexp.Compile(s); rerr != nil {
+				return invalid(field, "is not a valid Go regular expression: %v", rerr)
+			}
+			cfg.LeakScan.BlockPatterns = append(cfg.LeakScan.BlockPatterns, s)
+		}
+	case "leak_scan.large_file":
+		n, serr := ParseSize(v)
+		if serr != nil {
+			return invalid(key, "%v", serr)
+		}
+		cfg.LeakScan.LargeFile = n
 	case "gate.ci_appear_timeout":
 		cfg.Gate.CIAppearTimeout, err = dur()
 	case "gate.ci_timeout":
 		cfg.Gate.CITimeout, err = dur()
 	}
 	return err
+}
+
+var sizePattern = regexp.MustCompile(`(?i)^([0-9]+)\s*(KB|MB|GB)?$`)
+
+var errSize = errors.New("must be a positive size such as 5MB, 512KB or 1048576")
+
+// ParseSize reads leak_scan.large_file: a byte count, or a whole number
+// with KB, MB or GB (powers of 1024).
+func ParseSize(v any) (int64, error) {
+	var n int64
+	unit := ""
+	switch x := v.(type) {
+	case int:
+		n = int64(x)
+	case string:
+		m := sizePattern.FindStringSubmatch(strings.TrimSpace(x))
+		if m == nil {
+			return 0, errSize
+		}
+		p, err := strconv.ParseInt(m[1], 10, 64)
+		if err != nil {
+			return 0, errSize
+		}
+		n, unit = p, strings.ToUpper(m[2])
+	default:
+		return 0, errSize
+	}
+	shift := map[string]uint{"": 0, "KB": 10, "MB": 20, "GB": 30}[unit]
+	if n <= 0 || n > (int64(1)<<62)>>shift {
+		return 0, errSize
+	}
+	return n << shift, nil
 }
 
 func validate(c Config) error {
@@ -208,6 +294,8 @@ func validate(c Config) error {
 		return invalid("promote.default_mode", "only squash is supported in this version")
 	case !c.LeakScan.Secrets:
 		return invalid("leak_scan.secrets", "secret scanning cannot be disabled")
+	case c.LeakScan.Markers.Begin == c.LeakScan.Markers.End:
+		return invalid("leak_scan.markers", "begin and end must differ")
 	}
 	return nil
 }
@@ -226,6 +314,11 @@ promote:
 
 leak_scan:
   strip: [".ghostbranch/**"]
+  markers:
+    begin: BEGIN-INTERNAL
+    end: END-INTERNAL
+  block_patterns: []
+  large_file: 5MB
   secrets: true
 
 gate:

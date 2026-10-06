@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.2",
+  "schema_version": "0.3",
   "command": "apply",
   "ok": true,
   "exit_code": 0,
@@ -10,11 +10,12 @@
     "pr_url": "",
     "resumed": false,
     "approval": null,
+    "waived": [],
     "preview": {
       "fingerprint": {
         "feature_head": "d7407485ce685c126afcfc258f0a9eeb0092d776",
-        "gate_candidate": "d49d01dec389ef2590148b0e5e59dc80ebf3a0f3",
-        "overlay": "10e5ddddc0fd64a7daaff38906e96962dcbd4a40",
+        "gate_candidate": "6152a5194ee358189c553560ffcac65549b1401e",
+        "overlay": "b1428c4f99dd9fdcd40de6d3f9aea25809d4dfea",
         "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7"
       },
       "ops": [

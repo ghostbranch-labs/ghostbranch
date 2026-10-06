@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "A waived leak finding",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "rule", "where", "waivable", "reason"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^f-[0-9a-f]{12}$" },
+    "rule": { "type": "string" },
+    "where": { "enum": ["tree", "path", "commit_message", "author", "committer", "branch", "pr_title", "pr_body"] },
+    "path": { "type": "string" },
+    "line": { "type": "integer", "minimum": 1 },
+    "secret": { "const": "[REDACTED]" },
+    "match": { "type": "string" },
+    "waivable": { "type": "boolean" },
+    "reason": { "type": "string" }
+  }
+}

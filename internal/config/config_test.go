@@ -63,15 +63,25 @@ promote:
 func TestInvalidConfigs(t *testing.T) {
 	base := "version: 1\npublic: a/b\nshadow: a/b-shadow\n"
 	cases := map[string]string{
-		"unknown key":      base + "promte:\n  target: pr\n",
-		"bad version":      "version: 2\npublic: a/b\nshadow: a/b-shadow\n",
-		"missing public":   "version: 1\nshadow: a/b-shadow\n",
-		"merge target":     base + "promote:\n  target: merge\n",
-		"preserve mode":    base + "promote:\n  default_mode: preserve\n",
-		"secrets disabled": base + "leak_scan:\n  secrets: false\n",
-		"bad duration":     base + "gate:\n  ci_timeout: soon\n",
-		"strip not list":   base + "leak_scan:\n  strip: .ghostbranch/**\n",
-		"not yaml":         "version: [\n",
+		"unknown key":       base + "promte:\n  target: pr\n",
+		"bad version":       "version: 2\npublic: a/b\nshadow: a/b-shadow\n",
+		"missing public":    "version: 1\nshadow: a/b-shadow\n",
+		"merge target":      base + "promote:\n  target: merge\n",
+		"preserve mode":     base + "promote:\n  default_mode: preserve\n",
+		"secrets disabled":  base + "leak_scan:\n  secrets: false\n",
+		"bad duration":      base + "gate:\n  ci_timeout: soon\n",
+		"strip not list":    base + "leak_scan:\n  strip: .ghostbranch/**\n",
+		"not yaml":          "version: [\n",
+		"empty marker":      base + "leak_scan:\n  markers:\n    begin: \"\"\n",
+		"spaced marker":     base + "leak_scan:\n  markers:\n    begin: \"BEGIN INTERNAL\"\n",
+		"same markers":      base + "leak_scan:\n  markers:\n    begin: X\n    end: X\n",
+		"slash marker":      base + "leak_scan:\n  markers:\n    begin: \"//\"\n",
+		"punct marker":      base + "leak_scan:\n  markers:\n    end: \"<!--}>\"\n",
+		"star marker":       base + "leak_scan:\n  markers:\n    begin: \"*/\"\n",
+		"bad regex":         base + "leak_scan:\n  block_patterns: [\"ok\", \"(unclosed\"]\n",
+		"pattern not text":  base + "leak_scan:\n  block_patterns: [3]\n",
+		"patterns not list": base + "leak_scan:\n  block_patterns: JIRA\n",
+		"bad size":          base + "leak_scan:\n  large_file: huge\n",
 	}
 	for name, y := range cases {
 		_, _, err := config.Parse([]byte(y))
@@ -82,5 +92,61 @@ func TestInvalidConfigs(t *testing.T) {
 	_, _, err := config.Parse([]byte(base + "promte:\n  target: pr\n"))
 	if contract.From(err).Field != "promte.target" {
 		t.Errorf("unknown key error must name the key, got %+v", contract.From(err))
+	}
+	_, _, err = config.Parse([]byte(base + "leak_scan:\n  markers:\n    end: \"#;%\"\n"))
+	if ce := contract.From(err); ce == nil || ce.Field != "leak_scan.markers.end" || !strings.Contains(ce.Message, "must contain a letter or digit") {
+		t.Errorf("a punctuation-only marker must be named, got %+v", ce)
+	}
+	_, _, err = config.Parse([]byte(base + "leak_scan:\n  markers:\n    begin: \"@@1\"\n"))
+	if err != nil {
+		t.Errorf("a marker with a digit is valid, got %v", err)
+	}
+	_, _, err = config.Parse([]byte(base + "leak_scan:\n  block_patterns: [\"ok\", \"(unclosed\"]\n"))
+	if contract.From(err).Field != "leak_scan.block_patterns[1]" {
+		t.Errorf("a bad pattern must be named by index, got %+v", contract.From(err))
+	}
+}
+
+func TestLeakScanKeys(t *testing.T) {
+	y := "version: 1\npublic: a/b\nshadow: a/b-shadow\n" + `leak_scan:
+  markers:
+    begin: "@@INTERNAL"
+    end: "@@END"
+  block_patterns: ["internal\\.example\\.com", "JIRA-[0-9]+"]
+  large_file: 512KB
+`
+	cfg, warns, err := config.Parse([]byte(y))
+	if err != nil || len(warns) != 0 {
+		t.Fatalf("%v %v", warns, err)
+	}
+	ls := cfg.LeakScan
+	if ls.Markers != (config.Markers{Begin: "@@INTERNAL", End: "@@END"}) ||
+		!reflect.DeepEqual(ls.BlockPatterns, []string{`internal\.example\.com`, "JIRA-[0-9]+"}) || ls.LargeFile != 512*1024 {
+		t.Fatalf("leak_scan = %+v", ls)
+	}
+	d := config.Default().LeakScan
+	if d.Markers.Begin != "BEGIN-INTERNAL" || d.Markers.End != "END-INTERNAL" || d.LargeFile != 5<<20 || d.BlockPatterns == nil {
+		t.Fatalf("defaults = %+v", d)
+	}
+}
+
+func TestParseSize(t *testing.T) {
+	good := map[any]int64{1048576: 1048576, "5MB": 5 << 20, "512kb": 512 << 10, "1 GB": 1 << 30, "300": 300}
+	for in, want := range good {
+		if got, err := config.ParseSize(in); err != nil || got != want {
+			t.Errorf("ParseSize(%v) = %d %v, want %d", in, got, err, want)
+		}
+	}
+	for _, in := range []any{"0", "-1", "5TB", "", "5.5MB", 0, -3, 1.5, nil} {
+		if _, err := config.ParseSize(in); err == nil {
+			t.Errorf("ParseSize(%v) succeeded", in)
+		}
+	}
+}
+
+func TestAuthorEmailWaitsForPreserveMode(t *testing.T) {
+	_, warns, err := config.Parse([]byte("version: 1\npublic: a/b\nshadow: a/b-shadow\npromote:\n  author_email: keep\n"))
+	if err != nil || len(warns) != 1 || !strings.Contains(warns[0].Message, "preserve mode") {
+		t.Fatalf("%v %v", warns, err)
 	}
 }

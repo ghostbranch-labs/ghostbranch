@@ -1,0 +1,16 @@
+{
+  "schema_version": "0.3",
+  "command": "waivers add",
+  "ok": false,
+  "exit_code": 2,
+  "data": {},
+  "warnings": [],
+  "next": [],
+  "error": {
+    "code": "MISSING_INPUT",
+    "message": "say why these findings are safe to publish: pass --reason",
+    "field": "reason",
+    "retryable": false,
+    "details": {}
+  }
+}

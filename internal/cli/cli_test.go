@@ -181,3 +181,18 @@ func TestNewCommandsNeverPush(t *testing.T) {
 		t.Fatalf("pushes: %v", pushes)
 	}
 }
+
+// --all revokes every waiver in the workspace, whatever the repo, so an
+// explicit --repo beside it is refused rather than silently ignored.
+func TestWaiversRevokeAllRefusesRepo(t *testing.T) {
+	te := newTestEnv(t)
+	waiveLeak(te)
+	code, env := te.runJSON("waivers", "revoke", "--all", "--repo", "acme/widget")
+	e, _ := env["error"].(map[string]any)
+	if code != 2 || e["code"] != "BAD_FLAG" || e["field"] != "repo" {
+		t.Fatalf("%d %v", code, env)
+	}
+	if b, err := os.ReadFile(te.waiversFile()); err != nil || !strings.Contains(string(b), te.finding) {
+		t.Fatalf("the waiver must survive a refused revoke: %v %s", err, b)
+	}
+}

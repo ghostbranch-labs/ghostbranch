@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "A stored leak-finding waiver (never contains a secret)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "public", "rule", "where", "path", "match_sha256", "reason", "created_at", "created_by"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^f-[0-9a-f]{12}$" },
+    "public": { "type": "string" },
+    "rule": { "type": "string" },
+    "where": { "enum": ["tree", "path"] },
+    "path": { "type": "string" },
+    "match_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "reason": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string", "format": "date-time" },
+    "created_by": { "type": "string" }
+  }
+}

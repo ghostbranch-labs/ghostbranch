@@ -3,6 +3,7 @@ package ledger_test
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -26,7 +27,7 @@ func TestAppendIsOneLinePerEntry(t *testing.T) {
 		t.Fatalf("want 2 lines, got %d:\n%s", n, raw)
 	}
 	got, err := ledger.Read(path)
-	if err != nil || len(got) != 2 || got[0] != a || got[1] != b {
+	if err != nil || len(got) != 2 || !reflect.DeepEqual(got, []ledger.Entry{a, b}) {
 		t.Fatalf("Read = %+v %v", got, err)
 	}
 	if strings.Contains(strings.Split(string(raw), "\n")[0], "plan_id") {

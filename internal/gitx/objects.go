@@ -171,3 +171,53 @@ func (g *Git) DiffNames(ctx context.Context, a, b string) ([]string, error) {
 	}
 	return splitNUL(out), nil
 }
+
+// AttributesOverride is written to every engine mirror's info/attributes,
+// which outranks in-tree .gitattributes files. No tracked file can then name
+// a filter, a merge driver, or an eol or encoding conversion, so blobs pass
+// through a rebase byte for byte. merge=text is git's own 3-way merge.
+const AttributesOverride = "* -filter -ident -text -working-tree-encoding merge=text -diff\n"
+
+// ProtectAttributes writes AttributesOverride to the repository's
+// info/attributes, which its worktrees share.
+func (g *Git) ProtectAttributes(ctx context.Context) error {
+	dir, err := g.Run(ctx, "rev-parse", "--git-common-dir")
+	if err != nil {
+		return err
+	}
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(g.Dir, dir)
+	}
+	info := filepath.Join(dir, "info")
+	if err := os.MkdirAll(info, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(info, "attributes"), []byte(AttributesOverride), 0o644)
+}
+
+// CommitIdentities returns a commit's author and committer as
+// "Name <email>", read from the raw object.
+func (g *Git) CommitIdentities(ctx context.Context, sha string) (author, committer string, err error) {
+	out, err := g.runRaw(ctx, nil, "cat-file", "commit", sha)
+	if err != nil {
+		return "", "", err
+	}
+	header, _, _ := bytes.Cut(out, []byte("\n\n"))
+	for _, line := range strings.Split(string(header), "\n") {
+		key, rest, _ := strings.Cut(line, " ")
+		end := strings.LastIndexByte(rest, '>')
+		if end < 0 {
+			continue
+		}
+		switch key {
+		case "author":
+			author = rest[:end+1]
+		case "committer":
+			committer = rest[:end+1]
+		}
+	}
+	if author == "" || committer == "" {
+		return "", "", fmt.Errorf("commit %s has no author or committer", sha)
+	}
+	return author, committer, nil
+}

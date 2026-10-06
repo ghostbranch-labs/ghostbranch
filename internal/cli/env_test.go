@@ -19,17 +19,17 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/grant"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
-	"github.com/ghostbranch-labs/ghostbranch/internal/overlay"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
 )
 
 type testEnv struct {
-	t      *testing.T
-	root   string
-	forge  *fake.Forge
-	pubGit *gitx.Git
-	vars   map[string]string
-	env    cli.Env
+	t       *testing.T
+	root    string
+	forge   *fake.Forge
+	pubGit  *gitx.Git
+	vars    map[string]string
+	env     cli.Env
+	finding string
 }
 
 func newTestEnv(t *testing.T) *testEnv {
@@ -56,7 +56,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		NewForge:     func(string) (forge.Forge, error) { return f, nil },
 		GHToken:      func() (string, error) { return "", errors.New("gh is not logged in") },
 		CwdRemotes:   func() []string { return nil },
-		NewScanner:   func(s overlay.Set) (leak.Scanner, error) { return leak.NewGitleaks(s) },
+		NewScanner:   func(r leak.Rules) (leak.Scanner, error) { return leak.NewGitleaks(r) },
 		PollInterval: time.Second, SettleWindow: 5 * time.Second,
 		Executable: func() (string, error) { return filepath.Join(root, "bin", "ghostbranch"), nil },
 		Getwd:      func() (string, error) { return root, nil },
@@ -178,3 +178,34 @@ func atConsole(te *testEnv, answer func(code string) string) *typist {
 }
 
 func typeTheCode(code string) string { return code + "\n" }
+
+// firstWaivable gates feat-x and returns its first waivable finding id.
+func (te *testEnv) firstWaivable() string {
+	te.t.Helper()
+	_, m := te.runJSON("gate", "feat-x")
+	e, _ := m["error"].(map[string]any)
+	d, _ := e["details"].(map[string]any)
+	ids, _ := d["waivable"].([]any)
+	if len(ids) == 0 {
+		te.t.Fatalf("no waivable finding: %v", m)
+	}
+	return ids[0].(string)
+}
+
+// leakyWithID is withLeakyFeature with its finding id saved for <FINDING>.
+func leakyWithID(te *testEnv) { withLeakyFeature(te); te.finding = te.firstWaivable() }
+
+// waiveLeak waives feat-x's finding the way a person does: by typing the
+// code at the console. The binary has no other way.
+func waiveLeak(te *testEnv) {
+	te.t.Helper()
+	leakyWithID(te)
+	saved := te.env
+	atConsole(te, typeTheCode)
+	te.mustRun("waivers", "add", "feat-x", te.finding, "--reason", "test fixture")
+	te.env = saved
+}
+
+func (te *testEnv) waiversFile() string {
+	return filepath.Join(te.vars["GHOSTBRANCH_HOME"], "workspaces", "default", "waivers.json")
+}

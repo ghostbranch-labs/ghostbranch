@@ -1,0 +1,53 @@
+{
+  "schema_version": "0.3",
+  "command": "gate",
+  "ok": false,
+  "exit_code": 3,
+  "data": {
+    "feature": "feat-x",
+    "feature_head": "88139fd7713142e8d37f9460193493611415f2cb",
+    "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+    "overlay": "b1428c4f99dd9fdcd40de6d3f9aea25809d4dfea",
+    "candidate": "",
+    "published_tree": "",
+    "checks": "not_run",
+    "failed_checks": [],
+    "leak": "clean",
+    "findings": [],
+    "waived": [],
+    "shadow_pr": 0,
+    "reused": false,
+    "preview": null
+  },
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "gate",
+        "feat-x",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "after fixing the content on the feature branch in the shadow repo, gate again",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
+  "error": {
+    "code": "MARKER_INVALID",
+    "message": "BEGIN-INTERNAL/END-INTERNAL markers cannot be stripped safely: app.go:2 unmatched_begin",
+    "field": null,
+    "retryable": false,
+    "details": {
+      "feature": "feat-x",
+      "problems": [
+        {
+          "path": "app.go",
+          "line": 2,
+          "problem": "unmatched_begin"
+        }
+      ]
+    }
+  }
+}

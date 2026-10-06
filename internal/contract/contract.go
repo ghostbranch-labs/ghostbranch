@@ -11,7 +11,7 @@ import (
 
 // SchemaVersion versions the envelope and every data schema. It stays 0.x
 // until launch, and 0.x versions may break.
-const SchemaVersion = "0.2"
+const SchemaVersion = "0.3"
 
 // Exit codes. Agents branch on these, so they never change meaning.
 const (
@@ -45,6 +45,9 @@ const (
 	PairAmbiguous   Code = "PAIR_AMBIGUOUS"
 	NameInvalid     Code = "NAME_INVALID"
 	FeatureNotFound Code = "FEATURE_NOT_FOUND"
+	// WaiverUnknown means waivers add named an id that is not a waivable
+	// finding in what the gate would publish now.
+	WaiverUnknown Code = "WAIVER_UNKNOWN"
 
 	NotAPairCheckout Code = "NOT_A_PAIR_CHECKOUT"
 
@@ -52,6 +55,9 @@ const (
 	NoCI         Code = "NO_CI"
 	CITimeout    Code = "CI_TIMEOUT"
 	LeakFound    Code = "LEAK_FOUND"
+	// MarkerInvalid means BEGIN-INTERNAL/END-INTERNAL markers could not be
+	// stripped safely; the gate stops before CI.
+	MarkerInvalid Code = "MARKER_INVALID"
 
 	RebaseConflict   Code = "REBASE_CONFLICT"
 	SyncDiverged     Code = "SYNC_DIVERGED"
@@ -73,6 +79,7 @@ var exitCodes = map[Code]int{
 	BadFlag:          ExitUsage, MissingInput: ExitUsage, PairAmbiguous: ExitUsage,
 	NameInvalid: ExitUsage, FeatureNotFound: ExitUsage,
 	ChecksFailed: ExitGateFailed, NoCI: ExitGateFailed, CITimeout: ExitGateFailed, LeakFound: ExitGateFailed,
+	MarkerInvalid: ExitGateFailed, WaiverUnknown: ExitUsage,
 	RebaseConflict: ExitConflict, SyncDiverged: ExitConflict, BranchExists: ExitConflict,
 	OverlayCollision: ExitConflict, ShadowNotEmpty: ExitConflict, RefMoved: ExitConflict,
 	ApprovalRequired: ExitNeedsApproval,
@@ -159,9 +166,18 @@ const (
 	// ActorUnknown means GHOSTBRANCH_ACTOR was unset and the GitHub login
 	// could not be read, so the ledger records the actor as human:unknown.
 	ActorUnknown WarningCode = "ACTOR_UNKNOWN"
+	// WorkflowChanged, LargeFile and BinaryFile flag new or changed files
+	// going public that a person should look at. They never block.
+	WorkflowChanged WarningCode = "WORKFLOW_CHANGED"
+	LargeFile       WarningCode = "LARGE_FILE"
+	BinaryFile      WarningCode = "BINARY_FILE"
+	// WaiversUnreadable means waivers.json could not be read, so no waiver
+	// applied and every finding blocked.
+	WaiversUnreadable WarningCode = "WAIVERS_UNREADABLE"
 )
 
-var warningCodes = []WarningCode{ConfigKeyIgnored, PublicNotPublic, GateNotRecorded, ChecksLimited, ActorUnknown}
+var warningCodes = []WarningCode{ConfigKeyIgnored, PublicNotPublic, GateNotRecorded, ChecksLimited, ActorUnknown,
+	WorkflowChanged, LargeFile, BinaryFile, WaiversUnreadable}
 
 // AllWarnings lists every warning code, sorted.
 func AllWarnings() []WarningCode {
@@ -172,6 +188,7 @@ func AllWarnings() []WarningCode {
 
 // Warning is a non-fatal notice returned alongside a result.
 type Warning struct {
-	Code    WarningCode `json:"code"`
-	Message string      `json:"message"`
+	Code    WarningCode    `json:"code"`
+	Message string         `json:"message"`
+	Details map[string]any `json:"details,omitempty"`
 }

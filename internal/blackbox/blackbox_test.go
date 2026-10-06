@@ -81,7 +81,7 @@ func workspace(t *testing.T) string {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	ws := `{"schema_version": "0.2", "pairs": [{"public": "acme/widget", "shadow": "acme/widget-shadow"}]}` + "\n"
+	ws := `{"schema_version": "0.3", "pairs": [{"public": "acme/widget", "shadow": "acme/widget-shadow"}]}` + "\n"
 	if err := os.WriteFile(filepath.Join(dir, "workspace.json"), []byte(ws), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -282,5 +282,44 @@ func TestGuardHookEndToEnd(t *testing.T) {
 	must(t, env, co, bin, "guard", "uninstall", "--json")
 	if b, _ := os.ReadFile(filepath.Join(co, ".git", "hooks", "pre-push")); string(b) != lfs {
 		t.Fatalf("uninstall must restore the LFS hook:\n%s", b)
+	}
+}
+
+// An agent's shell cannot waive a leak finding: exit 5 at once, before any
+// network call, and nothing is written.
+func TestAnAgentShellCannotWaive(t *testing.T) {
+	home := workspace(t)
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = r.Close() }()
+	_, _ = w.WriteString("yes\nyes\nyes\n")
+	_ = w.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, "waivers", "add", "feat-x", "f-0123456789ab", "--reason", "fixture", "--repo", "acme/widget", "--json")
+	cmd.Stdin = r
+	cmd.Env = append(os.Environ(), "GHOSTBRANCH_HOME="+home, "GHOSTBRANCH_WORKSPACE=default",
+		"GHOSTBRANCH_TOKEN=unused", "GHOSTBRANCH_ACTOR=agent:blackbox")
+	out, _ := cmd.Output()
+	if ctx.Err() != nil {
+		t.Fatal("the binary waited for a console")
+	}
+	var env struct {
+		ExitCode int `json:"exit_code"`
+		Error    struct {
+			Code    string         `json:"code"`
+			Details map[string]any `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(out, &env); err != nil {
+		t.Fatalf("not JSON: %v\n%s", err, out)
+	}
+	if env.ExitCode != 5 || cmd.ProcessState.ExitCode() != 5 || env.Error.Code != "APPROVAL_REQUIRED" || env.Error.Details["reason"] != "no_console" {
+		t.Fatalf("%s", out)
+	}
+	if _, err := os.Stat(filepath.Join(home, "workspaces", "default", "waivers.json")); !os.IsNotExist(err) {
+		t.Fatal("a waiver was written")
 	}
 }

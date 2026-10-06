@@ -3,6 +3,7 @@ package cli_test
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
@@ -130,5 +131,58 @@ func TestNextSuggestsTheGuardInAnUnguardedCheckout(t *testing.T) {
 	te.env.GuardState = func(string) (bool, bool) { return true, true }
 	if _, env := te.runJSON("feature", "start", "feat-x"); len(nextOf(t, env)) != 1 {
 		t.Fatal("no guard suggestion once it is installed")
+	}
+}
+
+func TestNextHandsWaivableLeaksToAPerson(t *testing.T) {
+	te := newTestEnv(t)
+	leakyWithID(te)
+	_, m := te.runJSON("gate", "feat-x")
+	next, _ := m["next"].([]any)
+	if len(next) != 2 {
+		t.Fatalf("next = %v", next)
+	}
+	fix, waive := next[0].(map[string]any), next[1].(map[string]any)
+	if !reflect.DeepEqual(fix["command"], []any{"ghostbranch", "gate", "feat-x", "--repo", "acme/widget"}) || fix["needs_human"] != false {
+		t.Fatalf("fix = %v", fix)
+	}
+	if !reflect.DeepEqual(waive["command"], []any{"ghostbranch", "waivers", "add", "feat-x", te.finding, "--repo", "acme/widget"}) ||
+		waive["needs_human"] != true || !reflect.DeepEqual(waive["needs_input"], []any{"--reason"}) {
+		t.Fatalf("waive = %v", waive)
+	}
+}
+
+func TestNextForBadMarkersOnlyFixes(t *testing.T) {
+	te := newTestEnv(t)
+	initOnly(te)
+	te.mustRun("feature", "start", "feat-x")
+	te.shadowCommit("feat-x", map[string]string{"app.go": "// END-INTERNAL\n"})
+	_, m := te.runJSON("gate", "feat-x")
+	next, _ := m["next"].([]any)
+	if len(next) != 1 || next[0].(map[string]any)["needs_human"] != false {
+		t.Fatalf("next = %v", next)
+	}
+}
+
+// A leak in text the caller typed is fixed by new text, not by a change on
+// the feature branch: the step drops the old text and asks for a message.
+func TestNextAsksForNewTextWhenTheMessageLeaks(t *testing.T) {
+	te := newTestEnv(t)
+	gatedFeature(te)
+	leaky := "Add feature\n\nTOKEN=" + testutil.FakeGitHubToken()
+	for _, args := range [][]string{
+		{"promote", "feat-x", "-m", leaky, "--plan"},
+		{"promote", "feat-x", "--message=" + leaky, "--title", "t", "--body=b", "--plan"},
+	} {
+		code, env := te.runJSON(args...)
+		e, _ := env["error"].(map[string]any)
+		if code == 0 || e["code"] != "LEAK_FOUND" {
+			t.Fatalf("%v: %d %v", args, code, env)
+		}
+		n := nextOf(t, env)
+		if len(n) != 1 || !reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "promote", "feat-x", "--plan", "--json"}) ||
+			!reflect.DeepEqual(n[0]["needs_input"], []any{"--message"}) || !strings.Contains(n[0]["why"].(string), "commit message, title or body") {
+			t.Fatalf("%v: next = %v", args, n)
+		}
 	}
 }

@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.2",
+  "schema_version": "0.3",
   "command": "explain",
   "ok": true,
   "exit_code": 0,
@@ -38,7 +38,22 @@
         "exit_code": 3,
         "summary": "The leak scan found something in what would be published.",
         "causes": [],
-        "what_to_do": "Remove the leaked content from the feature (see details.findings) and gate again. Agents never waive findings.",
+        "what_to_do": "Remove the content in details.findings from the feature and gate again. If a person judges a finding in details.waivable a false positive, they run the waivers add command in next. Agents never waive findings or edit waivers.json.",
+        "needs_human": false
+      },
+      {
+        "code": "MARKER_INVALID",
+        "kind": "error",
+        "exit_code": 3,
+        "summary": "A file has BEGIN-INTERNAL/END-INTERNAL markers that cannot be stripped safely.",
+        "causes": [
+          "unmatched_begin: a begin marker with no end",
+          "unmatched_end: an end marker with no begin",
+          "nested: a begin marker inside an open section",
+          "malformed: a line that looks like a marker but is not exactly one (more text, a doubled prefix, or a multi-line comment)",
+          "unsupported_encoding: markers in a UTF-16 or UTF-32 file, or in a file read as binary"
+        ],
+        "what_to_do": "Fix the marker lines at details.problems on the feature branch, push it to the shadow repo, and gate again. Never delete only the marker lines: the internal lines would then be published.",
         "needs_human": false
       },
       {

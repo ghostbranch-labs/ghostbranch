@@ -1,0 +1,25 @@
+{
+  "schema_version": "0.3",
+  "command": "waivers list",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "pair": "acme/widget",
+    "waivers": [
+      {
+        "id": "f-7b1b6723317f",
+        "public": "acme/widget",
+        "rule": "github-pat",
+        "where": "tree",
+        "path": "config.env",
+        "match_sha256": "76375e21aaeadbb33067f84087af1bb4f81a039c0f0e3ab2b684e20858af07ad",
+        "reason": "test fixture",
+        "created_at": "2026-10-05T12:00:00Z",
+        "created_by": "human:octo"
+      }
+    ]
+  },
+  "warnings": [],
+  "next": [],
+  "error": null
+}

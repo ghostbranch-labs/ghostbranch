@@ -10,7 +10,9 @@ package e2e_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -19,12 +21,16 @@ import (
 	"time"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/cli"
+	"github.com/ghostbranch-labs/ghostbranch/internal/config"
+	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	ghforge "github.com/ghostbranch-labs/ghostbranch/internal/forge/github"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/grant"
+	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
 	"github.com/ghostbranch-labs/ghostbranch/internal/ledger"
 	"github.com/ghostbranch-labs/ghostbranch/internal/overlay"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
+	"github.com/ghostbranch-labs/ghostbranch/internal/waiver"
 )
 
 const (
@@ -167,7 +173,8 @@ func TestSandboxLoop(t *testing.T) {
 
 	feat := "e2e-" + runID
 	run(0, "feature", "start", feat)
-	commit(feat, map[string]string{"hello.txt": "hello from " + runID + "\n", ".ghostbranch/notes.md": "private notes\n"})
+	commit(feat, map[string]string{"hello.txt": "hello from " + runID + "\n", ".ghostbranch/notes.md": "private notes\n",
+		"internal.txt": "public line\n# BEGIN-INTERNAL\ninternal line\n# END-INTERNAL\n"})
 	run(0, "gate", feat)
 	res := run(0, "promote", feat, "--mode", "squash", "-m", "Add hello for "+runID, "--plan")
 	planID := res["data"].(map[string]any)["plan"].(map[string]any)["id"].(string)
@@ -212,6 +219,9 @@ func TestSandboxLoop(t *testing.T) {
 	if !sawHello {
 		t.Fatal("hello.txt was not published")
 	}
+	if blob, ok, err := g.ShowFile(ctx, "refs/heads/published", "internal.txt"); err != nil || !ok || string(blob) != "public line\n" {
+		t.Fatalf("internal.txt was published as %q (%v)", blob, err)
+	}
 
 	leaky := "leak-" + runID
 	run(0, "feature", "start", leaky)
@@ -230,6 +240,36 @@ func TestSandboxLoop(t *testing.T) {
 	}
 	if _, ok := refs["refs/heads/"+leaky]; ok {
 		t.Fatal("a leaking feature reached the public repo")
+	}
+
+	// A codename the overlay config blocks is refused, then published once a
+	// person has waived it. The waiver is written the way waivers add writes
+	// it after the console code; the binary has no other way.
+	cfgText := strings.Replace(string(config.Render(publicRepo, shadowRepo)), "block_patterns: []", `block_patterns: ["project-falcon"]`, 1)
+	if !strings.Contains(cfgText, "project-falcon") {
+		t.Fatal("config.Render no longer has an empty block_patterns line to replace")
+	}
+	commit(engine.OverlayBranch, map[string]string{".ghostbranch.yml": cfgText})
+	named := "named-" + runID
+	run(0, "feature", "start", named)
+	commit(named, map[string]string{"docs/codename.txt": "shipping project-falcon\n"})
+	m = run(3, "gate", named)
+	ids, _ := m["error"].(map[string]any)["details"].(map[string]any)["waivable"].([]any)
+	if len(ids) != 1 {
+		t.Fatalf("want one waivable finding: %v", m)
+	}
+	sum := sha256.Sum256([]byte("project-falcon"))
+	if err := waiver.NewStore(filepath.Join(ws, "waivers.json"), filepath.Join(ws, "waivers.lock")).Add([]waiver.Waiver{{
+		ID: ids[0].(string), Public: publicRepo, Rule: leak.BlockRule, Where: "tree", Path: "docs/codename.txt",
+		MatchSHA256: hex.EncodeToString(sum[:]), Reason: "e2e: the codename is public", CreatedAt: now, CreatedBy: "human:e2e"}}, now); err != nil {
+		t.Fatal(err)
+	}
+	run(0, "gate", named)
+	res = run(0, "promote", named, "--mode", "squash", "-m", "Add the codename for "+runID, "--plan")
+	planID = res["data"].(map[string]any)["plan"].(map[string]any)["id"].(string)
+	res = run(0, "apply", planID, "--yes")
+	if w, _ := res["data"].(map[string]any)["waived"].([]any); len(w) != 1 {
+		t.Fatalf("apply must report the waived finding: %v", res["data"])
 	}
 
 	entries, err := ledger.Read(filepath.Join(home, "workspaces", "default", "ledger.jsonl"))

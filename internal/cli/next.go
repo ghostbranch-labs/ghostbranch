@@ -8,6 +8,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 	"github.com/ghostbranch-labs/ghostbranch/internal/guard"
+	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
 )
 
 // usedWorkspace is the workspace this run acted in: the engine's when there
@@ -82,6 +83,8 @@ func (a *app) next(err error) []contract.Next {
 				return []contract.Next{{Command: a.again(true), NeedsHuman: true,
 					Why: "a person must run this in their own terminal and type the code it shows"}}
 			}
+		case contract.LeakFound, contract.MarkerInvalid:
+			return a.leakNext(ce)
 		case contract.PlanStale:
 			f, _ := ce.Details["feature"].(string)
 			pub, _ := ce.Details["public"].(string)
@@ -176,4 +179,64 @@ func guardState(public string) (bool, bool) {
 	}
 	st, err := guard.Inspect(co)
 	return true, err == nil && st.Installed
+}
+
+// textWheres are the findings in text promote publishes rather than in the
+// tree: fixed by new text, never on the feature branch.
+var textWheres = map[string]bool{"commit_message": true, "author": true, "committer": true, "branch": true, "pr_title": true, "pr_body": true}
+
+func typedTextLeaks(ce *contract.Error) bool {
+	fs, _ := ce.Details["findings"].([]leak.Finding)
+	for _, f := range fs {
+		if textWheres[f.Where] {
+			return true
+		}
+	}
+	return false
+}
+
+// withoutTexts drops -m/--message, --title and --body and their values, so
+// the caller supplies new text rather than repeat the leak.
+func withoutTexts(argv []string) []string {
+	out := make([]string, 0, len(argv))
+	for i := 0; i < len(argv); i++ {
+		arg := argv[i]
+		switch {
+		case arg == "-m" || arg == "--message" || arg == "--title" || arg == "--body":
+			i++ // and its value
+		case strings.HasPrefix(arg, "--message=") || strings.HasPrefix(arg, "--title=") || strings.HasPrefix(arg, "--body="),
+			strings.HasPrefix(arg, "-m") && !strings.HasPrefix(arg, "--"):
+		default:
+			out = append(out, arg)
+		}
+	}
+	return out
+}
+
+// leakNext is what to do about LEAK_FOUND or MARKER_INVALID: fix the
+// content and run again; and, for waivable findings a person judges false
+// positives, that person waives them at their console.
+func (a *app) leakNext(ce *contract.Error) []contract.Next {
+	f, _ := ce.Details["feature"].(string)
+	var out []contract.Next
+	switch a.command {
+	case "promote":
+		if typedTextLeaks(ce) {
+			out = append(out, contract.Next{Command: withoutTexts(a.again(false)), NeedsInput: []string{"--message"},
+				Why: "a leak is in text this promote publishes: run it again with a new commit message, title or body (and fix any file findings on the feature branch in the shadow repo first)"})
+			break
+		}
+		out = append(out, contract.Next{Command: a.again(false), Why: "after fixing the content on the feature branch in the shadow repo, run this again"})
+	case "gate", "waivers add":
+		if f != "" {
+			out = append(out, contract.Next{Command: a.scoped("gate", f), Why: "after fixing the content on the feature branch in the shadow repo, gate again"})
+		}
+	}
+	ids, _ := ce.Details["waivable"].([]string)
+	if ce.Code == contract.LeakFound && f != "" && len(ids) > 0 {
+		out = append(out, contract.Next{Command: a.scoped(append([]string{"waivers", "add", f}, ids...)...), NeedsHuman: true,
+			NeedsInput: []string{"--reason"},
+			Why:        "only if a person judges these findings false positives: they review them at their console and give a reason"})
+	}
+	return out
 }

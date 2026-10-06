@@ -1,0 +1,54 @@
+{
+  "schema_version": "0.3",
+  "command": "gate",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "feature": "feat-x",
+    "feature_head": "4d1d49322a3efd3fda9f092af6dd0ddce5b0a824",
+    "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+    "overlay": "b1428c4f99dd9fdcd40de6d3f9aea25809d4dfea",
+    "candidate": "75941ec5efa72a50aa03df5c5488d26d786e0536",
+    "published_tree": "b0c171b27508197c71fd9aaf45002e46841f61e2",
+    "checks": "passed",
+    "failed_checks": [],
+    "leak": "clean",
+    "findings": [],
+    "waived": [
+      {
+        "id": "f-7b1b6723317f",
+        "rule": "github-pat",
+        "where": "tree",
+        "path": "config.env",
+        "line": 1,
+        "secret": "[REDACTED]",
+        "waivable": true,
+        "reason": "test fixture"
+      }
+    ],
+    "shadow_pr": 1,
+    "reused": false,
+    "preview": null
+  },
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "promote",
+        "feat-x",
+        "--mode",
+        "squash",
+        "--plan",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "the gate passed; plan the publish",
+      "needs_human": false,
+      "needs_input": [
+        "--message"
+      ]
+    }
+  ],
+  "error": null
+}

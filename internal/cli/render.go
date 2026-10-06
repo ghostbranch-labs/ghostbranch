@@ -21,11 +21,11 @@ func short(sha string) string {
 
 func findings(b *strings.Builder, fs []leak.Finding) {
 	for _, f := range fs {
-		loc := f.Where
-		if f.Path != "" {
-			loc = fmt.Sprintf("%s:%d", f.Path, f.Line)
+		what := f.Rule
+		if f.Match != "" {
+			what += fmt.Sprintf(" %q", f.Match)
 		}
-		fmt.Fprintf(b, "  leak: %s in %s\n", f.Rule, loc)
+		fmt.Fprintf(b, "  leak %s: %s in %s\n", f.ID, what, engine.Location(f))
 	}
 }
 
@@ -130,6 +130,7 @@ func human(r any) string {
 			fmt.Fprintf(&b, "  failed check: %s\n", c)
 		}
 		findings(&b, v.Findings)
+		waivedLines(&b, v.Waived)
 	case *engine.PromoteResult:
 		switch {
 		case v.Preview != nil:
@@ -140,12 +141,14 @@ func human(r any) string {
 			fmt.Fprintf(&b, "Plan %s saved to %s.\nPublish it with: ghostbranch apply %s\n", v.Plan.ID, v.PlanPath, v.Plan.ID)
 		}
 		findings(&b, v.Findings)
+		waivedLines(&b, v.Waived)
 	case *engine.ApplyResult:
 		if v.Preview != nil {
 			previewText(&b, v.Preview)
 			break
 		}
 		fmt.Fprintf(&b, "Published %s as PR #%d: %s\n", v.PublicBranch, v.PublicPR, v.PRURL)
+		waivedLines(&b, v.Waived)
 	case *engine.AgentsAllowResult:
 		if v.Preview != nil {
 			previewText(&b, v.Preview)
@@ -168,6 +171,26 @@ func human(r any) string {
 		for _, g := range v.Revoked {
 			fmt.Fprintf(&b, "Agents may no longer publish to %s.\n", g.Public)
 		}
+	case *engine.WaiversAddResult:
+		if v.Preview != nil {
+			previewText(&b, v.Preview)
+			break
+		}
+		fmt.Fprintf(&b, "Waived %d finding(s) in %s.\n", len(v.Waivers), v.Feature)
+	case *engine.WaiversListResult:
+		if len(v.Waivers) == 0 {
+			b.WriteString("No waivers.\n")
+			break
+		}
+		for _, w := range v.Waivers {
+			fmt.Fprintf(&b, "%s  %s  %s in %s: %s (%s, %s)\n", w.ID, w.Public, w.Rule, w.Path, w.Reason, w.CreatedBy, w.CreatedAt.Format(time.RFC3339))
+		}
+	case *engine.WaiversRevokeResult:
+		if v.Preview != nil {
+			previewText(&b, v.Preview)
+			break
+		}
+		fmt.Fprintf(&b, "Revoked %d waiver(s).\n", len(v.Revoked))
 	case *engine.AgentsStatusResult:
 		if len(v.Grants) == 0 {
 			b.WriteString("No agent grants on this machine.\n")
@@ -187,4 +210,10 @@ func human(r any) string {
 		}
 	}
 	return b.String()
+}
+
+func waivedLines(b *strings.Builder, ws []engine.WaivedFinding) {
+	for _, w := range ws {
+		fmt.Fprintf(b, "  waived %s: %s in %s (%s)\n", w.ID, w.Rule, engine.Location(w.Finding), w.Reason)
+	}
 }

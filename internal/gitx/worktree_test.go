@@ -232,3 +232,105 @@ func TestCheckoutContentCannotBecomeGitConfigHooksOrAttributes(t *testing.T) {
 		t.Errorf("checked-out content was applied as attributes: lf.txt = %q", onDisk)
 	}
 }
+
+// hostileSystemConfig points git's system config at a filter driver and a
+// merge driver that append to a sentinel file, and turns on rerere and
+// fsmonitor. It returns the sentinel's path.
+func hostileSystemConfig(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	sentinel := filepath.Join(dir, "ran")
+	script := filepath.ToSlash(filepath.Join(dir, "evil.sh"))
+	body := "echo ran >> '" + filepath.ToSlash(sentinel) + "'\n" +
+		"if [ -n \"$2\" ]; then cp \"$2\" \"$1\"; else cat; fi\n"
+	if err := os.WriteFile(filepath.Join(dir, "evil.sh"), []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := "[filter \"evil\"]\n\tclean = sh '" + script + "'\n\tsmudge = sh '" + script + "'\n" +
+		"[merge \"evil\"]\n\tdriver = sh '" + script + "' %A %B\n" +
+		"[rerere]\n\tenabled = true\n[core]\n\tfsmonitor = true\n"
+	sys := filepath.Join(dir, "gitconfig")
+	if err := os.WriteFile(sys, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_CONFIG_SYSTEM", sys)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "0")
+	return sentinel
+}
+
+// rebaseThroughAttributes builds a feature whose .gitattributes names the
+// evil drivers, needing a real 3-way merge of a.txt, and rebases it.
+func rebaseThroughAttributes(t *testing.T, protect bool) (*gitx.Git, string) {
+	t.Helper()
+	ctx := context.Background()
+	root := t.TempDir()
+	g := testutil.BareRepo(t, filepath.Join(root, "r.git"))
+	if protect {
+		if err := g.ProtectAttributes(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	base := testutil.Commit(t, g, "main", "base", map[string]string{
+		".gitattributes": "* filter=evil merge=evil\n", "a.txt": "1\n2\n3\n4\n5\n"})
+	if err := g.UpdateRef(ctx, "refs/heads/feat", base); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Commit(t, g, "main", "upstream", map[string]string{"a.txt": "1 upstream\n2\n3\n4\n5\n"})
+	testutil.Commit(t, g, "feat", "work", map[string]string{"a.txt": "1\n2\n3\n4\n5 feature\n"})
+	wt, err := g.WorktreeAdd(ctx, filepath.Join(root, "wt"), "refs/heads/feat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wt.Rebase(ctx, "refs/heads/main", testutil.Author(9)); err != nil {
+		t.Fatal(err)
+	}
+	head, err := wt.MustResolve(ctx, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return g, head
+}
+
+func TestProtectedAttributesStopFiltersAndMergeDrivers(t *testing.T) {
+	t.Run("control: the drivers really run without the override", func(t *testing.T) {
+		sentinel := hostileSystemConfig(t)
+		rebaseThroughAttributes(t, false)
+		if _, err := os.Stat(sentinel); err != nil {
+			t.Fatalf("the hostile drivers never ran, so this test proves nothing: %v", err)
+		}
+	})
+	t.Run("protected", func(t *testing.T) {
+		sentinel := hostileSystemConfig(t)
+		g, head := rebaseThroughAttributes(t, true)
+		if _, err := os.Stat(sentinel); !os.IsNotExist(err) {
+			t.Fatalf("a driver ran despite the attribute override (%v)", err)
+		}
+		got, ok, err := g.ShowFile(context.Background(), head, "a.txt")
+		if err != nil || !ok || string(got) != "1 upstream\n2\n3\n4\n5 feature\n" {
+			t.Fatalf("a.txt = %q %v: want git's own 3-way merge, byte for byte", got, err)
+		}
+	})
+}
+
+func TestOverridesBeatSystemRerereAndFsmonitor(t *testing.T) {
+	hostileSystemConfig(t)
+	g := testutil.BareRepo(t, filepath.Join(t.TempDir(), "r.git"))
+	for key, want := range map[string]string{"rerere.enabled": "false", "core.fsmonitor": "false"} {
+		got, err := g.Run(context.Background(), "config", "--get", key)
+		if err != nil || got != want {
+			t.Errorf("%s = %q (%v), want %q", key, got, err, want)
+		}
+	}
+}
+
+func TestProtectAttributesWritesTheMirrorFile(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "m.git")
+	g := testutil.BareRepo(t, dir)
+	if err := g.ProtectAttributes(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "info", "attributes"))
+	if err != nil || string(got) != gitx.AttributesOverride {
+		t.Fatalf("info/attributes = %q %v", got, err)
+	}
+}

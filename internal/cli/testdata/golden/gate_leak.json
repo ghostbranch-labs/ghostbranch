@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.2",
+  "schema_version": "0.3",
   "command": "gate",
   "ok": false,
   "exit_code": 3,
@@ -7,41 +7,80 @@
     "feature": "feat-x",
     "feature_head": "4d1d49322a3efd3fda9f092af6dd0ddce5b0a824",
     "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
-    "overlay": "10e5ddddc0fd64a7daaff38906e96962dcbd4a40",
-    "candidate": "5a0d7631c924be006ec16ebac28949cacbc36b2a",
+    "overlay": "b1428c4f99dd9fdcd40de6d3f9aea25809d4dfea",
+    "candidate": "75941ec5efa72a50aa03df5c5488d26d786e0536",
     "published_tree": "b0c171b27508197c71fd9aaf45002e46841f61e2",
     "checks": "not_run",
     "failed_checks": [],
     "leak": "found",
     "findings": [
       {
+        "id": "f-7b1b6723317f",
         "rule": "github-pat",
         "where": "tree",
         "path": "config.env",
         "line": 1,
-        "secret": "[REDACTED]"
+        "secret": "[REDACTED]",
+        "waivable": true
       }
     ],
+    "waived": [],
     "shadow_pr": 0,
     "reused": false,
     "preview": null
   },
   "warnings": [],
-  "next": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "gate",
+        "feat-x",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "after fixing the content on the feature branch in the shadow repo, gate again",
+      "needs_human": false,
+      "needs_input": []
+    },
+    {
+      "command": [
+        "ghostbranch",
+        "waivers",
+        "add",
+        "feat-x",
+        "f-7b1b6723317f",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "only if a person judges these findings false positives: they review them at their console and give a reason",
+      "needs_human": true,
+      "needs_input": [
+        "--reason"
+      ]
+    }
+  ],
   "error": {
     "code": "LEAK_FOUND",
     "message": "1 leak finding(s) in what would be published; nothing was pushed to the public repo",
     "field": null,
     "retryable": false,
     "details": {
+      "feature": "feat-x",
       "findings": [
         {
+          "id": "f-7b1b6723317f",
           "rule": "github-pat",
           "where": "tree",
           "path": "config.env",
           "line": 1,
-          "secret": "[REDACTED]"
+          "secret": "[REDACTED]",
+          "waivable": true
         }
+      ],
+      "not_waivable": [],
+      "waivable": [
+        "f-7b1b6723317f"
       ]
     }
   }

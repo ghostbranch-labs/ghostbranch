@@ -330,3 +330,22 @@ func TestPromoteReGatesWhenTheGateBranchIsGone(t *testing.T) {
 		t.Fatalf("apply: %v", err)
 	}
 }
+
+func TestPromoteReportsAFileWarningOnceWhenItRunsTheGate(t *testing.T) {
+	h := newHarness(t)
+	h.init()
+	h.startFeature("feat-x", map[string]string{".github/workflows/release.yml": "on: push\n"})
+	_, warns, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Message: "m", PlanOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, w := range warns {
+		if w.Code == contract.WorkflowChanged {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("want exactly one WORKFLOW_CHANGED warning, got %d in %+v", n, warns)
+	}
+}

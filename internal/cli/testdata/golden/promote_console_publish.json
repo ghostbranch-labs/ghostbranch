@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.2",
+  "schema_version": "0.3",
   "command": "promote",
   "ok": true,
   "exit_code": 0,
@@ -8,19 +8,20 @@
       "feature": "feat-x",
       "feature_head": "d7407485ce685c126afcfc258f0a9eeb0092d776",
       "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
-      "overlay": "10e5ddddc0fd64a7daaff38906e96962dcbd4a40",
-      "candidate": "d49d01dec389ef2590148b0e5e59dc80ebf3a0f3",
+      "overlay": "b1428c4f99dd9fdcd40de6d3f9aea25809d4dfea",
+      "candidate": "6152a5194ee358189c553560ffcac65549b1401e",
       "published_tree": "ef9061717144a4bf03a0230d8f8926d019f2adeb",
       "checks": "passed",
       "failed_checks": [],
       "leak": "clean",
       "findings": [],
+      "waived": [],
       "shadow_pr": 0,
       "reused": true,
       "preview": null
     },
     "plan": {
-      "schema_version": "0.2",
+      "schema_version": "0.3",
       "id": "20261005T120005Z-0c0d0e",
       "kind": "promote",
       "actor": "human:octo",
@@ -34,8 +35,8 @@
       "fingerprint": {
         "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
         "feature_head": "d7407485ce685c126afcfc258f0a9eeb0092d776",
-        "overlay": "10e5ddddc0fd64a7daaff38906e96962dcbd4a40",
-        "gate_candidate": "d49d01dec389ef2590148b0e5e59dc80ebf3a0f3"
+        "overlay": "b1428c4f99dd9fdcd40de6d3f9aea25809d4dfea",
+        "gate_candidate": "6152a5194ee358189c553560ffcac65549b1401e"
       },
       "publish": {
         "commit": "15dd9c9bcb7655bdb426fb4a24f440fc9c31fb65",
@@ -54,11 +55,14 @@
       },
       "leak": {
         "findings": [],
+        "waived": [],
+        "warnings": [],
         "scanner_version": "gitleaks v8.30.1"
       }
     },
     "plan_path": "<ROOT>/home/workspaces/default/plans/20261005T120005Z-0c0d0e.json",
     "findings": [],
+    "waived": [],
     "applied": {
       "plan_id": "20261005T120005Z-0c0d0e",
       "public_branch": "feat-x",
@@ -68,6 +72,7 @@
       "approval": {
         "kind": "console"
       },
+      "waived": [],
       "preview": null
     },
     "preview": null

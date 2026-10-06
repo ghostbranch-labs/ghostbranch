@@ -91,6 +91,9 @@ func (e *Engine) mirror(ctx context.Context, p workspace.Pair, pub, sh forge.Rep
 	if err := g.AddRemote(ctx, remoteShadow, sh.CloneURL); err != nil {
 		return nil, internalErr(err, "configure the shadow remote")
 	}
+	if err := g.ProtectAttributes(ctx); err != nil {
+		return nil, internalErr(err, "protect the mirror from in-tree attributes")
+	}
 	return g, nil
 }
 
