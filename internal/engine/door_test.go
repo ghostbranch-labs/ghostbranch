@@ -30,7 +30,17 @@ func TestOnlyPromoteAndApplyReachThePublicRepo(t *testing.T) {
 		}
 		still(step)
 	}
-	_, _, err := h.eng.Sync(h.ctx, h.pair)
+	n := len(h.pushes)
+	_, _, err := h.eng.AgentsAllow(h.ctx, h.pair, engine.AgentsAllowOptions{})
+	run("agents allow", err, "")
+	_, _, err = h.eng.AgentsStatus(h.ctx, &h.pair)
+	run("agents status", err, "")
+	_, _, err = h.eng.AgentsRevoke(h.ctx, &h.pair, false)
+	run("agents revoke", err, "")
+	if len(h.pushes) != n {
+		t.Fatal("agents commands must never push")
+	}
+	_, _, err = h.eng.Sync(h.ctx, h.pair)
 	run("sync", err, "")
 	h.startFeature("good", map[string]string{"good.txt": "g\n"})
 	h.startFeature("leaky", map[string]string{"leak.env": "T=" + testutil.FakeGitHubToken() + "\n"})

@@ -94,6 +94,12 @@ func TestGoldenContract(t *testing.T) {
 			[]string{"promote", "feat-x", "-m", "Add feature", "--yes"}, 5},
 		{"promote_plan_under_grant", publishable, []string{"promote", "feat-x", "-m", "Add feature", "--plan"}, 0},
 		{"promote_grant_needs_yes", publishable, []string{"promote", "feat-x", "-m", "Add feature"}, 5},
+		{"promote_not_confirmed", func(te *testEnv) { gatedFeature(te); atConsole(te, func(string) string { return "n\n" }) },
+			[]string{"promote", "feat-x", "-m", "Add feature"}, 5},
+		{"promote_too_many_attempts", func(te *testEnv) { gatedFeature(te); atConsole(te, func(string) string { return "X\nY\nZ\n" }) },
+			[]string{"promote", "feat-x", "-m", "Add feature"}, 5},
+		{"promote_console_publish", func(te *testEnv) { gatedFeature(te); atConsole(te, typeTheCode) },
+			[]string{"promote", "feat-x", "-m", "Add feature"}, 0},
 		{"promote_publish", publishable, []string{"promote", "feat-x", "-m", "Add feature", "--yes"}, 0},
 		{"apply_stale", func(te *testEnv) {
 			gatedFeature(te)
@@ -207,4 +213,10 @@ func TestArtifactsMatchTheirSchemas(t *testing.T) {
 	if n < 5 {
 		t.Fatalf("want at least 5 ledger lines (init, feature start, gate, promote, apply), got %d", n)
 	}
+
+	grants, err := os.ReadFile(filepath.Join(home, "workspaces", "default", "grants.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	validate(t, "grants.schema.json", grants)
 }

@@ -1,9 +1,11 @@
 package cli_test
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -158,5 +160,24 @@ func TestGuideNeedsNoTokenAndMatchesItsSchema(t *testing.T) {
 	}
 	if code, out, _ := te.run("explain", "LEAK_FOUND"); code != 0 || !strings.Contains(out, "LEAK_FOUND (error, exit 3)") {
 		t.Fatalf("%d %q", code, out)
+	}
+}
+
+func TestNewCommandsNeverPush(t *testing.T) {
+	hermeticGit(t)
+	te := newTestEnv(t)
+	initOnly(te)
+	pairCheckout(te)
+	te.vars["CLAUDE_CONFIG_DIR"] = filepath.Join(te.root, "claude")
+	var pushes []string
+	te.env.OnPush = func(op, remote string, _ []string) { pushes = append(pushes, op+" "+remote) }
+	before, _ := te.pubGit.Refs(context.Background(), "refs")
+	for _, args := range [][]string{{"guide"}, {"guide", "--install", "codex"}, {"explain", "--all"},
+		{"agents", "status"}, {"agents", "allow"}, {"agents", "revoke"}, {"guard", "install"}, {"guard", "status"}, {"guard", "uninstall"}} {
+		te.run(args...)
+	}
+	after, _ := te.pubGit.Refs(context.Background(), "refs")
+	if len(pushes) != 0 || !reflect.DeepEqual(before, after) {
+		t.Fatalf("pushes: %v", pushes)
 	}
 }
