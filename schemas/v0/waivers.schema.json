@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "waivers.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "waivers"],
+  "properties": {
+    "schema_version": { "const": "0.3" },
+    "waivers": { "type": "array", "items": { "$ref": "waiver.schema.json" } }
+  }
+}

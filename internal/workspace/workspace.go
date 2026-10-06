@@ -137,7 +137,9 @@ func (w *Workspace) LockPath(p Pair) string  { return filepath.Join(w.PairDir(p)
 func (w *Workspace) WorkDir(p Pair, opID string) string {
 	return filepath.Join(w.PairDir(p), "work", opID)
 }
-func (w *Workspace) LedgerPath() string     { return filepath.Join(w.Dir, "ledger.jsonl") }
-func (w *Workspace) PlansDir() string       { return filepath.Join(w.Dir, "plans") }
-func (w *Workspace) GrantsPath() string     { return filepath.Join(w.Dir, "grants.json") }
-func (w *Workspace) GrantsLockPath() string { return filepath.Join(w.Dir, "grants.lock") }
+func (w *Workspace) LedgerPath() string      { return filepath.Join(w.Dir, "ledger.jsonl") }
+func (w *Workspace) PlansDir() string        { return filepath.Join(w.Dir, "plans") }
+func (w *Workspace) GrantsPath() string      { return filepath.Join(w.Dir, "grants.json") }
+func (w *Workspace) GrantsLockPath() string  { return filepath.Join(w.Dir, "grants.lock") }
+func (w *Workspace) WaiversPath() string     { return filepath.Join(w.Dir, "waivers.json") }
+func (w *Workspace) WaiversLockPath() string { return filepath.Join(w.Dir, "waivers.lock") }
