@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
@@ -90,5 +91,48 @@ func TestPromoteAndApplyPreviewsWithAFreshGate(t *testing.T) {
 	}
 	if len(h.pushes) != pushes {
 		t.Fatal("apply --dry-run pushed")
+	}
+}
+
+// A promote preview refuses a public branch that is already at another
+// commit, exactly as the real publish would.
+func TestPromotePreviewRefusesAnExistingPublicBranch(t *testing.T) {
+	h := gated(t)
+	other := testutil.Commit(t, h.pubGit, "feat-x", "someone else's", map[string]string{"x.txt": "x\n"})
+	pushes := len(h.pushes)
+	h.eng.DryRun = true
+	res, err := promote(h, engine.PromoteOptions{Message: "m"})
+	h.eng.DryRun = false
+	ce := wantCode(t, err, contract.BranchExists)
+	if ce.Field != "branch" || ce.Details["branch"] != "feat-x" || ce.Details["sha"] != other {
+		t.Fatalf("error = %+v", ce)
+	}
+	if res != nil && res.Preview != nil {
+		t.Fatalf("a refused promote must not return a preview: %v", res.Preview.Ops)
+	}
+	if len(h.pushes) != pushes {
+		t.Fatal("promote --dry-run pushed")
+	}
+}
+
+// Once the plan is published, previewing the same promote lists no public
+// push and no new PR: both already exist.
+func TestPromotePreviewAfterPublishOmitsDoneSteps(t *testing.T) {
+	h := gated(t)
+	saved, err := promote(h, engine.PromoteOptions{Message: "m", PlanOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: saved.Plan.ID}); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	h.eng.DryRun = true
+	res, err := promote(h, engine.PromoteOptions{Message: "m"})
+	h.eng.DryRun = false
+	if err != nil || res.Plan == nil || res.Plan.Publish.Commit != saved.Plan.Publish.Commit {
+		t.Fatalf("the preview must rebuild the published commit: %+v %v", res, err)
+	}
+	if got := opNames(res.Preview); !reflect.DeepEqual(got, []string{"push_ref"}) || res.Preview.Ops[0]["repo"] != shadowName {
+		t.Fatalf("ops = %v", res.Preview.Ops)
 	}
 }

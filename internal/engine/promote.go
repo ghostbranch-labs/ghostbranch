@@ -169,11 +169,11 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 		Leak: plan.Leak{Findings: []map[string]any{}, ScannerVersion: version}}
 	res.Plan = &pl
 	if e.DryRun {
-		existing, _, _ := g.Resolve(ctx, publicRef(branch))
 		pv := preview.New(map[string]string{"public_main": pm, "feature_head": head, "overlay": O, "gate_candidate": C})
-		pv.Add(preview.PushRef(p.Shadow, remotePlanRef(planID), "", P),
-			preview.PushRef(p.Public, "refs/heads/"+branch, existing, P),
-			preview.OpenPR(p.Public, branch, "main", false))
+		pv.Add(preview.PushRef(p.Shadow, remotePlanRef(planID), "", P))
+		if err := e.previewPublish(ctx, pc, pv, branch, P); err != nil {
+			return res, warns, err
+		}
 		res.Preview = pv
 		return res, warns, nil
 	}
