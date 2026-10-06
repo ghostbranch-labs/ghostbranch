@@ -70,7 +70,7 @@ func human(r any) string {
 			fmt.Fprintf(&b, "  warning: %s is gone, so public pushes are refused until you reinstall\n", v.Binary)
 		}
 	case *guard.CheckResult:
-		fmt.Fprintf(&b, "guard: %d ref(s) checked; nothing private is being pushed.\n", v.Checked)
+		// It runs inside every public git push: a pass says nothing.
 	case *ExplainResult:
 		for _, e := range v.Entries {
 			exit := ""

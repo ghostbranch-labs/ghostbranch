@@ -67,6 +67,8 @@ feature work to the public repo. Its limits:
   only if the mirror has seen it, so run `ghostbranch sync` now and then. A branch named after a
   feature is always caught.
 - It covers only the checkout it is installed in, and `git push --no-verify` skips it.
+- It reads Ghostbranch's state from the default location unless `GHOSTBRANCH_HOME` is set where git
+  runs the hook.
 
 ## Strict isolation (for people)
 

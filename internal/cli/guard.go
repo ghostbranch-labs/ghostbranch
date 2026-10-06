@@ -194,7 +194,7 @@ func (a *app) guardCheckCmd() *cobra.Command {
 			}
 			p, found := ws.Find(slug)
 			if !ok || !found || !strings.EqualFold(p.Public, slug) {
-				return contract.New(contract.PushBlocked, "the guard cannot tell which public repo %q is, so the push is refused; reinstall it with ghostbranch guard install", args[0])
+				return contract.New(contract.PushBlocked, "the guard cannot tell which public repo %q is, so the push is refused; reinstall it with ghostbranch guard install, or remove the guard with ghostbranch guard uninstall", args[0])
 			}
 			facts, err := mirrorFacts(ctx, ws.MirrorDir(p))
 			if err != nil {

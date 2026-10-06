@@ -74,6 +74,11 @@ func TestGuardCommands(t *testing.T) {
 	} else {
 		validData(t, env)
 	}
+	// It runs inside every public git push, so a pass prints nothing.
+	te.env.Stdin = strings.NewReader("refs/heads/main 1111111111111111111111111111111111111111 refs/heads/main 0000000000000000000000000000000000000000\n")
+	if code, out, errOut := te.run("guard", "check", "origin", "https://github.com/acme/widget.git"); code != 0 || out != "" || errOut != "" {
+		t.Fatalf("check main (human): %d stdout %q stderr %q", code, out, errOut)
+	}
 	te.env.Stdin = strings.NewReader("refs/heads/x 1111111111111111111111111111111111111111 refs/heads/ghostbranch 0000000000000000000000000000000000000000\n")
 	code, env = te.runJSON("guard", "check", "origin", "/some/rewritten/path")
 	e, _ := env["error"].(map[string]any)
@@ -89,7 +94,8 @@ func TestGuardCommands(t *testing.T) {
 	te.env.Stdin = strings.NewReader("refs/heads/main 1111111111111111111111111111111111111111 refs/heads/main 0000000000000000000000000000000000000000\n")
 	code, env = te.runJSON("guard", "check", "nosuch", "/local/path")
 	if e, _ := env["error"].(map[string]any); code != 1 || e["code"] != "PUSH_BLOCKED" ||
-		!strings.Contains(e["message"].(string), "cannot tell which public repo") {
+		!strings.Contains(e["message"].(string), "cannot tell which public repo") ||
+		!strings.Contains(e["message"].(string), "or remove the guard with ghostbranch guard uninstall") {
 		t.Fatalf("check unknown remote: %d %v", code, env)
 	}
 	if code, env := te.runJSON("guard", "uninstall"); code != 0 || env["data"].(map[string]any)["action"] != "removed" {
