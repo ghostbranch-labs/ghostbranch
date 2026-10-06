@@ -3,7 +3,7 @@
   "title": "apply data",
   "type": "object",
   "additionalProperties": false,
-  "required": ["plan_id", "public_branch", "public_pr", "pr_url", "resumed", "approval", "dry_run"],
+  "required": ["plan_id", "public_branch", "public_pr", "pr_url", "resumed", "approval", "preview"],
   "properties": {
     "plan_id": { "$ref": "common.schema.json#/$defs/planId" },
     "public_branch": { "type": "string" },
@@ -20,6 +20,6 @@
             "created_by": { "$ref": "common.schema.json#/$defs/actor" } } }
       ]
     },
-    "dry_run": { "type": "boolean" }
+    "preview": { "oneOf": [{ "type": "null" }, { "$ref": "preview.schema.json" }] }
   }
 }

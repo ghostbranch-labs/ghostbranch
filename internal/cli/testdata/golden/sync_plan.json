@@ -1,0 +1,32 @@
+{
+  "schema_version": "0.2",
+  "command": "sync",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "public": "acme/widget",
+    "shadow": "acme/widget-shadow",
+    "action": "fast_forward",
+    "public_main": "178f8a91fcb0e6a374393202f9c61275c78d3dbb",
+    "shadow_main_before": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+    "shadow_main_after": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+    "preview": {
+      "fingerprint": {
+        "public_main": "178f8a91fcb0e6a374393202f9c61275c78d3dbb",
+        "shadow_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7"
+      },
+      "ops": [
+        {
+          "from": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+          "op": "push_ref",
+          "ref": "refs/heads/main",
+          "repo": "acme/widget-shadow",
+          "to": "178f8a91fcb0e6a374393202f9c61275c78d3dbb"
+        }
+      ]
+    }
+  },
+  "warnings": [],
+  "next": [],
+  "error": null
+}

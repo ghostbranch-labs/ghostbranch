@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -12,6 +14,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/overlay"
+	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
@@ -22,17 +25,16 @@ type InitOptions struct {
 }
 
 type InitResult struct {
-	Public           string   `json:"public"`
-	Shadow           string   `json:"shadow"`
-	CreatedShadow    bool     `json:"created_shadow"`
-	Adopted          bool     `json:"adopted"`
-	Resumed          bool     `json:"resumed"`
-	MirroredBranches []string `json:"mirrored_branches"`
-	MirroredTags     []string `json:"mirrored_tags"`
-	OverlayCreated   bool     `json:"overlay_created"`
-	DefaultBranchSet bool     `json:"default_branch_set"`
-	DryRun           bool     `json:"dry_run"`
-	Actions          []string `json:"actions"`
+	Public           string           `json:"public"`
+	Shadow           string           `json:"shadow"`
+	CreatedShadow    bool             `json:"created_shadow"`
+	Adopted          bool             `json:"adopted"`
+	Resumed          bool             `json:"resumed"`
+	MirroredBranches []string         `json:"mirrored_branches"`
+	MirroredTags     []string         `json:"mirrored_tags"`
+	OverlayCreated   bool             `json:"overlay_created"`
+	DefaultBranchSet bool             `json:"default_branch_set"`
+	Preview          *preview.Preview `json:"preview"`
 }
 
 const overlayReadme = `# Ghostbranch overlay
@@ -72,7 +74,7 @@ func (e *Engine) Init(ctx context.Context, opt InitOptions) (res *InitResult, wa
 	}
 	p := workspace.Pair{Public: opt.Public, Shadow: shadow}
 	pair = &p
-	res = &InitResult{Public: p.Public, Shadow: p.Shadow, MirroredBranches: []string{}, MirroredTags: []string{}, Actions: []string{}, DryRun: e.DryRun}
+	res = &InitResult{Public: p.Public, Shadow: p.Shadow, MirroredBranches: []string{}, MirroredTags: []string{}}
 
 	pub, err := e.Forge.GetRepo(ctx, p.Public)
 	if err != nil {
@@ -98,9 +100,7 @@ func (e *Engine) Init(ctx context.Context, opt InitOptions) (res *InitResult, wa
 	if !exists {
 		res.CreatedShadow = true
 		if e.DryRun {
-			res.Actions = []string{"create private repo " + p.Shadow, "mirror public branches and tags",
-				"create the " + OverlayBranch + " overlay branch", "make " + OverlayBranch + " the default branch", "register the pair"}
-			return res, warns, nil
+			return res, warns, e.previewNewShadow(ctx, p, pub, registered, res)
 		}
 		e.progressf("creating private repo %s", p.Shadow)
 		if _, err := e.Forge.CreatePrivateRepo(ctx, p.Shadow); err != nil {
@@ -144,21 +144,24 @@ func (e *Engine) Init(ctx context.Context, opt InitOptions) (res *InitResult, wa
 		return res, warns, err
 	}
 
-	specs, leases, err := e.missingMirrorRefs(ctx, pc, res)
+	specs, leases, err := e.missingMirrorRefs(ctx, g, res)
 	if err != nil {
 		return res, warns, err
 	}
 	_, hasOverlay, _ := g.Resolve(ctx, shadowRef(OverlayBranch))
 	if e.DryRun {
-		if len(specs) > 0 {
-			res.Actions = append(res.Actions, fmt.Sprintf("mirror %d branches and %d tags", len(res.MirroredBranches), len(res.MirroredTags)))
-		}
+		pv := preview.New(map[string]string{"public_main": publicMain})
+		addMirrorOps(pv, p.Shadow, specs)
 		if !hasOverlay {
-			res.Actions = append(res.Actions, "create the "+OverlayBranch+" overlay branch")
+			pv.Add(preview.PushRef(p.Shadow, "refs/heads/"+OverlayBranch, "", ""))
 		}
 		if pc.shadow.DefaultBranch != OverlayBranch {
-			res.Actions = append(res.Actions, "make "+OverlayBranch+" the default branch")
+			pv.Add(preview.SetDefaultBranch(p.Shadow, OverlayBranch))
 		}
+		if !registered {
+			pv.Add(preview.RegisterPair(p.Public, p.Shadow))
+		}
+		res.Preview = pv
 		return res, warns, nil
 	}
 	if len(specs) > 0 {
@@ -226,8 +229,7 @@ func (e *Engine) checkAdoptable(ctx context.Context, pc *pairCtx) error {
 
 // missingMirrorRefs lists public branches and tags absent from the shadow
 // repo, main first, with must-not-exist leases.
-func (e *Engine) missingMirrorRefs(ctx context.Context, pc *pairCtx, res *InitResult) ([]string, []gitx.Lease, error) {
-	g := pc.git
+func (e *Engine) missingMirrorRefs(ctx context.Context, g *gitx.Git, res *InitResult) ([]string, []gitx.Lease, error) {
 	get := func(prefix string) (map[string]string, error) { return g.Refs(ctx, prefix) }
 	pubHeads, err := get("refs/remotes/public")
 	if err != nil {
@@ -271,6 +273,46 @@ func (e *Engine) missingMirrorRefs(ctx context.Context, pc *pairCtx, res *InitRe
 		}
 	}
 	return specs, leases, nil
+}
+
+func addMirrorOps(pv *preview.Preview, shadow string, specs []string) {
+	for _, s := range specs {
+		sha, dst, _ := strings.Cut(s, ":")
+		pv.Add(preview.PushRef(shadow, dst, "", sha))
+	}
+}
+
+// previewNewShadow lists what init would do when the shadow repo does not
+// exist yet. Only the public repo is fetched, into the local mirror.
+func (e *Engine) previewNewShadow(ctx context.Context, p workspace.Pair, pub forge.Repo, registered bool, res *InitResult) error {
+	dir := e.WS.MirrorDir(p)
+	if _, err := os.Stat(filepath.Join(dir, "HEAD")); err != nil {
+		if _, err := gitx.Init(ctx, dir, true); err != nil {
+			return internalErr(err, "create the mirror")
+		}
+	}
+	g := gitx.New(dir)
+	g.Config = e.gitConfig()
+	if err := g.AddRemote(ctx, remotePublic, pub.CloneURL); err != nil {
+		return internalErr(err, "configure the public remote")
+	}
+	if err := g.Fetch(ctx, remotePublic, "+refs/heads/*:refs/remotes/public/*", "+refs/tags/*:refs/public-tags/*"); err != nil {
+		return remoteErr(err, "fetch the public repo")
+	}
+	pm, _, _ := g.Resolve(ctx, publicRef("main"))
+	specs, _, err := e.missingMirrorRefs(ctx, g, res)
+	if err != nil {
+		return err
+	}
+	pv := preview.New(map[string]string{"public_main": pm})
+	pv.Add(preview.CreateRepo(p.Shadow))
+	addMirrorOps(pv, p.Shadow, specs)
+	pv.Add(preview.PushRef(p.Shadow, "refs/heads/"+OverlayBranch, "", ""), preview.SetDefaultBranch(p.Shadow, OverlayBranch))
+	if !registered {
+		pv.Add(preview.RegisterPair(p.Public, p.Shadow))
+	}
+	res.Preview = pv
+	return nil
 }
 
 func (e *Engine) createOverlay(ctx context.Context, pc *pairCtx) error {

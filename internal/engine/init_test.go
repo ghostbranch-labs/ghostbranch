@@ -134,7 +134,7 @@ func TestInitDryRunWritesNothing(t *testing.T) {
 	h := newHarness(t)
 	h.eng.DryRun = true
 	res, _, err := h.eng.Init(h.ctx, engine.InitOptions{Public: publicName})
-	if err != nil || !res.DryRun || len(res.Actions) == 0 {
+	if err != nil || res.Preview == nil || len(res.Preview.Ops) == 0 {
 		t.Fatalf("dry run = %+v %v", res, err)
 	}
 	if _, err := h.forge.GetRepo(h.ctx, shadowName); !errors.Is(err, forge.ErrNotFound) {

@@ -1,0 +1,58 @@
+{
+  "schema_version": "0.2",
+  "command": "gate",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "feature": "feat-x",
+    "feature_head": "d7407485ce685c126afcfc258f0a9eeb0092d776",
+    "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+    "overlay": "10e5ddddc0fd64a7daaff38906e96962dcbd4a40",
+    "candidate": "d49d01dec389ef2590148b0e5e59dc80ebf3a0f3",
+    "published_tree": "ef9061717144a4bf03a0230d8f8926d019f2adeb",
+    "checks": "not_run",
+    "failed_checks": [],
+    "leak": "clean",
+    "findings": [],
+    "shadow_pr": 0,
+    "reused": false,
+    "preview": {
+      "fingerprint": {
+        "feature_head": "d7407485ce685c126afcfc258f0a9eeb0092d776",
+        "overlay": "10e5ddddc0fd64a7daaff38906e96962dcbd4a40",
+        "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7"
+      },
+      "ops": [
+        {
+          "from": null,
+          "op": "push_ref",
+          "ref": "refs/heads/ghostbranch-gate/feat-x",
+          "repo": "acme/widget-shadow",
+          "to": "d49d01dec389ef2590148b0e5e59dc80ebf3a0f3"
+        },
+        {
+          "base": "main",
+          "draft": true,
+          "head": "ghostbranch-gate/feat-x",
+          "op": "open_pr",
+          "repo": "acme/widget-shadow"
+        },
+        {
+          "op": "wait_checks",
+          "repo": "acme/widget-shadow",
+          "sha": "d49d01dec389ef2590148b0e5e59dc80ebf3a0f3"
+        },
+        {
+          "from": "a889955ca455f04db0beb644084fb88e9e62cee7",
+          "op": "push_ref",
+          "ref": "refs/ghostbranch/features/feat-x",
+          "repo": "acme/widget-shadow",
+          "to": null
+        }
+      ]
+    }
+  },
+  "warnings": [],
+  "next": [],
+  "error": null
+}

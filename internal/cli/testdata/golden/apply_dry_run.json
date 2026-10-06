@@ -1,0 +1,41 @@
+{
+  "schema_version": "0.2",
+  "command": "apply",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "plan_id": "20261005T120005Z-0c0d0e",
+    "public_branch": "feat-x",
+    "public_pr": 0,
+    "pr_url": "",
+    "resumed": false,
+    "approval": null,
+    "preview": {
+      "fingerprint": {
+        "feature_head": "d7407485ce685c126afcfc258f0a9eeb0092d776",
+        "gate_candidate": "d49d01dec389ef2590148b0e5e59dc80ebf3a0f3",
+        "overlay": "10e5ddddc0fd64a7daaff38906e96962dcbd4a40",
+        "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7"
+      },
+      "ops": [
+        {
+          "from": null,
+          "op": "push_ref",
+          "ref": "refs/heads/feat-x",
+          "repo": "acme/widget",
+          "to": "15dd9c9bcb7655bdb426fb4a24f440fc9c31fb65"
+        },
+        {
+          "base": "main",
+          "draft": false,
+          "head": "feat-x",
+          "op": "open_pr",
+          "repo": "acme/widget"
+        }
+      ]
+    }
+  },
+  "warnings": [],
+  "next": [],
+  "error": null
+}

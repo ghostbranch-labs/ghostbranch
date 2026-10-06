@@ -4,7 +4,7 @@
   "type": "object",
   "additionalProperties": false,
   "required": ["feature", "feature_head", "public_main", "overlay", "candidate", "published_tree", "checks",
-               "failed_checks", "leak", "findings", "shadow_pr", "reused", "dry_run"],
+               "failed_checks", "leak", "findings", "shadow_pr", "reused", "preview"],
   "properties": {
     "feature": { "type": "string" },
     "feature_head": { "$ref": "common.schema.json#/$defs/sha" },
@@ -18,6 +18,6 @@
     "findings": { "type": "array", "items": { "$ref": "finding.schema.json" } },
     "shadow_pr": { "type": "integer", "minimum": 0 },
     "reused": { "type": "boolean" },
-    "dry_run": { "type": "boolean" }
+    "preview": { "oneOf": [{ "type": "null" }, { "$ref": "preview.schema.json" }] }
   }
 }

@@ -17,7 +17,7 @@
       "findings": [],
       "shadow_pr": 0,
       "reused": true,
-      "dry_run": false
+      "preview": null
     },
     "plan": {
       "schema_version": "0.2",
@@ -70,9 +70,9 @@
         "grant_id": "g-0a0b0c",
         "created_by": "human:octo"
       },
-      "dry_run": false
+      "preview": null
     },
-    "dry_run": false
+    "preview": null
   },
   "warnings": [],
   "next": [],

@@ -12,6 +12,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/ledger"
 	"github.com/ghostbranch-labs/ghostbranch/internal/overlay"
 	"github.com/ghostbranch-labs/ghostbranch/internal/plan"
+	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
@@ -27,7 +28,7 @@ type ApplyResult struct {
 	PRURL        string           `json:"pr_url"`
 	Resumed      bool             `json:"resumed"`
 	Approval     *ledger.Approval `json:"approval"`
-	DryRun       bool             `json:"dry_run"`
+	Preview      *preview.Preview `json:"preview"`
 }
 
 // Apply publishes a saved plan if the repos still match it. Every step is
@@ -131,7 +132,7 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 	}
 
 	branch := pl.Publish.TargetBranch
-	res := &ApplyResult{PlanID: pl.ID, PublicBranch: branch, DryRun: e.DryRun}
+	res := &ApplyResult{PlanID: pl.ID, PublicBranch: branch}
 	existing, exists, _ := g.Resolve(ctx, publicRef(branch))
 	if exists && existing != P {
 		return res, warns, contract.New(contract.BranchExists,
@@ -139,6 +140,18 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 			WithField("branch").WithDetails(map[string]any{"branch": branch, "sha": existing})
 	}
 	if e.DryRun {
+		pv := preview.New(map[string]string{"public_main": pm, "feature_head": head, "overlay": O, "gate_candidate": gateC})
+		if !exists {
+			pv.Add(preview.PushRef(pc.pair.Public, "refs/heads/"+branch, "", P))
+		}
+		pr, err := e.Forge.FindOpenPR(ctx, pc.pair.Public, branch, "main")
+		if err != nil {
+			return res, warns, forgeErr(err, "find the public PR")
+		}
+		if pr == nil {
+			pv.Add(preview.OpenPR(pc.pair.Public, branch, "main", false))
+		}
+		res.Preview = pv
 		return res, warns, nil
 	}
 	files, err := g.DiffNames(ctx, pl.Publish.Parent, P)

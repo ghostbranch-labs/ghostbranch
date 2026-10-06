@@ -17,7 +17,7 @@
       "findings": [],
       "shadow_pr": 0,
       "reused": true,
-      "dry_run": false
+      "preview": null
     },
     "plan": {
       "schema_version": "0.2",
@@ -60,7 +60,7 @@
     "plan_path": "<ROOT>/home/workspaces/default/plans/20261005T120005Z-0c0d0e.json",
     "findings": [],
     "applied": null,
-    "dry_run": false
+    "preview": null
   },
   "warnings": [],
   "next": [],

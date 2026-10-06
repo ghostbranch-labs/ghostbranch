@@ -94,6 +94,17 @@ func TestGoldenContract(t *testing.T) {
 			te.mustRun("promote", "feat-x", "-m", "Add feature", "--plan")
 			testutil.Commit(te.t, te.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
 		}, []string{"apply", "<PLAN>", "--yes"}, 6},
+		{"sync_plan", func(te *testEnv) {
+			initOnly(te)
+			testutil.Commit(te.t, te.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
+		}, []string{"sync", "--plan"}, 0},
+		{"feature_start_plan", initOnly, []string{"feature", "start", "feat-x", "--plan"}, 0},
+		{"gate_plan", withFeature, []string{"gate", "feat-x", "--plan"}, 0},
+		{"promote_dry_run_stale_gate", withFeature, []string{"promote", "feat-x", "-m", "Add feature", "--dry-run"}, 0},
+		{"apply_dry_run", func(te *testEnv) {
+			gatedFeature(te)
+			te.mustRun("promote", "feat-x", "-m", "Add feature", "--plan")
+		}, []string{"apply", "<PLAN>", "--dry-run"}, 0},
 		{"bad_flag", nil, []string{"gate"}, 2},
 		{"shadow_not_private", func(te *testEnv) { initOnly(te); te.forge.SetPrivate("acme/widget-shadow", false) }, []string{"sync"}, 1},
 	}

@@ -25,7 +25,7 @@ Every command takes --json for one machine-readable object on stdout. Exit codes
 	pf.StringVar(&a.repo, "repo", "", "public or shadow repo (owner/name) to act on")
 	pf.StringVar(&a.workspace, "workspace", "", `workspace name (default $GHOSTBRANCH_WORKSPACE or "default")`)
 	pf.BoolVar(&a.nonInteractive, "non-interactive", false, "never prompt; missing input is an error")
-	pf.BoolVar(&a.dryRun, "dry-run", false, "show what would happen without writing to any repo")
+	pf.BoolVar(&a.dryRun, "dry-run", false, "preview exactly what would change, and change nothing")
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
 		return contract.New(contract.BadFlag, "%s", err.Error())
 	})
@@ -59,6 +59,7 @@ repo. Running it again resumes a partial setup.`,
 	c.Flags().StringVar(&o.Shadow, "shadow", "", "shadow repo name (default <owner/repo>-shadow)")
 	c.Flags().BoolVar(&o.Adopt, "adopt", false, "take over an existing, empty or mirror-only, private repo")
 	c.Flags().BoolVar(&yes, "yes", false, "accepted for consistency; init never asks")
+	c.Flags().BoolVar(&a.dryRun, "plan", false, "preview exactly what would change, and change nothing (same as --dry-run)")
 	return c
 }
 
@@ -83,6 +84,7 @@ func (a *app) syncCmd() *cobra.Command {
 		},
 	}
 	c.Flags().BoolVar(&yes, "yes", false, "accepted for consistency; sync never asks")
+	c.Flags().BoolVar(&a.dryRun, "plan", false, "preview exactly what would change, and change nothing (same as --dry-run)")
 	return c
 }
 
@@ -107,11 +109,12 @@ func (a *app) featureStartCmd() *cobra.Command {
 		},
 	}
 	c.Flags().BoolVar(&yes, "yes", false, "accepted for consistency; feature start never asks")
+	c.Flags().BoolVar(&a.dryRun, "plan", false, "preview exactly what would change, and change nothing (same as --dry-run)")
 	return c
 }
 
 func (a *app) gateCmd() *cobra.Command {
-	return &cobra.Command{
+	c := &cobra.Command{
 		Use:   "gate <feature>",
 		Short: "Rebase on public main, scan for leaks, and run CI; report only",
 		Long: `gate rebases the feature onto public main, scans exactly what would be published for leaks,
@@ -131,6 +134,8 @@ every check. It records the result and never touches the public repo. Exit 3 mea
 			return done(a, res, w, err)
 		},
 	}
+	c.Flags().BoolVar(&a.dryRun, "plan", false, "preview exactly what would change, and change nothing (same as --dry-run)")
+	return c
 }
 
 func (a *app) promoteCmd() *cobra.Command {

@@ -1,0 +1,36 @@
+{
+  "schema_version": "0.2",
+  "command": "feature start",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "name": "feat-x",
+    "branch": "feat-x",
+    "base": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+    "checkout": "git fetch && git switch feat-x",
+    "preview": {
+      "fingerprint": {
+        "shadow_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7"
+      },
+      "ops": [
+        {
+          "from": null,
+          "op": "push_ref",
+          "ref": "refs/heads/feat-x",
+          "repo": "acme/widget-shadow",
+          "to": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7"
+        },
+        {
+          "from": null,
+          "op": "push_ref",
+          "ref": "refs/ghostbranch/features/feat-x",
+          "repo": "acme/widget-shadow",
+          "to": null
+        }
+      ]
+    }
+  },
+  "warnings": [],
+  "next": [],
+  "error": null
+}

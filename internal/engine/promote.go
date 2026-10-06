@@ -13,6 +13,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/ledger"
 	"github.com/ghostbranch-labs/ghostbranch/internal/overlay"
 	"github.com/ghostbranch-labs/ghostbranch/internal/plan"
+	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
@@ -28,12 +29,12 @@ type PromoteOptions struct {
 }
 
 type PromoteResult struct {
-	Gate     *GateResult    `json:"gate"`
-	Plan     *plan.Plan     `json:"plan"`
-	PlanPath string         `json:"plan_path"`
-	Findings []leak.Finding `json:"findings"`
-	Applied  *ApplyResult   `json:"applied"`
-	DryRun   bool           `json:"dry_run"`
+	Gate     *GateResult      `json:"gate"`
+	Plan     *plan.Plan       `json:"plan"`
+	PlanPath string           `json:"plan_path"`
+	Findings []leak.Finding   `json:"findings"`
+	Applied  *ApplyResult     `json:"applied"`
+	Preview  *preview.Preview `json:"preview"`
 }
 
 const editorTemplate = "\n# Write the commit message for the public squash commit of feature %q.\n" +
@@ -70,7 +71,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	if branch == "" {
 		branch = opt.Feature
 	}
-	res = &PromoteResult{Findings: []leak.Finding{}, DryRun: e.DryRun}
+	res = &PromoteResult{Findings: []leak.Finding{}}
 	pc, err := e.open(ctx, "promote", p, true)
 	if err != nil {
 		return res, nil, err
@@ -100,11 +101,19 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	// one would make every plan stale.
 	tip, tipOK, _ := g.Resolve(ctx, shadowRef(gateBranch(opt.Feature)))
 	candidateLive := m.Gate != nil && m.Gate.Candidate != "" && tipOK && tip == m.Gate.Candidate
-	if m.Gate.Passed() && m.Gate.FreshFor(head, pm, O) && candidateLive {
+	fresh := m.Gate.Passed() && m.Gate.FreshFor(head, pm, O) && candidateLive
+	switch {
+	case fresh:
 		res.Gate = &GateResult{Feature: opt.Feature, FeatureHead: head, PublicMain: pm, Overlay: O,
 			Candidate: m.Gate.Candidate, PublishedTree: m.Gate.PublishedTree, Checks: m.Gate.Checks,
-			FailedChecks: []string{}, Leak: m.Gate.Leak, Findings: []leak.Finding{}, Reused: true, DryRun: e.DryRun}
-	} else {
+			FailedChecks: []string{}, Leak: m.Gate.Leak, Findings: []leak.Finding{}, Reused: true}
+	case e.DryRun:
+		// Running the gate would push; say so and stop, rather than return
+		// a plan whose checks never ran.
+		res.Preview = preview.New(map[string]string{"public_main": pm, "feature_head": head, "overlay": O})
+		res.Preview.Add(preview.RunGate(opt.Feature))
+		return res, warns, nil
+	default:
 		e.progressf("the gate for %s is missing or stale; running it", opt.Feature)
 		gr, gw, err := e.gate(ctx, pc, opt.Feature)
 		res.Gate = gr
@@ -160,6 +169,12 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 		Leak: plan.Leak{Findings: []map[string]any{}, ScannerVersion: version}}
 	res.Plan = &pl
 	if e.DryRun {
+		existing, _, _ := g.Resolve(ctx, publicRef(branch))
+		pv := preview.New(map[string]string{"public_main": pm, "feature_head": head, "overlay": O, "gate_candidate": C})
+		pv.Add(preview.PushRef(p.Shadow, remotePlanRef(planID), "", P),
+			preview.PushRef(p.Public, "refs/heads/"+branch, existing, P),
+			preview.OpenPR(p.Public, branch, "main", false))
+		res.Preview = pv
 		return res, warns, nil
 	}
 	if err := e.push(ctx, pc, remoteShadow, gitx.PushOptions{Leases: []gitx.Lease{{Ref: remotePlanRef(planID)}}}, P+":"+remotePlanRef(planID)); err != nil {

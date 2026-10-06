@@ -15,8 +15,7 @@
     "mirrored_tags": [],
     "overlay_created": true,
     "default_branch_set": true,
-    "dry_run": false,
-    "actions": []
+    "preview": null
   },
   "warnings": [],
   "next": [],

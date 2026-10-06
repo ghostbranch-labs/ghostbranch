@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
 )
 
 func TestFullLoopThroughTheCLI(t *testing.T) {
@@ -95,5 +97,19 @@ func TestPlumbingFailureIsInternalNotUsage(t *testing.T) {
 	code, env := te.runJSON("sync")
 	if e, _ := env["error"].(map[string]any); code != 1 || e["code"] != "INTERNAL" {
 		t.Fatalf("%d %v", code, env)
+	}
+}
+
+func TestPlanIsAPreview(t *testing.T) {
+	te := newTestEnv(t)
+	initOnly(te)
+	testutil.Commit(t, te.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
+	code, out, _ := te.run("sync", "--plan")
+	if code != 0 || !strings.Contains(out, "Dry run; nothing was changed") || !strings.Contains(out, "refs/heads/main") {
+		t.Fatalf("%d %q", code, out)
+	}
+	code, env := te.runJSON("sync")
+	if data, _ := env["data"].(map[string]any); code != 0 || data["action"] != "fast_forward" || data["preview"] != nil {
+		t.Fatalf("the preview must not have synced: %d %v", code, env)
 	}
 }
