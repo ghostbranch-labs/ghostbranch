@@ -224,11 +224,25 @@ func TestGuardHookEndToEnd(t *testing.T) {
 		return must(t, env, root, "git", "--git-dir", public.Dir, "rev-parse", "refs/heads/main")
 	}
 
-	// Review Focus 3: one push with public main and a feature is refused whole.
-	for _, args := range [][]string{{"origin", "main", "feat-x"}, {"origin", "feat-x"}, {"origin", featTip + ":refs/heads/renamed"}} {
-		out, err := push(args...)
-		if err == nil || !strings.Contains(out, "PUSH_BLOCKED") {
-			t.Fatalf("git push %v must be refused:\n%s", args, out)
+	// Review Focus 3: one push with public main and a feature is refused
+	// whole, and the refusal names only the feature.
+	byName := `refs/heads/feat-x: "feat-x" is a Ghostbranch feature`
+	for _, c := range []struct {
+		args []string
+		why  string
+	}{
+		{[]string{"origin", "main", "feat-x"}, byName},
+		{[]string{"origin", "feat-x"}, byName},
+		{[]string{"origin", featTip + ":refs/heads/renamed"}, `refs/heads/renamed: it contains the commits of feature "feat-x"`},
+	} {
+		out, err := push(c.args...)
+		if err == nil || !strings.Contains(out, "PUSH_BLOCKED") || !strings.Contains(out, c.why) {
+			t.Fatalf("git push %v must be refused because %s:\n%s", c.args, c.why, out)
+		}
+		for _, line := range strings.Split(out, "\n") {
+			if strings.HasPrefix(strings.TrimSpace(line), "refs/heads/main:") {
+				t.Fatalf("git push %v must not name public main:\n%s", c.args, out)
+			}
 		}
 	}
 	if publicMain() != m {
@@ -237,12 +251,14 @@ func TestGuardHookEndToEnd(t *testing.T) {
 	if out, err := push("origin", "main"); err != nil || publicMain() != mainTip {
 		t.Fatalf("public main must go through: %v\n%s", err, out)
 	}
+	oldShadow := must(t, env, root, "git", "--git-dir", shadow.Dir, "rev-parse", "refs/heads/feat-x")
 	if out, err := push("shadow", "feat-x"); err != nil {
 		t.Fatalf("pushes to the shadow repo are untouched: %v\n%s", err, out)
 	}
 	log, _ := os.ReadFile(filepath.FromSlash(logf))
 	if !strings.Contains(string(log), "lfs origin") || !strings.Contains(string(log), "lfs shadow") ||
-		!strings.Contains(string(log), "refs/heads/main "+mainTip+" refs/heads/main "+m) {
+		!strings.Contains(string(log), "refs/heads/main "+mainTip+" refs/heads/main "+m) ||
+		!strings.Contains(string(log), "refs/heads/feat-x "+featTip+" refs/heads/feat-x "+oldShadow) {
 		t.Fatalf("the chained hook must run with git's exact input:\n%s", log)
 	}
 

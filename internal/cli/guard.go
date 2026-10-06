@@ -2,7 +2,9 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -147,6 +149,23 @@ func (a *app) guardStatusCmd() *cobra.Command {
 	}
 }
 
+// mirrorFacts reads the features recorded in the engine's mirror. Only a
+// mirror directory that does not exist yet means "no features", so the
+// reserved names still apply; anything else the guard cannot read is an
+// error, and the push is refused.
+func mirrorFacts(ctx context.Context, dir string) (guard.Facts, error) {
+	facts := guard.Facts{Names: map[string]bool{}, Heads: map[string]string{}}
+	if _, err := os.Stat(dir); errors.Is(err, fs.ErrNotExist) {
+		return facts, nil
+	} else if err != nil {
+		return facts, err
+	}
+	if _, err := os.Stat(filepath.Join(dir, "HEAD")); err != nil {
+		return facts, fmt.Errorf("%s is not a readable git repository: %w", dir, err)
+	}
+	return guard.LoadFacts(ctx, gitx.New(dir))
+}
+
 func (a *app) guardCheckCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "check <remote> <url>",
@@ -177,11 +196,9 @@ func (a *app) guardCheckCmd() *cobra.Command {
 			if !ok || !found || !strings.EqualFold(p.Public, slug) {
 				return contract.New(contract.PushBlocked, "the guard cannot tell which public repo %q is, so the push is refused; reinstall it with ghostbranch guard install", args[0])
 			}
-			facts := guard.Facts{Names: map[string]bool{}, Heads: map[string]string{}}
-			if _, err := os.Stat(filepath.Join(ws.MirrorDir(p), "HEAD")); err == nil {
-				if facts, err = guard.LoadFacts(ctx, gitx.New(ws.MirrorDir(p))); err != nil {
-					return contract.Wrap(contract.PushBlocked, err, "read the features of %s, so the push is refused", p.Public)
-				}
+			facts, err := mirrorFacts(ctx, ws.MirrorDir(p))
+			if err != nil {
+				return contract.Wrap(contract.PushBlocked, err, "the guard could not read the features of %s, so the push is refused", p.Public)
 			}
 			// The checkout reads its objects with plain git, so the user's
 			// config (safe.directory and the like) applies.

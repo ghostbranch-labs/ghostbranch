@@ -48,6 +48,10 @@ func TestGuardCommands(t *testing.T) {
 	initOnly(te)
 	delete(te.vars, "GHOSTBRANCH_TOKEN") // the guard needs no token
 	dir := pairCheckout(te)
+	// A remote for the shadow repo is never recorded as public.
+	if out, err := exec.Command("git", "-C", dir, "remote", "add", "shadow", "https://github.com/acme/widget-shadow.git").CombinedOutput(); err != nil {
+		t.Fatalf("%v %s", err, out)
+	}
 	code, env := te.runJSON("guard", "install")
 	data, _ := env["data"].(map[string]any)
 	if code != 0 || data["action"] != "installed" {
@@ -72,13 +76,76 @@ func TestGuardCommands(t *testing.T) {
 	}
 	te.env.Stdin = strings.NewReader("refs/heads/x 1111111111111111111111111111111111111111 refs/heads/ghostbranch 0000000000000000000000000000000000000000\n")
 	code, env = te.runJSON("guard", "check", "origin", "/some/rewritten/path")
-	if e, _ := env["error"].(map[string]any); code != 1 || e["code"] != "PUSH_BLOCKED" {
+	e, _ := env["error"].(map[string]any)
+	if code != 1 || e["code"] != "PUSH_BLOCKED" {
 		t.Fatalf("check overlay: %d %v", code, env)
+	}
+	details, _ := e["details"].(map[string]any)
+	blocked, _ := details["blocked"].([]any)
+	if len(blocked) != 1 || blocked[0].(map[string]any)["ref"] != "refs/heads/ghostbranch" {
+		t.Fatalf("check overlay must name refs/heads/ghostbranch: %v", env)
+	}
+	// A remote the guard cannot place is refused, never waved through.
+	te.env.Stdin = strings.NewReader("refs/heads/main 1111111111111111111111111111111111111111 refs/heads/main 0000000000000000000000000000000000000000\n")
+	code, env = te.runJSON("guard", "check", "nosuch", "/local/path")
+	if e, _ := env["error"].(map[string]any); code != 1 || e["code"] != "PUSH_BLOCKED" ||
+		!strings.Contains(e["message"].(string), "cannot tell which public repo") {
+		t.Fatalf("check unknown remote: %d %v", code, env)
 	}
 	if code, env := te.runJSON("guard", "uninstall"); code != 0 || env["data"].(map[string]any)["action"] != "removed" {
 		t.Fatalf("uninstall: %d %v", code, env)
 	} else {
 		validData(t, env)
+	}
+}
+
+// The engine's mirror holds the recorded features. Only a mirror that does
+// not exist yet means "no features"; one the guard cannot read refuses the
+// push.
+func TestGuardCheckMirror(t *testing.T) {
+	mainLine := "refs/heads/main 1111111111111111111111111111111111111111 refs/heads/main 0000000000000000000000000000000000000000\n"
+	cases := []struct {
+		name    string
+		mirror  func(t *testing.T, dir string)
+		blocked bool
+	}{
+		{"no mirror yet", func(*testing.T, string) {}, false},
+		{"mirror without HEAD", func(t *testing.T, dir string) {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}, true},
+		{"mirror is a file", func(t *testing.T, dir string) {
+			if err := os.WriteFile(dir, []byte("not a repo\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			hermeticGit(t)
+			te := newTestEnv(t)
+			initOnly(te)
+			pairCheckout(te)
+			mirror := filepath.Join(te.vars["GHOSTBRANCH_HOME"], "workspaces", "default", "pairs", "acme__widget", "mirror.git")
+			if err := os.RemoveAll(mirror); err != nil {
+				t.Fatal(err)
+			}
+			c.mirror(t, mirror)
+			te.env.Stdin = strings.NewReader(mainLine)
+			code, env := te.runJSON("guard", "check", "origin", "https://github.com/acme/widget.git")
+			if !c.blocked {
+				if code != 0 {
+					t.Fatalf("a push of public main with no mirror yet must pass: %d %v", code, env)
+				}
+				return
+			}
+			e, _ := env["error"].(map[string]any)
+			if code != 1 || e["code"] != "PUSH_BLOCKED" ||
+				!strings.Contains(e["message"].(string), "could not read the features of acme/widget") {
+				t.Fatalf("an unreadable mirror must refuse the push: %d %v", code, env)
+			}
+		})
 	}
 }
 
