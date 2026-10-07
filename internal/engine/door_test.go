@@ -3,11 +3,13 @@ package engine_test
 import (
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/approval"
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
+	"github.com/ghostbranch-labs/ghostbranch/internal/forge/fake"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
 )
 
@@ -40,8 +42,27 @@ func TestOnlyPromoteAndApplyReachThePublicRepo(t *testing.T) {
 	if len(h.pushes) != n {
 		t.Fatal("agents commands must never push")
 	}
-	_, _, err = h.eng.Sync(h.ctx, h.pair, engine.SyncOptions{})
+	// Public main moves on with a push-triggered workflow, so sync really
+	// pushes and looks for (and cancels) the runs that push started.
+	h.eng.CIAppearWindow, h.eng.CIAppearPoll = 3*time.Second, time.Second
+	next := testutil.Commit(t, h.pubGit, "main", "next", map[string]string{".github/workflows/push.yml": pushWorkflow})
+	seedRuns(h, next, wfRun(1, "ci", "queued"))
+	h.forge.Runs[publicName] = []fake.Run{{SHA: next, Run: wfRun(2, "ci", "queued")}}
+	baseline = h.publicRefs()
+	n = len(h.pushes)
+	sres, _, err := h.eng.Sync(h.ctx, h.pair, engine.SyncOptions{})
 	run("sync", err, "")
+	if len(h.pushes) == n || sres.ShadowMainAfter != next || len(sres.CancelledRuns) != 1 {
+		t.Fatalf("sync did not push and cancel: %+v", sres)
+	}
+	for _, repo := range append(append([]string(nil), h.forge.PushRunsRepos...), h.forge.CancelRunRepos...) {
+		if repo != shadowName {
+			t.Fatalf("sync asked about workflow runs in %s", repo)
+		}
+	}
+	if len(h.forge.PushRunsRepos) == 0 || len(h.forge.CancelRunRepos) == 0 || len(h.forge.Cancelled[publicName]) != 0 {
+		t.Fatalf("PushRuns %v CancelRun %v cancelled %v", h.forge.PushRunsRepos, h.forge.CancelRunRepos, h.forge.Cancelled)
+	}
 	n = len(h.pushes)
 	_, _, err = h.eng.Audit(h.ctx, h.pair)
 	run("audit", err, "")

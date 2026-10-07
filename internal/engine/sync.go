@@ -184,7 +184,9 @@ func addPushed(list []pushedCommit, sha, branch string) []pushedCommit {
 
 // pushStartsWorkflows reports whether pushing sha to any of branches starts
 // a workflow: whether sha's tree has a workflow file push-triggered for one
-// of them. Files that don't parse start nothing (GitHub rejects them). If
+// of them. Files that don't parse start nothing (GitHub rejects them), and
+// neither do files whose every job carries the audit's push guard, which
+// compares with the public repo and so skips pushes in the shadow repo. If
 // the tree can't be read, it answers true, so sync still looks.
 func (e *Engine) pushStartsWorkflows(ctx context.Context, pc *pairCtx, sha string, branches []string) bool {
 	entries, err := pc.git.ListTree(ctx, sha)
@@ -203,7 +205,7 @@ func (e *Engine) pushStartsWorkflows(ctx context.Context, pc *pairCtx, sha strin
 	}
 	names := guardNames(pc)
 	for i, path := range paths {
-		if f, err := workflow.Parse(path, blobs[shas[i]], names); err == nil && f.PushTriggered(branches) {
+		if f, err := workflow.Parse(path, blobs[shas[i]], names); err == nil && f.PushTriggered(branches) && !f.PushGuarded {
 			return true
 		}
 	}
@@ -220,7 +222,8 @@ var activeRun = map[string]bool{"queued": true, "in_progress": true, "waiting": 
 // no new one.
 // Runs are cancelled as soon as they are seen, since GitHub bills each
 // started job at least a minute. It never fails the sync, which has
-// already pushed: trouble is a CI_NOT_CANCELLED warning.
+// already pushed: trouble is a CI_NOT_CANCELLED warning. Once a cancel is
+// forbidden, every other would be too, so it stops looking.
 func (e *Engine) cancelPushRuns(ctx context.Context, pc *pairCtx, pushed []pushedCommit) ([]CancelledRun, []contract.Warning) {
 	repo := pc.pair.Shadow
 	interval := e.CIAppearPoll
@@ -258,6 +261,10 @@ func (e *Engine) cancelPushRuns(ctx context.Context, pc *pairCtx, pushed []pushe
 				if !activeRun[r.Status] {
 					continue
 				}
+				if denied > 0 {
+					denied++ // the token can't cancel: count it, don't ask
+					continue
+				}
 				switch err := e.Forge.CancelRun(ctx, repo, r.ID); {
 				case err == nil:
 					e.progressf("cancelled workflow run %s (%d)", r.Workflow, r.ID)
@@ -268,12 +275,12 @@ func (e *Engine) cancelPushRuns(ctx context.Context, pc *pairCtx, pushed []pushe
 					failure = err
 				}
 			}
-			if (len(seen) > 0 && fresh == 0) || e.Now().Sub(start) >= e.CIAppearWindow {
+			if denied > 0 || (len(seen) > 0 && fresh == 0) || e.Now().Sub(start) >= e.CIAppearWindow {
 				break
 			}
 			e.Sleep(interval)
 		}
-		if listDenied || failure != nil {
+		if listDenied || denied > 0 || failure != nil {
 			break
 		}
 	}

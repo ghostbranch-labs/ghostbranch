@@ -36,15 +36,19 @@ type Forge struct {
 	CreateForbidden  bool
 	// Runs are the push-triggered workflow runs per repo, for PushRuns.
 	// RunsForbidden makes PushRuns fail with ErrForbidden, RunsErr with
-	// that error; CancelForbidden makes CancelRun fail with ErrForbidden.
-	// Cancelled records the run IDs CancelRun cancelled, per repo, and
-	// PushRunsCalls counts PushRuns calls.
+	// that error; CancelForbidden makes CancelRun fail with ErrForbidden,
+	// CancelErr with that error. Cancelled records the run IDs CancelRun
+	// cancelled, per repo; PushRunsCalls counts PushRuns calls, and
+	// PushRunsRepos and CancelRunRepos record the repo each call named.
 	Runs            map[string][]Run
 	RunsForbidden   map[string]bool
 	RunsErr         error
 	CancelForbidden map[string]bool
+	CancelErr       error
 	Cancelled       map[string][]int64
 	PushRunsCalls   int
+	PushRunsRepos   []string
+	CancelRunRepos  []string
 }
 
 // Run is a seeded workflow run that a push of SHA started.
@@ -102,6 +106,15 @@ func (f *Forge) SetPrivate(full string, private bool) {
 	f.repos[full].Private = private
 	f.mu.Unlock()
 }
+
+// SetFullName makes GetRepo of full answer with canonical as the repo's
+// name, as GitHub does for a name typed in another case.
+func (f *Forge) SetFullName(full, canonical string) {
+	f.mu.Lock()
+	f.repos[full].FullName = canonical
+	f.mu.Unlock()
+}
+
 func (f *Forge) SetFork(full string, fork bool) {
 	f.mu.Lock()
 	f.repos[full].Fork = fork
@@ -254,6 +267,7 @@ func (f *Forge) PushRuns(_ context.Context, full, sha string) ([]forge.Run, erro
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.PushRunsCalls++
+	f.PushRunsRepos = append(f.PushRunsRepos, full)
 	if f.RunsForbidden[full] {
 		return nil, fmt.Errorf("list workflow runs of %s: %w", full, forge.ErrForbidden)
 	}
@@ -272,8 +286,12 @@ func (f *Forge) PushRuns(_ context.Context, full, sha string) ([]forge.Run, erro
 func (f *Forge) CancelRun(_ context.Context, full string, id int64) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.CancelRunRepos = append(f.CancelRunRepos, full)
 	if f.CancelForbidden[full] {
 		return fmt.Errorf("cancel workflow run %d of %s: %w", id, full, forge.ErrForbidden)
+	}
+	if f.CancelErr != nil {
+		return f.CancelErr
 	}
 	for i := range f.Runs[full] {
 		r := &f.Runs[full][i]

@@ -99,7 +99,7 @@ func TestSyncCIWasteIsDocumented(t *testing.T) {
 		t.Fatalf("CI_NOT_CANCELLED = %+v %v", es, err)
 	}
 	d := warningDocs[PushTriggersOnSync]
-	for _, want := range []string{"github.event_name != 'push'", "Actions write", "GHOSTBRANCH_SYNC_TOKEN"} {
+	for _, want := range []string{"github.event_name != 'push'", "Actions write", "GHOSTBRANCH_SYNC_TOKEN", "<existing> && (github.event_name != 'push'"} {
 		if !strings.Contains(d.Summary+" "+d.WhatToDo, want) {
 			t.Errorf("PUSH_TRIGGERS_ON_SYNC doc lacks %q", want)
 		}

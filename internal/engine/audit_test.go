@@ -143,3 +143,64 @@ func (h *harness) setConfig(old, new string) {
 	testutil.Commit(h.t, h.shadowGit(), engine.OverlayBranch, "config",
 		map[string]string{".ghostbranch.yml": strings.Replace(string(raw), old, new, 1)})
 }
+
+// The advised guard names the public repo as GitHub spells it, not as the
+// pair was typed.
+func TestAuditPushGuardUsesTheCanonicalName(t *testing.T) {
+	h := newHarness(t)
+	testutil.Commit(t, h.pubGit, "main", "guarded ci", map[string]string{".github/workflows/ci.yml": guardedCI})
+	h.init()
+	h.forge.SetFullName(publicName, "Acme/Widget")
+	_, warns, err := h.eng.Audit(h.ctx, h.pair)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range warns {
+		if w.Code == contract.PushTriggersOnSync {
+			if want := "github.event_name != 'push' || github.repository == 'Acme/Widget'"; w.Details["guard"] != want {
+				t.Fatalf("guard = %v, want %q", w.Details["guard"], want)
+			}
+			return
+		}
+	}
+	t.Fatalf("no PUSH_TRIGGERS_ON_SYNC in %+v", warns)
+}
+
+// Following the audit's advice clears the warning: a file whose every job
+// carries the push guard is no longer a push trigger, and a job that already
+// had an if: keeps it, combined with the guard.
+func TestAuditPushTriggersClearOnceJobsCarryTheGuard(t *testing.T) {
+	h := newHarness(t)
+	const guarded = "on:\n  push:\n    branches: [main]\n  pull_request:\njobs:\n" +
+		"  test:\n    if: github.event_name != 'push' || github.repository == 'acme/widget'\n    runs-on: x\n    steps:\n      - run: echo\n" +
+		"  lint:\n    if: matrix.os == 'linux' && (github.event_name != 'push' || github.repository == 'acme/widget')\n    runs-on: x\n    steps:\n      - run: echo\n"
+	testutil.Commit(t, h.pubGit, "main", "push-guarded ci", map[string]string{".github/workflows/ci.yml": guarded})
+	h.init()
+	res, warns, err := h.eng.Audit(h.ctx, h.pair)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := codes(warns)
+	if len(res.PushTriggers) != 0 || c[contract.PushTriggersOnSync] != 0 || len(res.Guards) != 0 || c[contract.RepoGuard] != 0 {
+		t.Fatalf("push triggers = %v guards = %+v warnings = %+v", res.PushTriggers, res.Guards, warns)
+	}
+}
+
+func TestAuditPushGuardAdviceCombinesWithAnExistingIf(t *testing.T) {
+	h := newHarness(t)
+	testutil.Commit(t, h.pubGit, "main", "guarded ci", map[string]string{".github/workflows/ci.yml": guardedCI})
+	h.init()
+	_, warns, err := h.eng.Audit(h.ctx, h.pair)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range warns {
+		if w.Code == contract.PushTriggersOnSync {
+			if !strings.Contains(w.Message, "<existing> && (github.event_name != 'push' || github.repository == 'acme/widget')") {
+				t.Fatalf("message = %s", w.Message)
+			}
+			return
+		}
+	}
+	t.Fatalf("no PUSH_TRIGGERS_ON_SYNC in %+v", warns)
+}

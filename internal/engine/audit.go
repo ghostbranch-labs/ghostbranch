@@ -137,7 +137,7 @@ func (e *Engine) audit(ctx context.Context, pc *pairCtx, cfg config.Config, O st
 			if _, guards, err := workflow.Rewrite(f.path, src, names); err == nil {
 				res.Guards = append(res.Guards, guards...)
 			}
-			if parsed.PushTriggered(cfg.Sync.Branches) {
+			if parsed.PushTriggered(cfg.Sync.Branches) && !parsed.PushGuarded {
 				res.PushTriggers = append(res.PushTriggers, f.path)
 			}
 		}
@@ -186,10 +186,11 @@ func (e *Engine) audit(ctx context.Context, pc *pairCtx, cfg config.Config, O st
 	// A sync pushes with the person's token (or GHOSTBRANCH_SYNC_TOKEN when
 	// scheduled), and token pushes start push-triggered workflows.
 	if len(res.PushTriggers) > 0 {
-		guard := "github.event_name != 'push' || github.repository == '" + pc.pair.Public + "'"
+		guard := "github.event_name != 'push' || github.repository == '" + names.Public + "'"
 		warns = append(warns, contract.Warning{Code: contract.PushTriggersOnSync,
 			Message: "pushes to synced branches start these workflows in the shadow repo: " + strings.Join(res.PushTriggers, ", ") +
-				"; ghostbranch sync cancels them when the token has Actions write. To stop them for good, add this to their push-triggered jobs: if: " + guard,
+				"; ghostbranch sync cancels them when the token has Actions write. To stop them for good, add this to their push-triggered jobs: if: " + guard +
+				" (a job that already has an if: combines them: if: <existing> && (" + guard + "))",
 			Details: map[string]any{"paths": res.PushTriggers, "guard": guard}})
 	}
 	if res.Minutes.Billed {

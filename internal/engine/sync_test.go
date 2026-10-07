@@ -141,6 +141,25 @@ func TestSyncDoesNotWaitWhenThePushStartsNoWorkflow(t *testing.T) {
 	}
 }
 
+// A workflow whose every job carries the audit's push guard skips push runs
+// in the shadow repo, so its push starts nothing: sync doesn't look.
+func TestSyncDoesNotWaitWhenEveryJobCarriesThePushGuard(t *testing.T) {
+	h := newHarness(t)
+	h.init()
+	h.eng.CIAppearWindow, h.eng.CIAppearPoll = 10*time.Second, time.Second
+	guarded := strings.Replace(pushWorkflow, "    runs-on: x", "    if: github.event_name != 'push' || github.repository == 'acme/widget'\n    runs-on: x", 1)
+	next := testutil.Commit(t, h.pubGit, "main", "next", map[string]string{".github/workflows/push.yml": guarded})
+	seedRuns(h, next, wfRun(1, "ci", "queued"))
+	start := h.clock.Now()
+	res, warns, err := h.eng.Sync(h.ctx, h.pair, engine.SyncOptions{})
+	if err != nil || len(warns) != 0 || res.ShadowMainAfter != next || len(res.CancelledRuns) != 0 {
+		t.Fatalf("%+v %+v %v", res, warns, err)
+	}
+	if h.forge.PushRunsCalls != 0 || !h.clock.Now().Equal(start) {
+		t.Fatalf("PushRuns calls = %d, waited %s", h.forge.PushRunsCalls, h.clock.Now().Sub(start))
+	}
+}
+
 func seedRuns(h *harness, sha string, runs ...forge.Run) {
 	if h.forge.Runs == nil {
 		h.forge.Runs = map[string][]fake.Run{}
@@ -235,7 +254,44 @@ func TestSyncWarnsWhenTheTokenCannotCancelRuns(t *testing.T) {
 	}
 }
 
+// Once a cancel is forbidden every other one would be too: sync stops
+// looking, for this commit and the rest, and counts the runs it saw.
+func TestSyncStopsLookingOnceACancelIsForbidden(t *testing.T) {
+	h, next := pushRunsHarness(t)
+	h.setConfig("branches: [main]", "branches: [main, release]")
+	seedRuns(h, next, wfRun(1, "ci", "queued"), wfRun(2, "lint", "in_progress"))
+	other := testutil.Commit(t, h.pubGit, "release", "rel", map[string]string{
+		".github/workflows/push.yml": strings.Replace(pushWorkflow, "[main]", "[main, release]", 1)})
+	seedRuns(h, other, wfRun(3, "ci", "queued"))
+	h.forge.CancelForbidden = map[string]bool{shadowName: true}
+	start := h.clock.Now()
+	res, warns, err := h.eng.Sync(h.ctx, h.pair, engine.SyncOptions{})
+	if err != nil || len(res.CancelledRuns) != 0 {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if h.forge.PushRunsCalls != 1 || len(h.forge.CancelRunRepos) != 1 || !h.clock.Now().Equal(start) {
+		t.Fatalf("PushRuns calls = %d, CancelRun calls = %d, waited %s", h.forge.PushRunsCalls, len(h.forge.CancelRunRepos), h.clock.Now().Sub(start))
+	}
+	if len(warns) != 1 || warns[0].Code != contract.CINotCancelled ||
+		!strings.Contains(warns[0].Message, "the push started 2 workflow run(s) in the shadow repo, and the token can't cancel them") {
+		t.Fatalf("warnings = %+v", warns)
+	}
+}
+
 func TestSyncWarnsOnOtherCancelErrors(t *testing.T) {
+	h, next := pushRunsHarness(t)
+	seedRuns(h, next, wfRun(1, "ci", "queued"), wfRun(2, "lint", "queued"))
+	h.forge.CancelErr = errors.New("actions are down")
+	res, warns, err := h.eng.Sync(h.ctx, h.pair, engine.SyncOptions{})
+	if err != nil || res.ShadowMainAfter != next || len(res.CancelledRuns) != 0 {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if len(warns) != 1 || warns[0].Code != contract.CINotCancelled || !strings.Contains(warns[0].Message, "actions are down") {
+		t.Fatalf("warnings = %+v", warns)
+	}
+}
+
+func TestSyncWarnsWhenListingRunsFails(t *testing.T) {
 	h, next := pushRunsHarness(t)
 	seedRuns(h, next, wfRun(1, "ci", "queued"))
 	h.forge.RunsErr = errors.New("actions are down")
