@@ -23,7 +23,8 @@ main, green CI, and a leak scan of exactly what will be published.
 
 ## Set up a repo
 
-1. `ghostbranch init <public> --plan --json`, then `ghostbranch init <public> --json`.
+1. `ghostbranch init <public> --plan --json`, then `ghostbranch init <public> --json`. If the person
+   named a shadow repo, add `--shadow <owner/name>` to both.
 2. Exit 1 with `SHADOW_CREATE_DENIED` means the token may not create repos. **Stop**: show the person
    `error.details.steps` and **ask them to do steps 1 and 2 of `error.details.steps`**: create the empty
    private repo, and add it to the token. Never ask the person for a token with wider access.
@@ -40,8 +41,9 @@ main, green CI, and a leak scan of exactly what will be published.
 - Sync is manual by default. When a result warns `SHADOW_BEHIND`, run `ghostbranch sync` (fast-forward
   only; it never resolves a conflict). The gate always rebases on public main, so it is never affected.
 - Sync's pushes start the shadow repo's push-triggered workflows, which re-test what public CI already
-  tested, so sync cancels those runs. `CI_NOT_CANCELLED` means it couldn't (the token needs Actions
-  write); the runs only cost minutes. The audit's `PUSH_TRIGGERS_ON_SYNC` gives a guard that stops them.
+  tested, so sync cancels those runs (`--no-cancel` skips that). `CI_NOT_CANCELLED` means it couldn't
+  (the token needs Actions write); the runs only cost minutes. The audit's `PUSH_TRIGGERS_ON_SYNC`
+  gives a guard that stops them.
 - Scheduled sync is opt-in and costs Actions minutes (every 6 hours is about 120 a month). It is the
   person's choice: they set `sync.schedule` in `.ghostbranch.yml` on the `ghostbranch` branch, then
   `ghostbranch upgrade --plan` and `ghostbranch upgrade` install the workflow. `sync.schedule: off`
@@ -69,9 +71,11 @@ main, green CI, and a leak scan of exactly what will be published.
 - Set `GHOSTBRANCH_ACTOR=agent:<your-name>` (for example `agent:claude-code`) on every
   `ghostbranch` command, so the ledger records that an agent acted. It is a label only; it never
   grants or blocks anything.
+- Write the promote `--message` yourself from the change (it becomes the public commit and PR text),
+  and show it to the person; use theirs if they give one.
 - Don't know a code? `ghostbranch explain <CODE> --json`.
-- Want to see what a command would do? Add `--plan` (or `--dry-run`): it returns the exact
-  operations and changes nothing.
+- Want to see what a command would do? Add `--plan` (or `--dry-run`): it returns the exact operations
+  and changes nothing.
 
 ## When the gate finds a leak
 
@@ -85,8 +89,10 @@ main, green CI, and a leak scan of exactly what will be published.
   which lines are meant to be internal, restore the marker pair (for example, add the missing
   `END-INTERNAL` line). Never delete, rewrite or move marker lines or the internal lines between
   them to make the gate pass; if it is not clear, stop and ask the person.
-- Never change `leak_scan` (`markers`, `block_patterns`, `strip`) in `.ghostbranch.yml` to get past
-  a finding; that is the person's call.
+- If a finding is a fake secret in a test fixture, you may rewrite the fixture to build the value at
+  runtime (for example by concatenating parts): that removes the content. Never waive it yourself.
+- Never change `leak_scan` (`markers`, `block_patterns`, `strip`) in `.ghostbranch.yml` to get past a
+  finding; that is the person's call.
 - The warnings `WORKFLOW_CHANGED`, `LARGE_FILE` and `BINARY_FILE` don't block. Mention them to the
   person when you hand over a publish.
 
@@ -161,14 +167,18 @@ or in one Git reads as binary. A person can change the tokens with `leak_scan.ma
 
 ## Token permissions (for people)
 
+Any token can read public repos, so for a public repo you only grant permissions on the shadow repo.
+A fine-grained token applies the same permissions to every repo it selects, so if your public repo is
+private, a token that can read it can also write it: keep it to yourself, never give it to an agent.
+
 Fine-grained tokens, per command:
 
 | Command | Permissions |
 |---|---|
 | `init` that creates the shadow repo | Administration write on **all repositories** of the owner (a token can't name a repo that doesn't exist yet), plus the `init --adopt` set |
-| `init --adopt` (create the empty private repo yourself first) | Shadow: Administration, Contents and Workflows read and write. Public: Contents read |
-| `sync`, `upgrade` | Shadow: Contents and Workflows write; Actions write lets `sync` cancel the workflow runs its pushes start. Public: Contents read |
-| `feature start`, `gate` | Shadow: Contents, Pull requests and Workflows write; Actions and Commit statuses read. Public: Contents read |
+| `init --adopt` (create the empty private repo yourself first) | Shadow: Administration, Contents and Workflows read and write |
+| `sync`, `upgrade` | Shadow: Contents and Workflows write; Actions write (optional: lets `sync` cancel the workflow runs its pushes start) |
+| `feature start`, `gate` | Shadow: Contents, Pull requests and Workflows write; Actions and Commit statuses read |
 | `promote`, `apply` | Public: Contents and Pull requests write (yours, never an agent's) |
 | `audit` | Contents read; optionally Secrets: read, to compare secret names |
 
