@@ -26,7 +26,7 @@ func TestRenderListsEveryCodeFromTheRegistry(t *testing.T) {
 			t.Errorf("exit %d is missing from the exit table", x)
 		}
 	}
-	if n := strings.Count(out, "\n"); n > 220 {
+	if n := strings.Count(out, "\n"); n > 240 {
 		t.Errorf("the guide is %d lines; keep it short (spec: about 150 plus the tables)", n)
 	}
 }
@@ -120,5 +120,52 @@ func TestGuideTellsAgentsToHandWaiversToAPerson(t *testing.T) {
 		if !strings.Contains(g, want) {
 			t.Errorf("the guide lacks %q", want)
 		}
+	}
+}
+
+func TestGuideCoversSetupAndCIParity(t *testing.T) {
+	out := guide.Render(contract.Registry())
+	for _, want := range []string{
+		"## Set up a repo", "SHADOW_CREATE_DENIED", "ghostbranch init <public> --adopt",
+		"Never ask the person for a token with wider access",
+		"## Keeping up with public", "ghostbranch sync", "SHADOW_BEHIND", "sync.schedule", "ghostbranch upgrade",
+		"GHOSTBRANCH_SYNC_TOKEN", "never public write",
+		"## Token permissions (for people)", "Administration", "Secrets: read",
+		"REPO_GUARD_UNREWRITABLE",
+		"of `error.details.steps`", "Shadow: Contents, Pull requests and Workflows write",
+		"other than through `ghostbranch init`", "`SYNC_DIVERGED`, which needs a",
+		"Shadow: Administration, Contents and Workflows read and write. Public: Contents read",
+		"Once the person confirms both are done", "deploy or publish credentials", "`ci.rewrite_repo_guards: warn`",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("guide lacks %q", want)
+		}
+	}
+}
+
+// Only promote and apply write to the public repo: the table is where a
+// person is sent to widen an agent's token, so any other row granting
+// public write would hand the agent the publish.
+func TestTokenTableGrantsPublicWriteOnlyToPromote(t *testing.T) {
+	out := guide.Render(contract.Registry())
+	_, table, _ := strings.Cut(out, "## Token permissions (for people)")
+	table, _, _ = strings.Cut(table, "\n## ")
+	rows := 0
+	for _, line := range strings.Split(table, "\n") {
+		if !strings.HasPrefix(line, "| `") {
+			continue
+		}
+		rows++
+		cells := strings.Split(line, "|")
+		cmd, perms := cells[1], cells[2]
+		i := strings.Index(perms, "Public:")
+		public := i >= 0 && strings.Contains(perms[i:], "write") ||
+			strings.Contains(perms, "two repos") && strings.Contains(perms, "write")
+		if public != strings.Contains(cmd, "promote") {
+			t.Errorf("row %q: public write = %v", strings.TrimSpace(cmd), public)
+		}
+	}
+	if rows != 6 {
+		t.Fatalf("found %d token rows, want 6", rows)
 	}
 }

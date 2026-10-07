@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "upgrade data",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["public", "shadow", "changed", "files", "commit", "audit", "preview"],
+  "properties": {
+    "public": { "$ref": "common.schema.json#/$defs/repo" },
+    "shadow": { "$ref": "common.schema.json#/$defs/repo" },
+    "changed": { "type": "boolean" },
+    "files": { "type": "array", "items": { "type": "object", "additionalProperties": false,
+      "required": ["path", "status", "action", "replaces_local_edits"],
+      "properties": { "path": { "type": "string" },
+        "status": { "enum": ["current", "missing", "outdated", "modified", "newer"] },
+        "action": { "enum": ["add", "update", "remove", "unchanged"] },
+        "replaces_local_edits": { "type": "boolean" } } } },
+    "commit": { "$ref": "common.schema.json#/$defs/shaOrEmpty" },
+    "audit": { "oneOf": [{ "type": "null" }, { "$ref": "audit.schema.json" }] },
+    "preview": { "oneOf": [{ "type": "null" }, { "$ref": "preview.schema.json" }] }
+  }
+}

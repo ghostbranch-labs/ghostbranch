@@ -30,11 +30,13 @@ func TestDescribe(t *testing.T) {
 	p.Add(preview.CreateRepo("acme/x-shadow"), preview.PushRef("acme/x-shadow", "refs/heads/main", "", "0123456789abcdef"),
 		preview.PushRef("acme/x-shadow", "refs/heads/main", "0123456789abcdef", "fedcba9876543210"),
 		preview.OpenPR("acme/x-shadow", "g", "main", true), preview.RunGate("feat-x"), preview.MoveFile("a", "b"),
-		preview.PushRef("acme/x-shadow", "refs/ghostbranch/features/f", "0123456789abcdef", ""))
+		preview.PushRef("acme/x-shadow", "refs/ghostbranch/features/f", "0123456789abcdef", ""),
+		preview.OverlayFile("acme/x-shadow", ".github/workflows/ghostbranch-sync.yml", "add"))
 	got := strings.Join(p.Describe(), "\n")
 	for _, want := range []string{"create private repo acme/x-shadow", "create refs/heads/main in acme/x-shadow at 0123456789ab",
 		"move refs/heads/main in acme/x-shadow from 0123456789ab to fedcba987654", "open a draft PR in acme/x-shadow from g into main",
-		"run the gate for feat-x", "move a to b", "update refs/ghostbranch/features/f in acme/x-shadow from 0123456789ab"} {
+		"run the gate for feat-x", "move a to b", "update refs/ghostbranch/features/f in acme/x-shadow from 0123456789ab",
+		"add .github/workflows/ghostbranch-sync.yml on the ghostbranch branch of acme/x-shadow"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in:\n%s", want, got)
 		}

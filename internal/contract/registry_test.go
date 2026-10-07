@@ -1,6 +1,9 @@
 package contract
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestEveryCodeIsDocumentedExactlyOnce(t *testing.T) {
 	if len(errorDocs) != len(exitCodes) {
@@ -58,5 +61,23 @@ func TestExplain(t *testing.T) {
 	}
 	if (TokenCannotPublish.Exit() != ExitFailure) || NotAPairCheckout.Exit() != ExitUsage || PushBlocked.Exit() != ExitFailure || GuardUnsupported.Exit() != ExitFailure {
 		t.Fatal("new codes map to the wrong exit codes")
+	}
+}
+
+// Guarded jobs run in the shadow repo on unreleased code, so the advice
+// never sends deploy or publish credentials there, and says what widening a
+// guard writes into the public repo.
+func TestGuardAndSecretAdviceKeepsDeploysOut(t *testing.T) {
+	for code, wants := range map[WarningCode][]string{
+		SecretsMissing: {"A person adds only the secrets the tests need. Never add deploy or publish credentials to the shadow repo: guarded jobs run there on unreleased code. Ghostbranch never reads or copies secret values."},
+		RepoGuard:      {"deploys or publishes", "ci.rewrite_repo_guards: warn"},
+		RepoGuardUnrewritable: {"deploys or publishes", "ci.rewrite_repo_guards: warn",
+			"writes the shadow repo's name into the public repo"},
+	} {
+		for _, want := range wants {
+			if !strings.Contains(warningDocs[code].WhatToDo, want) {
+				t.Errorf("%s what_to_do lacks %q", code, want)
+			}
+		}
 	}
 }

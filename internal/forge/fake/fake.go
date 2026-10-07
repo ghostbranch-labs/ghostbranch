@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"sync"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
@@ -27,6 +28,12 @@ type Forge struct {
 	LimitedChecks bool
 	// PushDenied makes PushAccess report "false" (403) for these repos.
 	PushDenied map[string]bool
+	// Secrets are SecretNames' answer per repo; SecretsForbidden makes it
+	// fail with ErrForbidden. CreateForbidden makes CreatePrivateRepo fail
+	// with ErrForbidden.
+	Secrets          map[string][]string
+	SecretsForbidden map[string]bool
+	CreateForbidden  bool
 }
 
 // New stores bare repos under root.
@@ -115,6 +122,9 @@ func (f *Forge) GetRepo(_ context.Context, full string) (forge.Repo, error) {
 func (f *Forge) CreatePrivateRepo(_ context.Context, full string) (forge.Repo, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.CreateForbidden {
+		return forge.Repo{}, fmt.Errorf("create %s: %w", full, forge.ErrForbidden)
+	}
 	r, err := f.add(full, true)
 	if err != nil {
 		return forge.Repo{}, err
@@ -210,4 +220,15 @@ func (f *Forge) PushAccess(_ context.Context, full string) forge.PushAccess {
 		return forge.PushAccess{Can: "false", HTTPStatus: 403}
 	}
 	return forge.PushAccess{Can: "true", HTTPStatus: 200}
+}
+
+func (f *Forge) SecretNames(_ context.Context, full string) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.SecretsForbidden[full] {
+		return nil, fmt.Errorf("list secrets of %s: %w", full, forge.ErrForbidden)
+	}
+	out := append([]string{}, f.Secrets[full]...)
+	sort.Strings(out)
+	return out, nil
 }

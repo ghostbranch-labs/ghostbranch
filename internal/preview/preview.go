@@ -64,6 +64,11 @@ func WriteFile(path string) Op        { return Op{"op": "write_file", "path": pa
 func RemoveFile(path string) Op       { return Op{"op": "remove_file", "path": path} }
 func MoveFile(from, to string) Op     { return Op{"op": "move_file", "from": from, "to": to} }
 
+// OverlayFile is a change to a managed file on the overlay branch.
+func OverlayFile(repo, path, action string) Op {
+	return Op{"op": "overlay_file", "repo": repo, "path": path, "action": action}
+}
+
 func short(v any) string {
 	s, _ := v.(string)
 	if len(s) > 12 {
@@ -123,6 +128,8 @@ func (p *Preview) Describe() []string {
 			line = fmt.Sprintf("remove %s", o["path"])
 		case "move_file":
 			line = fmt.Sprintf("move %s to %s", o["from"], o["to"])
+		case "overlay_file":
+			line = fmt.Sprintf("%s %s on the %s branch of %s", o["action"], o["path"], "ghostbranch", o["repo"])
 		default:
 			line = fmt.Sprintf("%v", o)
 		}

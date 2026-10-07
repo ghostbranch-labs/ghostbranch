@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -111,6 +112,10 @@ func (c *Client) CreatePrivateRepo(ctx context.Context, full string) (forge.Repo
 		AutoInit:    new(false),
 		Description: new("Ghostbranch shadow repo (private). Do not make public."),
 	})
+	// The public repo was already read, so a 404 on an org owner means "not allowed".
+	if isForbidden(resp, err) || (err != nil && org != "" && resp != nil && resp.StatusCode == 404) {
+		return forge.Repo{}, fmt.Errorf("%w: create %s: %v", forge.ErrForbidden, full, err)
+	}
 	if err := wrap(resp, err); err != nil {
 		return forge.Repo{}, err
 	}
@@ -338,4 +343,49 @@ func (c *Client) PushAccess(ctx context.Context, full string) forge.PushAccess {
 		return forge.PushAccess{Can: "false", HTTPStatus: resp.StatusCode}
 	}
 	return forge.PushAccess{Can: "unknown", HTTPStatus: resp.StatusCode}
+}
+
+// SecretNames lists the Actions secret names of full and the org secrets
+// shared with it, sorted and de-duplicated. Values are never read. A user
+// repo has no org secrets, so a 404 on that listing is not an error.
+func (c *Client) SecretNames(ctx context.Context, full string) ([]string, error) {
+	owner, name, err := forge.SplitName(full)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	list := func(f func(context.Context, string, string, *gh.ListOptions) (*gh.Secrets, *gh.Response, error), notFoundOK bool) error {
+		opts := &gh.ListOptions{PerPage: 100}
+		for {
+			s, resp, err := f(ctx, owner, name, opts)
+			if isForbidden(resp, err) {
+				return fmt.Errorf("%w: list secrets of %s: %v", forge.ErrForbidden, full, err)
+			}
+			if notFoundOK && err != nil && resp != nil && resp.StatusCode == 404 {
+				return nil
+			}
+			if err := wrap(resp, err); err != nil {
+				return err
+			}
+			for _, sec := range s.Secrets {
+				seen[sec.Name] = true
+			}
+			if resp.NextPage == 0 {
+				return nil
+			}
+			opts.Page = resp.NextPage
+		}
+	}
+	if err := list(c.c.Actions.ListRepoSecrets, false); err != nil {
+		return nil, err
+	}
+	if err := list(c.c.Actions.ListRepoOrgSecrets, true); err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(seen))
+	for n := range seen {
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	return out, nil
 }

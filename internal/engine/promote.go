@@ -15,6 +15,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/overlay"
 	"github.com/ghostbranch-labs/ghostbranch/internal/plan"
 	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
+	"github.com/ghostbranch-labs/ghostbranch/internal/workflow"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
@@ -88,6 +89,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	if err != nil {
 		return res, warns, err
 	}
+	warns = addWarnings(warns, e.behind(ctx, pc)...)
 	m, _, err := e.readMeta(ctx, pc, opt.Feature)
 	if err != nil {
 		return res, warns, err
@@ -107,22 +109,32 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	tip, tipOK, _ := g.Resolve(ctx, shadowRef(gateBranch(opt.Feature)))
 	candidateLive := m.Gate != nil && m.Gate.Candidate != "" && tipOK && tip == m.Gate.Candidate
 	fresh := m.Gate.Passed() && m.Gate.FreshFor(head, pm, O) && candidateLive
+	names := guardNames(pc)
+	var R, T2 string
+	var entries []gitx.TreeEntry
+	var guardRep workflow.GuardReport
 	if fresh {
-		// A gate recorded by a binary that stripped differently (an upgrade
-		// that added internal markers) is stale: gate again rather than
-		// publish a tree this binary would not build.
-		R, err := g.MustResolve(ctx, m.Gate.Candidate+"^")
-		if err != nil {
-			fresh = false
-		} else if T2, _, err := publishedTree(ctx, g, R, cfg); err != nil || T2 != m.Gate.PublishedTree {
-			fresh = false
+		// A gate recorded by a binary that built its candidate differently
+		// is stale: one that stripped differently (an upgrade that added
+		// internal markers), or one that did not rewrite repo guards (so its
+		// guarded jobs skipped). Gate again rather than publish a tree this
+		// binary would not build, or reuse CI that did not run those jobs.
+		fresh = false
+		var rerr error
+		if R, rerr = g.MustResolve(ctx, m.Gate.Candidate+"^"); rerr == nil {
+			if T2, entries, rerr = publishedTree(ctx, g, R, cfg); rerr == nil && T2 == m.Gate.PublishedTree {
+				want, rep, _, werr := e.candidateTree(ctx, g, R, entries, O, names, cfg.CI.RewriteRepoGuards)
+				have, herr := g.TreeOf(ctx, m.Gate.Candidate)
+				fresh, guardRep = werr == nil && herr == nil && want == have, rep
+			}
 		}
 	}
 	switch {
 	case fresh:
 		res.Gate = &GateResult{Feature: opt.Feature, FeatureHead: head, PublicMain: pm, Overlay: O,
 			Candidate: m.Gate.Candidate, PublishedTree: m.Gate.PublishedTree, Checks: m.Gate.Checks,
-			FailedChecks: []string{}, Leak: m.Gate.Leak, Findings: []leak.Finding{}, Waived: []WaivedFinding{}, Reused: true}
+			FailedChecks: []string{}, Leak: m.Gate.Leak, Findings: []leak.Finding{}, Waived: []WaivedFinding{},
+			RepoGuards: &guardRep, Reused: true}
 	case e.DryRun:
 		// Running the gate would push; say so and stop, rather than return
 		// a plan whose checks never ran.
@@ -137,17 +149,16 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 		if err != nil {
 			return res, warns, err
 		}
+		if R, err = g.MustResolve(ctx, gr.Candidate+"^"); err != nil {
+			return res, warns, internalErr(err, "read the rebased feature")
+		}
+		if T2, entries, err = publishedTree(ctx, g, R, cfg); err != nil {
+			return res, warns, err
+		}
+		guardRep = *gr.RepoGuards
 	}
 	C, T := res.Gate.Candidate, res.Gate.PublishedTree
 	set := overlay.NewSet(cfg.LeakScan.Strip...)
-	R, err := g.MustResolve(ctx, C+"^")
-	if err != nil {
-		return res, warns, internalErr(err, "read the rebased feature")
-	}
-	T2, entries, err := publishedTree(ctx, g, R, cfg)
-	if err != nil {
-		return res, warns, err
-	}
 	if T2 != T {
 		return res, warns, contract.New(contract.Internal, "the gated tree %s no longer matches its candidate (%s)", short(T), short(T2))
 	}
@@ -161,7 +172,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	if err != nil {
 		return res, warns, internalErr(err, "write the public commit")
 	}
-	if err := assertPublish(ctx, g, P, T, C, pm, set); err != nil {
+	if err := assertPublish(ctx, g, P, T, C, pm, set, names); err != nil {
 		return res, warns, err
 	}
 	ident := who.Name + " <" + who.Email + ">"
@@ -186,7 +197,8 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 		Publish: plan.Publish{Commit: P, Tree: T, Parent: pm,
 			Author:       plan.Identity{Name: who.Name, Email: who.Email, Date: who.When},
 			TargetBranch: branch, PR: plan.PR{Title: title, Body: body}},
-		Leak: plan.Leak{Findings: []map[string]any{}, Waived: planWaived(waived), Warnings: append([]contract.Warning{}, rep.Warnings...), ScannerVersion: version}}
+		Leak: plan.Leak{Findings: []map[string]any{}, Waived: planWaived(waived), Warnings: append([]contract.Warning{}, rep.Warnings...), ScannerVersion: version},
+		CI:   plan.CI{RepoGuards: guardRep}}
 	res.Plan = &pl
 	if e.DryRun {
 		pv := preview.New(map[string]string{"public_main": pm, "feature_head": head, "overlay": O, "gate_candidate": C})

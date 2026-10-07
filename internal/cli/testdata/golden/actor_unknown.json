@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.3",
+  "schema_version": "0.4",
   "command": "sync",
   "ok": true,
   "exit_code": 0,
@@ -10,6 +10,14 @@
     "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
     "shadow_main_before": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
     "shadow_main_after": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+    "branches": [
+      {
+        "name": "main",
+        "from": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+        "to": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+        "status": "up_to_date"
+      }
+    ],
     "preview": null
   },
   "warnings": [

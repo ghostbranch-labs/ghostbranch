@@ -58,9 +58,10 @@ func newTestEnv(t *testing.T) *testEnv {
 		CwdRemotes:   func() []string { return nil },
 		NewScanner:   func(r leak.Rules) (leak.Scanner, error) { return leak.NewGitleaks(r) },
 		PollInterval: time.Second, SettleWindow: 5 * time.Second,
-		Executable: func() (string, error) { return filepath.Join(root, "bin", "ghostbranch"), nil },
-		Getwd:      func() (string, error) { return root, nil },
-		GuardState: func(string) (bool, bool) { return false, false },
+		Executable:   func() (string, error) { return filepath.Join(root, "bin", "ghostbranch"), nil },
+		Getwd:        func() (string, error) { return root, nil },
+		GuardState:   func(string) (bool, bool) { return false, false },
+		ShadowRemote: func(string) (string, string, bool) { return "shadow", "shadow", true },
 	}
 	return te
 }

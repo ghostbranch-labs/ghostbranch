@@ -5,8 +5,8 @@
   "additionalProperties": false,
   "required": ["schema_version", "command", "ok", "exit_code", "data", "warnings", "next", "error"],
   "properties": {
-    "schema_version": { "const": "0.3" },
-    "command": { "enum": ["ghostbranch", "init", "sync", "feature start", "gate", "promote", "apply", "agents allow", "agents revoke", "agents status", "explain", "guide", "guard install", "guard uninstall", "guard status", "guard check", "waivers add", "waivers list", "waivers revoke"] },
+    "schema_version": { "const": "0.4" },
+    "command": { "enum": ["ghostbranch", "init", "sync", "audit", "upgrade", "feature start", "gate", "promote", "apply", "agents allow", "agents revoke", "agents status", "explain", "guide", "guard install", "guard uninstall", "guard status", "guard check", "waivers add", "waivers list", "waivers revoke"] },
     "ok": { "type": "boolean" },
     "exit_code": { "type": "integer", "minimum": 0, "maximum": 6 },
     "data": { "type": "object" },
@@ -18,7 +18,9 @@
         "required": ["code", "message"],
         "properties": {
           "code": { "enum": ["CONFIG_KEY_IGNORED", "PUBLIC_NOT_PUBLIC", "GATE_NOT_RECORDED", "CHECKS_LIMITED", "ACTOR_UNKNOWN",
-                          "WORKFLOW_CHANGED", "LARGE_FILE", "BINARY_FILE", "WAIVERS_UNREADABLE"] },
+                          "WORKFLOW_CHANGED", "LARGE_FILE", "BINARY_FILE", "WAIVERS_UNREADABLE",
+                          "OVERLAY_OUTDATED", "REPO_GUARD", "REPO_GUARD_UNREWRITABLE", "SECRETS_UNLISTED", "SECRETS_MISSING",
+                          "PUSH_TRIGGERS_ON_SYNC", "ACTIONS_MINUTES_BILLED", "SHADOW_BEHIND", "AUDIT_INCOMPLETE"] },
           "message": { "type": "string" },
           "details": { "type": "object" }
         }
@@ -50,7 +52,7 @@
               "enum": ["AUTH_MISSING", "FORGE_ERROR", "SHADOW_NOT_PRIVATE", "CONFIG_INVALID", "LOCKED", "INTERNAL",
                        "BAD_FLAG", "MISSING_INPUT", "PAIR_AMBIGUOUS", "NAME_INVALID", "FEATURE_NOT_FOUND",
                        "CHECKS_FAILED", "NO_CI", "CI_TIMEOUT", "LEAK_FOUND",
-                       "REBASE_CONFLICT", "SYNC_DIVERGED", "BRANCH_EXISTS", "OVERLAY_COLLISION", "SHADOW_NOT_EMPTY", "REF_MOVED",
+                       "REBASE_CONFLICT", "SYNC_DIVERGED", "BRANCH_EXISTS", "OVERLAY_COLLISION", "SHADOW_NOT_EMPTY", "REF_MOVED", "SHADOW_CREATE_DENIED",
                        "APPROVAL_REQUIRED", "PLAN_STALE",
                        "TOKEN_CANNOT_PUBLISH", "GUARD_UNSUPPORTED", "PUSH_BLOCKED", "NOT_A_PAIR_CHECKOUT",
                        "MARKER_INVALID", "WAIVER_UNKNOWN"]

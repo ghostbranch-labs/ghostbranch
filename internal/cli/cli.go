@@ -62,6 +62,11 @@ type Env struct {
 	// GuardState reports whether the current directory is a checkout of the
 	// public repo and whether the guard is installed there (for next).
 	GuardState func(public string) (inCheckout, installed bool)
+	// ShadowRemote names the remote of the current checkout that points at
+	// the shadow repo ("" if none, or if its name is not safe to print into
+	// a command), a remote name not yet in use for adding one, and whether
+	// the current directory is a git checkout at all.
+	ShadowRemote func(shadow string) (remote, free string, inCheckout bool)
 }
 
 // DefaultEnv is the real process environment.
@@ -79,6 +84,7 @@ func DefaultEnv() Env {
 		Executable:   os.Executable,
 		Getwd:        os.Getwd,
 		GuardState:   guardState,
+		ShadowRemote: shadowRemote,
 	}
 }
 
@@ -96,6 +102,7 @@ type app struct {
 	eng            *engine.Engine
 	args           []string
 	pairFull       workspace.Pair
+	shadowRemote   string
 }
 
 // Run executes one command and returns the process exit code.
@@ -156,11 +163,21 @@ func (a *app) render(err error) int {
 	}
 	if env.Error != nil {
 		_, _ = fmt.Fprintf(a.env.Stderr, "error: %s [%s]\n", env.Error.Message, env.Error.Code)
+		printSteps(a.env.Stderr, env.Error)
 		printNext(a.env.Stderr, next)
 	} else {
 		printNext(a.env.Stdout, next)
 	}
 	return env.ExitCode
+}
+
+// printSteps lists an error's details.steps, numbered, for people. The JSON
+// output carries them in error.details.steps.
+func printSteps(w io.Writer, e *contract.ErrorBody) {
+	steps, _ := e.Details["steps"].([]string)
+	for i, s := range steps {
+		_, _ = fmt.Fprintf(w, "  %d. %s\n", i+1, s)
+	}
 }
 
 func printNext(w io.Writer, next []contract.Next) {

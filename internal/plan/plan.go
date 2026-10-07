@@ -12,9 +12,10 @@ import (
 	"time"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
+	"github.com/ghostbranch-labs/ghostbranch/internal/workflow"
 )
 
-const SchemaVersion = "0.3"
+const SchemaVersion = "0.4"
 
 type Pair struct {
 	Public string `json:"public"`
@@ -86,6 +87,12 @@ type Leak struct {
 	ScannerVersion string             `json:"scanner_version"`
 }
 
+// CI is what the gate's CI ran with: the repo guards it rewrote, and those
+// it could not, which skipped in the shadow repo.
+type CI struct {
+	RepoGuards workflow.GuardReport `json:"repo_guards"`
+}
+
 type Plan struct {
 	SchemaVersion string      `json:"schema_version"`
 	ID            string      `json:"id"`
@@ -98,6 +105,7 @@ type Plan struct {
 	Fingerprint   Fingerprint `json:"fingerprint"`
 	Publish       Publish     `json:"publish"`
 	Leak          Leak        `json:"leak"`
+	CI            CI          `json:"ci"`
 }
 
 // NewID returns a time-sortable plan ID such as 20261005T123000Z-abcdef.

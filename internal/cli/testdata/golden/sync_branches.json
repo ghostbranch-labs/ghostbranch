@@ -1,0 +1,32 @@
+{
+  "schema_version": "0.4",
+  "command": "sync",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "public": "acme/widget",
+    "shadow": "acme/widget-shadow",
+    "action": "noop",
+    "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+    "shadow_main_before": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+    "shadow_main_after": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+    "branches": [
+      {
+        "name": "main",
+        "from": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+        "to": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+        "status": "up_to_date"
+      },
+      {
+        "name": "release",
+        "from": "",
+        "to": "f67b6e8dd95ad522dddbc4b38ab5c333eb60a6fa",
+        "status": "created"
+      }
+    ],
+    "preview": null
+  },
+  "warnings": [],
+  "next": [],
+  "error": null
+}

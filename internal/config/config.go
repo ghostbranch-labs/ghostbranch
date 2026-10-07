@@ -24,6 +24,23 @@ type Config struct {
 	Promote  Promote
 	LeakScan LeakScan
 	Gate     Gate
+	Sync     Sync
+	CI       CI
+}
+
+// ScheduleOff turns scheduled sync off: no sync workflow is installed.
+const ScheduleOff = "off"
+
+// Sync is how shadow branches follow public. Schedule is ScheduleOff or a
+// five-field cron for the opt-in sync workflow.
+type Sync struct {
+	Schedule string
+	Branches []string
+}
+
+// CI is how the gate treats the public repo's workflows.
+type CI struct {
+	RewriteRepoGuards string // rewrite | warn | off
 }
 
 type Promote struct {
@@ -58,6 +75,7 @@ func Default() Config {
 		LeakScan: LeakScan{Strip: []string{".ghostbranch/**"}, Secrets: true,
 			Markers: Markers{Begin: "BEGIN-INTERNAL", End: "END-INTERNAL"}, BlockPatterns: []string{}, LargeFile: 5 << 20},
 		Gate: Gate{CIAppearTimeout: 10 * time.Minute, CITimeout: 60 * time.Minute},
+		Sync: Sync{Schedule: ScheduleOff, Branches: []string{"main"}}, CI: CI{RewriteRepoGuards: "rewrite"},
 	}
 }
 
@@ -68,6 +86,7 @@ var honoured = map[string]bool{
 	"leak_scan.markers.begin": true, "leak_scan.markers.end": true,
 	"leak_scan.block_patterns": true, "leak_scan.large_file": true,
 	"gate.ci_appear_timeout": true, "gate.ci_timeout": true,
+	"sync.schedule": true, "sync.branches": true, "ci.rewrite_repo_guards": true,
 }
 
 // ignoredRoots are product-spec keys that later sub-projects implement.
@@ -98,7 +117,6 @@ func Parse(data []byte) (Config, []contract.Warning, error) {
 
 	cfg := Default()
 	var warns []contract.Warning
-	warned := map[string]bool{}
 	for _, k := range keys {
 		switch root := ignoredRoot(k); {
 		case replaced[k] != "":
@@ -108,11 +126,8 @@ func Parse(data []byte) (Config, []contract.Warning, error) {
 				return Config{}, nil, err
 			}
 		case root != "":
-			if !warned[root] {
-				warned[root] = true
-				warns = append(warns, contract.Warning{Code: contract.ConfigKeyIgnored,
-					Message: fmt.Sprintf("%s is not supported in this version and is ignored", root)})
-			}
+			warns = append(warns, contract.Warning{Code: contract.ConfigKeyIgnored,
+				Message: fmt.Sprintf("%s is not supported in this version and is ignored", k)})
 		default:
 			return Config{}, nil, contract.New(contract.ConfigInvalid, "unknown key %q in .ghostbranch.yml", k).WithField(k)
 		}
@@ -244,6 +259,45 @@ func set(cfg *Config, key string, v any) error {
 		cfg.Gate.CIAppearTimeout, err = dur()
 	case "gate.ci_timeout":
 		cfg.Gate.CITimeout, err = dur()
+	case "sync.schedule":
+		s, ok := v.(string)
+		if !ok {
+			return invalid(key, `must be "off" or five cron fields such as "23 */6 * * *"`)
+		}
+		norm, serr := checkSchedule(s)
+		if serr != nil {
+			return invalid(key, "%v", serr)
+		}
+		cfg.Sync.Schedule = norm
+	case "sync.branches":
+		list, ok := v.([]any)
+		if !ok || len(list) == 0 {
+			return invalid(key, "must be a list of branch names that includes main")
+		}
+		seen := map[string]bool{}
+		cfg.Sync.Branches = nil
+		for _, item := range list {
+			b, ok := item.(string)
+			if !ok || !validBranch(b) {
+				return invalid(key, "%v is not a branch name Ghostbranch can sync", item)
+			}
+			if seen[b] {
+				return invalid(key, "lists %s twice", b)
+			}
+			seen[b] = true
+			cfg.Sync.Branches = append(cfg.Sync.Branches, b)
+		}
+		if !seen["main"] {
+			return invalid(key, "must include main")
+		}
+	case "ci.rewrite_repo_guards":
+		var s string
+		if s, err = str(); err == nil {
+			if s != "rewrite" && s != "warn" && s != "off" {
+				return invalid(key, "must be rewrite, warn or off")
+			}
+			cfg.CI.RewriteRepoGuards = s
+		}
 	}
 	return err
 }
@@ -278,6 +332,52 @@ func ParseSize(v any) (int64, error) {
 		return 0, errSize
 	}
 	return n << shift, nil
+}
+
+var (
+	cronField  = regexp.MustCompile(`^[0-9A-Za-z*/,-]+$`)
+	fastMinute = regexp.MustCompile(`^\*(/[1-4])?$`)
+	branchPart = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+)
+
+// checkSchedule returns s with single spaces, or why GitHub's schedule (or
+// the workflow it is written into) would not take it.
+func checkSchedule(s string) (string, error) {
+	if s == ScheduleOff {
+		return s, nil
+	}
+	if strings.ContainsAny(s, "\r\n") {
+		// strings.Fields would swallow a line break as spacing.
+		return "", errors.New("must be on one line")
+	}
+	f := strings.Fields(s)
+	if len(f) != 5 {
+		return "", errors.New(`must be "off" or five cron fields, such as "23 */6 * * *"`)
+	}
+	for _, x := range f {
+		if !cronField.MatchString(x) {
+			return "", fmt.Errorf("cron field %q has characters a schedule does not take", x)
+		}
+	}
+	if fastMinute.MatchString(f[0]) {
+		return "", errors.New("runs more often than every 5 minutes, GitHub's shortest schedule; use a minute such as 23 or */15")
+	}
+	return strings.Join(f, " "), nil
+}
+
+// validBranch accepts branch names made of letters, digits, '.', '_' and
+// '-' in '/'-separated parts, within git's ref-name rules. Anything else
+// could break the YAML or bash the sync workflow is rendered into.
+func validBranch(b string) bool {
+	if b == "" || strings.HasPrefix(b, "-") || strings.HasSuffix(b, ".") || strings.HasSuffix(b, ".lock") || strings.Contains(b, "..") {
+		return false
+	}
+	for _, part := range strings.Split(b, "/") {
+		if !branchPart.MatchString(part) || strings.HasPrefix(part, ".") {
+			return false
+		}
+	}
+	return true
 }
 
 func validate(c Config) error {
@@ -320,6 +420,17 @@ leak_scan:
   block_patterns: []
   large_file: 5MB
   secrets: true
+
+sync:
+  # Scheduled sync is off: run ghostbranch sync yourself (commands warn when
+  # shadow main falls behind public). To opt in, set a cron such as
+  # "23 */6 * * *" (about 120 Actions minutes a month), then run
+  # ghostbranch upgrade.
+  schedule: "off"
+  branches: [main]
+
+ci:
+  rewrite_repo_guards: rewrite
 
 gate:
   ci_appear_timeout: 10m

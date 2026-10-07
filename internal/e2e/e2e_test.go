@@ -2,9 +2,13 @@
 
 // Package e2e_test runs the whole loop against real GitHub, using the fixed
 // sandbox repos ghostbranch-labs/e2e-public and e2e-shadow. It pushes to
-// them, so run it only with the owner's go-ahead:
+// them, so run it only with the owner's go-ahead.
 //
-//	GHOSTBRANCH_E2E_TOKEN=... go test -tags e2e -count=1 -timeout 35m -v ./internal/e2e/
+// The token needs Actions: read and write on e2e-shadow. TestSandboxSyncWorkflow
+// dispatches the opt-in sync workflow and disables it again, which read access
+// alone cannot do.
+//
+//	GHOSTBRANCH_E2E_TOKEN=... go test -tags e2e -count=1 -timeout 45m -v ./internal/e2e/
 package e2e_test
 
 import (
@@ -14,11 +18,15 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	gh "github.com/google/go-github/v92/github"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/cli"
 	"github.com/ghostbranch-labs/ghostbranch/internal/config"
@@ -28,6 +36,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/grant"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
 	"github.com/ghostbranch-labs/ghostbranch/internal/ledger"
+	"github.com/ghostbranch-labs/ghostbranch/internal/managed"
 	"github.com/ghostbranch-labs/ghostbranch/internal/overlay"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
 	"github.com/ghostbranch-labs/ghostbranch/internal/waiver"
@@ -51,7 +60,21 @@ jobs:
     steps:
       - run: echo "sandbox check passed"
 `,
+	// A job guarded to the public repo: the gate rewrites the guard, so it runs
+	// on the shadow repo too instead of being skipped.
+	".github/workflows/guarded.yml": `name: guarded
+on:
+  pull_request:
+jobs:
+  upstream-only:
+    if: github.repository == 'ghostbranch-labs/e2e-public'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "ran in $GITHUB_REPOSITORY"
+`,
 }
+
+const syncWorkflowFile = "ghostbranch-sync.yml"
 
 func token(t *testing.T) string {
 	tok := os.Getenv("GHOSTBRANCH_E2E_TOKEN")
@@ -125,11 +148,10 @@ func (w testWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func TestSandboxLoop(t *testing.T) {
-	tok := token(t)
-	ctx := context.Background()
-	reset(t, tok)
-
+// newRunner returns a function that drives the CLI in-process against a fresh
+// GHOSTBRANCH_HOME and returns the parsed JSON envelope, failing the test when
+// the exit code is not want. It also returns the home directory.
+func newRunner(t *testing.T, tok string) (func(want int, args ...string) map[string]any, string) {
 	home := t.TempDir()
 	vars := map[string]string{"GHOSTBRANCH_HOME": home, "GHOSTBRANCH_TOKEN": tok, "GHOSTBRANCH_ACTOR": "human:e2e"}
 	env := cli.DefaultEnv()
@@ -140,7 +162,7 @@ func TestSandboxLoop(t *testing.T) {
 		return os.Getenv(k)
 	}
 	env.ConsoleUsable = false
-	run := func(want int, args ...string) map[string]any {
+	return func(want int, args ...string) map[string]any {
 		t.Helper()
 		var out bytes.Buffer
 		e := env
@@ -154,7 +176,15 @@ func TestSandboxLoop(t *testing.T) {
 			t.Fatalf("%v: exit %d, want %d\n%s", args, code, want, out.String())
 		}
 		return m
-	}
+	}, home
+}
+
+func TestSandboxLoop(t *testing.T) {
+	tok := token(t)
+	ctx := context.Background()
+	reset(t, tok)
+
+	run, home := newRunner(t, tok)
 	commit := func(branch string, files map[string]string) {
 		t.Helper()
 		g := authed(t, tok)
@@ -175,7 +205,31 @@ func TestSandboxLoop(t *testing.T) {
 	run(0, "feature", "start", feat)
 	commit(feat, map[string]string{"hello.txt": "hello from " + runID + "\n", ".ghostbranch/notes.md": "private notes\n",
 		"internal.txt": "public line\n# BEGIN-INTERNAL\ninternal line\n# END-INTERNAL\n"})
-	run(0, "gate", feat)
+	gateRes := run(0, "gate", feat)["data"].(map[string]any)
+	// The public workflow's guarded job must have run on the candidate: the
+	// gate rewrote its repo guard, so it is a success, not a skip.
+	guards, _ := gateRes["repo_guards"].(map[string]any)
+	if rw, _ := guards["rewritten"].([]any); len(rw) != 1 {
+		t.Fatalf("want one rewritten repo guard: %v", gateRes["repo_guards"])
+	}
+	candidate, _ := gateRes["candidate"].(string)
+	checks, err := ghforge.New(tok).ListChecks(ctx, shadowRepo, candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawGuarded bool
+	for _, c := range checks {
+		if !strings.Contains(c.Name, "upstream-only") && !strings.Contains(c.Name, "guarded") {
+			continue
+		}
+		sawGuarded = true
+		if c.Conclusion != "success" {
+			t.Errorf("guarded check %q: status %q conclusion %q, want success (the guard was not rewritten, or the job was skipped)", c.Name, c.Status, c.Conclusion)
+		}
+	}
+	if !sawGuarded {
+		t.Fatalf("no check named upstream-only or guarded on candidate %s: %+v", candidate, checks)
+	}
 	res := run(0, "promote", feat, "--mode", "squash", "-m", "Add hello for "+runID, "--plan")
 	planID := res["data"].(map[string]any)["plan"].(map[string]any)["id"].(string)
 	m := run(5, "apply", planID, "--yes")
@@ -284,5 +338,280 @@ func TestSandboxLoop(t *testing.T) {
 		if !ops[op] {
 			t.Errorf("ledger has no %q entry", op)
 		}
+	}
+}
+
+// fetchOverlay fetches the shadow overlay branch into g.
+func fetchOverlay(t *testing.T, g *gitx.Git) {
+	t.Helper()
+	if err := g.Fetch(context.Background(), "shadow", "+refs/heads/"+engine.OverlayBranch+":refs/heads/"+engine.OverlayBranch); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// overlayHasSyncWorkflow fetches the shadow overlay branch into g and reports
+// whether it holds the managed sync workflow file.
+func overlayHasSyncWorkflow(t *testing.T, g *gitx.Git) bool {
+	t.Helper()
+	fetchOverlay(t, g)
+	_, ok, err := g.ShowFile(context.Background(), "refs/heads/"+engine.OverlayBranch, managed.SyncPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ok
+}
+
+// editOverlayConfig rewrites .ghostbranch.yml on the shadow overlay branch with
+// edit and pushes it with a lease on the branch's old tip, so a concurrent
+// change is never overwritten. edit must change the text.
+func editOverlayConfig(t *testing.T, tok string, edit func(cfg string) string) {
+	t.Helper()
+	ctx := context.Background()
+	g := authed(t, tok)
+	fetchOverlay(t, g)
+	ref := "refs/heads/" + engine.OverlayBranch
+	old, ok, err := g.Resolve(ctx, ref)
+	if err != nil || !ok {
+		t.Fatalf("overlay branch missing: %v", err)
+	}
+	cfg, ok, err := g.ShowFile(ctx, ref, ".ghostbranch.yml")
+	if err != nil || !ok {
+		t.Fatalf("overlay has no .ghostbranch.yml: %v", err)
+	}
+	edited := edit(string(cfg))
+	if edited == string(cfg) {
+		t.Fatal("the config edit changed nothing")
+	}
+	testutil.Commit(t, g, engine.OverlayBranch, "e2e: edit the overlay config", map[string]string{".ghostbranch.yml": edited})
+	if err := g.Push(ctx, "shadow", gitx.PushOptions{Leases: []gitx.Lease{{Ref: ref, Expect: old}}}, ref+":"+ref); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// replaceOnce replaces the single occurrence of from in text with to.
+func replaceOnce(t *testing.T, text, from, to string) string {
+	t.Helper()
+	if n := strings.Count(text, from); n != 1 {
+		t.Fatalf("want exactly one %q in the config, found %d", from, n)
+	}
+	return strings.Replace(text, from, to, 1)
+}
+
+// pushPublicReadme adds one commit that touches only README.md on public main
+// and returns its SHA.
+func pushPublicReadme(t *testing.T, tok, text string) string {
+	t.Helper()
+	ctx := context.Background()
+	g := authed(t, tok)
+	if err := g.Fetch(ctx, "public", "+refs/heads/main:refs/heads/main"); err != nil {
+		t.Fatal(err)
+	}
+	old, _, err := g.Resolve(ctx, "refs/heads/main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sha := testutil.Commit(t, g, "main", "e2e: touch the readme", map[string]string{"README.md": text})
+	if err := g.Push(ctx, "public", gitx.PushOptions{Leases: []gitx.Lease{{Ref: "refs/heads/main", Expect: old}}}, "refs/heads/main:refs/heads/main"); err != nil {
+		t.Fatal(err)
+	}
+	return sha
+}
+
+// httpStatus is the HTTP status of a go-github error, or 0 for a network or
+// other error that carries none.
+func httpStatus(err error) int {
+	var er *gh.ErrorResponse
+	if errors.As(err, &er) && er.Response != nil {
+		return er.Response.StatusCode
+	}
+	return 0
+}
+
+// dispatchSyncWorkflow enables (a workflow disabled by an earlier failed run's
+// cleanup stays disabled when its file is re-added) and dispatches the sync
+// workflow on the overlay branch, and returns the ID of the run it started.
+// GitHub can take a few seconds to register a just-pushed workflow, so 404 and
+// 422 are retried for a minute; a 401 or 403 means the token cannot write
+// Actions and fails at once.
+func dispatchSyncWorkflow(t *testing.T, ghc *gh.Client, owner, repo string) int64 {
+	t.Helper()
+	ctx := context.Background()
+	wantDetails := true
+	const hint = "the token needs Actions: read and write on " + shadowRepo
+	var last error
+	for i := 0; i < 6; i++ {
+		if i > 0 {
+			time.Sleep(10 * time.Second)
+		}
+		if _, err := ghc.Actions.EnableWorkflowByFileName(ctx, owner, repo, syncWorkflowFile); err != nil {
+			switch httpStatus(err) {
+			case http.StatusUnauthorized, http.StatusForbidden:
+				t.Fatalf("enabling %s: %v (%s)", syncWorkflowFile, err, hint)
+			}
+			// 404: not registered yet. Anything else: let the dispatch report it.
+		}
+		details, _, err := ghc.Actions.CreateWorkflowDispatchEventByFileName(ctx, owner, repo, syncWorkflowFile,
+			gh.CreateWorkflowDispatchEventRequest{Ref: engine.OverlayBranch, ReturnRunDetails: &wantDetails})
+		if err == nil {
+			if details == nil || details.WorkflowRunID == nil {
+				t.Fatalf("GitHub accepted the dispatch but returned no run ID (return_run_details): %+v", details)
+			}
+			return *details.WorkflowRunID
+		}
+		last = err
+		switch httpStatus(err) {
+		case http.StatusNotFound, http.StatusUnprocessableEntity:
+		case http.StatusUnauthorized, http.StatusForbidden:
+			t.Fatalf("dispatching %s: %v (%s)", syncWorkflowFile, err, hint)
+		default:
+			t.Fatalf("dispatching %s: %v", syncWorkflowFile, err)
+		}
+	}
+	t.Fatalf("dispatching %s kept failing; the workflow may be disabled or not registered yet: %v (%s)", syncWorkflowFile, last, hint)
+	return 0
+}
+
+// waitForRun polls a workflow run every 15 s for up to 5 minutes until it is
+// completed. Up to 3 consecutive transient errors (network, 5xx) are
+// tolerated.
+func waitForRun(t *testing.T, ghc *gh.Client, owner, repo string, id int64) *gh.WorkflowRun {
+	t.Helper()
+	ctx := context.Background()
+	var last *gh.WorkflowRun
+	failures := 0
+	for deadline := time.Now().Add(5 * time.Minute); time.Now().Before(deadline); {
+		time.Sleep(15 * time.Second)
+		r, _, err := ghc.Actions.GetWorkflowRunByID(ctx, owner, repo, id)
+		if err != nil {
+			if st := httpStatus(err); st != 0 && st < 500 {
+				t.Fatalf("reading sync run %d: %v", id, err)
+			}
+			if failures++; failures > 3 {
+				t.Fatalf("reading sync run %d failed %d times in a row: %v", id, failures, err)
+			}
+			continue
+		}
+		failures = 0
+		last = r
+		if r.GetStatus() == "completed" {
+			return r
+		}
+	}
+	if last == nil {
+		t.Fatalf("sync run %d could not be read within 5 minutes", id)
+	}
+	t.Fatalf("sync run %s did not complete within 5 minutes (last status %q)", last.GetHTMLURL(), last.GetStatus())
+	return nil
+}
+
+// upgradeHas reports whether an upgrade result lists the sync workflow with
+// the given action.
+func upgradeHas(up map[string]any, action string) bool {
+	files, _ := up["files"].([]any)
+	for _, f := range files {
+		m, _ := f.(map[string]any)
+		if m["path"] == managed.SyncPath && m["action"] == action {
+			return true
+		}
+	}
+	return false
+}
+
+// TestSandboxSyncWorkflow covers the opt-in sync workflow: init does not
+// install it, a configured schedule makes upgrade add it, a dispatched run
+// fast-forwards shadow main to public main, and turning the schedule off makes
+// upgrade remove it. It runs on its own reset sandbox, after TestSandboxLoop.
+func TestSandboxSyncWorkflow(t *testing.T) {
+	tok := token(t)
+	ctx := context.Background()
+	reset(t, tok)
+	run, _ := newRunner(t, tok)
+
+	ghc, err := gh.NewClient(gh.WithAuthToken(tok))
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, repo, _ := strings.Cut(shadowRepo, "/")
+
+	// A failed run must not leave a scheduled workflow burning Actions
+	// minutes: if the file is still on the overlay at the end, disable it.
+	cleanupRepo := authed(t, tok)
+	t.Cleanup(func() {
+		ctx := context.Background()
+		refs, err := cleanupRepo.LsRemote(ctx, "shadow")
+		if err != nil {
+			t.Errorf("cleanup: cannot read %s, the sync workflow may still be scheduled: %v", shadowRepo, err)
+			return
+		}
+		if _, ok := refs["refs/heads/"+engine.OverlayBranch]; !ok {
+			return // init never got as far as creating the overlay
+		}
+		if err := cleanupRepo.Fetch(ctx, "shadow", "+refs/heads/"+engine.OverlayBranch+":refs/heads/"+engine.OverlayBranch); err != nil {
+			t.Errorf("cleanup: cannot read the overlay, the sync workflow may still be scheduled: %v", err)
+			return
+		}
+		_, present, err := cleanupRepo.ShowFile(ctx, "refs/heads/"+engine.OverlayBranch, managed.SyncPath)
+		if err != nil {
+			t.Errorf("cleanup: %v", err)
+			return
+		}
+		if !present {
+			return
+		}
+		if _, err := ghc.Actions.DisableWorkflowByFileName(ctx, owner, repo, syncWorkflowFile); err != nil {
+			t.Errorf("cleanup: the sync workflow is still on %s and could not be disabled (the token needs Actions: read and write): %v", shadowRepo, err)
+		}
+	})
+
+	run(0, "init", publicRepo, "--shadow", shadowRepo, "--adopt")
+
+	// 1. init installs no sync workflow: the schedule defaults to off.
+	if overlayHasSyncWorkflow(t, authed(t, tok)) {
+		t.Fatalf("init installed %s with the schedule off", managed.SyncPath)
+	}
+
+	// 2. Opt in: set a schedule on the overlay, then upgrade adds the file.
+	editOverlayConfig(t, tok, func(cfg string) string {
+		return replaceOnce(t, cfg, `schedule: "off"`, `schedule: "23 */6 * * *"`)
+	})
+	up := run(0, "upgrade", "--yes")["data"].(map[string]any)
+	if up["changed"] != true || !upgradeHas(up, "add") {
+		t.Fatalf("upgrade with a schedule must add %s: %v", managed.SyncPath, up)
+	}
+	if !overlayHasSyncWorkflow(t, authed(t, tok)) {
+		t.Fatalf("%s is not on the overlay after upgrade", managed.SyncPath)
+	}
+
+	// 3. Public moves ahead; the dispatched workflow brings shadow main along.
+	publicHead := pushPublicReadme(t, tok, "# e2e-public\n\nTouched at "+time.Now().UTC().Format(time.RFC3339)+".\n")
+	refs, err := authed(t, tok).LsRemote(ctx, "shadow")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refs["refs/heads/main"] == publicHead {
+		t.Fatal("shadow main already equals public main before the workflow ran")
+	}
+	finished := waitForRun(t, ghc, owner, repo, dispatchSyncWorkflow(t, ghc, owner, repo))
+	if finished.GetConclusion() != "success" {
+		t.Fatalf("sync run %s: conclusion %q, want success", finished.GetHTMLURL(), finished.GetConclusion())
+	}
+	refs, err = authed(t, tok).LsRemote(ctx, "shadow")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refs["refs/heads/main"] != publicHead {
+		t.Fatalf("shadow main = %s after the sync run, want public main %s", refs["refs/heads/main"], publicHead)
+	}
+
+	// 4. Opt out: schedule off, and upgrade removes the file.
+	editOverlayConfig(t, tok, func(cfg string) string {
+		return replaceOnce(t, cfg, `schedule: "23 */6 * * *"`, `schedule: "off"`)
+	})
+	up = run(0, "upgrade", "--yes")["data"].(map[string]any)
+	if up["changed"] != true || !upgradeHas(up, "remove") {
+		t.Fatalf("upgrade with the schedule off must remove %s: %v", managed.SyncPath, up)
+	}
+	if overlayHasSyncWorkflow(t, authed(t, tok)) {
+		t.Fatalf("%s is still on the overlay after upgrade removed it", managed.SyncPath)
 	}
 }

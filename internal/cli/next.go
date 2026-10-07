@@ -2,6 +2,9 @@ package cli
 
 import (
 	"context"
+	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
@@ -9,6 +12,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 	"github.com/ghostbranch-labs/ghostbranch/internal/guard"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
+	"github.com/ghostbranch-labs/ghostbranch/internal/managed"
 )
 
 // usedWorkspace is the workspace this run acted in: the engine's when there
@@ -85,6 +89,16 @@ func (a *app) next(err error) []contract.Next {
 			}
 		case contract.LeakFound, contract.MarkerInvalid:
 			return a.leakNext(ce)
+		case contract.ShadowCreateDenied:
+			pub, _ := ce.Details["public"].(string)
+			sh, _ := ce.Details["shadow"].(string)
+			args := []string{"init", pub, "--adopt"}
+			if explicit, _ := ce.Details["explicit_shadow"].(bool); explicit {
+				args = append(args, "--shadow", sh)
+			}
+			// The adopt can't succeed until a person has done steps 1 and 2.
+			return []contract.Next{{Command: a.gb(args...), NeedsHuman: true,
+				Why: "a person first creates the empty private repo and adds it to the token (error.details.steps 1 and 2); then run this to adopt it"}}
 		case contract.PlanStale:
 			f, _ := ce.Details["feature"].(string)
 			pub, _ := ce.Details["public"].(string)
@@ -100,11 +114,18 @@ func (a *app) next(err error) []contract.Next {
 		}
 		return nil
 	}
-	var out []contract.Next
+	out := a.syncNext()
 	switch r := a.result.(type) {
 	case *engine.FeatureStartResult:
 		if r.Preview == nil {
-			out = append(out, contract.Next{Command: a.scoped("gate", r.Name), Why: "push work to the feature branch in the shadow repo, then gate it"})
+			why := "commit on " + r.Name + ", push it with `git push " + a.shadowRemote + " " + r.Name + "` (the shadow repo, never origin), then gate it"
+			switch a.shadowRemote {
+			case "":
+				why = "commit on " + r.Name + ", push it to the shadow repo with the remote in data.checkout (never origin), then gate it"
+			case "origin":
+				why = "commit on " + r.Name + ", push it with `git push origin " + r.Name + "` (origin is the shadow repo here), then gate it"
+			}
+			out = append(out, contract.Next{Command: a.scoped("gate", r.Name), Why: why})
 		}
 	case *engine.GateResult:
 		if r.Preview == nil && r.Checks == feature.ChecksPassed && r.Leak == feature.LeakClean {
@@ -114,6 +135,10 @@ func (a *app) next(err error) []contract.Next {
 	case *engine.PromoteResult:
 		if r.Preview == nil && r.Applied == nil && r.Plan != nil && r.PlanPath != "" {
 			out = append(out, a.applyNext(r.Plan.ID, true))
+		}
+	case *engine.UpgradeResult:
+		if r.Preview == nil && r.Audit != nil && a.hasAuditFindings() {
+			out = append(out, contract.Next{Command: a.scoped("audit"), Why: "the audit after upgrade has warnings; read them"})
 		}
 	}
 	switch r := a.result.(type) {
@@ -130,7 +155,86 @@ func (a *app) next(err error) []contract.Next {
 			out = append(out, a.guardNext()...)
 		}
 	}
-	return out
+	return append(out, a.upgradeNext()...)
+}
+
+// syncNext leads next when shadow main is behind public main. Syncing moves
+// only shadow branches, none of which a gate candidate or a plan's
+// fingerprint depends on, so it is safe before any other step.
+func (a *app) syncNext() []contract.Next {
+	if a.command == "sync" || !a.hasWarning(contract.ShadowBehind) {
+		return nil
+	}
+	return []contract.Next{{Command: a.scoped("sync"), Why: "shadow main is behind public main; sync it (fast-forward only)"}}
+}
+
+// upgradeNext trails next when managed overlay files are out of date.
+// Upgrading moves the overlay branch, which the gate candidate and the plan
+// fingerprint include, so it comes after the steps that use them.
+func (a *app) upgradeNext() []contract.Next {
+	if a.command == "upgrade" || !a.hasWarning(contract.OverlayOutdated) {
+		return nil
+	}
+	// Upgrading after a gate or a plan would make the plan stale.
+	const afterPlan = "after the plan is applied (upgrade moves the overlay and would make the plan stale)"
+	planNext := false
+	switch r := a.result.(type) {
+	case *engine.GateResult:
+		planNext = true
+	case *engine.PromoteResult:
+		planNext = r.Applied == nil
+	}
+	if a.handEdited() {
+		why := "a managed file was edited by hand; preview what upgrade would replace"
+		if planNext {
+			why += ", and upgrade only " + afterPlan
+		}
+		return []contract.Next{{Command: a.scoped("upgrade", "--plan"), Why: why}}
+	}
+	why := "managed overlay files are out of date; preview with --plan, then upgrade"
+	if planNext {
+		why = "managed overlay files are out of date; upgrade " + afterPlan
+	}
+	return []contract.Next{{Command: a.scoped("upgrade"), Why: why}}
+}
+
+// handEdited is whether an OVERLAY_OUTDATED warning names a managed file
+// edited by hand, which upgrade would replace.
+func (a *app) handEdited() bool {
+	for _, w := range a.warnings {
+		if w.Code != contract.OverlayOutdated {
+			continue
+		}
+		files, _ := w.Details["files"].([]string)
+		for _, f := range files {
+			if strings.HasSuffix(f, " ("+string(managed.Modified)+")") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (a *app) hasWarning(code contract.WarningCode) bool {
+	for _, w := range a.warnings {
+		if w.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+// hasAuditFindings is whether the audit raised a warning worth reading in
+// full. ACTIONS_MINUTES_BILLED is left out: every private shadow repo has it.
+func (a *app) hasAuditFindings() bool {
+	for _, w := range a.warnings {
+		switch w.Code {
+		case contract.OverlayOutdated, contract.RepoGuard, contract.RepoGuardUnrewritable,
+			contract.SecretsUnlisted, contract.SecretsMissing, contract.PushTriggersOnSync:
+			return true
+		}
+	}
+	return false
 }
 
 // applyNext publishes plan id: under a grant when one is in force (and
@@ -179,6 +283,64 @@ func guardState(public string) (bool, bool) {
 	}
 	st, err := guard.Inspect(co)
 	return true, err == nil && st.Installed
+}
+
+// safeRemoteName is what a remote name must match to be printed unquoted
+// into a command: git accepts far more in config than a shell does.
+var safeRemoteName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
+// shadowRemote is the default Env.ShadowRemote.
+func shadowRemote(shadow string) (remote, free string, inCheckout bool) {
+	ctx := context.Background()
+	co, err := guard.Open(ctx, ".")
+	if err != nil {
+		return "", "shadow", false
+	}
+	remotes, err := co.Remotes(ctx)
+	if err != nil {
+		return "", "shadow", true
+	}
+	names := make([]string, 0, len(remotes))
+	for n := range remotes {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	free = freeRemoteName(remotes)
+	for _, n := range names {
+		if s, ok := guard.Slug(remotes[n]); ok && strings.EqualFold(s, shadow) && safeRemoteName.MatchString(n) {
+			return n, free, true
+		}
+	}
+	return "", free, true
+}
+
+// freeRemoteName is the first of shadow, ghostbranch-shadow,
+// ghostbranch-shadow-2, ... that no remote uses.
+func freeRemoteName(remotes map[string]string) string {
+	free := "shadow"
+	for i := 1; ; i++ {
+		if _, used := remotes[free]; !used {
+			return free
+		}
+		free = "ghostbranch-shadow"
+		if i > 1 {
+			free += "-" + strconv.Itoa(i)
+		}
+	}
+}
+
+// checkoutHint is the exact git command that gets feature name into the
+// caller's checkout: through the remote that points at the shadow repo, one
+// added for it under the name free, or a fresh clone.
+func checkoutHint(name, shadow, remote, free string, inCheckout bool) string {
+	url := "https://github.com/" + shadow + ".git"
+	switch {
+	case remote != "":
+		return "git fetch " + remote + " && git switch " + name
+	case inCheckout:
+		return "git remote add " + free + " " + url + " && git fetch " + free + " && git switch " + name
+	}
+	return "git clone --origin shadow --branch " + name + " " + url
 }
 
 // textWheres are the findings in text promote publishes rather than in the

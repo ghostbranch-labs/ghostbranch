@@ -15,6 +15,10 @@ var ErrNotFound = errors.New("not found")
 // ErrTransient wraps failures worth retrying: 5xx, rate limits, network.
 var ErrTransient = errors.New("transient forge error")
 
+// ErrForbidden wraps a plain permission refusal (a 403 that is not a rate
+// limit): the token may not do this.
+var ErrForbidden = errors.New("forbidden")
+
 type Repo struct {
 	FullName      string
 	Private       bool
@@ -63,6 +67,9 @@ type Forge interface {
 	GetPR(ctx context.Context, full string, number int) (PR, error)
 	ListChecks(ctx context.Context, full, sha string) ([]Check, error)
 	CurrentUser(ctx context.Context) (User, error)
+	// SecretNames lists the Actions secret names visible to full: its own
+	// and the org secrets shared with it. Values are never read.
+	SecretNames(ctx context.Context, full string) ([]string, error)
 }
 
 // NoreplyEmail is the user's GitHub noreply address. Public commits use it

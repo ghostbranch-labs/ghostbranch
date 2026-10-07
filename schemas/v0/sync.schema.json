@@ -3,7 +3,7 @@
   "title": "sync data",
   "type": "object",
   "additionalProperties": false,
-  "required": ["public", "shadow", "action", "public_main", "shadow_main_before", "shadow_main_after", "preview"],
+  "required": ["public", "shadow", "action", "public_main", "shadow_main_before", "shadow_main_after", "branches", "preview"],
   "properties": {
     "public": { "$ref": "common.schema.json#/$defs/repo" },
     "shadow": { "$ref": "common.schema.json#/$defs/repo" },
@@ -11,6 +11,20 @@
     "public_main": { "$ref": "common.schema.json#/$defs/sha" },
     "shadow_main_before": { "$ref": "common.schema.json#/$defs/shaOrEmpty" },
     "shadow_main_after": { "$ref": "common.schema.json#/$defs/shaOrEmpty" },
+    "branches": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "from", "to", "status"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "from": { "$ref": "common.schema.json#/$defs/shaOrEmpty" },
+          "to": { "$ref": "common.schema.json#/$defs/shaOrEmpty" },
+          "status": { "enum": ["up_to_date", "created", "fast_forwarded", "diverged"] }
+        }
+      }
+    },
     "preview": { "oneOf": [{ "type": "null" }, { "$ref": "preview.schema.json" }] }
   }
 }

@@ -78,3 +78,27 @@ func TestPushAccess(t *testing.T) {
 		t.Fatalf("%+v", a)
 	}
 }
+
+func TestSecretsAndCreateForbidden(t *testing.T) {
+	ctx := context.Background()
+	f := fake.New(filepath.Join(t.TempDir(), "forge"))
+	f.Secrets = map[string][]string{"acme/widget-shadow": {"B", "A"}}
+	f.SecretsForbidden = map[string]bool{"acme/locked": true}
+	got, err := f.SecretNames(ctx, "acme/widget-shadow")
+	if err != nil || len(got) != 2 || got[0] != "A" || got[1] != "B" {
+		t.Fatalf("SecretNames = %v %v", got, err)
+	}
+	if got, err := f.SecretNames(ctx, "acme/none"); err != nil || len(got) != 0 {
+		t.Fatalf("unlisted repo = %v %v", got, err)
+	}
+	if _, err := f.SecretNames(ctx, "acme/locked"); !errors.Is(err, forge.ErrForbidden) {
+		t.Fatalf("SecretsForbidden: %v", err)
+	}
+	f.CreateForbidden = true
+	if _, err := f.CreatePrivateRepo(ctx, "acme/new-shadow"); !errors.Is(err, forge.ErrForbidden) {
+		t.Fatalf("CreateForbidden: %v", err)
+	}
+	if _, err := f.GetRepo(ctx, "acme/new-shadow"); !errors.Is(err, forge.ErrNotFound) {
+		t.Fatalf("a refused create must not add the repo: %v", err)
+	}
+}

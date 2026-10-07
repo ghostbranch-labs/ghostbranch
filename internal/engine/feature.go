@@ -34,6 +34,7 @@ func (e *Engine) FeatureStart(ctx context.Context, p workspace.Pair, name string
 	if _, _, warns, err = e.readConfig(ctx, pc); err != nil {
 		return nil, warns, err
 	}
+	warns = addWarnings(warns, e.behind(ctx, pc)...)
 	if err := e.checkNameFree(ctx, pc, name); err != nil {
 		return nil, warns, err
 	}

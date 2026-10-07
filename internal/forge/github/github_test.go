@@ -328,3 +328,58 @@ func TestPushAccessProbesReceivePack(t *testing.T) {
 		t.Fatalf("network error: %+v", a)
 	}
 }
+
+func TestSecretNames(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /repos/acme/widget-shadow/actions/secrets", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("page") == "2" {
+			writeJSON(w, map[string]any{"total_count": 3, "secrets": []map[string]any{{"name": "B_KEY"}}})
+			return
+		}
+		w.Header().Set("Link", `<`+"http://"+r.Host+r.URL.Path+`?page=2>; rel="next"`)
+		writeJSON(w, map[string]any{"total_count": 3, "secrets": []map[string]any{{"name": "A_KEY"}, {"name": "SHARED"}}})
+	})
+	mux.HandleFunc("GET /repos/acme/widget-shadow/actions/organization-secrets", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{"total_count": 2, "secrets": []map[string]any{{"name": "SHARED"}, {"name": "ORG_KEY"}}})
+	})
+	mux.HandleFunc("GET /repos/acme/locked/actions/secrets", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"message":"Resource not accessible by personal access token"}`, http.StatusForbidden)
+	})
+	mux.HandleFunc("GET /repos/octo/mine/actions/secrets", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{"total_count": 1, "secrets": []map[string]any{{"name": "MINE"}}})
+	})
+	mux.HandleFunc("GET /repos/octo/mine/actions/organization-secrets", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+	})
+	c := newClient(t, mux)
+	ctx := context.Background()
+	got, err := c.SecretNames(ctx, "acme/widget-shadow")
+	if err != nil || strings.Join(got, ",") != "A_KEY,B_KEY,ORG_KEY,SHARED" {
+		t.Fatalf("SecretNames = %v %v", got, err)
+	}
+	if _, err := c.SecretNames(ctx, "acme/locked"); !errors.Is(err, forge.ErrForbidden) {
+		t.Fatalf("403: %v", err)
+	}
+	if got, err := c.SecretNames(ctx, "octo/mine"); err != nil || strings.Join(got, ",") != "MINE" {
+		t.Fatalf("user repo without org secrets: %v %v", got, err)
+	}
+}
+
+func TestCreatePrivateRepoForbidden(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /user", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{"login": "octo", "id": 1})
+	})
+	mux.HandleFunc("POST /orgs/acme/repos", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"message":"Resource not accessible by personal access token"}`, http.StatusForbidden)
+	})
+	mux.HandleFunc("POST /orgs/hidden/repos", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+	})
+	c := newClient(t, mux)
+	for _, full := range []string{"acme/widget-shadow", "hidden/widget-shadow"} {
+		if _, err := c.CreatePrivateRepo(context.Background(), full); !errors.Is(err, forge.ErrForbidden) {
+			t.Fatalf("%s: %v", full, err)
+		}
+	}
+}

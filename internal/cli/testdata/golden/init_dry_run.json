@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.3",
+  "schema_version": "0.4",
   "command": "init",
   "ok": true,
   "exit_code": 0,
@@ -15,6 +15,7 @@
     "mirrored_tags": [],
     "overlay_created": false,
     "default_branch_set": false,
+    "audit": null,
     "preview": {
       "fingerprint": {
         "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7"

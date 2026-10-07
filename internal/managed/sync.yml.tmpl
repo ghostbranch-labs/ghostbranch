@@ -1,0 +1,29 @@
+# Written by ghostbranch. `ghostbranch upgrade` rewrites this file; do not edit it.
+# It fast-forwards this shadow repo's branches from the public repo. It runs
+# only because .ghostbranch.yml sets sync.schedule; each run bills at least
+# one Actions minute. Set sync.schedule: off and run ghostbranch upgrade to
+# remove it. See `ghostbranch guide` for GHOSTBRANCH_SYNC_TOKEN.
+name: ghostbranch-sync
+on:
+  schedule:
+    - cron: "{{SCHEDULE}}"
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: ghostbranch-sync
+  cancel-in-progress: false
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Fast-forward shadow branches from public
+        shell: bash
+        env:
+          PUBLIC_REPO: {{PUBLIC}}
+          BRANCHES: "{{BRANCHES}}"
+          SYNC_TOKEN: ${{ secrets.GHOSTBRANCH_SYNC_TOKEN }}
+          DEFAULT_TOKEN: ${{ github.token }}
+        run: |
+{{SCRIPT}}

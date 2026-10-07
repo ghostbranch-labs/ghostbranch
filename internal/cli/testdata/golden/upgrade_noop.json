@@ -1,0 +1,53 @@
+{
+  "schema_version": "0.4",
+  "command": "upgrade",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "public": "acme/widget",
+    "shadow": "acme/widget-shadow",
+    "changed": false,
+    "files": [
+      {
+        "path": ".github/workflows/ghostbranch-sync.yml",
+        "status": "current",
+        "action": "unchanged",
+        "replaces_local_edits": false
+      }
+    ],
+    "commit": "",
+    "audit": {
+      "public": "acme/widget",
+      "shadow": "acme/widget-shadow",
+      "guards": [],
+      "guard_mode": "rewrite",
+      "secrets": {
+        "referenced": [],
+        "listed": false,
+        "missing": [],
+        "inherit": [],
+        "environments": []
+      },
+      "push_triggers": [],
+      "minutes": {
+        "billed": true,
+        "scheduled_sync": null
+      },
+      "overlay": [
+        {
+          "path": ".github/workflows/ghostbranch-sync.yml",
+          "status": "current"
+        }
+      ]
+    },
+    "preview": null
+  },
+  "warnings": [
+    {
+      "code": "ACTIONS_MINUTES_BILLED",
+      "message": "acme/widget-shadow is private, so its Actions minutes are billed"
+    }
+  ],
+  "next": [],
+  "error": null
+}

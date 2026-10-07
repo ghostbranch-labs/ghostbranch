@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.3",
+  "schema_version": "0.4",
   "command": "gate",
   "ok": false,
   "exit_code": 3,
@@ -7,8 +7,8 @@
     "feature": "feat-x",
     "feature_head": "4d1d49322a3efd3fda9f092af6dd0ddce5b0a824",
     "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
-    "overlay": "b1428c4f99dd9fdcd40de6d3f9aea25809d4dfea",
-    "candidate": "75941ec5efa72a50aa03df5c5488d26d786e0536",
+    "overlay": "b60402e97e1fbf747e73421d2765b542fc4b34ee",
+    "candidate": "d158ef1d602e40e07d858664b36edbb5129f10e7",
     "published_tree": "b0c171b27508197c71fd9aaf45002e46841f61e2",
     "checks": "not_run",
     "failed_checks": [],
@@ -25,6 +25,11 @@
       }
     ],
     "waived": [],
+    "repo_guards": {
+      "mode": "rewrite",
+      "rewritten": [],
+      "unrewritable": []
+    },
     "shadow_pr": 0,
     "reused": false,
     "preview": null
