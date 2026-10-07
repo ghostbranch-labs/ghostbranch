@@ -157,7 +157,7 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 			WithDetails(stale(pl, []string{"publish.tree"}))
 	}
 	set := overlay.NewSet(cfg.LeakScan.Strip...)
-	if err := assertPublish(ctx, g, P, pl.Publish.Tree, pl.Fingerprint.GateCandidate, pm, set); err != nil {
+	if err := assertPublish(ctx, g, P, pl.Publish.Tree, pl.Fingerprint.GateCandidate, pm, set, guardNames(pc)); err != nil {
 		return nil, warns, err
 	}
 	entries, err := g.ListTree(ctx, P)

@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "audit data",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["public", "shadow", "guards", "guard_mode", "secrets", "push_triggers", "minutes", "overlay"],
+  "properties": {
+    "public": { "$ref": "common.schema.json#/$defs/repo" },
+    "shadow": { "$ref": "common.schema.json#/$defs/repo" },
+    "guards": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/guard" } },
+    "guard_mode": { "enum": ["rewrite", "warn", "off"] },
+    "secrets": {
+      "type": "object", "additionalProperties": false,
+      "required": ["referenced", "listed", "missing", "inherit", "environments"],
+      "properties": {
+        "referenced": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["name", "files"],
+          "properties": { "name": { "type": "string" }, "files": { "type": "array", "items": { "type": "string" } } } } },
+        "listed": { "type": "boolean" },
+        "missing": { "type": "array", "items": { "type": "string" } },
+        "inherit": { "type": "array", "items": { "type": "string" } },
+        "environments": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "push_triggers": { "type": "array", "items": { "type": "string" } },
+    "minutes": { "type": "object", "additionalProperties": false, "required": ["billed", "scheduled_sync"],
+      "properties": { "billed": { "type": "boolean" }, "scheduled_sync": { "type": ["string", "null"] } } },
+    "overlay": { "type": "array", "items": { "$ref": "#/$defs/managedFile" } }
+  },
+  "$defs": {
+    "managedFile": { "type": "object", "additionalProperties": false, "required": ["path", "status"],
+      "properties": { "path": { "type": "string" }, "status": { "enum": ["current", "missing", "outdated", "modified", "newer"] } } }
+  }
+}

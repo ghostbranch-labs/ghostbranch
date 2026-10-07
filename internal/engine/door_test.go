@@ -42,6 +42,25 @@ func TestOnlyPromoteAndApplyReachThePublicRepo(t *testing.T) {
 	}
 	_, _, err = h.eng.Sync(h.ctx, h.pair)
 	run("sync", err, "")
+	n = len(h.pushes)
+	_, _, err = h.eng.Audit(h.ctx, h.pair)
+	run("audit", err, "")
+	if len(h.pushes) != n {
+		t.Fatal("audit must never push")
+	}
+	// A schedule makes upgrade install the sync workflow, so it really pushes.
+	h.setConfig(`schedule: "off"`, `schedule: "23 */6 * * *"`)
+	n = len(h.pushes)
+	_, _, err = h.eng.Upgrade(h.ctx, h.pair)
+	run("upgrade", err, "")
+	if len(h.pushes) == n {
+		t.Fatal("upgrade did not push")
+	}
+	for _, p := range h.pushes[n:] {
+		if p.remote != "shadow" {
+			t.Fatalf("upgrade pushed to %s: %+v", p.remote, p)
+		}
+	}
 	h.startFeature("good", map[string]string{"good.txt": "g\n"})
 	h.startFeature("leaky", map[string]string{"leak.env": "T=" + testutil.FakeGitHubToken() + "\n"})
 	h.startFeature("red", map[string]string{"red.txt": "r\n"})

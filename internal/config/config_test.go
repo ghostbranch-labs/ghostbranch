@@ -32,7 +32,7 @@ func TestRequireHumanIsReplacedByGrants(t *testing.T) {
 	}
 }
 
-func TestSpecKeysNotBuiltYetWarnOncePerSection(t *testing.T) {
+func TestSpecKeysNotBuiltYetWarnPerKey(t *testing.T) {
 	y := `version: 1
 public: a/b
 shadow: a/b-shadow
@@ -51,7 +51,7 @@ promote:
 		t.Fatal(err)
 	}
 	if len(warns) != 3 {
-		t.Fatalf("want 3 warnings (sync, agents, promote.author_email), got %v", warns)
+		t.Fatalf("want 3 warnings (agents.default_tier, agents.overrides.claude-code, promote.author_email), got %v", warns)
 	}
 	for _, w := range warns {
 		if w.Code != contract.ConfigKeyIgnored {
@@ -148,5 +148,130 @@ func TestAuthorEmailWaitsForPreserveMode(t *testing.T) {
 	_, warns, err := config.Parse([]byte("version: 1\npublic: a/b\nshadow: a/b-shadow\npromote:\n  author_email: keep\n"))
 	if err != nil || len(warns) != 1 || !strings.Contains(warns[0].Message, "preserve mode") {
 		t.Fatalf("%v %v", warns, err)
+	}
+}
+
+func parseWith(t *testing.T, extra string) (config.Config, []contract.Warning, error) {
+	t.Helper()
+	return config.Parse([]byte(string(config.Render("acme/widget", "acme/widget-shadow")) + extra))
+}
+
+func TestSyncAndCIDefaults(t *testing.T) {
+	cfg, warns, err := config.Parse(config.Render("acme/widget", "acme/widget-shadow"))
+	if err != nil || len(warns) != 0 {
+		t.Fatalf("Render does not parse cleanly: %v %v", warns, err)
+	}
+	if cfg.Sync.Schedule != config.ScheduleOff || !reflect.DeepEqual(cfg.Sync.Branches, []string{"main"}) || cfg.CI.RewriteRepoGuards != "rewrite" {
+		t.Fatalf("defaults = %+v %+v", cfg.Sync, cfg.CI)
+	}
+	if !reflect.DeepEqual(cfg.Sync, config.Default().Sync) || cfg.CI != config.Default().CI {
+		t.Fatal("Render and Default disagree")
+	}
+}
+
+func TestSyncSchedule(t *testing.T) {
+	for _, tc := range []struct {
+		in, want string
+		ok       bool
+	}{
+		{`"off"`, "off", true},
+		{`off`, "off", true},
+		{`"23 */6 * * *"`, "23 */6 * * *", true},
+		{`"0  3 * * 1-5"`, "0 3 * * 1-5", true},
+		{`"*/15 * * * *"`, "*/15 * * * *", true},
+		{`"* * * * *"`, "", false},
+		{`"*/4 * * * *"`, "", false},
+		{`"0 0 * *"`, "", false},
+		{`"0 0 * * * *"`, "", false},
+		{`6h`, "", false},
+	} {
+		raw := strings.Replace(string(config.Render("acme/widget", "acme/widget-shadow")), `schedule: "off"`, "schedule: "+tc.in, 1)
+		got, _, err := config.Parse([]byte(raw))
+		if (err == nil) != tc.ok {
+			t.Fatalf("%s: err = %v", tc.in, err)
+		}
+		if tc.ok && got.Sync.Schedule != tc.want {
+			t.Fatalf("%s: schedule = %q", tc.in, got.Sync.Schedule)
+		}
+		if !tc.ok && contract.From(err).Field != "sync.schedule" {
+			t.Fatalf("%s: field = %q", tc.in, contract.From(err).Field)
+		}
+	}
+}
+
+func TestSyncBranches(t *testing.T) {
+	for _, tc := range []struct {
+		in string
+		ok bool
+	}{
+		{`[main]`, true},
+		{`[main, release/1.x, dev_2]`, true},
+		{`[dev]`, false},        // must include main
+		{`[main, main]`, false}, // duplicate
+		{`[]`, false},
+		{`main`, false}, // not a list
+		{`[main, "-x"]`, false},
+		{`[main, "a..b"]`, false},
+		{`[main, "x.lock"]`, false},
+		{`[main, "a/.b"]`, false},
+	} {
+		raw := strings.Replace(string(config.Render("acme/widget", "acme/widget-shadow")), "branches: [main]", "branches: "+tc.in, 1)
+		_, _, err := config.Parse([]byte(raw))
+		if (err == nil) != tc.ok {
+			t.Fatalf("%s: err = %v", tc.in, err)
+		}
+	}
+}
+
+// Review Focus 3: values rendered into the sync workflow's YAML and bash
+// never carry metacharacters.
+func TestSyncValuesRejectInjection(t *testing.T) {
+	for _, branches := range []string{`[main, "x; rm -rf ~"]`, `[main, "a\"b"]`, `[main, "a b"]`, `[main, "a$(id)"]`, "[main, \"a\\nb\"]"} {
+		raw := strings.Replace(string(config.Render("acme/widget", "acme/widget-shadow")), "branches: [main]", "branches: "+branches, 1)
+		if _, _, err := config.Parse([]byte(raw)); contract.From(err).Field != "sync.branches" {
+			t.Fatalf("branches %s accepted: %v", branches, err)
+		}
+	}
+	for _, sched := range []string{`"0 0 * * *\"\n"`, "\"0 0 * * *\\n\"", `"0 0 * * $(id)"`, `"0 0 * * 1;2"`} {
+		raw := strings.Replace(string(config.Render("acme/widget", "acme/widget-shadow")), `schedule: "off"`, "schedule: "+sched, 1)
+		if _, _, err := config.Parse([]byte(raw)); contract.From(err).Field != "sync.schedule" {
+			t.Fatalf("schedule %s accepted: %v", sched, err)
+		}
+	}
+}
+
+func TestRewriteRepoGuardsMode(t *testing.T) {
+	for mode, ok := range map[string]bool{"rewrite": true, "warn": true, "off": true, "yes": false} {
+		raw := strings.Replace(string(config.Render("acme/widget", "acme/widget-shadow")), "rewrite_repo_guards: rewrite", "rewrite_repo_guards: "+mode, 1)
+		cfg, _, err := config.Parse([]byte(raw))
+		if (err == nil) != ok || (ok && cfg.CI.RewriteRepoGuards != mode) {
+			t.Fatalf("%s: %+v %v", mode, cfg.CI, err)
+		}
+	}
+}
+
+func TestIgnoredKeysWarnPerKey(t *testing.T) {
+	_, warns, err := parseWith(t, "agents:\n  allow: true\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := strings.Replace(string(config.Render("acme/widget", "acme/widget-shadow")), "rewrite_repo_guards: rewrite",
+		"rewrite_repo_guards: rewrite\n  runners: github-hosted\n  reuse_public_workflows: true", 1)
+	_, warns2, err := config.Parse([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var msgs []string
+	for _, w := range append(warns, warns2...) {
+		if w.Code != contract.ConfigKeyIgnored {
+			t.Fatalf("unexpected warning %+v", w)
+		}
+		msgs = append(msgs, w.Message)
+	}
+	want := []string{"agents.allow is not supported in this version and is ignored",
+		"ci.reuse_public_workflows is not supported in this version and is ignored",
+		"ci.runners is not supported in this version and is ignored"}
+	if !reflect.DeepEqual(msgs, want) {
+		t.Fatalf("warnings = %q", msgs)
 	}
 }

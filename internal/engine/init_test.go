@@ -3,6 +3,7 @@ package engine_test
 import (
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/config"
@@ -10,13 +11,14 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
+	"github.com/ghostbranch-labs/ghostbranch/internal/managed"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
 )
 
 func TestInitCreatesShadowMirrorsAndOverlay(t *testing.T) {
 	h := newHarness(t)
 	res, warns, err := h.eng.Init(h.ctx, engine.InitOptions{Public: publicName})
-	if err != nil || len(warns) != 0 {
+	if err != nil || len(warns) != 1 || warns[0].Code != contract.ActionsMinutesBilled {
 		t.Fatalf("init: %v %v", warns, err)
 	}
 	if !res.CreatedShadow || res.Shadow != shadowName || !res.OverlayCreated || !res.DefaultBranchSet ||
@@ -134,7 +136,7 @@ func TestInitDryRunWritesNothing(t *testing.T) {
 	h := newHarness(t)
 	h.eng.DryRun = true
 	res, _, err := h.eng.Init(h.ctx, engine.InitOptions{Public: publicName})
-	if err != nil || res.Preview == nil || len(res.Preview.Ops) == 0 {
+	if err != nil || res.Preview == nil || len(res.Preview.Ops) == 0 || !res.CreatedShadow {
 		t.Fatalf("dry run = %+v %v", res, err)
 	}
 	if _, err := h.forge.GetRepo(h.ctx, shadowName); !errors.Is(err, forge.ErrNotFound) {
@@ -149,7 +151,60 @@ func TestInitWarnsWhenPublicIsPrivate(t *testing.T) {
 	h := newHarness(t)
 	h.forge.SetPrivate(publicName, true)
 	_, warns, err := h.eng.Init(h.ctx, engine.InitOptions{Public: publicName})
-	if err != nil || len(warns) != 1 || warns[0].Code != contract.PublicNotPublic {
+	if c := codes(warns); err != nil || len(warns) != 2 || c[contract.PublicNotPublic] != 1 || c[contract.ActionsMinutesBilled] != 1 {
 		t.Fatalf("warns = %v err = %v", warns, err)
+	}
+}
+
+func TestInitDeniedCreateExplainsAdopt(t *testing.T) {
+	h := newHarness(t)
+	h.forge.CreateForbidden = true
+	res, _, err := h.eng.Init(h.ctx, engine.InitOptions{Public: publicName})
+	ce := wantCode(t, err, contract.ShadowCreateDenied)
+	if res == nil || res.CreatedShadow {
+		t.Fatalf("a denied create must not report created_shadow: %+v", res)
+	}
+	steps, _ := ce.Details["steps"].([]string)
+	if len(steps) != 3 || !strings.Contains(steps[0], "gh repo create acme/widget-shadow --private") ||
+		!strings.Contains(steps[2], "ghostbranch init acme/widget --adopt") || ce.Details["shadow"] != shadowName {
+		t.Fatalf("details = %+v", ce.Details)
+	}
+	// the person creates it; adopt then works
+	h.forge.CreateForbidden = false
+	if _, err := h.forge.AddRepo(shadowName, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := h.eng.Init(h.ctx, engine.InitOptions{Public: publicName, Adopt: true}); err != nil {
+		t.Fatalf("adopt: %v", err)
+	}
+}
+
+func TestInitWritesNoSyncWorkflowByDefaultAndAudits(t *testing.T) {
+	h := newHarness(t)
+	res, warns, err := h.eng.Init(h.ctx, engine.InitOptions{Public: publicName})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := h.shadowGit().ShowFile(h.ctx, "refs/heads/"+engine.OverlayBranch, managed.SyncPath); ok {
+		t.Fatal("init installed the sync workflow although sync.schedule is off")
+	}
+	if res.Audit == nil || res.Audit.Overlay[0].Status != managed.Current {
+		t.Fatalf("audit = %+v", res.Audit)
+	}
+	if codes(warns)[contract.ActionsMinutesBilled] != 1 {
+		t.Fatalf("warnings = %+v", warns)
+	}
+}
+
+func TestInitOnACompletePairWarnsWhenTheOverlayIsOutdated(t *testing.T) {
+	h := newHarness(t)
+	h.init()
+	h.setConfig(`schedule: "off"`, `schedule: "23 */6 * * *"`)
+	_, warns, err := h.eng.Init(h.ctx, engine.InitOptions{Public: publicName})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if codes(warns)[contract.OverlayOutdated] != 1 {
+		t.Fatalf("warnings = %+v", warns)
 	}
 }

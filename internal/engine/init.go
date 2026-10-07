@@ -13,6 +13,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
+	"github.com/ghostbranch-labs/ghostbranch/internal/managed"
 	"github.com/ghostbranch-labs/ghostbranch/internal/overlay"
 	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
@@ -34,6 +35,7 @@ type InitResult struct {
 	MirroredTags     []string         `json:"mirrored_tags"`
 	OverlayCreated   bool             `json:"overlay_created"`
 	DefaultBranchSet bool             `json:"default_branch_set"`
+	Audit            *AuditResult     `json:"audit"`
 	Preview          *preview.Preview `json:"preview"`
 }
 
@@ -98,14 +100,18 @@ func (e *Engine) Init(ctx context.Context, opt InitOptions) (res *InitResult, wa
 	}
 
 	if !exists {
-		res.CreatedShadow = true
 		if e.DryRun {
+			res.CreatedShadow = true // what the run would do
 			return res, warns, e.previewNewShadow(ctx, p, pub, registered, res)
 		}
 		e.progressf("creating private repo %s", p.Shadow)
 		if _, err := e.Forge.CreatePrivateRepo(ctx, p.Shadow); err != nil {
+			if errors.Is(err, forge.ErrForbidden) {
+				return res, warns, shadowCreateDenied(p, opt.Shadow != "", err)
+			}
 			return res, warns, forgeErr(err, "create shadow repo %s", p.Shadow)
 		}
+		res.CreatedShadow = true
 	} else {
 		res.Adopted, res.Resumed = opt.Adopt, !opt.Adopt
 	}
@@ -187,7 +193,38 @@ func (e *Engine) Init(ctx context.Context, opt InitOptions) (res *InitResult, wa
 			return res, warns, internalErr(err, "save the workspace")
 		}
 	}
+	auditIncomplete := func(err error) {
+		warns = append(warns, contract.Warning{Code: contract.AuditIncomplete,
+			Message: "the CI audit could not run (" + contract.From(err).Message + "); run ghostbranch audit"})
+	}
+	if err := e.fetch(ctx, g); err != nil {
+		auditIncomplete(err)
+		return res, warns, nil
+	}
+	cfg, O, cw, cerr := e.readConfig(ctx, pc)
+	warns = addWarnings(warns, cw...)
+	if cerr != nil {
+		auditIncomplete(cerr)
+		return res, warns, nil
+	}
+	res.Audit, warns = e.auditInto(ctx, pc, cfg, O, warns)
 	return res, warns, nil
+}
+
+// shadowCreateDenied is SHADOW_CREATE_DENIED with the steps that work with
+// a token scoped to the two repos.
+func shadowCreateDenied(p workspace.Pair, explicitShadow bool, err error) error {
+	adopt := "ghostbranch init " + p.Public + " --adopt"
+	if explicitShadow {
+		adopt += " --shadow " + p.Shadow
+	}
+	steps := []string{
+		fmt.Sprintf("Create an empty private repo %s (no README, license or .gitignore): on GitHub's new-repository page, or with `gh repo create %s --private`.", p.Shadow, p.Shadow),
+		fmt.Sprintf("Add %s to the token's repository access, with the permissions in the token table of `ghostbranch guide`.", p.Shadow),
+		"Run " + adopt + ".",
+	}
+	return contract.Wrap(contract.ShadowCreateDenied, err, "the token can't create %s; create it yourself and adopt it", p.Shadow).
+		WithDetails(map[string]any{"public": p.Public, "shadow": p.Shadow, "explicit_shadow": explicitShadow, "steps": steps})
 }
 
 // checkAdoptable accepts an empty shadow repo, one that is already this
@@ -325,10 +362,26 @@ func (e *Engine) createOverlay(ctx context.Context, pc *pairCtx) error {
 	if err != nil {
 		return internalErr(err, "write the overlay README")
 	}
-	tree, err := g.MakeTree(ctx, []gitx.TreeEntry{
+	// The managed files the default config wants: none while sync.schedule
+	// defaults to off, but this keeps init in step if a default changes.
+	def := config.Default()
+	files := managed.Render(managed.Input{Public: pc.pair.Public, Schedule: def.Sync.Schedule, Branches: def.Sync.Branches})
+	entries := []gitx.TreeEntry{
 		{Mode: "100644", Type: "blob", SHA: cfgBlob, Path: ".ghostbranch.yml"},
 		{Mode: "100644", Type: "blob", SHA: readme, Path: ".ghostbranch/README.md"},
-	})
+	}
+	for _, path := range managed.Paths() {
+		body, ok := files[path]
+		if !ok {
+			continue
+		}
+		sha, err := g.HashObject(ctx, body)
+		if err != nil {
+			return internalErr(err, "write "+path)
+		}
+		entries = append(entries, gitx.TreeEntry{Mode: "100644", Type: "blob", SHA: sha, Path: path})
+	}
+	tree, err := g.MakeTree(ctx, entries)
 	if err != nil {
 		return internalErr(err, "write the overlay tree")
 	}

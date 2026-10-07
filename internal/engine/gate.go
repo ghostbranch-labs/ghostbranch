@@ -14,6 +14,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
 	"github.com/ghostbranch-labs/ghostbranch/internal/ledger"
 	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
+	"github.com/ghostbranch-labs/ghostbranch/internal/workflow"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
@@ -29,7 +30,10 @@ type GateResult struct {
 	Leak          string          `json:"leak"`
 	Findings      []leak.Finding  `json:"findings"`
 	Waived        []WaivedFinding `json:"waived"`
-	ShadowPR      int             `json:"shadow_pr"`
+	// RepoGuards is what the gate did with the public workflows' repo
+	// guards in C; nil when no candidate was built.
+	RepoGuards *workflow.GuardReport `json:"repo_guards"`
+	ShadowPR   int                   `json:"shadow_pr"`
 	// Reused is set by promote when it reuses a fresh green gate instead of re-running it.
 	Reused  bool             `json:"reused"`
 	Preview *preview.Preview `json:"preview"`
@@ -58,7 +62,8 @@ func (e *Engine) Gate(ctx context.Context, p workspace.Pair, name string) (res *
 		return nil, nil, err
 	}
 	defer pc.unlock()
-	return e.gate(ctx, pc, name)
+	res, w, err := e.gate(ctx, pc, name)
+	return res, addWarnings(e.behind(ctx, pc), w...), err
 }
 
 // built is what the gate would publish right now: the feature rebased onto
@@ -131,9 +136,14 @@ func (e *Engine) gate(ctx context.Context, pc *pairCtx, name string) (*GateResul
 	if err != nil {
 		return res, warns, err
 	}
-	C, err := e.candidate(ctx, g, b.R, b.entries, O, name)
+	C, guardRep, guards, err := e.candidate(ctx, g, b.R, b.entries, O, name, guardNames(pc), cfg.CI.RewriteRepoGuards)
 	if err != nil {
 		return res, warns, err
+	}
+	res.RepoGuards = &guardRep
+	warns = addWarnings(warns, guardWarnings(cfg.CI.RewriteRepoGuards, guards, false)...)
+	if files, err := e.managedFiles(ctx, g, O, cfg); err == nil {
+		warns = addWarnings(warns, outdatedWarnings(files)...)
 	}
 	res.Candidate, res.PublishedTree = C, b.T
 	blocking, waived, ww := e.splitFindings(pc.pair, b.report.Findings)
@@ -212,6 +222,19 @@ func (e *Engine) gate(ctx context.Context, pc *pairCtx, name string) (*GateResul
 		return res, warns, contract.New(contract.CITimeout, "checks did not finish within %s", cfg.Gate.CITimeout)
 	}
 	return res, warns, nil
+}
+
+// guardNames are the repo names the guard rewrite uses. The gate, promote,
+// apply and the audit all take them from GitHub's canonical names for the
+// pair, never from the config or the names as typed locally, so the rewrite
+// the gate made and the one assertPublish recomputes are byte for byte the
+// same, even for a plan made on another machine.
+func guardNames(pc *pairCtx) workflow.Names {
+	n := workflow.Names{Public: pc.public.FullName, Shadow: pc.shadow.FullName}
+	if n.Public == "" || n.Shadow == "" {
+		n = workflow.Names{Public: pc.pair.Public, Shadow: pc.pair.Shadow}
+	}
+	return n
 }
 
 func (e *Engine) recordGate(ctx context.Context, pc *pairCtx, m feature.Meta, metaSHA string, res *GateResult) error {

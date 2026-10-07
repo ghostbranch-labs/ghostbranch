@@ -1,0 +1,49 @@
+{
+  "schema_version": "0.4",
+  "command": "init",
+  "ok": false,
+  "exit_code": 1,
+  "data": {
+    "public": "acme/widget",
+    "shadow": "acme/widget-shadow",
+    "created_shadow": false,
+    "adopted": false,
+    "resumed": false,
+    "mirrored_branches": [],
+    "mirrored_tags": [],
+    "overlay_created": false,
+    "default_branch_set": false,
+    "audit": null,
+    "preview": null
+  },
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "init",
+        "acme/widget",
+        "--adopt"
+      ],
+      "why": "a person first creates the empty private repo and adds it to the token (error.details.steps 1 and 2); then run this to adopt it",
+      "needs_human": true,
+      "needs_input": []
+    }
+  ],
+  "error": {
+    "code": "SHADOW_CREATE_DENIED",
+    "message": "the token can't create acme/widget-shadow; create it yourself and adopt it: create acme/widget-shadow: forbidden",
+    "field": null,
+    "retryable": false,
+    "details": {
+      "explicit_shadow": false,
+      "public": "acme/widget",
+      "shadow": "acme/widget-shadow",
+      "steps": [
+        "Create an empty private repo acme/widget-shadow (no README, license or .gitignore): on GitHub's new-repository page, or with `gh repo create acme/widget-shadow --private`.",
+        "Add acme/widget-shadow to the token's repository access, with the permissions in the token table of `ghostbranch guide`.",
+        "Run ghostbranch init acme/widget --adopt."
+      ]
+    }
+  }
+}

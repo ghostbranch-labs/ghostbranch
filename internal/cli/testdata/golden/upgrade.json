@@ -1,0 +1,53 @@
+{
+  "schema_version": "0.4",
+  "command": "upgrade",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "public": "acme/widget",
+    "shadow": "acme/widget-shadow",
+    "changed": true,
+    "files": [
+      {
+        "path": ".github/workflows/ghostbranch-sync.yml",
+        "status": "missing",
+        "action": "add",
+        "replaces_local_edits": false
+      }
+    ],
+    "commit": "7683308c8f3345db85f452b7dc33d47b63de83de",
+    "audit": {
+      "public": "acme/widget",
+      "shadow": "acme/widget-shadow",
+      "guards": [],
+      "guard_mode": "rewrite",
+      "secrets": {
+        "referenced": [],
+        "listed": false,
+        "missing": [],
+        "inherit": [],
+        "environments": []
+      },
+      "push_triggers": [],
+      "minutes": {
+        "billed": true,
+        "scheduled_sync": "23 */6 * * *"
+      },
+      "overlay": [
+        {
+          "path": ".github/workflows/ghostbranch-sync.yml",
+          "status": "current"
+        }
+      ]
+    },
+    "preview": null
+  },
+  "warnings": [
+    {
+      "code": "ACTIONS_MINUTES_BILLED",
+      "message": "acme/widget-shadow is private, so its Actions minutes are billed; scheduled sync (23 */6 * * *) bills at least one minute a run, about 120 minutes a month at every 6 hours"
+    }
+  ],
+  "next": [],
+  "error": null
+}

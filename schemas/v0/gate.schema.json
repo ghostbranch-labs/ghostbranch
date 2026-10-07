@@ -4,7 +4,7 @@
   "type": "object",
   "additionalProperties": false,
   "required": ["feature", "feature_head", "public_main", "overlay", "candidate", "published_tree", "checks",
-               "failed_checks", "leak", "findings", "waived", "shadow_pr", "reused", "preview"],
+               "failed_checks", "leak", "findings", "waived", "repo_guards", "shadow_pr", "reused", "preview"],
   "properties": {
     "feature": { "type": "string" },
     "feature_head": { "$ref": "common.schema.json#/$defs/sha" },
@@ -17,6 +17,7 @@
     "leak": { "enum": ["clean", "found"] },
     "findings": { "type": "array", "items": { "$ref": "finding.schema.json" } },
     "waived": { "type": "array", "items": { "$ref": "waived.schema.json" } },
+    "repo_guards": { "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/guardReport" }] },
     "shadow_pr": { "type": "integer", "minimum": 0 },
     "reused": { "type": "boolean" },
     "preview": { "oneOf": [{ "type": "null" }, { "$ref": "preview.schema.json" }] }

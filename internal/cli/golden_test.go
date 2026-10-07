@@ -26,7 +26,7 @@ var dataSchemas = map[string]string{
 	"gate": "gate.schema.json", "promote": "promote.schema.json", "apply": "apply.schema.json",
 	"agents allow": "agents-allow.schema.json", "agents revoke": "agents-revoke.schema.json", "agents status": "agents-status.schema.json",
 	"waivers add": "waivers-add.schema.json", "waivers list": "waivers-list.schema.json", "waivers revoke": "waivers-revoke.schema.json",
-	"explain": "explain.schema.json", "guide": "guide.schema.json",
+	"explain": "explain.schema.json", "guide": "guide.schema.json", "audit": "audit.schema.json", "upgrade": "upgrade.schema.json",
 	"guard install": "guard.schema.json", "guard uninstall": "guard.schema.json", "guard status": "guard.schema.json", "guard check": "guard.schema.json",
 }
 
@@ -80,12 +80,22 @@ func TestGoldenContract(t *testing.T) {
 	}{
 		{"init", nil, []string{"init", "acme/widget"}, 0},
 		{"init_dry_run", nil, []string{"init", "acme/widget", "--dry-run"}, 0},
+		{"init_create_denied", func(te *testEnv) { te.forge.CreateForbidden = true }, []string{"init", "acme/widget"}, 1},
 		{"sync_noop", initOnly, []string{"sync"}, 0},
 		{"sync_fast_forward", func(te *testEnv) {
 			initOnly(te)
 			testutil.Commit(te.t, te.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
 		}, []string{"sync"}, 0},
+		{"sync_branches", func(te *testEnv) {
+			initOnly(te)
+			testutil.Commit(te.t, te.pubGit, "release", "release", map[string]string{"rel.txt": "rel\n"})
+			editConfig(te, "branches: [main]", "branches: [main, release]")
+		}, []string{"sync"}, 0},
 		{"feature_start", initOnly, []string{"feature", "start", "feat-x"}, 0},
+		{"feature_start_behind", func(te *testEnv) {
+			initOnly(te)
+			testutil.Commit(te.t, te.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
+		}, []string{"feature", "start", "feat-x"}, 0},
 		{"feature_start_exists", withFeature, []string{"feature", "start", "feat-x"}, 4},
 		{"gate", withFeature, []string{"gate", "feat-x"}, 0},
 		{"gate_checks_failed", func(te *testEnv) { withFeature(te); te.forge.Checks = failing }, []string{"gate", "feat-x"}, 3},
@@ -144,6 +154,23 @@ func TestGoldenContract(t *testing.T) {
 		{"waivers_add_missing_reason", initOnly, []string{"waivers", "add", "feat-x", "f-000000000000"}, 2},
 		{"waivers_list", waiveLeak, []string{"waivers", "list"}, 0},
 		{"waivers_revoke", waiveLeak, []string{"waivers", "revoke", "<FINDING>"}, 0},
+		{"audit", initOnly, []string{"audit"}, 0},
+		{"audit_secrets_unlisted", func(te *testEnv) {
+			// committed before init, so init mirrors it into shadow main
+			testutil.Commit(te.t, te.pubGit, "main", "uses a secret", map[string]string{".github/workflows/rel.yml": `on: push
+jobs:
+  r:
+    runs-on: x
+    steps:
+      - run: echo ${{ secrets.NPM_TOKEN }}
+`})
+			initOnly(te)
+			te.forge.SecretsForbidden = map[string]bool{"acme/widget-shadow": true}
+		}, []string{"audit"}, 0},
+		{"upgrade_noop", initOnly, []string{"upgrade"}, 0},
+		{"upgrade_plan", scheduled, []string{"upgrade", "--plan"}, 0},
+		{"upgrade_plan_noop", initOnly, []string{"upgrade", "--plan"}, 0},
+		{"upgrade", scheduled, []string{"upgrade"}, 0},
 	}
 	for _, s := range scenarios {
 		t.Run(s.name, func(t *testing.T) {
@@ -191,6 +218,26 @@ func TestGoldenContract(t *testing.T) {
 			}
 		})
 	}
+}
+
+// scheduled is an initialized pair whose config turns scheduled sync on, so
+// the sync workflow is wanted but not yet on the overlay branch.
+func scheduled(te *testEnv) {
+	initOnly(te)
+	editConfig(te, `schedule: "off"`, `schedule: "23 */6 * * *"`)
+}
+
+// editConfig replaces old with new in the overlay branch's .ghostbranch.yml.
+func editConfig(te *testEnv, old, new string) {
+	sh := gitx.New(te.forge.RepoDir("acme/widget-shadow"))
+	raw, _, err := sh.ShowFile(te.t.Context(), "refs/heads/ghostbranch", ".ghostbranch.yml")
+	if err != nil {
+		te.t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), old) {
+		te.t.Fatalf("config has no %q", old)
+	}
+	te.shadowCommit("ghostbranch", map[string]string{".ghostbranch.yml": strings.Replace(string(raw), old, new, 1)})
 }
 
 // Plans, feature.json and the ledger are part of the contract too.

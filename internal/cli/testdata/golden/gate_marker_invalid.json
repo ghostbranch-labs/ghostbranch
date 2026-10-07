@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.3",
+  "schema_version": "0.4",
   "command": "gate",
   "ok": false,
   "exit_code": 3,
@@ -7,7 +7,7 @@
     "feature": "feat-x",
     "feature_head": "88139fd7713142e8d37f9460193493611415f2cb",
     "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
-    "overlay": "b1428c4f99dd9fdcd40de6d3f9aea25809d4dfea",
+    "overlay": "b60402e97e1fbf747e73421d2765b542fc4b34ee",
     "candidate": "",
     "published_tree": "",
     "checks": "not_run",
@@ -15,6 +15,7 @@
     "leak": "clean",
     "findings": [],
     "waived": [],
+    "repo_guards": null,
     "shadow_pr": 0,
     "reused": false,
     "preview": null

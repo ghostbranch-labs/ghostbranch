@@ -7,7 +7,7 @@
   "properties": {
     "ts": { "$ref": "common.schema.json#/$defs/time" },
     "actor": { "$ref": "common.schema.json#/$defs/actor" },
-    "op": { "enum": ["init", "sync", "feature start", "gate", "promote", "apply", "agents allow", "agents revoke", "waivers add", "waivers revoke", "grant_created", "grant_replaced", "grant_revoked"] },
+    "op": { "enum": ["init", "sync", "upgrade", "feature start", "gate", "promote", "apply", "agents allow", "agents revoke", "waivers add", "waivers revoke", "grant_created", "grant_replaced", "grant_revoked"] },
     "pair": { "$ref": "common.schema.json#/$defs/repo" },
     "feature": { "type": "string" },
     "plan_id": { "$ref": "common.schema.json#/$defs/planId" },

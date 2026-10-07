@@ -8,14 +8,51 @@ main, green CI, and a leak scan of exactly what will be published.
 
 ## The loop
 
+0. New repo? See *Set up a repo*. Before starting a feature, if a result warns `SHADOW_BEHIND`, run
+   `ghostbranch sync` (its `next` says so).
 1. `ghostbranch feature start <name> --json` creates the feature branch in the shadow repo.
-2. Work on that branch, and push it **to the shadow repo only**.
+2. Run the command in `data.checkout`. It fetches the branch from the shadow repo (in a checkout of the
+   public repo, usually a remote named `shadow`) and switches to it. Commit there, and push **to the
+   shadow repo only** (`git push shadow <name>`), never to `origin`.
 3. `ghostbranch gate <name> --json` rebases on public main, scans for leaks and runs CI.
 4. `ghostbranch promote <name> --mode squash -m "<message>" --plan --json` saves a plan of exactly
    what would be published.
 5. Follow `next`:
    - `needs_human: true`: stop, and give the person that exact command.
    - `needs_human: false`: a person has allowed agents to publish here; you may run it.
+
+## Set up a repo
+
+1. `ghostbranch init <public> --plan --json`, then `ghostbranch init <public> --json`.
+2. Exit 1 with `SHADOW_CREATE_DENIED` means the token may not create repos. **Stop**: show the person
+   `error.details.steps` and **ask them to do steps 1 and 2 of `error.details.steps`**: create the empty
+   private repo, and add it to the token. Never ask the person for a token with wider access.
+3. Wait. Once the person confirms both are done, run `ghostbranch init <public> --adopt --json` (the
+   command in `next`; its `needs_human` stands for their steps 1 and 2).
+4. `ghostbranch audit --json` and report to the person: repo guards the gate can't rewrite
+   (`REPO_GUARD_UNREWRITABLE`), secrets the tests need (`SECRETS_MISSING`, or the to-check list when
+   `SECRETS_UNLISTED`), that the shadow repo's Actions minutes are billed, and, if they opt in to
+   scheduled sync, whether they need a `GHOSTBRANCH_SYNC_TOKEN` secret (see *Keeping up with public*).
+   Guarded jobs run in the shadow repo on unreleased code: never deploy or publish credentials there.
+
+## Keeping up with public
+
+- Sync is manual by default. When a result warns `SHADOW_BEHIND`, run `ghostbranch sync` (fast-forward
+  only; it never resolves a conflict). The gate always rebases on public main, so it is never affected.
+- Scheduled sync is opt-in and costs Actions minutes (every 6 hours is about 120 a month). It is the
+  person's choice: they set `sync.schedule` in `.ghostbranch.yml` on the `ghostbranch` branch, then
+  `ghostbranch upgrade --plan` and `ghostbranch upgrade` install the workflow. `sync.schedule: off`
+  plus `upgrade` removes it. Don't turn it on yourself.
+- The workflow uses its own default token. If the public repo is private, or public commits change
+  workflow files, the person adds a `GHOSTBRANCH_SYNC_TOKEN` secret to the shadow repo: a fine-grained
+  token with Contents read on the public repo and Contents and Workflows write on the shadow repo,
+  never public write.
+- `OVERLAY_OUTDATED` means run `ghostbranch upgrade --plan`, then `ghostbranch upgrade`.
+- Repo guards: the gate rewrites `github.repository == 'org/project'` guards in its CI candidate only,
+  so those jobs run in the shadow repo, on unreleased code; what publishes is untouched. A guarded job
+  that deploys or publishes must never get its secrets in the shadow repo; if guarded jobs deploy, the
+  person sets `ci.rewrite_repo_guards: warn`. `REPO_GUARD_UNREWRITABLE` names a guard it can't rewrite:
+  tell the person that job skipped and was not tested.
 
 ## Rules
 
@@ -24,7 +61,8 @@ main, green CI, and a leak scan of exactly what will be published.
 - **When `needs_human` is true, stop.** Tell the person the exact command and why, and don't look
   for another way.
 - Exit 6: the repos moved, so plan again. Exit 3: fix the code or remove the leaked content, then
-  gate again. Exit 4: resolve the conflict the error names.
+  gate again. Exit 4: resolve the conflict the error names, except `SYNC_DIVERGED`, which needs a
+  person: stop and tell them.
 - Set `GHOSTBRANCH_ACTOR=agent:<your-name>` (for example `agent:claude-code`) on every
   `ghostbranch` command, so the ledger records that an agent acted. It is a label only; it never
   grants or blocks anything.
@@ -58,6 +96,8 @@ main, green CI, and a leak scan of exactly what will be published.
   the person's.
 - Never edit `grants.json`, plan files or `.ghostbranch.yml` to get past a check.
 - Never run `ghostbranch waivers add`, edit `waivers.json`, or otherwise hide a leak-scan finding.
+- Never create or delete repos (other than through `ghostbranch init`), or change repo settings, tokens
+  or secrets yourself; those are the person's.
 
 You may *suggest* these to the person, never run them yourself:
 
@@ -115,6 +155,19 @@ prefix (`/// BEGIN-INTERNAL`, `## END-INTERNAL`), or a marker inside a multi-lin
 (`/* BEGIN-INTERNAL` on one line, `*/` on another). So do markers in a UTF-16 or UTF-32 file,
 or in one Git reads as binary. A person can change the tokens with `leak_scan.markers` in
 `.ghostbranch.yml`.
+
+## Token permissions (for people)
+
+Fine-grained tokens, per command:
+
+| Command | Permissions |
+|---|---|
+| `init` that creates the shadow repo | Administration write on **all repositories** of the owner (a token can't name a repo that doesn't exist yet), plus the `init --adopt` set |
+| `init --adopt` (create the empty private repo yourself first) | Shadow: Administration, Contents and Workflows read and write. Public: Contents read |
+| `sync`, `upgrade` | Shadow: Contents and Workflows write. Public: Contents read |
+| `feature start`, `gate` | Shadow: Contents, Pull requests and Workflows write; Actions and Commit statuses read. Public: Contents read |
+| `promote`, `apply` | Public: Contents and Pull requests write (yours, never an agent's) |
+| `audit` | Contents read; optionally Secrets: read, to compare secret names |
 
 ## Strict isolation (for people)
 

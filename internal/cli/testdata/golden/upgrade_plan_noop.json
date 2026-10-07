@@ -1,0 +1,30 @@
+{
+  "schema_version": "0.4",
+  "command": "upgrade",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "public": "acme/widget",
+    "shadow": "acme/widget-shadow",
+    "changed": false,
+    "files": [
+      {
+        "path": ".github/workflows/ghostbranch-sync.yml",
+        "status": "current",
+        "action": "unchanged",
+        "replaces_local_edits": false
+      }
+    ],
+    "commit": "",
+    "audit": null,
+    "preview": {
+      "fingerprint": {
+        "overlay": "b60402e97e1fbf747e73421d2765b542fc4b34ee"
+      },
+      "ops": []
+    }
+  },
+  "warnings": [],
+  "next": [],
+  "error": null
+}

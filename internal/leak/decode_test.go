@@ -7,6 +7,7 @@ import (
 	"unicode/utf16"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
+	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
 )
 
 func le16(s string) []byte {
@@ -88,7 +89,7 @@ func TestBOMWindowMatchesTheBinaryCheck(t *testing.T) {
 }
 
 func TestRunsFindASCIIAtEveryStride(t *testing.T) {
-	const secret = "ghp_runs_secret_123"
+	secret := testutil.FakeGitHubToken()
 	bin := []byte{0x89, 'P', 'N', 'G', 0, 0, 1, 2}
 	cases := map[string][]byte{
 		"stride 1":              cat(bin, []byte(secret), []byte{0, 0}),

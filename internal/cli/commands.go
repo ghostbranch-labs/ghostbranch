@@ -34,7 +34,7 @@ Coding agents: run "ghostbranch guide" first.`,
 	})
 	feature := &cobra.Command{Use: "feature", Short: "Work with features (private branches in the shadow repo)"}
 	feature.AddCommand(a.featureStartCmd())
-	root.AddCommand(a.initCmd(), a.syncCmd(), feature, a.gateCmd(), a.promoteCmd(), a.applyCmd(), a.agentsCmd(), a.waiversCmd(), a.explainCmd(), a.guideCmd(), a.guardCmd())
+	root.AddCommand(a.initCmd(), a.syncCmd(), a.auditCmd(), a.upgradeCmd(), feature, a.gateCmd(), a.promoteCmd(), a.applyCmd(), a.agentsCmd(), a.waiversCmd(), a.explainCmd(), a.guideCmd(), a.guardCmd())
 	return root
 }
 
@@ -94,6 +94,58 @@ func (a *app) syncCmd() *cobra.Command {
 	return c
 }
 
+func (a *app) auditCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "audit",
+		Short: "Report what keeps the shadow repo's CI from matching public CI",
+		Long: `audit reads the workflows the shadow repo's CI runs and reports repo guards (jobs that skip in
+the shadow repo), referenced secrets and which are missing (when the token may list them), workflows a
+token-authenticated scheduled sync would start, billed Actions minutes, and whether Ghostbranch's managed
+overlay files are current. It changes nothing.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			e, err := a.engine(cmd.Context())
+			if err != nil {
+				return err
+			}
+			p, err := a.pair(e)
+			if err != nil {
+				return err
+			}
+			res, w, err := e.Audit(cmd.Context(), p)
+			return done(a, res, w, err)
+		},
+	}
+}
+
+func (a *app) upgradeCmd() *cobra.Command {
+	var yes bool
+	c := &cobra.Command{
+		Use:   "upgrade",
+		Short: "Bring the pair's Ghostbranch-managed overlay files up to date",
+		Long: `upgrade compares the overlay branch's managed files (today the opt-in sync workflow) with this
+version's templates and .ghostbranch.yml, then adds, updates or removes them in one overlay commit.
+Turning scheduled sync on or off is: edit sync.schedule, then run upgrade. A file someone edited by hand
+is replaced; --plan shows that first. It writes only the shadow repo's overlay branch, then runs the audit.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			e, err := a.engine(cmd.Context())
+			if err != nil {
+				return err
+			}
+			p, err := a.pair(e)
+			if err != nil {
+				return err
+			}
+			res, w, err := e.Upgrade(cmd.Context(), p)
+			return done(a, res, w, err)
+		},
+	}
+	c.Flags().BoolVar(&yes, "yes", false, "accepted for consistency; upgrade never asks")
+	c.Flags().BoolVar(&a.dryRun, "plan", false, "preview exactly what would change, and change nothing (same as --dry-run)")
+	return c
+}
+
 func (a *app) featureStartCmd() *cobra.Command {
 	var yes bool
 	c := &cobra.Command{
@@ -111,6 +163,11 @@ func (a *app) featureStartCmd() *cobra.Command {
 				return err
 			}
 			res, w, err := e.FeatureStart(cmd.Context(), p, args[0])
+			if res != nil && a.env.ShadowRemote != nil {
+				remote, free, in := a.env.ShadowRemote(p.Shadow)
+				res.Checkout = checkoutHint(res.Name, p.Shadow, remote, free, in)
+				a.shadowRemote = remote
+			}
 			return done(a, res, w, err)
 		},
 	}

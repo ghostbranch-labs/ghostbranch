@@ -21,8 +21,8 @@ func TestEveryCodeHasItsExitCode(t *testing.T) {
 		contract.RebaseConflict: 4, contract.SyncDiverged: 4, contract.BranchExists: 4,
 		contract.OverlayCollision: 4, contract.ShadowNotEmpty: 4, contract.RefMoved: 4,
 		contract.ApprovalRequired: 5,
-		contract.PlanStale:        6,
-		contract.MarkerInvalid:    3, contract.WaiverUnknown: 2,
+		contract.PlanStale:        6, contract.ShadowCreateDenied: 1,
+		contract.MarkerInvalid: 3, contract.WaiverUnknown: 2,
 	}
 	all := contract.AllCodes()
 	if len(all) != len(want) {
@@ -58,7 +58,7 @@ func TestSuccessEnvelopeShape(t *testing.T) {
 	if err := json.Unmarshal(b, &m); err != nil {
 		t.Fatal(err)
 	}
-	if m["schema_version"] != "0.3" || m["ok"] != true || m["exit_code"] != float64(0) ||
+	if m["schema_version"] != "0.4" || m["ok"] != true || m["exit_code"] != float64(0) ||
 		m["command"] != "sync" || m["error"] != nil {
 		t.Fatalf("bad envelope: %s", b)
 	}
@@ -107,5 +107,26 @@ func TestWarningDetailsAreOptional(t *testing.T) {
 	full, _ := json.Marshal(contract.Warning{Code: contract.LargeFile, Message: "m", Details: map[string]any{"paths": []string{"a.bin"}}})
 	if !strings.Contains(string(full), `"details":{"paths":["a.bin"]}`) {
 		t.Fatalf("details missing: %s", full)
+	}
+}
+
+func TestSubProject4CodesAreRegistered(t *testing.T) {
+	if contract.ShadowCreateDenied.Exit() != contract.ExitFailure {
+		t.Fatalf("SHADOW_CREATE_DENIED exits %d", contract.ShadowCreateDenied.Exit())
+	}
+	for _, w := range []contract.WarningCode{contract.OverlayOutdated, contract.RepoGuard, contract.RepoGuardUnrewritable,
+		contract.SecretsUnlisted, contract.SecretsMissing, contract.PushTriggersOnSync, contract.ActionsMinutesBilled,
+		contract.ShadowBehind, contract.AuditIncomplete} {
+		es, err := contract.Explain(string(w))
+		if err != nil || len(es) != 1 || es[0].Summary == "" || es[0].WhatToDo == "" {
+			t.Fatalf("%s is not documented: %+v %v", w, es, err)
+		}
+	}
+	es, err := contract.Explain("SHADOW_CREATE_DENIED")
+	if err != nil || !es[0].NeedsHuman || !strings.Contains(es[0].WhatToDo, "--adopt") {
+		t.Fatalf("SHADOW_CREATE_DENIED doc: %+v %v", es, err)
+	}
+	if contract.SchemaVersion != "0.4" {
+		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 }

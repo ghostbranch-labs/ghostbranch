@@ -98,6 +98,38 @@ func human(r any) string {
 		if v.OverlayCreated {
 			b.WriteString("  created the ghostbranch overlay branch (.ghostbranch.yml)\n")
 		}
+		if v.Audit != nil {
+			auditText(&b, v.Audit)
+		}
+	case *engine.AuditResult:
+		auditText(&b, v)
+	case *engine.UpgradeResult:
+		if v.Preview != nil {
+			previewText(&b, v.Preview)
+			for _, f := range v.Files {
+				if f.ReplacesLocalEdits {
+					fmt.Fprintf(&b, "  warning: %s was edited by hand; upgrade replaces those edits\n", f.Path)
+				}
+			}
+			break
+		}
+		if !v.Changed {
+			b.WriteString("The overlay's managed files are current; nothing to do.\n")
+		}
+		for _, f := range v.Files {
+			if f.Action != "unchanged" {
+				fmt.Fprintf(&b, "  %s %s\n", f.Action, f.Path)
+			}
+			if f.ReplacesLocalEdits {
+				fmt.Fprintf(&b, "  replaced hand edits in %s\n", f.Path)
+			}
+		}
+		if v.Commit != "" {
+			fmt.Fprintf(&b, "Upgraded the overlay branch in %s.\n", short(v.Commit))
+		}
+		if v.Audit != nil {
+			auditText(&b, v.Audit)
+		}
 	case *engine.SyncResult:
 		if v.Preview != nil {
 			previewText(&b, v.Preview)
@@ -110,6 +142,11 @@ func human(r any) string {
 			fmt.Fprintf(&b, "Shadow main fast-forwarded %s -> %s.\n", short(v.ShadowMainBefore), short(v.PublicMain))
 		default:
 			b.WriteString("Shadow main has diverged from public main; nothing was pushed.\n")
+		}
+		for _, br := range v.Branches {
+			if br.Name != "main" {
+				fmt.Fprintf(&b, "  %s: %s\n", br.Name, br.Status)
+			}
 		}
 	case *engine.FeatureStartResult:
 		if v.Preview != nil {
@@ -215,5 +252,48 @@ func human(r any) string {
 func waivedLines(b *strings.Builder, ws []engine.WaivedFinding) {
 	for _, w := range ws {
 		fmt.Fprintf(b, "  waived %s: %s in %s (%s)\n", w.ID, w.Rule, engine.Location(w.Finding), w.Reason)
+	}
+}
+
+func auditText(b *strings.Builder, v *engine.AuditResult) {
+	fmt.Fprintf(b, "CI audit of %s:\n", v.Shadow)
+	if len(v.Guards) == 0 {
+		b.WriteString("  repo guards: none\n")
+	}
+	for _, g := range v.Guards {
+		how := "rewritten by the gate"
+		switch {
+		case !g.Rewritable:
+			how = "NOT rewritable: skips in the shadow repo"
+		case v.GuardMode != "rewrite":
+			how = "skips in the shadow repo (ci.rewrite_repo_guards: " + v.GuardMode + ")"
+		}
+		step := ""
+		if g.Step != nil {
+			step = " step " + *g.Step
+		}
+		fmt.Fprintf(b, "  repo guard: %s job %s%s (%s)\n", g.Path, g.Job, step, how)
+	}
+	names := make([]string, 0, len(v.Secrets.Referenced))
+	for _, r := range v.Secrets.Referenced {
+		names = append(names, r.Name)
+	}
+	switch {
+	case len(names) == 0:
+		b.WriteString("  secrets: none referenced\n")
+	case !v.Secrets.Listed:
+		fmt.Fprintf(b, "  secrets referenced (check they exist; the token can't list them): %s\n", strings.Join(names, ", "))
+	case len(v.Secrets.Missing) > 0:
+		fmt.Fprintf(b, "  secrets missing in the shadow repo: %s\n", strings.Join(v.Secrets.Missing, ", "))
+	default:
+		fmt.Fprintf(b, "  secrets: all %d present\n", len(names))
+	}
+	if v.Minutes.ScheduledSync != nil {
+		fmt.Fprintf(b, "  scheduled sync: %s (bills Actions minutes)\n", *v.Minutes.ScheduledSync)
+	} else {
+		b.WriteString("  scheduled sync: off (run ghostbranch sync yourself)\n")
+	}
+	for _, f := range v.Overlay {
+		fmt.Fprintf(b, "  managed %s: %s\n", f.Path, f.Status)
 	}
 }

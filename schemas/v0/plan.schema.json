@@ -4,9 +4,9 @@
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "id", "kind", "actor", "created_at", "pair", "feature", "mode", "fingerprint",
-               "publish", "leak"],
+               "publish", "leak", "ci"],
   "properties": {
-    "schema_version": { "const": "0.3" },
+    "schema_version": { "const": "0.4" },
     "id": { "$ref": "common.schema.json#/$defs/planId" },
     "kind": { "const": "promote" },
     "actor": { "$ref": "common.schema.json#/$defs/actor" },
@@ -60,6 +60,10 @@
         "warnings": { "type": "array", "items": { "type": "object", "required": ["code", "message"] } },
         "scanner_version": { "type": "string" }
       }
+    },
+    "ci": {
+      "type": "object", "additionalProperties": false, "required": ["repo_guards"],
+      "properties": { "repo_guards": { "$ref": "common.schema.json#/$defs/guardReport" } }
     }
   }
 }

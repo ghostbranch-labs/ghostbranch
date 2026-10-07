@@ -11,7 +11,7 @@ import (
 
 // SchemaVersion versions the envelope and every data schema. It stays 0.x
 // until launch, and 0.x versions may break.
-const SchemaVersion = "0.3"
+const SchemaVersion = "0.4"
 
 // Exit codes. Agents branch on these, so they never change meaning.
 const (
@@ -65,6 +65,9 @@ const (
 	OverlayCollision Code = "OVERLAY_COLLISION"
 	ShadowNotEmpty   Code = "SHADOW_NOT_EMPTY"
 	RefMoved         Code = "REF_MOVED"
+	// ShadowCreateDenied means the token may not create the shadow repo; a
+	// person creates it and init adopts it.
+	ShadowCreateDenied Code = "SHADOW_CREATE_DENIED"
 
 	ApprovalRequired Code = "APPROVAL_REQUIRED"
 
@@ -72,7 +75,7 @@ const (
 )
 
 var exitCodes = map[Code]int{
-	AuthMissing: ExitFailure, ForgeError: ExitFailure, ShadowNotPrivate: ExitFailure,
+	AuthMissing: ExitFailure, ShadowCreateDenied: ExitFailure, ForgeError: ExitFailure, ShadowNotPrivate: ExitFailure,
 	ConfigInvalid: ExitFailure, Locked: ExitFailure, Internal: ExitFailure,
 	TokenCannotPublish: ExitFailure, GuardUnsupported: ExitFailure, PushBlocked: ExitFailure,
 	NotAPairCheckout: ExitUsage,
@@ -174,10 +177,31 @@ const (
 	// WaiversUnreadable means waivers.json could not be read, so no waiver
 	// applied and every finding blocked.
 	WaiversUnreadable WarningCode = "WAIVERS_UNREADABLE"
+	// OverlayOutdated means a Ghostbranch-managed overlay file is missing,
+	// out of date or edited by hand; ghostbranch upgrade fixes it.
+	OverlayOutdated WarningCode = "OVERLAY_OUTDATED"
+	// RepoGuard and RepoGuardUnrewritable flag workflow jobs or steps guarded
+	// to the public repo's name, which skip in the shadow repo.
+	RepoGuard             WarningCode = "REPO_GUARD"
+	RepoGuardUnrewritable WarningCode = "REPO_GUARD_UNREWRITABLE"
+	// SecretsUnlisted and SecretsMissing come from the secrets audit.
+	SecretsUnlisted WarningCode = "SECRETS_UNLISTED"
+	SecretsMissing  WarningCode = "SECRETS_MISSING"
+	// PushTriggersOnSync names workflows a token-authenticated sync starts.
+	PushTriggersOnSync WarningCode = "PUSH_TRIGGERS_ON_SYNC"
+	// ActionsMinutesBilled: the shadow repo is private, so Actions is billed.
+	ActionsMinutesBilled WarningCode = "ACTIONS_MINUTES_BILLED"
+	// ShadowBehind means shadow main is behind public main.
+	ShadowBehind WarningCode = "SHADOW_BEHIND"
+	// AuditIncomplete means init or upgrade succeeded but the audit after it
+	// could not run.
+	AuditIncomplete WarningCode = "AUDIT_INCOMPLETE"
 )
 
 var warningCodes = []WarningCode{ConfigKeyIgnored, PublicNotPublic, GateNotRecorded, ChecksLimited, ActorUnknown,
-	WorkflowChanged, LargeFile, BinaryFile, WaiversUnreadable}
+	WorkflowChanged, LargeFile, BinaryFile, WaiversUnreadable,
+	OverlayOutdated, RepoGuard, RepoGuardUnrewritable, SecretsUnlisted, SecretsMissing, PushTriggersOnSync,
+	ActionsMinutesBilled, ShadowBehind, AuditIncomplete}
 
 // AllWarnings lists every warning code, sorted.
 func AllWarnings() []WarningCode {
