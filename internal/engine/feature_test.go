@@ -1,6 +1,8 @@
 package engine_test
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -80,5 +82,48 @@ func TestFeatureStartPercentInExistingBranchName(t *testing.T) {
 	ce := wantCode(t, err, contract.BranchExists)
 	if !strings.Contains(ce.Message, "pct/a%sb") || strings.Contains(ce.Message, "%!") {
 		t.Fatalf("message garbled: %q", ce.Message)
+	}
+}
+
+// installShadowHook makes the fake forge's shadow repo refuse every push with
+// msg, the way a ruleset, a missing token scope or a server hook does.
+func (h *harness) installShadowHook(msg string) {
+	h.t.Helper()
+	hooks := filepath.Join(h.forge.RepoDir(shadowName), "hooks")
+	if err := os.MkdirAll(hooks, 0o755); err != nil {
+		h.t.Fatal(err)
+	}
+	script := "#!/bin/sh\necho '" + msg + "' >&2\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(hooks, "pre-receive"), []byte(script), 0o755); err != nil {
+		h.t.Fatal(err)
+	}
+}
+
+func TestPushTheServerRefusesIsPushRefusedNotBranchExists(t *testing.T) {
+	h := newHarness(t)
+	h.init()
+	h.installShadowHook("GH013: repository rule violations found")
+	_, _, err := h.eng.FeatureStart(h.ctx, h.pair, "feat-x")
+	ce := wantCode(t, err, contract.PushRefused)
+	if ce.Details["remote"] != "shadow" || ce.Details["reason"] == nil || !strings.Contains(ce.Details["reason"].(string), "pre-receive hook declined") {
+		t.Fatalf("details = %v", ce.Details)
+	}
+	refs, _ := ce.Details["refs"].([]string)
+	if len(refs) == 0 {
+		t.Fatalf("details.refs = %v", ce.Details["refs"])
+	}
+	if !strings.HasPrefix(ce.Message, "the shadow repo refused the push: ") || strings.Contains(ce.Message, "Workflows write") {
+		t.Fatalf("message = %q", ce.Message)
+	}
+}
+
+func TestPushRefusedForWorkflowScopeSaysWhichPermission(t *testing.T) {
+	h := newHarness(t)
+	h.init()
+	h.installShadowHook("refusing to allow an OAuth App to create or update workflow .github/workflows/x.yml without workflow scope")
+	_, _, err := h.eng.FeatureStart(h.ctx, h.pair, "feat-x")
+	ce := wantCode(t, err, contract.PushRefused)
+	if !strings.Contains(ce.Message, "without workflow scope") || !strings.HasSuffix(ce.Message, "; the token needs Workflows write (fine-grained) or the workflow scope (gh/OAuth)") {
+		t.Fatalf("message = %q", ce.Message)
 	}
 }

@@ -67,6 +67,17 @@ func (e *RejectedError) Error() string {
 	return fmt.Sprintf("push rejected for %s: %s", strings.Join(e.Refs, ", "), e.Detail)
 }
 
+// RefusedError means the remote refused at least one ref for a reason of
+// its own (permissions, a ruleset, a hook); retrying won't help.
+type RefusedError struct {
+	Refs   []string
+	Reason string // the server's reason, e.g. text inside "[remote rejected] (...)"
+}
+
+func (e *RefusedError) Error() string {
+	return fmt.Sprintf("push refused for %s: %s", strings.Join(e.Refs, ", "), e.Reason)
+}
+
 // PermissionError means the remote refused the push because the credentials
 // may not write to it (GitHub answers 403).
 type PermissionError struct{ Detail string }
@@ -113,13 +124,33 @@ func (g *Git) Push(ctx context.Context, remote string, opt PushOptions, refspecs
 		return nil
 	}
 	if ge, ok := err.(*Error); ok {
-		var refs []string
+		var refs, refused, reasons []string
 		for _, line := range strings.Split(ge.Stdout, "\n") {
-			if strings.HasPrefix(line, "!") {
-				if parts := strings.Split(line, "\t"); len(parts) >= 2 {
-					refs = append(refs, parts[1])
-				}
+			if !strings.HasPrefix(line, "!") {
+				continue
 			}
+			parts := strings.Split(strings.TrimRight(line, "\r"), "\t")
+			if len(parts) < 2 {
+				continue
+			}
+			if len(parts) >= 3 && strings.HasPrefix(strings.TrimSpace(parts[2]), "[remote rejected]") {
+				_, dst, ok := strings.Cut(parts[1], ":")
+				if !ok {
+					dst = parts[1]
+				}
+				refused = append(refused, dst)
+				reasons = append(reasons, remoteRejectedReason(parts[2]))
+				continue
+			}
+			refs = append(refs, parts[1])
+		}
+		if len(refused) > 0 {
+			reason := strings.Join(reasons, "; ")
+			// A hook or ruleset usually says why in "remote:" lines on stderr.
+			if said := remoteSaid(ge.Stderr); said != "" {
+				reason += ": " + said
+			}
+			return &RefusedError{Refs: refused, Reason: reason}
 		}
 		if len(refs) > 0 {
 			return &RejectedError{Refs: refs, Detail: strings.TrimSpace(ge.Stdout + "\n" + ge.Stderr)}
@@ -129,4 +160,27 @@ func (g *Git) Push(ctx context.Context, remote string, opt PushOptions, refspecs
 		}
 	}
 	return err
+}
+
+// remoteRejectedReason is the text inside the parentheses of a porcelain
+// status such as "[remote rejected] (pre-receive hook declined)".
+func remoteRejectedReason(status string) string {
+	status = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(status), "[remote rejected]"))
+	if strings.HasPrefix(status, "(") && strings.HasSuffix(status, ")") {
+		return status[1 : len(status)-1]
+	}
+	return status
+}
+
+// remoteSaid joins the messages the server sent with "remote: " on stderr.
+func remoteSaid(stderr string) string {
+	var said []string
+	for _, line := range strings.Split(stderr, "\n") {
+		if msg, ok := strings.CutPrefix(strings.TrimSpace(line), "remote:"); ok {
+			if msg = strings.TrimSpace(msg); msg != "" {
+				said = append(said, msg)
+			}
+		}
+	}
+	return strings.Join(said, " ")
 }

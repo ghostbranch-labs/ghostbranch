@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -125,6 +126,17 @@ func (e *Engine) push(ctx context.Context, pc *pairCtx, remote string, opt gitx.
 	if errors.As(err, &rej) {
 		return contract.Wrap(contract.RefMoved, err, "a ref changed on the %s repo while this ran; re-run the command", remote).
 			WithDetails(map[string]any{"refs": rej.Refs})
+	}
+	var refused *gitx.RefusedError
+	if errors.As(err, &refused) {
+		msg := fmt.Sprintf("the %s repo refused the push: %s", remote, refused.Reason)
+		if strings.Contains(strings.ToLower(refused.Reason), "workflow") {
+			msg += "; the token needs Workflows write (fine-grained) or the workflow scope (gh/OAuth)"
+		}
+		ce := contract.New(contract.PushRefused, "%s", msg).
+			WithDetails(map[string]any{"remote": remote, "refs": refused.Refs, "reason": refused.Reason})
+		ce.Err = err
+		return ce
 	}
 	var perm *gitx.PermissionError
 	if remote == remotePublic && errors.As(err, &perm) {

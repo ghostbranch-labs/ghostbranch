@@ -81,3 +81,11 @@ func TestGuardAndSecretAdviceKeepsDeploysOut(t *testing.T) {
 		}
 	}
 }
+
+func TestPushRefusedIsDocumentedForAPerson(t *testing.T) {
+	es, err := Explain("PUSH_REFUSED")
+	if err != nil || len(es) != 1 || *es[0].ExitCode != 1 || !es[0].NeedsHuman ||
+		es[0].Summary == "" || len(es[0].Causes) != 3 || !strings.Contains(es[0].WhatToDo, "error.details.reason") {
+		t.Fatalf("PUSH_REFUSED doc: %+v %v", es, err)
+	}
+}

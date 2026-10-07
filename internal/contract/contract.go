@@ -65,6 +65,9 @@ const (
 	OverlayCollision Code = "OVERLAY_COLLISION"
 	ShadowNotEmpty   Code = "SHADOW_NOT_EMPTY"
 	RefMoved         Code = "REF_MOVED"
+	// PushRefused means the remote refused a push for a reason of its own
+	// (token permission, a ruleset, a hook); running it again is refused again.
+	PushRefused Code = "PUSH_REFUSED"
 	// ShadowCreateDenied means the token may not create the shadow repo; a
 	// person creates it and init adopts it.
 	ShadowCreateDenied Code = "SHADOW_CREATE_DENIED"
@@ -77,7 +80,7 @@ const (
 var exitCodes = map[Code]int{
 	AuthMissing: ExitFailure, ShadowCreateDenied: ExitFailure, ForgeError: ExitFailure, ShadowNotPrivate: ExitFailure,
 	ConfigInvalid: ExitFailure, Locked: ExitFailure, Internal: ExitFailure,
-	TokenCannotPublish: ExitFailure, GuardUnsupported: ExitFailure, PushBlocked: ExitFailure,
+	TokenCannotPublish: ExitFailure, GuardUnsupported: ExitFailure, PushBlocked: ExitFailure, PushRefused: ExitFailure,
 	NotAPairCheckout: ExitUsage,
 	BadFlag:          ExitUsage, MissingInput: ExitUsage, PairAmbiguous: ExitUsage,
 	NameInvalid: ExitUsage, FeatureNotFound: ExitUsage,
