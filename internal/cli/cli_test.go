@@ -204,7 +204,8 @@ func TestWaiversRevokeAllRefusesRepo(t *testing.T) {
 func TestSyncCancelsPushRunsAndNoCancelSkips(t *testing.T) {
 	te := newTestEnv(t)
 	initOnly(te)
-	up := testutil.Commit(t, te.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
+	up := testutil.Commit(t, te.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n",
+		".github/workflows/push.yml": "on: push\njobs:\n  t:\n    runs-on: x\n    steps:\n      - run: echo\n"})
 	te.forge.Runs = map[string][]fake.Run{"acme/widget-shadow": {
 		{SHA: up, Run: forge.Run{ID: 7, Workflow: "ci", Status: "queued", URL: "https://github.example/runs/7"}}}}
 	code, out, _ := te.run("sync")

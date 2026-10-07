@@ -10,6 +10,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
+	"github.com/ghostbranch-labs/ghostbranch/internal/workflow"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
@@ -99,7 +100,8 @@ func (e *Engine) Sync(ctx context.Context, p workspace.Pair, o SyncOptions) (res
 	if e.DryRun {
 		res.Preview = preview.New(map[string]string{"public_main": pm, "shadow_main": sm})
 	}
-	var diverged, pushed []string
+	var diverged []string
+	var pushed []pushedCommit
 	for _, b := range cfg.Sync.Branches {
 		pb := pubs[b]
 		sb, ok, err := g.Resolve(ctx, shadowRef(b))
@@ -135,7 +137,7 @@ func (e *Engine) Sync(ctx context.Context, p workspace.Pair, o SyncOptions) (res
 				}
 				_ = g.UpdateRef(ctx, shadowRef(b), pb)
 				br.To = pb
-				pushed = appendNew(pushed, pb)
+				pushed = addPushed(pushed, pb, b)
 			}
 		}
 		if b == "main" {
@@ -146,7 +148,7 @@ func (e *Engine) Sync(ctx context.Context, p workspace.Pair, o SyncOptions) (res
 	}
 	if len(pushed) > 0 && !o.NoCancel {
 		var cw []contract.Warning
-		res.CancelledRuns, cw = e.cancelPushRuns(ctx, p.Shadow, pushed)
+		res.CancelledRuns, cw = e.cancelPushRuns(ctx, pc, pushed)
 		warns = addWarnings(warns, cw...)
 	}
 	if len(diverged) > 0 {
@@ -164,30 +166,76 @@ func (e *Engine) Sync(ctx context.Context, p workspace.Pair, o SyncOptions) (res
 // syncAction is the top-level action for main's per-branch status.
 var syncAction = map[string]string{"up_to_date": "noop", "fast_forwarded": "fast_forward", "created": "fast_forward", "diverged": "diverged"}
 
-func appendNew(list []string, s string) []string {
-	for _, x := range list {
-		if x == s {
+// pushedCommit is a commit sync pushed and the branches it pushed it to.
+type pushedCommit struct {
+	sha      string
+	branches []string
+}
+
+func addPushed(list []pushedCommit, sha, branch string) []pushedCommit {
+	for i := range list {
+		if list[i].sha == sha {
+			list[i].branches = append(list[i].branches, branch)
 			return list
 		}
 	}
-	return append(list, s)
+	return append(list, pushedCommit{sha: sha, branches: []string{branch}})
+}
+
+// pushStartsWorkflows reports whether pushing sha to any of branches starts
+// a workflow: whether sha's tree has a workflow file push-triggered for one
+// of them. Files that don't parse start nothing (GitHub rejects them). If
+// the tree can't be read, it answers true, so sync still looks.
+func (e *Engine) pushStartsWorkflows(ctx context.Context, pc *pairCtx, sha string, branches []string) bool {
+	entries, err := pc.git.ListTree(ctx, sha)
+	if err != nil {
+		return true
+	}
+	var paths, shas []string
+	for _, en := range entries {
+		if en.Type == "blob" && workflow.IsWorkflowPath(en.Path) {
+			paths, shas = append(paths, en.Path), append(shas, en.SHA)
+		}
+	}
+	blobs, err := pc.git.ReadBlobs(ctx, shas)
+	if err != nil {
+		return true
+	}
+	names := guardNames(pc)
+	for i, path := range paths {
+		if f, err := workflow.Parse(path, blobs[shas[i]], names); err == nil && f.PushTriggered(branches) {
+			return true
+		}
+	}
+	return false
 }
 
 // activeRun is the run statuses sync cancels.
 var activeRun = map[string]bool{"queued": true, "in_progress": true, "waiting": true, "requested": true, "pending": true}
 
-// cancelPushRuns cancels the workflow runs that pushing shas started in
-// repo. For each sha it looks for up to CIAppearWindow, every PollInterval,
-// and stops once runs have appeared and a further look finds no new one.
+// cancelPushRuns cancels the workflow runs that the pushes started in the
+// shadow repo. A commit whose push starts no workflow is skipped without
+// asking GitHub. For the others it looks for up to CIAppearWindow, every
+// CIAppearPoll, and stops once runs have appeared and a further look finds
+// no new one.
 // Runs are cancelled as soon as they are seen, since GitHub bills each
 // started job at least a minute. It never fails the sync, which has
 // already pushed: trouble is a CI_NOT_CANCELLED warning.
-func (e *Engine) cancelPushRuns(ctx context.Context, repo string, shas []string) ([]CancelledRun, []contract.Warning) {
+func (e *Engine) cancelPushRuns(ctx context.Context, pc *pairCtx, pushed []pushedCommit) ([]CancelledRun, []contract.Warning) {
+	repo := pc.pair.Shadow
+	interval := e.CIAppearPoll
+	if interval <= 0 {
+		interval = DefaultCIAppearPoll
+	}
 	cancelled := []CancelledRun{}
 	denied := 0
 	listDenied := false
 	var failure error
-	for _, sha := range shas {
+	for _, pu := range pushed {
+		sha := pu.sha
+		if !e.pushStartsWorkflows(ctx, pc, sha, pu.branches) {
+			continue
+		}
 		e.progressf("looking for workflow runs the push of %s started in %s", short(sha), repo)
 		start := e.Now()
 		seen := map[int64]bool{}
@@ -223,7 +271,7 @@ func (e *Engine) cancelPushRuns(ctx context.Context, repo string, shas []string)
 			if (len(seen) > 0 && fresh == 0) || e.Now().Sub(start) >= e.CIAppearWindow {
 				break
 			}
-			e.Sleep(e.PollInterval)
+			e.Sleep(interval)
 		}
 		if listDenied || failure != nil {
 			break

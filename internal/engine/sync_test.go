@@ -108,15 +108,37 @@ func TestSyncReportsEachDivergedBranchAndPushesTheRest(t *testing.T) {
 	}
 }
 
-// pushRunsHarness is an initialised pair whose public main moved on, so the
-// next sync fast-forwards shadow main to next.
+const pushWorkflow = "on:\n  push:\n    branches: [main]\njobs:\n  t:\n    runs-on: x\n    steps:\n      - run: echo\n"
+
+// pushRunsHarness is an initialised pair whose public main moved on, with a
+// workflow a push to main starts, so the next sync fast-forwards shadow
+// main to next and looks for the runs it started.
 func pushRunsHarness(t *testing.T) (h *harness, next string) {
 	t.Helper()
 	h = newHarness(t)
 	h.init()
-	h.eng.CIAppearWindow = 10 * time.Second
-	next = testutil.Commit(t, h.pubGit, "main", "next", map[string]string{"n.txt": "1\n"})
+	h.eng.CIAppearWindow, h.eng.CIAppearPoll = 10*time.Second, time.Second
+	next = testutil.Commit(t, h.pubGit, "main", "next", map[string]string{"n.txt": "1\n", ".github/workflows/push.yml": pushWorkflow})
 	return h, next
+}
+
+// A pushed commit with no workflow a push to that branch starts can't have
+// started runs: sync doesn't ask GitHub and doesn't wait.
+func TestSyncDoesNotWaitWhenThePushStartsNoWorkflow(t *testing.T) {
+	h := newHarness(t)
+	h.init()
+	h.eng.CIAppearWindow, h.eng.CIAppearPoll = 10*time.Second, time.Second
+	next := testutil.Commit(t, h.pubGit, "main", "next", map[string]string{
+		".github/workflows/rel.yml": strings.Replace(pushWorkflow, "[main]", "[release]", 1)})
+	seedRuns(h, next, wfRun(1, "ci", "queued"))
+	start := h.clock.Now()
+	res, warns, err := h.eng.Sync(h.ctx, h.pair, engine.SyncOptions{})
+	if err != nil || len(warns) != 0 || res.ShadowMainAfter != next || len(res.CancelledRuns) != 0 {
+		t.Fatalf("%+v %+v %v", res, warns, err)
+	}
+	if h.forge.PushRunsCalls != 0 || !h.clock.Now().Equal(start) {
+		t.Fatalf("PushRuns calls = %d, waited %s", h.forge.PushRunsCalls, h.clock.Now().Sub(start))
+	}
 }
 
 func seedRuns(h *harness, sha string, runs ...forge.Run) {
