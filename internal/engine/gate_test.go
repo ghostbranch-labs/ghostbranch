@@ -1,6 +1,7 @@
 package engine_test
 
 import (
+	"bytes"
 	"reflect"
 	"strings"
 	"sync/atomic"
@@ -45,7 +46,12 @@ func TestGatePassesAndRecordsTheResult(t *testing.T) {
 	head := h.startFeature("feat-x", map[string]string{"feature.txt": "new\n", ".ghostbranch/notes.md": "private\n"})
 	before := h.publicRefs()
 
+	var progress bytes.Buffer
+	h.eng.Progress = &progress
 	res, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
+	if wantLine := "waiting for CI on " + res.Candidate[:12] + " (shadow PR #1: https://github.example/" + shadowName + "/pull/1)"; !strings.Contains(progress.String(), wantLine) {
+		t.Errorf("progress lacks %q in %q", wantLine, progress.String())
+	}
 	if err != nil || res.Checks != feature.ChecksPassed || res.Leak != feature.LeakClean || res.FeatureHead != head {
 		t.Fatalf("gate = %+v %v", res, err)
 	}
@@ -66,7 +72,7 @@ func TestGatePassesAndRecordsTheResult(t *testing.T) {
 		t.Fatalf("published tree = %v", tPaths)
 	}
 	prs := h.forge.PRs(shadowName)
-	if len(prs) != 1 || !prs[0].Draft || prs[0].Head != "ghostbranch-gate/feat-x" || prs[0].Base != "main" || res.ShadowPR != 1 {
+	if len(prs) != 1 || !prs[0].Draft || prs[0].Head != "ghostbranch-gate/feat-x" || prs[0].Base != "main" || res.ShadowPR == nil || *res.ShadowPR != 1 {
 		t.Fatalf("shadow PRs = %+v", prs)
 	}
 	raw, _, _ := h.shadowGit().ShowFile(h.ctx, "refs/ghostbranch/features/feat-x", feature.MetaFile)
@@ -127,6 +133,9 @@ func TestGateLeakFailsBeforeCI(t *testing.T) {
 	_ = wantCode(t, err, contract.LeakFound)
 	if res.Leak != feature.LeakFound || res.Checks != feature.ChecksNotRun || len(res.Findings) == 0 || calls.Load() != 0 {
 		t.Fatalf("gate = %+v, ListChecks calls = %d", res, calls.Load())
+	}
+	if res.ShadowPR != nil {
+		t.Fatalf("no PR was opened, so shadow_pr must be nil, got %d", *res.ShadowPR)
 	}
 	if _, ok, _ := h.shadowGit().Resolve(h.ctx, "refs/heads/ghostbranch-gate/feat-x"); ok {
 		t.Fatal("a leaking candidate must not be pushed to CI")

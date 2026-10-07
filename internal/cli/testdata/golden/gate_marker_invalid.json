@@ -16,7 +16,7 @@
     "findings": [],
     "waived": [],
     "repo_guards": null,
-    "shadow_pr": 0,
+    "shadow_pr": null,
     "reused": false,
     "preview": null
   },

@@ -163,8 +163,8 @@ func human(r any) string {
 			previewText(&b, v.Preview)
 			break
 		}
-		if v.ShadowPR > 0 {
-			fmt.Fprintf(&b, "  candidate %s on shadow PR #%d\n", short(v.Candidate), v.ShadowPR)
+		if v.ShadowPR != nil {
+			fmt.Fprintf(&b, "  candidate %s on shadow PR #%d\n", short(v.Candidate), *v.ShadowPR)
 		}
 		for _, c := range v.FailedChecks {
 			fmt.Fprintf(&b, "  failed check: %s\n", c)
