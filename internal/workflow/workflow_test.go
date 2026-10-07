@@ -60,6 +60,20 @@ func TestGuardForms(t *testing.T) {
 		{"github.event.repository.html_url == 'https://github.com/acme/widget'", names, true, false, ""},
 		{"contains(github.event.repository.url, 'repos/acme/widget')", names, true, false, ""},
 		{"github.repositoryUrl == 'https://github.com/acme/widget.git'", names, true, false, ""},
+		// the push guard the audit advises only skips pushes: not a repo guard
+		{"github.event_name != 'push' || github.repository == 'acme/widget'", names, false, false, ""},
+		{"${{ github.repository == 'Acme/Widget' || github.event_name != 'push' }}", names, false, false, ""},
+		{"(github.event_name != 'push') || (github.event.repository.full_name == 'acme/widget')", names, false, false, ""},
+		{"GitHub.Event_Name != 'push' || 'acme/widget' == GitHub.Repository", names, false, false, ""},
+		{"'push' != github.event_name || github.repository == 'acme/widget'", names, false, false, ""},
+		{"matrix.os == 'linux' && (github.event_name != 'push' || github.repository == 'acme/widget')", names, false, false, ""},
+		{"github.repository == 'acme/widget' && (github.event_name != 'push' || github.repository == 'acme/widget')", names, true, true,
+			"(github.repository == 'acme/widget' || github.repository == 'acme/widget-shadow') && (github.event_name != 'push' || github.repository == 'acme/widget')"},
+		// other forms still guard
+		{"github.event_name == 'push' || github.repository == 'acme/widget'", names, true, true,
+			"github.event_name == 'push' || (github.repository == 'acme/widget' || github.repository == 'acme/widget-shadow')"},
+		{"github.event_name != 'push' && github.repository == 'acme/widget'", names, true, true,
+			"github.event_name != 'push' && (github.repository == 'acme/widget' || github.repository == 'acme/widget-shadow')"},
 	} {
 		got, guard, ok := guardExpr(tc.expr, tc.n)
 		if guard != tc.guard || ok != tc.rewritable || (ok && got != tc.want) {
@@ -141,6 +155,40 @@ func TestPushTriggers(t *testing.T) {
 		}
 		if got := f.PushTriggered([]string{"main"}); got != want {
 			t.Errorf("%q: got %v", on, got)
+		}
+	}
+}
+
+func TestPushGuarded(t *testing.T) {
+	const guard = "github.event_name != 'push' || github.repository == 'acme/widget'"
+	job := func(id, cond string) string {
+		s := "  " + id + ":\n    runs-on: x\n"
+		if cond != "" {
+			s += "    if: " + cond + "\n"
+		}
+		return s + "    steps:\n      - run: echo\n"
+	}
+	for _, tc := range []struct {
+		name, jobs string
+		want       bool
+	}{
+		{"every job guarded", job("a", guard) + job("b", "${{ 'acme/widget' == github.repository || github.event_name != 'push' }}"), true},
+		{"combined with an existing if", job("a", "matrix.os == 'linux' && ("+guard+")"), true},
+		{"one job unguarded", job("a", guard) + job("b", ""), false},
+		{"another repo", job("a", "github.event_name != 'push' || github.repository == 'other/repo'"), false},
+		{"a plain repo guard", job("a", "github.repository == 'acme/widget'"), false},
+		{"a step-level guard only", "  a:\n    runs-on: x\n    steps:\n      - if: " + guard + "\n        run: echo\n", false},
+		{"no jobs", "  {}\n", false},
+	} {
+		f, err := Parse("w.yml", []byte("on: push\njobs:\n"+tc.jobs), names)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if f.PushGuarded != tc.want {
+			t.Errorf("%s: PushGuarded = %v", tc.name, f.PushGuarded)
+		}
+		if !f.PushTriggered([]string{"main"}) {
+			t.Errorf("%s: PushTriggered must not change", tc.name)
 		}
 	}
 }

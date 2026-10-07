@@ -81,3 +81,27 @@ func TestGuardAndSecretAdviceKeepsDeploysOut(t *testing.T) {
 		}
 	}
 }
+
+func TestPushRefusedIsDocumentedForAPerson(t *testing.T) {
+	es, err := Explain("PUSH_REFUSED")
+	if err != nil || len(es) != 1 || *es[0].ExitCode != 1 || !es[0].NeedsHuman ||
+		es[0].Summary == "" || len(es[0].Causes) != 3 || !strings.Contains(es[0].WhatToDo, "error.details.reason") {
+		t.Fatalf("PUSH_REFUSED doc: %+v %v", es, err)
+	}
+}
+
+// A sync pushes with the person's token, so it starts push-triggered
+// workflows in the shadow repo; the docs name the fixes.
+func TestSyncCIWasteIsDocumented(t *testing.T) {
+	es, err := Explain("CI_NOT_CANCELLED")
+	if err != nil || len(es) != 1 || es[0].Kind != KindWarning || !strings.Contains(es[0].WhatToDo, "Actions write") ||
+		!strings.Contains(es[0].WhatToDo, "--no-cancel") {
+		t.Fatalf("CI_NOT_CANCELLED = %+v %v", es, err)
+	}
+	d := warningDocs[PushTriggersOnSync]
+	for _, want := range []string{"github.event_name != 'push'", "Actions write", "GHOSTBRANCH_SYNC_TOKEN", "<existing> && (github.event_name != 'push'"} {
+		if !strings.Contains(d.Summary+" "+d.WhatToDo, want) {
+			t.Errorf("PUSH_TRIGGERS_ON_SYNC doc lacks %q", want)
+		}
+	}
+}

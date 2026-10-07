@@ -71,11 +71,14 @@ repo. Running it again resumes a partial setup.`,
 
 func (a *app) syncCmd() *cobra.Command {
 	var yes bool
+	var o engine.SyncOptions
 	c := &cobra.Command{
 		Use:   "sync",
 		Short: "Fast-forward shadow main to public main",
-		Long:  `sync fast-forwards the shadow repo's main to public main. It never force-pushes: if shadow main has diverged it stops with exit 4.`,
-		Args:  cobra.NoArgs,
+		Long: `sync fast-forwards the shadow repo's main to public main. It never force-pushes: if shadow main has diverged it stops with exit 4.
+Its pushes start the shadow repo's push-triggered workflows, which re-test what public CI already tested,
+so it then cancels those runs (the token needs Actions write on the shadow repo); --no-cancel leaves them running.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			e, err := a.engine(cmd.Context())
 			if err != nil {
@@ -85,10 +88,11 @@ func (a *app) syncCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			res, w, err := e.Sync(cmd.Context(), p)
+			res, w, err := e.Sync(cmd.Context(), p, o)
 			return done(a, res, w, err)
 		},
 	}
+	c.Flags().BoolVar(&o.NoCancel, "no-cancel", false, "don't cancel the workflow runs the sync's pushes start in the shadow repo")
 	c.Flags().BoolVar(&yes, "yes", false, "accepted for consistency; sync never asks")
 	c.Flags().BoolVar(&a.dryRun, "plan", false, "preview exactly what would change, and change nothing (same as --dry-run)")
 	return c
@@ -100,8 +104,8 @@ func (a *app) auditCmd() *cobra.Command {
 		Short: "Report what keeps the shadow repo's CI from matching public CI",
 		Long: `audit reads the workflows the shadow repo's CI runs and reports repo guards (jobs that skip in
 the shadow repo), referenced secrets and which are missing (when the token may list them), workflows a
-token-authenticated scheduled sync would start, billed Actions minutes, and whether Ghostbranch's managed
-overlay files are current. It changes nothing.`,
+sync starts in the shadow repo and the guard that stops them, billed Actions minutes, and whether
+Ghostbranch's managed overlay files are current. It changes nothing.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			e, err := a.engine(cmd.Context())

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
+	"github.com/ghostbranch-labs/ghostbranch/internal/forge/fake"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
 )
 
@@ -194,5 +196,33 @@ func TestWaiversRevokeAllRefusesRepo(t *testing.T) {
 	}
 	if b, err := os.ReadFile(te.waiversFile()); err != nil || !strings.Contains(string(b), te.finding) {
 		t.Fatalf("the waiver must survive a refused revoke: %v %s", err, b)
+	}
+}
+
+// sync cancels the workflow runs its push starts in the shadow repo and
+// says so; --no-cancel leaves them running.
+func TestSyncCancelsPushRunsAndNoCancelSkips(t *testing.T) {
+	te := newTestEnv(t)
+	initOnly(te)
+	up := testutil.Commit(t, te.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n",
+		".github/workflows/push.yml": "on: push\njobs:\n  t:\n    runs-on: x\n    steps:\n      - run: echo\n"})
+	te.forge.Runs = map[string][]fake.Run{"acme/widget-shadow": {
+		{SHA: up, Run: forge.Run{ID: 7, Workflow: "ci", Status: "queued", URL: "https://github.example/runs/7"}}}}
+	code, out, _ := te.run("sync")
+	if code != 0 || !strings.Contains(out, "  cancelled 1 push-triggered workflow run(s) in the shadow repo\n") {
+		t.Fatalf("%d %q", code, out)
+	}
+	if got := te.forge.Cancelled["acme/widget-shadow"]; len(got) != 1 || got[0] != 7 {
+		t.Fatalf("cancelled = %v", got)
+	}
+
+	next := testutil.Commit(t, te.pubGit, "main", "upstream 2", map[string]string{"up.txt": "up 2\n"})
+	te.forge.Runs["acme/widget-shadow"] = append(te.forge.Runs["acme/widget-shadow"],
+		fake.Run{SHA: next, Run: forge.Run{ID: 8, Workflow: "ci", Status: "queued"}})
+	calls := te.forge.PushRunsCalls
+	code, env := te.runJSON("sync", "--no-cancel")
+	data, _ := env["data"].(map[string]any)
+	if runs, ok := data["cancelled_runs"].([]any); code != 0 || !ok || len(runs) != 0 || te.forge.PushRunsCalls != calls {
+		t.Fatalf("--no-cancel: %d %v, PushRuns calls %d -> %d", code, env, calls, te.forge.PushRunsCalls)
 	}
 }

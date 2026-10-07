@@ -21,7 +21,7 @@ func TestEveryCodeHasItsExitCode(t *testing.T) {
 		contract.RebaseConflict: 4, contract.SyncDiverged: 4, contract.BranchExists: 4,
 		contract.OverlayCollision: 4, contract.ShadowNotEmpty: 4, contract.RefMoved: 4,
 		contract.ApprovalRequired: 5,
-		contract.PlanStale:        6, contract.ShadowCreateDenied: 1,
+		contract.PlanStale:        6, contract.ShadowCreateDenied: 1, contract.PushRefused: 1,
 		contract.MarkerInvalid: 3, contract.WaiverUnknown: 2,
 	}
 	all := contract.AllCodes()

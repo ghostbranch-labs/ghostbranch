@@ -33,7 +33,9 @@ type GateResult struct {
 	// RepoGuards is what the gate did with the public workflows' repo
 	// guards in C; nil when no candidate was built.
 	RepoGuards *workflow.GuardReport `json:"repo_guards"`
-	ShadowPR   int                   `json:"shadow_pr"`
+	// ShadowPR is the gate PR in the shadow repo; nil when none was opened
+	// (the gate failed before CI, or it was a dry run or a reused gate).
+	ShadowPR *int `json:"shadow_pr"`
 	// Reused is set by promote when it reuses a fresh green gate instead of re-running it.
 	Reused  bool             `json:"reused"`
 	Preview *preview.Preview `json:"preview"`
@@ -196,9 +198,9 @@ func (e *Engine) gate(ctx context.Context, pc *pairCtx, name string) (*GateResul
 		}
 		pr = &created
 	}
-	res.ShadowPR = pr.Number
+	res.ShadowPR = &pr.Number
 
-	e.progressf("waiting for CI on %s (shadow PR #%d)", short(C), pr.Number)
+	e.progressf("waiting for CI on %s (shadow PR #%d: %s)", short(C), pr.Number, pr.URL)
 	out, err := e.waitChecks(ctx, pc.pair.Shadow, C, cfg.Gate)
 	if err != nil {
 		return res, warns, err

@@ -134,7 +134,16 @@ func TestGuideCoversSetupAndCIParity(t *testing.T) {
 		"REPO_GUARD_UNREWRITABLE",
 		"of `error.details.steps`", "Shadow: Contents, Pull requests and Workflows write",
 		"other than through `ghostbranch init`", "`SYNC_DIVERGED`, which needs a",
-		"Shadow: Administration, Contents and Workflows read and write. Public: Contents read",
+		"Shadow: Administration, Contents and Workflows read and write |",
+		"Any token can read public repos, so for a public repo you only grant permissions on the shadow repo",
+		"never give it to an agent", "Actions write (optional: lets `sync` cancel the workflow runs its pushes start)",
+		"add `--shadow <owner/name>` to both", "(`--no-cancel` skips that)",
+		"Write the promote `--message` yourself from the change", "show it to the person; use theirs if they give one",
+		"you may rewrite the fixture to build the value at", "Never waive it yourself",
+		"tell the person in your handover which finding you", "Anything that might be real",
+		"applies its permissions to every repo it", "it could write that repo too: scheduled sync isn't supported",
+		"Actions write is optional: it lets",
+		"`<existing> && (github.event_name != 'push' || github.repository == '<public>')`",
 		"Once the person confirms both are done", "deploy or publish credentials", "`ci.rewrite_repo_guards: warn`",
 	} {
 		if !strings.Contains(out, want) {

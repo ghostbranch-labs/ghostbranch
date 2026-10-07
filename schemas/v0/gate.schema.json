@@ -18,7 +18,7 @@
     "findings": { "type": "array", "items": { "$ref": "finding.schema.json" } },
     "waived": { "type": "array", "items": { "$ref": "waived.schema.json" } },
     "repo_guards": { "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/guardReport" }] },
-    "shadow_pr": { "type": "integer", "minimum": 0 },
+    "shadow_pr": { "type": ["integer", "null"], "minimum": 0 },
     "reused": { "type": "boolean" },
     "preview": { "oneOf": [{ "type": "null" }, { "$ref": "preview.schema.json" }] }
   }

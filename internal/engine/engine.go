@@ -26,6 +26,11 @@ import (
 const (
 	DefaultPollInterval = 15 * time.Second
 	DefaultSettleWindow = 60 * time.Second
+	// DefaultCIAppearWindow is how long sync looks for the workflow runs
+	// its pushes start in the shadow repo.
+	DefaultCIAppearWindow = 30 * time.Second
+	// DefaultCIAppearPoll is how often sync looks within that window.
+	DefaultCIAppearPoll = 3 * time.Second
 	// OverlayBranch holds the overlay and is the shadow repo's default branch.
 	OverlayBranch = "ghostbranch"
 )
@@ -51,7 +56,12 @@ type Engine struct {
 	NewScanner   func(leak.Rules) (leak.Scanner, error)
 	PollInterval time.Duration
 	SettleWindow time.Duration
-	DryRun       bool
+	// CIAppearWindow is how long sync looks for the workflow runs its
+	// pushes start; zero looks once. CIAppearPoll is how often it looks
+	// (zero means DefaultCIAppearPoll).
+	CIAppearWindow time.Duration
+	CIAppearPoll   time.Duration
+	DryRun         bool
 	// OnPush observes every push before it happens (tests).
 	OnPush func(op, remote string, refspecs []string)
 }

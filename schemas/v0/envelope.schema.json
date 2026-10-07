@@ -20,7 +20,8 @@
           "code": { "enum": ["CONFIG_KEY_IGNORED", "PUBLIC_NOT_PUBLIC", "GATE_NOT_RECORDED", "CHECKS_LIMITED", "ACTOR_UNKNOWN",
                           "WORKFLOW_CHANGED", "LARGE_FILE", "BINARY_FILE", "WAIVERS_UNREADABLE",
                           "OVERLAY_OUTDATED", "REPO_GUARD", "REPO_GUARD_UNREWRITABLE", "SECRETS_UNLISTED", "SECRETS_MISSING",
-                          "PUSH_TRIGGERS_ON_SYNC", "ACTIONS_MINUTES_BILLED", "SHADOW_BEHIND", "AUDIT_INCOMPLETE"] },
+                          "PUSH_TRIGGERS_ON_SYNC", "ACTIONS_MINUTES_BILLED", "SHADOW_BEHIND", "AUDIT_INCOMPLETE",
+                          "CI_NOT_CANCELLED"] },
           "message": { "type": "string" },
           "details": { "type": "object" }
         }
@@ -54,7 +55,7 @@
                        "CHECKS_FAILED", "NO_CI", "CI_TIMEOUT", "LEAK_FOUND",
                        "REBASE_CONFLICT", "SYNC_DIVERGED", "BRANCH_EXISTS", "OVERLAY_COLLISION", "SHADOW_NOT_EMPTY", "REF_MOVED", "SHADOW_CREATE_DENIED",
                        "APPROVAL_REQUIRED", "PLAN_STALE",
-                       "TOKEN_CANNOT_PUBLISH", "GUARD_UNSUPPORTED", "PUSH_BLOCKED", "NOT_A_PAIR_CHECKOUT",
+                       "TOKEN_CANNOT_PUBLISH", "GUARD_UNSUPPORTED", "PUSH_BLOCKED", "PUSH_REFUSED", "NOT_A_PAIR_CHECKOUT",
                        "MARKER_INVALID", "WAIVER_UNKNOWN"]
             },
             "message": { "type": "string" },

@@ -383,3 +383,77 @@ func TestCreatePrivateRepoForbidden(t *testing.T) {
 		}
 	}
 }
+
+func TestPushRunsListsPushRunsForTheSHA(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /repos/acme/s/actions/runs", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if q.Get("head_sha") != "abc" || q.Get("event") != "push" {
+			t.Errorf("runs query = %v", q)
+		}
+		if q.Get("page") == "2" {
+			writeJSON(w, map[string]any{"workflow_runs": []map[string]any{
+				{"id": 2, "name": "Lint", "status": "completed", "html_url": "https://github.com/acme/s/actions/runs/2"}}})
+			return
+		}
+		w.Header().Set("Link", `<`+"http://"+r.Host+r.URL.Path+`?head_sha=abc&event=push&page=2>; rel="next"`)
+		writeJSON(w, map[string]any{"workflow_runs": []map[string]any{
+			{"id": 1, "name": "CI", "status": "queued", "html_url": "https://github.com/acme/s/actions/runs/1"}}})
+	})
+	mux.HandleFunc("GET /repos/acme/locked/actions/runs", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"message":"Resource not accessible by personal access token"}`, http.StatusForbidden)
+	})
+	c := newClient(t, mux)
+	ctx := context.Background()
+	runs, err := c.PushRuns(ctx, "acme/s", "abc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []forge.Run{
+		{ID: 1, Workflow: "CI", Status: "queued", URL: "https://github.com/acme/s/actions/runs/1"},
+		{ID: 2, Workflow: "Lint", Status: "completed", URL: "https://github.com/acme/s/actions/runs/2"},
+	}
+	if len(runs) != len(want) || runs[0] != want[0] || runs[1] != want[1] {
+		t.Fatalf("runs = %+v", runs)
+	}
+	if _, err := c.PushRuns(ctx, "acme/locked", "abc"); !errors.Is(err, forge.ErrForbidden) {
+		t.Fatalf("403: %v", err)
+	}
+}
+
+func TestCancelRun(t *testing.T) {
+	mux := http.NewServeMux()
+	var cancelled []string
+	mux.HandleFunc("POST /repos/acme/s/actions/runs/{id}/cancel", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		cancelled = append(cancelled, id)
+		switch id {
+		case "1":
+			w.WriteHeader(http.StatusAccepted)
+			writeJSON(w, map[string]any{})
+		case "2":
+			http.Error(w, `{"message":"Cannot cancel a workflow run that is completed."}`, http.StatusConflict)
+		case "3":
+			http.Error(w, `{"message":"Resource not accessible by personal access token"}`, http.StatusForbidden)
+		default:
+			http.Error(w, `{"message":"boom"}`, http.StatusInternalServerError)
+		}
+	})
+	c := newClient(t, mux)
+	ctx := context.Background()
+	if err := c.CancelRun(ctx, "acme/s", 1); err != nil {
+		t.Fatalf("202: %v", err)
+	}
+	if err := c.CancelRun(ctx, "acme/s", 2); err != nil {
+		t.Fatalf("409 (already finished): %v", err)
+	}
+	if err := c.CancelRun(ctx, "acme/s", 3); !errors.Is(err, forge.ErrForbidden) {
+		t.Fatalf("403: %v", err)
+	}
+	if err := c.CancelRun(ctx, "acme/s", 4); err == nil || errors.Is(err, forge.ErrForbidden) {
+		t.Fatalf("500: %v", err)
+	}
+	if strings.Join(cancelled, ",") != "1,2,3,4" {
+		t.Fatalf("cancelled = %v", cancelled)
+	}
+}

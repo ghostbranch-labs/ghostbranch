@@ -91,10 +91,9 @@ func TestUpgradeRefusesWhenTheOverlayMoves(t *testing.T) {
 	}
 }
 
-// Installing the scheduled sync workflow makes push-triggered public
-// workflows start on every token-authenticated sync; the audit after
-// upgrade says so.
-func TestUpgradeAuditWarnsAboutPushTriggersOnceSyncIsInstalled(t *testing.T) {
+// The audit after upgrade names push-triggered public workflows, which a
+// sync starts in the shadow repo whether or not scheduled sync is installed.
+func TestUpgradeAuditWarnsAboutPushTriggers(t *testing.T) {
 	h := newHarness(t)
 	testutil.Commit(t, h.pubGit, "main", "push ci", map[string]string{".github/workflows/push.yml": "on:\n  push:\n    branches: [main]\njobs:\n  t:\n    runs-on: x\n    steps:\n      - run: echo\n"})
 	h.init()
@@ -103,7 +102,7 @@ func TestUpgradeAuditWarnsAboutPushTriggersOnceSyncIsInstalled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c := codes(warns); c[contract.PushTriggersOnSync] != 0 || c[contract.OverlayOutdated] != 1 {
+	if c := codes(warns); c[contract.PushTriggersOnSync] != 1 || c[contract.OverlayOutdated] != 1 {
 		t.Fatalf("before upgrade, warnings = %+v", warns)
 	}
 	res, warns, err := h.eng.Upgrade(h.ctx, h.pair)

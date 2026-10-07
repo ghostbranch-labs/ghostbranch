@@ -41,7 +41,7 @@ func TestPreviewsWriteNothing(t *testing.T) {
 	before, pushes, entries := h.publicRefs(), len(h.pushes), len(h.ledger())
 
 	h.eng.DryRun = true
-	sres, _, err := h.eng.Sync(h.ctx, h.pair)
+	sres, _, err := h.eng.Sync(h.ctx, h.pair, engine.SyncOptions{})
 	if err != nil || !reflect.DeepEqual(opNames(sres.Preview), []string{"push_ref"}) || sres.Preview.Fingerprint["public_main"] == "" {
 		t.Fatalf("sync preview: %+v %v", sres, err)
 	}

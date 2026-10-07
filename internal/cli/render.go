@@ -148,6 +148,9 @@ func human(r any) string {
 				fmt.Fprintf(&b, "  %s: %s\n", br.Name, br.Status)
 			}
 		}
+		if n := len(v.CancelledRuns); n > 0 {
+			fmt.Fprintf(&b, "  cancelled %d push-triggered workflow run(s) in the shadow repo\n", n)
+		}
 	case *engine.FeatureStartResult:
 		if v.Preview != nil {
 			previewText(&b, v.Preview)
@@ -160,8 +163,8 @@ func human(r any) string {
 			previewText(&b, v.Preview)
 			break
 		}
-		if v.ShadowPR > 0 {
-			fmt.Fprintf(&b, "  candidate %s on shadow PR #%d\n", short(v.Candidate), v.ShadowPR)
+		if v.ShadowPR != nil {
+			fmt.Fprintf(&b, "  candidate %s on shadow PR #%d\n", short(v.Candidate), *v.ShadowPR)
 		}
 		for _, c := range v.FailedChecks {
 			fmt.Fprintf(&b, "  failed check: %s\n", c)

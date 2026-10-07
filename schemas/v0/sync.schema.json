@@ -3,7 +3,7 @@
   "title": "sync data",
   "type": "object",
   "additionalProperties": false,
-  "required": ["public", "shadow", "action", "public_main", "shadow_main_before", "shadow_main_after", "branches", "preview"],
+  "required": ["public", "shadow", "action", "public_main", "shadow_main_before", "shadow_main_after", "branches", "cancelled_runs", "preview"],
   "properties": {
     "public": { "$ref": "common.schema.json#/$defs/repo" },
     "shadow": { "$ref": "common.schema.json#/$defs/repo" },
@@ -22,6 +22,19 @@
           "from": { "$ref": "common.schema.json#/$defs/shaOrEmpty" },
           "to": { "$ref": "common.schema.json#/$defs/shaOrEmpty" },
           "status": { "enum": ["up_to_date", "created", "fast_forwarded", "diverged"] }
+        }
+      }
+    },
+    "cancelled_runs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "workflow", "url"],
+        "properties": {
+          "id": { "type": "integer" },
+          "workflow": { "type": "string" },
+          "url": { "type": "string" }
         }
       }
     },

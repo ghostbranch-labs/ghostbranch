@@ -18,6 +18,7 @@
         "status": "fast_forwarded"
       }
     ],
+    "cancelled_runs": [],
     "preview": null
   },
   "warnings": [],

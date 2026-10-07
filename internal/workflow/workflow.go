@@ -41,7 +41,11 @@ type File struct {
 	Secrets      []string
 	Inherit      []string
 	Environments []string
-	push         *pushFilter
+	// PushGuarded is true when every job has an if: holding the advised
+	// push guard (github.event_name != 'push' || github.repository ==
+	// '<public>'), so a push outside the public repo runs none of them.
+	PushGuarded bool
+	push        *pushFilter
 }
 
 // IsWorkflowPath reports whether GitHub Actions reads path as a workflow:
@@ -151,8 +155,12 @@ func Parse(path string, src []byte, n Names) (File, error) {
 	}
 	sort.Strings(f.Secrets)
 	if jobs := get(r, "jobs"); jobs != nil && jobs.Kind == yaml.MappingNode {
+		f.PushGuarded = len(jobs.Content) > 0
 		for i := 0; i+1 < len(jobs.Content); i += 2 {
 			id, job := jobs.Content[i].Value, jobs.Content[i+1]
+			if cond := get(job, "if"); !isString(cond) || !IsPushSkip(cond.Value, n.Public) {
+				f.PushGuarded = false
+			}
 			if s := get(job, "secrets"); s != nil && s.Kind == yaml.ScalarNode && s.Value == "inherit" {
 				f.Inherit = append(f.Inherit, id)
 			}

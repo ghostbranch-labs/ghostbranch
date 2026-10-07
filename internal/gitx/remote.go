@@ -67,6 +67,17 @@ func (e *RejectedError) Error() string {
 	return fmt.Sprintf("push rejected for %s: %s", strings.Join(e.Refs, ", "), e.Detail)
 }
 
+// RefusedError means the remote refused at least one ref for a reason of
+// its own (permissions, a ruleset, a hook); retrying won't help.
+type RefusedError struct {
+	Refs   []string
+	Reason string // the server's reason, e.g. text inside "[remote rejected] (...)"
+}
+
+func (e *RefusedError) Error() string {
+	return fmt.Sprintf("push refused for %s: %s", strings.Join(e.Refs, ", "), e.Reason)
+}
+
 // PermissionError means the remote refused the push because the credentials
 // may not write to it (GitHub answers 403).
 type PermissionError struct{ Detail string }
@@ -113,20 +124,80 @@ func (g *Git) Push(ctx context.Context, remote string, opt PushOptions, refspecs
 		return nil
 	}
 	if ge, ok := err.(*Error); ok {
-		var refs []string
-		for _, line := range strings.Split(ge.Stdout, "\n") {
-			if strings.HasPrefix(line, "!") {
-				if parts := strings.Split(line, "\t"); len(parts) >= 2 {
-					refs = append(refs, parts[1])
-				}
-			}
-		}
-		if len(refs) > 0 {
-			return &RejectedError{Refs: refs, Detail: strings.TrimSpace(ge.Stdout + "\n" + ge.Stderr)}
-		}
-		if permissionDenied.MatchString(ge.Stderr) {
-			return &PermissionError{Detail: strings.TrimSpace(ge.Stderr)}
+		if pe := pushFailure(ge.Stdout, ge.Stderr); pe != nil {
+			return pe
 		}
 	}
 	return err
+}
+
+// lostRace matches a [remote rejected] reason that means the ref moved on
+// the server while the push ran, as a lost lease does; re-running helps.
+var lostRace = regexp.MustCompile(`(?i)cannot lock ref|failed to update ref|incorrect old value|atomic`)
+
+// pushFailure classifies a failed push from its porcelain output: a
+// RefusedError when the server refused a ref for a reason of its own, a
+// RejectedError when a ref was rejected or lost a race, a PermissionError
+// when the credentials may not write; nil when it can't tell.
+func pushFailure(stdout, stderr string) error {
+	var refs, refused, reasons []string
+	for _, line := range strings.Split(stdout, "\n") {
+		if !strings.HasPrefix(line, "!") {
+			continue
+		}
+		parts := strings.Split(strings.TrimRight(line, "\r"), "\t")
+		if len(parts) < 2 {
+			continue
+		}
+		if len(parts) >= 3 && strings.HasPrefix(strings.TrimSpace(parts[2]), "[remote rejected]") {
+			if reason := remoteRejectedReason(parts[2]); !lostRace.MatchString(reason) {
+				_, dst, ok := strings.Cut(parts[1], ":")
+				if !ok {
+					dst = parts[1]
+				}
+				refused = append(refused, dst)
+				reasons = append(reasons, reason)
+				continue
+			}
+		}
+		refs = append(refs, parts[1])
+	}
+	if len(refused) > 0 {
+		reason := strings.Join(reasons, "; ")
+		// A hook or ruleset usually says why in "remote:" lines on stderr.
+		if said := remoteSaid(stderr); said != "" {
+			reason += ": " + said
+		}
+		return &RefusedError{Refs: refused, Reason: reason}
+	}
+	if len(refs) > 0 {
+		return &RejectedError{Refs: refs, Detail: strings.TrimSpace(stdout + "\n" + stderr)}
+	}
+	if permissionDenied.MatchString(stderr) {
+		return &PermissionError{Detail: strings.TrimSpace(stderr)}
+	}
+	return nil
+}
+
+// remoteRejectedReason is the text inside the parentheses of a porcelain
+// status such as "[remote rejected] (pre-receive hook declined)".
+func remoteRejectedReason(status string) string {
+	status = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(status), "[remote rejected]"))
+	if strings.HasPrefix(status, "(") && strings.HasSuffix(status, ")") {
+		return status[1 : len(status)-1]
+	}
+	return status
+}
+
+// remoteSaid joins the messages the server sent with "remote: " on stderr.
+func remoteSaid(stderr string) string {
+	var said []string
+	for _, line := range strings.Split(stderr, "\n") {
+		if msg, ok := strings.CutPrefix(strings.TrimSpace(line), "remote:"); ok {
+			if msg = strings.TrimSpace(msg); msg != "" {
+				said = append(said, msg)
+			}
+		}
+	}
+	return strings.Join(said, " ")
 }

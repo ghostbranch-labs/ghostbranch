@@ -16,6 +16,38 @@ var (
 	literalFirst = regexp.MustCompile(`(?i)'((?:[^']|'')*)'\s*(==|!=)\s*\b` + subject + `\b`)
 )
 
+// pushSkip is the guard the audit advises for a push-triggered job,
+// github.event_name != 'push' || github.repository == '<public>', in
+// either order, with full_name for repository and either side of each
+// comparison first, each operand optionally in parentheses. It skips push
+// runs outside the public repo and nothing else, so it is not a repo guard.
+var pushSkip = func() *regexp.Regexp {
+	paren := func(x string) string { return `(?:\(\s*` + x + `\s*\)|` + x + `)` }
+	ne := paren(`(?:github\.event_name\s*!=\s*'push'|'push'\s*!=\s*github\.event_name\b)`)
+	repo := `(?:github\.repository|github\.event\.repository\.full_name)`
+	eq := paren(`(?:\b` + repo + `\s*==\s*'(?:[^']|'')*'|'(?:[^']|'')*'\s*==\s*` + repo + `\b)`)
+	return regexp.MustCompile(`(?i)` + ne + `\s*\|\|\s*` + eq + `|` + eq + `\s*\|\|\s*` + ne)
+}()
+
+// pushSkips are the spans of expr that are the advised push guard for the
+// public repo.
+func pushSkips(expr, public string) [][]int {
+	var out [][]int
+	for _, m := range pushSkip.FindAllStringIndex(expr, -1) {
+		for _, c := range comparisons(expr[m[0]:m[1]]) {
+			if strings.EqualFold(c.op, "==") && strings.EqualFold(c.literal, public) {
+				out = append(out, m)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// IsPushSkip reports whether expr holds the advised push guard for the
+// public repo, so it skips every push run outside that repo.
+func IsPushSkip(expr, public string) bool { return len(pushSkips(expr, public)) > 0 }
+
 // cmp is one comparison of a subject with a string literal in an expression.
 type cmp struct {
 	start, end           int
@@ -110,12 +142,24 @@ func guardExpr(expr string, n Names) (out string, guard, rewritable bool) {
 			handled[key(c)] = true
 		}
 	}
+	skips := pushSkips(expr, n.Public)
+	inSkip := func(c cmp) bool {
+		for _, s := range skips {
+			if c.start >= s[0] && c.end <= s[1] {
+				return true
+			}
+		}
+		return false
+	}
 	var hits []cmp // in descending start order
 	rem := expr
 	for i := len(cs) - 1; i >= 0; i-- {
 		c := cs[i]
 		isOwner, pubVal, shVal := values(c)
 		switch {
+		case !isOwner && c.op == "==" && strings.EqualFold(c.literal, pubVal) && inSkip(c):
+			// the advised push guard: skips only pushes
+			rem = rem[:c.start] + rem[c.end:]
 		case strings.EqualFold(c.literal, pubVal) && (!isOwner || ownersDiffer):
 			if !handled[key(c)] {
 				hits = append(hits, c)
