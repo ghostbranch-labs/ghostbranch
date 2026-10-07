@@ -26,7 +26,7 @@ func TestShadowBehindWarnsUntilSync(t *testing.T) {
 	if w == nil || w.Details["behind"] != 2 {
 		t.Fatalf("warnings = %+v", warns)
 	}
-	if _, _, err := h.eng.Sync(h.ctx, h.pair); err != nil {
+	if _, _, err := h.eng.Sync(h.ctx, h.pair, engine.SyncOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	_, warns, err = h.eng.Audit(h.ctx, h.pair)

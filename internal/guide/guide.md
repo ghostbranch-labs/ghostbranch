@@ -39,6 +39,9 @@ main, green CI, and a leak scan of exactly what will be published.
 
 - Sync is manual by default. When a result warns `SHADOW_BEHIND`, run `ghostbranch sync` (fast-forward
   only; it never resolves a conflict). The gate always rebases on public main, so it is never affected.
+- Sync's pushes start the shadow repo's push-triggered workflows, which re-test what public CI already
+  tested, so sync cancels those runs. `CI_NOT_CANCELLED` means it couldn't (the token needs Actions
+  write); the runs only cost minutes. The audit's `PUSH_TRIGGERS_ON_SYNC` gives a guard that stops them.
 - Scheduled sync is opt-in and costs Actions minutes (every 6 hours is about 120 a month). It is the
   person's choice: they set `sync.schedule` in `.ghostbranch.yml` on the `ghostbranch` branch, then
   `ghostbranch upgrade --plan` and `ghostbranch upgrade` install the workflow. `sync.schedule: off`
@@ -164,7 +167,7 @@ Fine-grained tokens, per command:
 |---|---|
 | `init` that creates the shadow repo | Administration write on **all repositories** of the owner (a token can't name a repo that doesn't exist yet), plus the `init --adopt` set |
 | `init --adopt` (create the empty private repo yourself first) | Shadow: Administration, Contents and Workflows read and write. Public: Contents read |
-| `sync`, `upgrade` | Shadow: Contents and Workflows write. Public: Contents read |
+| `sync`, `upgrade` | Shadow: Contents and Workflows write; Actions write lets `sync` cancel the workflow runs its pushes start. Public: Contents read |
 | `feature start`, `gate` | Shadow: Contents, Pull requests and Workflows write; Actions and Commit statuses read. Public: Contents read |
 | `promote`, `apply` | Public: Contents and Pull requests write (yours, never an agent's) |
 | `audit` | Contents read; optionally Secrets: read, to compare secret names |

@@ -199,12 +199,15 @@ const (
 	// AuditIncomplete means init or upgrade succeeded but the audit after it
 	// could not run.
 	AuditIncomplete WarningCode = "AUDIT_INCOMPLETE"
+	// CINotCancelled means a sync's pushes may have started workflow runs
+	// in the shadow repo that sync could not cancel.
+	CINotCancelled WarningCode = "CI_NOT_CANCELLED"
 )
 
 var warningCodes = []WarningCode{ConfigKeyIgnored, PublicNotPublic, GateNotRecorded, ChecksLimited, ActorUnknown,
 	WorkflowChanged, LargeFile, BinaryFile, WaiversUnreadable,
 	OverlayOutdated, RepoGuard, RepoGuardUnrewritable, SecretsUnlisted, SecretsMissing, PushTriggersOnSync,
-	ActionsMinutesBilled, ShadowBehind, AuditIncomplete}
+	ActionsMinutesBilled, ShadowBehind, AuditIncomplete, CINotCancelled}
 
 // AllWarnings lists every warning code, sorted.
 func AllWarnings() []WarningCode {

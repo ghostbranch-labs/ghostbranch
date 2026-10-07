@@ -63,8 +63,34 @@ func TestAuditReportsGuardsSecretsAndMinutes(t *testing.T) {
 	}
 	c := codes(warns)
 	if c[contract.RepoGuardUnrewritable] != 1 || c[contract.SecretsMissing] != 1 || c[contract.ActionsMinutesBilled] != 1 ||
-		c[contract.RepoGuard] != 0 || c[contract.PushTriggersOnSync] != 0 || c[contract.OverlayOutdated] != 0 {
+		c[contract.RepoGuard] != 0 || c[contract.PushTriggersOnSync] != 1 || c[contract.OverlayOutdated] != 0 {
 		t.Fatalf("warnings = %+v", warns)
+	}
+}
+
+// ghostbranch sync pushes with the person's token, so push-triggered
+// workflows start in the shadow repo even with scheduled sync off.
+func TestAuditWarnsAboutPushTriggersWithScheduleOff(t *testing.T) {
+	h := newHarness(t)
+	testutil.Commit(t, h.pubGit, "main", "guarded ci", map[string]string{".github/workflows/ci.yml": guardedCI})
+	h.init()
+	_, warns, err := h.eng.Audit(h.ctx, h.pair)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var w *contract.Warning
+	for i := range warns {
+		if warns[i].Code == contract.PushTriggersOnSync {
+			w = &warns[i]
+		}
+	}
+	guard := "github.event_name != 'push' || github.repository == 'acme/widget'"
+	if w == nil || w.Details["guard"] != guard || !strings.Contains(w.Message, "if: "+guard) ||
+		!strings.Contains(w.Message, ".github/workflows/ci.yml") || !strings.Contains(w.Message, "Actions write") {
+		t.Fatalf("warnings = %+v", warns)
+	}
+	if paths, _ := w.Details["paths"].([]string); len(paths) != 1 || paths[0] != ".github/workflows/ci.yml" {
+		t.Fatalf("details = %+v", w.Details)
 	}
 }
 

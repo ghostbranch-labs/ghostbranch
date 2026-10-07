@@ -232,18 +232,18 @@ func TestNextPutsUpgradeAfterTheCommandsOwnSteps(t *testing.T) {
 }
 
 // upgrade points at the audit only for a finding worth reading, not for the
-// billed-minutes note every private shadow repo gets.
+// billed-minutes note every private shadow repo gets. A push-triggered
+// workflow is one: every sync starts it in the shadow repo.
 func TestNextAfterUpgradeAsksForTheAuditOnlyOnFindings(t *testing.T) {
 	te := newTestEnv(t)
-	testutil.Commit(t, te.pubGit, "main", "push ci", map[string]string{".github/workflows/push.yml": "on:\n  push:\n    branches: [main]\njobs:\n  t:\n    runs-on: x\n    steps:\n      - run: echo\n"})
 	initOnly(te)
 	_, env := te.runJSON("upgrade")
 	if n := nextOf(t, env); len(n) != 0 {
 		t.Fatalf("billed minutes only: next = %v", n)
 	}
-	cfg := strings.Replace(string(config.Render("acme/widget", "acme/widget-shadow")), `schedule: "off"`, `schedule: "23 */6 * * *"`, 1)
-	te.shadowCommit(engine.OverlayBranch, map[string]string{".ghostbranch.yml": cfg})
-	_, env = te.runJSON("upgrade") // installs sync: PUSH_TRIGGERS_ON_SYNC
+	testutil.Commit(t, te.pubGit, "main", "push ci", map[string]string{".github/workflows/push.yml": "on:\n  push:\n    branches: [main]\njobs:\n  t:\n    runs-on: x\n    steps:\n      - run: echo\n"})
+	te.mustRun("sync")
+	_, env = te.runJSON("upgrade") // PUSH_TRIGGERS_ON_SYNC, scheduled sync off
 	n := nextOf(t, env)
 	if len(n) != 1 || !reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "audit", "--repo", "acme/widget"}) {
 		t.Fatalf("next = %v", n)

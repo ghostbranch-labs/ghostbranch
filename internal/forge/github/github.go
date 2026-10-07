@@ -389,3 +389,47 @@ func (c *Client) SecretNames(ctx context.Context, full string) ([]string, error)
 	sort.Strings(out)
 	return out, nil
 }
+
+// PushRuns lists the Actions runs for sha that a push started, any status.
+func (c *Client) PushRuns(ctx context.Context, full, sha string) ([]forge.Run, error) {
+	owner, name, err := forge.SplitName(full)
+	if err != nil {
+		return nil, err
+	}
+	out := []forge.Run{}
+	opts := &gh.ListWorkflowRunsOptions{HeadSHA: sha, Event: "push", ListOptions: gh.ListOptions{PerPage: 100}}
+	for {
+		runs, resp, err := c.c.Actions.ListRepositoryWorkflowRuns(ctx, owner, name, opts)
+		if isForbidden(resp, err) {
+			return nil, fmt.Errorf("%w: list workflow runs of %s: %v", forge.ErrForbidden, full, err)
+		}
+		if err := wrap(resp, err); err != nil {
+			return nil, err
+		}
+		for _, r := range runs.WorkflowRuns {
+			out = append(out, forge.Run{ID: r.GetID(), Workflow: r.GetName(), Status: r.GetStatus(), URL: r.GetHTMLURL()})
+		}
+		if resp.NextPage == 0 {
+			return out, nil
+		}
+		opts.Page = resp.NextPage
+	}
+}
+
+// CancelRun cancels workflow run id. GitHub answers 202; a 409 means the
+// run has already finished, which is what cancelling wanted.
+func (c *Client) CancelRun(ctx context.Context, full string, id int64) error {
+	owner, name, err := forge.SplitName(full)
+	if err != nil {
+		return err
+	}
+	resp, err := c.c.Actions.CancelWorkflowRunByID(ctx, owner, name, id)
+	var accepted *gh.AcceptedError
+	if errors.As(err, &accepted) || (err != nil && resp != nil && resp.StatusCode == http.StatusConflict) {
+		return nil
+	}
+	if isForbidden(resp, err) {
+		return fmt.Errorf("%w: cancel workflow run %d of %s: %v", forge.ErrForbidden, id, full, err)
+	}
+	return wrap(resp, err)
+}

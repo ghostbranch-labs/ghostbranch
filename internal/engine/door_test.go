@@ -40,7 +40,7 @@ func TestOnlyPromoteAndApplyReachThePublicRepo(t *testing.T) {
 	if len(h.pushes) != n {
 		t.Fatal("agents commands must never push")
 	}
-	_, _, err = h.eng.Sync(h.ctx, h.pair)
+	_, _, err = h.eng.Sync(h.ctx, h.pair, engine.SyncOptions{})
 	run("sync", err, "")
 	n = len(h.pushes)
 	_, _, err = h.eng.Audit(h.ctx, h.pair)
@@ -136,7 +136,7 @@ func TestAShadowRepoTurnedPublicStopsEverything(t *testing.T) {
 		n, before := len(h.pushes), h.publicRefs()
 		steps := map[string]error{}
 		_, _, steps["init"] = h.eng.Init(h.ctx, engine.InitOptions{Public: publicName})
-		_, _, steps["sync"] = h.eng.Sync(h.ctx, h.pair)
+		_, _, steps["sync"] = h.eng.Sync(h.ctx, h.pair, engine.SyncOptions{})
 		_, _, steps["feature start"] = h.eng.FeatureStart(h.ctx, h.pair, "other")
 		_, _, steps["gate"] = h.eng.Gate(h.ctx, h.pair, "good")
 		_, _, steps["promote"] = h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "good", Message: "m", Yes: true})

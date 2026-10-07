@@ -34,6 +34,23 @@ type Forge struct {
 	Secrets          map[string][]string
 	SecretsForbidden map[string]bool
 	CreateForbidden  bool
+	// Runs are the push-triggered workflow runs per repo, for PushRuns.
+	// RunsForbidden makes PushRuns fail with ErrForbidden, RunsErr with
+	// that error; CancelForbidden makes CancelRun fail with ErrForbidden.
+	// Cancelled records the run IDs CancelRun cancelled, per repo, and
+	// PushRunsCalls counts PushRuns calls.
+	Runs            map[string][]Run
+	RunsForbidden   map[string]bool
+	RunsErr         error
+	CancelForbidden map[string]bool
+	Cancelled       map[string][]int64
+	PushRunsCalls   int
+}
+
+// Run is a seeded workflow run that a push of SHA started.
+type Run struct {
+	SHA string
+	forge.Run
 }
 
 // New stores bare repos under root.
@@ -231,4 +248,46 @@ func (f *Forge) SecretNames(_ context.Context, full string) ([]string, error) {
 	out := append([]string{}, f.Secrets[full]...)
 	sort.Strings(out)
 	return out, nil
+}
+
+func (f *Forge) PushRuns(_ context.Context, full, sha string) ([]forge.Run, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.PushRunsCalls++
+	if f.RunsForbidden[full] {
+		return nil, fmt.Errorf("list workflow runs of %s: %w", full, forge.ErrForbidden)
+	}
+	if f.RunsErr != nil {
+		return nil, f.RunsErr
+	}
+	out := []forge.Run{}
+	for _, r := range f.Runs[full] {
+		if r.SHA == sha {
+			out = append(out, r.Run)
+		}
+	}
+	return out, nil
+}
+
+func (f *Forge) CancelRun(_ context.Context, full string, id int64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.CancelForbidden[full] {
+		return fmt.Errorf("cancel workflow run %d of %s: %w", id, full, forge.ErrForbidden)
+	}
+	for i := range f.Runs[full] {
+		r := &f.Runs[full][i]
+		if r.ID != id {
+			continue
+		}
+		if r.Status != "completed" {
+			r.Status = "completed"
+			if f.Cancelled == nil {
+				f.Cancelled = map[string][]int64{}
+			}
+			f.Cancelled[full] = append(f.Cancelled[full], id)
+		}
+		return nil
+	}
+	return fmt.Errorf("workflow run %d of %s: %w", id, full, forge.ErrNotFound)
 }

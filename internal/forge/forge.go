@@ -51,6 +51,14 @@ type Check struct {
 	Conclusion string // success, failure, skipped, neutral, cancelled, timed_out, action_required, …
 }
 
+// Run is a GitHub Actions workflow run.
+type Run struct {
+	ID       int64
+	Workflow string
+	Status   string // queued | in_progress | waiting | requested | pending | completed
+	URL      string
+}
+
 type User struct {
 	Login string
 	ID    int64
@@ -70,6 +78,11 @@ type Forge interface {
 	// SecretNames lists the Actions secret names visible to full: its own
 	// and the org secrets shared with it. Values are never read.
 	SecretNames(ctx context.Context, full string) ([]string, error)
+	// PushRuns lists Actions runs for sha triggered by event "push" (any status).
+	PushRuns(ctx context.Context, full, sha string) ([]Run, error)
+	// CancelRun cancels a queued or in-progress run. A run that has already
+	// finished is not an error.
+	CancelRun(ctx context.Context, full string, id int64) error
 }
 
 // NoreplyEmail is the user's GitHub noreply address. Public commits use it

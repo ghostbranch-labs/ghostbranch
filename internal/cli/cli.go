@@ -55,6 +55,9 @@ type Env struct {
 	PollInterval time.Duration
 	SettleWindow time.Duration
 	OnPush       func(op, remote string, refspecs []string)
+	// CIAppearWindow is how long sync looks for the workflow runs its
+	// pushes start in the shadow repo.
+	CIAppearWindow time.Duration
 	// Executable is this binary's path; the pre-push hook embeds it.
 	Executable func() (string, error)
 	// Getwd is the directory guard commands act on.
@@ -80,7 +83,7 @@ func DefaultEnv() Env {
 		CwdRemotes:   cwdRemotes,
 		NewScanner:   func(r leak.Rules) (leak.Scanner, error) { return leak.NewGitleaks(r) },
 		PollInterval: engine.DefaultPollInterval,
-		SettleWindow: engine.DefaultSettleWindow,
+		SettleWindow: engine.DefaultSettleWindow, CIAppearWindow: engine.DefaultCIAppearWindow,
 		Executable:   os.Executable,
 		Getwd:        os.Getwd,
 		GuardState:   guardState,
@@ -285,7 +288,7 @@ func (a *app) engine(ctx context.Context) (*engine.Engine, error) {
 	}
 	e := &engine.Engine{Forge: f, WS: ws, Actor: actor, Token: token, TokenSource: source,
 		Now: a.env.Now, Sleep: a.env.Sleep, Rand: a.env.Rand, Progress: a.env.Stderr,
-		NewScanner: a.env.NewScanner, PollInterval: a.env.PollInterval, SettleWindow: a.env.SettleWindow,
+		NewScanner: a.env.NewScanner, PollInterval: a.env.PollInterval, SettleWindow: a.env.SettleWindow, CIAppearWindow: a.env.CIAppearWindow,
 		DryRun: a.dryRun, OnPush: a.env.OnPush, Grants: grant.NewStore(ws.GrantsPath(), ws.GrantsLockPath()),
 		Waivers: waiver.NewStore(ws.WaiversPath(), ws.WaiversLockPath())}
 	if a.env.ConsoleUsable && !a.nonInteractive {

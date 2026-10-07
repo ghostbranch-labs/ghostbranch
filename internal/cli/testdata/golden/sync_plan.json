@@ -18,6 +18,7 @@
         "status": "fast_forwarded"
       }
     ],
+    "cancelled_runs": [],
     "preview": {
       "fingerprint": {
         "public_main": "178f8a91fcb0e6a374393202f9c61275c78d3dbb",

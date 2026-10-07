@@ -20,7 +20,8 @@
           "code": { "enum": ["CONFIG_KEY_IGNORED", "PUBLIC_NOT_PUBLIC", "GATE_NOT_RECORDED", "CHECKS_LIMITED", "ACTOR_UNKNOWN",
                           "WORKFLOW_CHANGED", "LARGE_FILE", "BINARY_FILE", "WAIVERS_UNREADABLE",
                           "OVERLAY_OUTDATED", "REPO_GUARD", "REPO_GUARD_UNREWRITABLE", "SECRETS_UNLISTED", "SECRETS_MISSING",
-                          "PUSH_TRIGGERS_ON_SYNC", "ACTIONS_MINUTES_BILLED", "SHADOW_BEHIND", "AUDIT_INCOMPLETE"] },
+                          "PUSH_TRIGGERS_ON_SYNC", "ACTIONS_MINUTES_BILLED", "SHADOW_BEHIND", "AUDIT_INCOMPLETE",
+                          "CI_NOT_CANCELLED"] },
           "message": { "type": "string" },
           "details": { "type": "object" }
         }

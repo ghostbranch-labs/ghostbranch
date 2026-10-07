@@ -10,7 +10,6 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/config"
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
-	"github.com/ghostbranch-labs/ghostbranch/internal/managed"
 	"github.com/ghostbranch-labs/ghostbranch/internal/overlay"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workflow"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
@@ -184,16 +183,14 @@ func (e *Engine) audit(ctx context.Context, pc *pairCtx, cfg config.Config, O st
 			}
 		}
 	}
-	installed := false
-	for _, f := range res.Overlay {
-		if f.Path == managed.SyncPath && f.Status != managed.Missing && cfg.Sync.Schedule != config.ScheduleOff {
-			installed = true
-		}
-	}
-	if installed && len(res.PushTriggers) > 0 {
+	// A sync pushes with the person's token (or GHOSTBRANCH_SYNC_TOKEN when
+	// scheduled), and token pushes start push-triggered workflows.
+	if len(res.PushTriggers) > 0 {
+		guard := "github.event_name != 'push' || github.repository == '" + pc.pair.Public + "'"
 		warns = append(warns, contract.Warning{Code: contract.PushTriggersOnSync,
-			Message: "a scheduled sync that uses GHOSTBRANCH_SYNC_TOKEN starts these workflows in the shadow repo: " + strings.Join(res.PushTriggers, ", "),
-			Details: map[string]any{"paths": res.PushTriggers}})
+			Message: "pushes to synced branches start these workflows in the shadow repo: " + strings.Join(res.PushTriggers, ", ") +
+				"; ghostbranch sync cancels them when the token has Actions write. To stop them for good, add this to their push-triggered jobs: if: " + guard,
+			Details: map[string]any{"paths": res.PushTriggers, "guard": guard}})
 	}
 	if res.Minutes.Billed {
 		msg := pc.pair.Shadow + " is private, so its Actions minutes are billed"
