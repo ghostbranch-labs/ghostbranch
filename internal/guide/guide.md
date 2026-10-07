@@ -42,16 +42,18 @@ main, green CI, and a leak scan of exactly what will be published.
   only; it never resolves a conflict). The gate always rebases on public main, so it is never affected.
 - Sync's pushes start the shadow repo's push-triggered workflows, which re-test what public CI already
   tested, so sync cancels those runs (`--no-cancel` skips that). `CI_NOT_CANCELLED` means it couldn't
-  (the token needs Actions write); the runs only cost minutes. The audit's `PUSH_TRIGGERS_ON_SYNC`
-  gives a guard that stops them.
+  (the token needs Actions write); the runs only cost minutes. To stop them for good, the person adds
+  the guard from the audit's `PUSH_TRIGGERS_ON_SYNC` to each push-triggered job; a job that already
+  has an `if:` combines them: `<existing> && (github.event_name != 'push' || github.repository == '<public>')`.
 - Scheduled sync is opt-in and costs Actions minutes (every 6 hours is about 120 a month). It is the
   person's choice: they set `sync.schedule` in `.ghostbranch.yml` on the `ghostbranch` branch, then
   `ghostbranch upgrade --plan` and `ghostbranch upgrade` install the workflow. `sync.schedule: off`
   plus `upgrade` removes it. Don't turn it on yourself.
-- The workflow uses its own default token. If the public repo is private, or public commits change
-  workflow files, the person adds a `GHOSTBRANCH_SYNC_TOKEN` secret to the shadow repo: a fine-grained
-  token with Contents read on the public repo and Contents and Workflows write on the shadow repo,
-  never public write.
+- The workflow uses its own default token. If public commits change workflow files, the person adds a
+  `GHOSTBRANCH_SYNC_TOKEN` secret to the shadow repo: a fine-grained token with shadow Contents and
+  Workflows write, never public write. A fine-grained token applies its permissions to every repo it
+  selects, so for a private public repo it could write that repo too: scheduled sync isn't supported
+  there; use `ghostbranch sync`.
 - `OVERLAY_OUTDATED` means run `ghostbranch upgrade --plan`, then `ghostbranch upgrade`.
 - Repo guards: the gate rewrites `github.repository == 'org/project'` guards in its CI candidate only,
   so those jobs run in the shadow repo, on unreleased code; what publishes is untouched. A guarded job
@@ -81,16 +83,16 @@ main, green CI, and a leak scan of exactly what will be published.
 
 - **Exit 3, `LEAK_FOUND`:** `error.details.findings` lists what would leak. Remove it from the
   feature branch, push to the shadow repo, and gate again (the first command in `next`).
-- If a finding in `error.details.waivable` is a false positive (a fake key in a test fixture, say),
-  **stop and give the person the `waivers add` command from `next`**. They check the finding at
-  their console, give the reason, and type the code. Findings in the commit message, branch or PR
-  text are never waivable: change the text.
+- A finding in a test fixture that is plainly a placeholder (an obviously fake value such as `fake-`,
+  `example-` or `test-`, or a token built for tests): you may rewrite the fixture to build the value at
+  runtime (for example by concatenating parts), and tell the person in your handover which finding you
+  rewrote. Anything that might be real: **stop and give the person the `waivers add` command from
+  `next`**; they check it at their console. Never waive it yourself. Findings in the commit message,
+  branch or PR text are never waivable: change the text.
 - **Exit 3, `MARKER_INVALID`:** `error.details.problems` names each bad marker line. If it is clear
   which lines are meant to be internal, restore the marker pair (for example, add the missing
   `END-INTERNAL` line). Never delete, rewrite or move marker lines or the internal lines between
   them to make the gate pass; if it is not clear, stop and ask the person.
-- If a finding is a fake secret in a test fixture, you may rewrite the fixture to build the value at
-  runtime (for example by concatenating parts): that removes the content. Never waive it yourself.
 - Never change `leak_scan` (`markers`, `block_patterns`, `strip`) in `.ghostbranch.yml` to get past a
   finding; that is the person's call.
 - The warnings `WORKFLOW_CHANGED`, `LARGE_FILE` and `BINARY_FILE` don't block. Mention them to the
@@ -144,26 +146,23 @@ feature work to the public repo. Its limits:
 An agent grant (`ghostbranch agents allow`) lets agents publish with `--yes`, but Claude Code may
 still block an agent from running `ghostbranch apply … --yes` as self-approval. If you want the
 agent to publish under the grant, also allow the command in Claude Code, for example in the
-project's `.claude/settings.local.json`:
+project's `.claude/settings.local.json` (keep that file out of commits):
 
 ```json
 { "permissions": { "allow": ["Bash(ghostbranch apply:*)"] } }
 ```
 
-Keep that file out of commits.
-
 ## Internal sections (for people)
 
 Lines between a `BEGIN-INTERNAL` line and an `END-INTERNAL` line are removed from every published
 file, and the gate's CI runs on the stripped files, so it tests exactly what goes public. Markers are
-matched ignoring case. Put each marker on its own line, in the file's comment syntax: `// BEGIN-INTERNAL`, `# END-INTERNAL`,
-`<!-- BEGIN-INTERNAL -->`. A line that looks like a marker but is not exactly one fails the
-gate rather than guess: a comment that adds text or punctuation after the marker
-(`// BEGIN-INTERNAL billing`, `// BEGIN-INTERNAL.`), a doubled
-prefix (`/// BEGIN-INTERNAL`, `## END-INTERNAL`), or a marker inside a multi-line comment
-(`/* BEGIN-INTERNAL` on one line, `*/` on another). So do markers in a UTF-16 or UTF-32 file,
-or in one Git reads as binary. A person can change the tokens with `leak_scan.markers` in
-`.ghostbranch.yml`.
+matched ignoring case. Put each marker on its own line, in the file's comment syntax:
+`// BEGIN-INTERNAL`, `# END-INTERNAL`, `<!-- BEGIN-INTERNAL -->`. A line that looks like a marker but
+is not exactly one fails the gate rather than guess: a comment that adds text or punctuation after the
+marker (`// BEGIN-INTERNAL billing`, `// BEGIN-INTERNAL.`), a doubled prefix (`/// BEGIN-INTERNAL`,
+`## END-INTERNAL`), or a marker inside a multi-line comment (`/* BEGIN-INTERNAL` on one line, `*/` on
+another). So do markers in a UTF-16 or UTF-32 file, or in one Git reads as binary. A person can change
+the tokens with `leak_scan.markers` in `.ghostbranch.yml`.
 
 ## Token permissions (for people)
 
@@ -189,10 +188,11 @@ running as your OS user could fake a terminal, edit local files, or push with gi
 boundary is the token.
 
 1. Create a fine-grained token scoped to **the shadow repo only**: Contents, Pull requests and
-   Workflows read and write; Actions and Commit statuses read.
+   Workflows read and write; Actions and Commit statuses read. Actions write is optional: it lets
+   `sync` cancel the runs its pushes start.
 2. Set it as `GHOSTBRANCH_TOKEN` **only in the agent's environment**.
-3. Make sure the agent's sandbox cannot read your `gh` login or keychain. Otherwise
-   `gh auth token` hands it your full token.
+3. Make sure the agent's sandbox cannot read your `gh` login or keychain, or `gh auth token` hands it
+   your full token.
 4. Check it: in the agent's environment, `ghostbranch agents status --json` shows
    `"token_can_publish": "false"`.
 
