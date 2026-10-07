@@ -130,7 +130,10 @@ func (e *Engine) push(ctx context.Context, pc *pairCtx, remote string, opt gitx.
 	var refused *gitx.RefusedError
 	if errors.As(err, &refused) {
 		msg := fmt.Sprintf("the %s repo refused the push: %s", remote, refused.Reason)
-		if strings.Contains(strings.ToLower(refused.Reason), "workflow") {
+		// GitHub's scope refusal: "refusing to allow ... to create or update
+		// workflow ... without workflow scope". A ruleset's "Required
+		// workflows" is not a token permission.
+		if r := strings.ToLower(refused.Reason); strings.Contains(r, "refusing to allow") && strings.Contains(r, "workflow") {
 			msg += "; the token needs Workflows write (fine-grained) or the workflow scope (gh/OAuth)"
 		}
 		ce := contract.New(contract.PushRefused, "%s", msg).

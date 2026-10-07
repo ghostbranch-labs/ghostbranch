@@ -127,3 +127,16 @@ func TestPushRefusedForWorkflowScopeSaysWhichPermission(t *testing.T) {
 		t.Fatalf("message = %q", ce.Message)
 	}
 }
+
+// A refusal that only mentions workflows (a ruleset's required workflows)
+// is not a missing token permission: no Workflows-write hint.
+func TestPushRefusedForRequiredWorkflowsGivesNoPermissionHint(t *testing.T) {
+	h := newHarness(t)
+	h.init()
+	h.installShadowHook("GH013: Repository rule violations found: Required workflows must pass")
+	_, _, err := h.eng.FeatureStart(h.ctx, h.pair, "feat-x")
+	ce := wantCode(t, err, contract.PushRefused)
+	if !strings.Contains(ce.Message, "Required workflows") || strings.Contains(ce.Message, "Workflows write") {
+		t.Fatalf("message = %q", ce.Message)
+	}
+}
