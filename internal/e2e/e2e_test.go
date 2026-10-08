@@ -472,10 +472,23 @@ func TestSandboxLoop(t *testing.T) {
 		&gh.PullRequestOptions{MergeMethod: "merge"}); err != nil {
 		t.Fatalf("merge public PR #%d: %v", histPR, err)
 	}
-	// Deleting the gate branch makes GitHub close the gate draft PR itself, so
-	// the close meets an already-closed PR: this run is also what confirms that
-	// GitHub treats closing an already-closed PR as a no-op.
-	syncData := run(0, "sync")["data"].(map[string]any)
+	// Deleting the gate branch makes GitHub close the gate draft PR itself,
+	// racing the close that follows the deletes, so ours may meet a PR that
+	// is closed or closing. Either way the close must end cleanly: no
+	// FEATURE_NOT_CLOSED warning for hist, and its ledger entry (checked
+	// below) exits 0. That does not by itself prove GitHub's no-op on an
+	// already-closed PR: a close that fails on a PR that is closed by then
+	// also counts as done. It does prove the close ends cleanly against the
+	// real API.
+	syncEnv := run(0, "sync")
+	syncData := syncEnv["data"].(map[string]any)
+	syncWarns, _ := syncEnv["warnings"].([]any)
+	for _, w := range syncWarns {
+		wm, _ := w.(map[string]any)
+		if d, _ := wm["details"].(map[string]any); wm["code"] == "FEATURE_NOT_CLOSED" && d["feature"] == hist {
+			t.Errorf("sync warned that it couldn't close %s: %v", hist, wm)
+		}
+	}
 	var closedHist bool
 	closedList, _ := syncData["closed"].([]any)
 	for _, c := range closedList {
@@ -496,8 +509,8 @@ func TestSandboxLoop(t *testing.T) {
 		}
 	}
 
-	// The gate draft PR is closed now (by GitHub when the gate branch went, then
-	// the no-op close).
+	// The gate draft PR is closed now (by GitHub when the gate branch went, or
+	// by our close).
 	gatePRs, _, err := ghc.PullRequests.List(ctx, strings.Split(shadowRepo, "/")[0], strings.Split(shadowRepo, "/")[1],
 		&gh.PullRequestListOptions{State: "all", Head: strings.Split(shadowRepo, "/")[0] + ":ghostbranch-gate/" + hist})
 	if err != nil {
@@ -553,6 +566,19 @@ func TestSandboxLoop(t *testing.T) {
 	}
 	if !closeWithRefs {
 		t.Error("no feature close ledger entry records the deleted refs")
+	}
+	// sync's close of hist ended cleanly, its gate PR included.
+	var histClose bool
+	for _, e := range entries {
+		if e.Op == "feature close" && e.Feature == hist {
+			histClose = true
+			if e.ExitCode != 0 {
+				t.Errorf("the feature close entry for %s exited %d (%s)", hist, e.ExitCode, e.ErrorCode)
+			}
+		}
+	}
+	if !histClose {
+		t.Errorf("the ledger has no feature close entry for %s", hist)
 	}
 }
 

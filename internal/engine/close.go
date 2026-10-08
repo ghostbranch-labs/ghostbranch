@@ -27,12 +27,13 @@ type FeatureAbandonResult struct {
 
 // FeatureCloseResult is what closing a feature deleted.
 type FeatureCloseResult struct {
-	Feature  string            `json:"feature"`
-	State    feature.State     `json:"state"`    // the state it was closed from
-	Deleted  map[string]string `json:"deleted"`  // shadow ref -> SHA it pointed at; never null
-	GatePR   *int              `json:"gate_pr"`  // the draft PR closed, nil when none was open
-	Approval *ledger.Approval  `json:"approval"` // console, or nil when none was needed
-	Preview  *preview.Preview  `json:"preview"`
+	Feature      string            `json:"feature"`
+	State        feature.State     `json:"state"`         // the state it was closed from
+	Deleted      map[string]string `json:"deleted"`       // shadow ref -> SHA it pointed at; never null
+	GatePR       *int              `json:"gate_pr"`       // the draft PR closed (by us, or by GitHub as its branch went), nil when none was open
+	NeedsConsole bool              `json:"needs_console"` // closing takes a person at a console (not ClosableWithoutConsole); set under --plan too
+	Approval     *ledger.Approval  `json:"approval"`      // console; nil under --plan, and when none was needed
+	Preview      *preview.Preview  `json:"preview"`
 }
 
 // FeatureAbandon parks a feature (or, with undo, restores it) by flipping
@@ -258,7 +259,7 @@ func (e *Engine) closeTargets(ctx context.Context, pc *pairCtx, r FeatureReport)
 // a MIRROR_NOT_UPDATED warning.
 func (e *Engine) closeWith(ctx context.Context, pc *pairCtx, r FeatureReport, t closeTargets) (*FeatureCloseResult, []contract.Warning, error) {
 	sh := pc.pair.Shadow
-	res := &FeatureCloseResult{Feature: r.Name, State: r.State, Deleted: map[string]string{}}
+	res := &FeatureCloseResult{Feature: r.Name, State: r.State, Deleted: map[string]string{}, NeedsConsole: !ClosableWithoutConsole(r)}
 	pr, err := e.Forge.FindOpenPR(ctx, sh, gateBranch(r.Name), "main")
 	if err != nil {
 		return nil, nil, forgeErr(err, "find the gate PR of feature %s", r.Name)
@@ -309,8 +310,13 @@ func (e *Engine) closeWith(ctx context.Context, pc *pairCtx, r FeatureReport, t 
 	}
 	if pr != nil {
 		// GitHub may already have closed it with its head branch; closing a
-		// closed PR is not an error.
+		// closed PR is not an error. GitHub closing it while ours is in
+		// flight can still fail ours, so on any other error look again: a
+		// PR that is closed now is done.
 		err := e.Forge.ClosePullRequest(ctx, sh, pr.Number)
+		if err != nil && !errors.Is(err, forge.ErrNotFound) && !errors.Is(err, forge.ErrForbidden) && e.prClosed(ctx, sh, pr.Number) {
+			err = nil
+		}
 		switch {
 		case err == nil:
 			n := pr.Number
@@ -325,6 +331,13 @@ func (e *Engine) closeWith(ctx context.Context, pc *pairCtx, r FeatureReport, t 
 		}
 	}
 	return res, warns, nil
+}
+
+// prClosed reports whether PR number in full is closed now. An error is
+// not closed.
+func (e *Engine) prClosed(ctx context.Context, full string, number int) bool {
+	got, err := e.Forge.GetPR(ctx, full, number)
+	return err == nil && got.State == "closed"
 }
 
 // afterDeletes makes an error that follows the deletes never retryable:

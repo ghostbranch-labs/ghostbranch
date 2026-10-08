@@ -6,8 +6,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
+	"github.com/ghostbranch-labs/ghostbranch/internal/ledger"
+	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
 // log reads the local ledger only: no token, no forge, no pair.
@@ -53,7 +56,7 @@ func TestLogNeedsNoToken(t *testing.T) {
 	if es := entries("--since", "2026-10-06T00:00:00Z"); len(es) != 0 {
 		t.Fatalf("--since tomorrow: %v", es)
 	}
-	for _, bad := range [][]string{{"--since", "yesterday"}, {"--limit", "-1"}} {
+	for _, bad := range [][]string{{"--since", "yesterday"}, {"--limit", "-1"}, {"--limit", "0"}, {"--repo", "widget"}} {
 		code, env := te.runJSON(append([]string{"log"}, bad...)...)
 		e, _ := env["error"].(map[string]any)
 		if code != 2 || e["code"] != "BAD_FLAG" || e["field"] != strings.TrimPrefix(bad[0], "--") {
@@ -65,6 +68,65 @@ func TestLogNeedsNoToken(t *testing.T) {
 	if code != 0 || len(lines) != 2 || !strings.Contains(lines[0], "feature start") || !strings.Contains(lines[0], "feat-x") ||
 		!strings.Contains(lines[0], "exit 0") || !strings.HasPrefix(lines[0], "2026-10-05T") {
 		t.Fatalf("human log: %d %q", code, out)
+	}
+}
+
+// log --repo shows one pair's entries: a registered public or shadow repo,
+// any other owner/name (a removed pair's history), or . for the pair this
+// checkout's remotes name. It still needs no token.
+func TestLogRepoFiltersByPair(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	delete(te.vars, "GHOSTBRANCH_TOKEN")
+	te.env.NewForge = func(string) (forge.Forge, error) {
+		t.Error("log built a GitHub client")
+		return te.forge, nil
+	}
+	ws := filepath.Join(te.vars["GHOSTBRANCH_HOME"], "workspaces", "default")
+	if err := ledger.Append(filepath.Join(ws, "ledger.jsonl"), ledger.Entry{TS: time.Date(2026, 10, 5, 13, 0, 0, 0, time.UTC),
+		Actor: "human:octo", Op: "remove", Pair: "acme/other", Summary: "removed acme/other"}); err != nil {
+		t.Fatal(err)
+	}
+	pairs := func(args ...string) string {
+		t.Helper()
+		code, env := te.runJSON(append([]string{"log"}, args...)...)
+		if code != 0 {
+			t.Fatalf("log %v: exit %d %v", args, code, env)
+		}
+		data, _ := env["data"].(map[string]any)
+		es, _ := data["entries"].([]any)
+		var out []string
+		for _, e := range es {
+			out = append(out, e.(map[string]any)["pair"].(string)+" "+e.(map[string]any)["op"].(string))
+		}
+		return strings.Join(out, ",")
+	}
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{nil, "acme/other remove,acme/widget init"},
+		{[]string{"--repo", "acme/widget"}, "acme/widget init"},
+		{[]string{"--repo", "ACME/Widget"}, "acme/widget init"},
+		{[]string{"--repo", "acme/widget-shadow"}, "acme/widget init"},
+		{[]string{"--repo", "acme/other"}, "acme/other remove"},
+		{[]string{"--repo", "acme/none"}, ""},
+	} {
+		if got := pairs(c.args...); got != c.want {
+			t.Errorf("log %v: got %q, want %q", c.args, got, c.want)
+		}
+	}
+	// --repo . names the pair from this checkout's remotes, or fails.
+	code, env := te.runJSON("log", "--repo", ".")
+	if e, _ := env["error"].(map[string]any); code != 2 || e["code"] != "PAIR_AMBIGUOUS" {
+		t.Fatalf("--repo . outside a checkout: %d %v", code, env)
+	}
+	te.env.CwdRemotes = func() []workspace.Remote {
+		return []workspace.Remote{{Name: "origin", URL: "https://github.com/acme/widget.git"}}
+	}
+	if got := pairs("--repo", "."); got != "acme/widget init" {
+		t.Errorf("--repo . in a widget checkout: got %q", got)
 	}
 }
 

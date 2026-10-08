@@ -8,6 +8,7 @@
     "state": "gate_passed",
     "deleted": {},
     "gate_pr": null,
+    "needs_console": true,
     "approval": null,
     "preview": {
       "fingerprint": {
@@ -41,6 +42,20 @@
     }
   },
   "warnings": [],
-  "next": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "feature",
+        "close",
+        "feat-x",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "the preview lists what closing deletes; it is gate_passed, so a person closes it at the console",
+      "needs_human": true,
+      "needs_input": []
+    }
+  ],
   "error": null
 }

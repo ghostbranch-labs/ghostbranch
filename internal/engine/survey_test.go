@@ -196,6 +196,20 @@ func TestSurveyMovedFallbacks(t *testing.T) {
 		t.Fatal(err)
 	}
 	check("plan without a head, gate candidate differs", feature.StateMergedMoved)
+	// Two empty candidates are not a match: nothing ties the gate to the
+	// publish.
+	pl.Fingerprint.GateCandidate = ""
+	if _, err := plan.Save(h.eng.WS.PlansDir(), pl); err != nil {
+		t.Fatal(err)
+	}
+	forgeMeta(t, h, "feat-x", func(m *feature.Meta) {
+		g := *gate
+		g.Candidate = ""
+		m.Gate = &g
+	})
+	check("plan without a head or a gate candidate, gate without a candidate", feature.StateMergedMoved)
+	closable("plan without a head or a gate candidate, gate without a candidate", false)
+	forgeMeta(t, h, "feat-x", func(m *feature.Meta) { m.Gate = gate })
 
 	// Without the plan, nothing ties the gate record to the publish: a
 	// re-gate may have overwritten it.

@@ -3,7 +3,7 @@
   "title": "feature close data",
   "type": "object",
   "additionalProperties": false,
-  "required": ["feature", "state", "deleted", "gate_pr", "approval", "preview"],
+  "required": ["feature", "state", "deleted", "gate_pr", "needs_console", "approval", "preview"],
   "properties": {
     "feature": { "type": "string" },
     "state": {
@@ -16,9 +16,10 @@
       "propertyNames": { "pattern": "^refs/" },
       "additionalProperties": { "$ref": "common.schema.json#/$defs/sha" }
     },
-    "gate_pr": { "description": "the gate's draft PR that was closed; null when none was open", "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 1 }] },
+    "gate_pr": { "description": "the gate's draft PR that was closed (by this close, or by GitHub when its branch was deleted); null when none was open", "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 1 }] },
+    "needs_console": { "description": "whether closing this feature takes a person at a console: false only for a published, merged and unmoved feature, or a merged one whose branch is gone; set under --plan too", "type": "boolean" },
     "approval": {
-      "description": "how the close was approved; null when it needed no console (published, merged and unmoved)",
+      "description": "how the close was approved; null under --plan, and when no console was needed",
       "oneOf": [
         { "type": "null" },
         { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "console" } } }

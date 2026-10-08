@@ -931,8 +931,31 @@ func TestNextForFeatureClose(t *testing.T) {
 	data, _ := env["data"].(map[string]any)
 	deleted, _ := data["deleted"].(map[string]any)
 	if code != 1 || len(deleted) != 4 || len(n) != 1 || n[0]["needs_human"] != true ||
-		!reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "log", "--feature", "feat-c", "--op", "feature close"}) {
+		!reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "log", "--feature", "feat-c", "--op", "feature close", "--repo", "acme/widget"}) {
 		t.Fatalf("gate PR left open: exit %d, deleted %v, next = %v", code, deleted, n)
+	}
+}
+
+// feature close --plan offers the close itself, for a person when the
+// feature needs a console and for the agent when it is merged and unmoved.
+func TestNextForFeatureClosePlan(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	grantAgents(te)
+	te.mustRun("feature", "start", "feat-d")
+	te.forge.SetPRMerged("acme/widget", publishFeature(te, "feat-a"))
+	for _, c := range []struct {
+		name  string
+		human bool
+	}{{"feat-d", true}, {"feat-a", false}} {
+		code, env := te.runJSON("feature", "close", c.name, "--plan")
+		n := nextOf(t, env)
+		data, _ := env["data"].(map[string]any)
+		if code != 0 || data["needs_console"] != c.human || len(n) != 1 || n[0]["needs_human"] != c.human ||
+			!reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "feature", "close", c.name, "--repo", "acme/widget"}) {
+			t.Fatalf("%s --plan: exit %d, needs_console %v, next = %v", c.name, code, data["needs_console"], n)
+		}
 	}
 }
 

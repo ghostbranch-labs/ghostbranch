@@ -219,6 +219,32 @@ func TestOnlyPromoteAndApplyReachThePublicRepo(t *testing.T) {
 		}
 	}
 
+	// sync after a public merge: its auto-close deletes the merged
+	// feature's shadow refs and closes its gate PR, and writes nothing to
+	// public. The publish itself is promote's.
+	pr, _ := h.publish("second")
+	if h.gatePR("second") == 0 {
+		t.Fatal("the gate left no draft PR for second")
+	}
+	h.forge.SetPRMerged(publicName, pr)
+	baseline = h.publicRefs()
+	n, closed := len(h.pushes), len(h.forge.ClosePRRepos)
+	sres, _, err = h.eng.Sync(h.ctx, h.pair, engine.SyncOptions{})
+	run("sync after a public merge", err, "")
+	if len(sres.Closed) != 1 || sres.Closed[0].Name != "second" || len(h.pushes) == n || len(h.forge.ClosePRRepos) == closed {
+		t.Fatalf("sync did not close the merged feature: %+v", sres)
+	}
+	for _, p := range h.pushes[n:] {
+		if p.remote != "shadow" {
+			t.Fatalf("%s pushed to %s: %+v", p.op, p.remote, p)
+		}
+	}
+	for _, repo := range h.forge.ClosePRRepos[closed:] {
+		if repo != shadowName {
+			t.Fatalf("sync closed a PR in %s", repo)
+		}
+	}
+
 	// remove is local: it unregisters the pair and touches no repo. It goes
 	// last, since nothing runs on the pair after it.
 	baseline = h.publicRefs()

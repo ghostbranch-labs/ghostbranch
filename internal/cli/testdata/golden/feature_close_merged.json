@@ -13,6 +13,7 @@
       "refs/heads/ghostbranch-gate/feat-x": "b2482c2a452cada619378f5b9fb700b98d030fb9"
     },
     "gate_pr": 1,
+    "needs_console": false,
     "approval": null,
     "preview": null
   },

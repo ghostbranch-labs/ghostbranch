@@ -196,10 +196,10 @@ func (e *Engine) Sync(ctx context.Context, p workspace.Pair, o SyncOptions) (res
 // the same code as feature close: nothing that needs a person is ever
 // touched here. noClose skips all of it, the survey too. In a dry run the
 // closes' ops join res.Preview. Nothing here fails the sync: a survey that
-// fails closes nothing, and a close that fails is a FEATURE_NOT_CLOSED
-// warning. The ledger records each close, with every ref it deleted, and a
-// feature whose refs were deleted is in res.Closed even if its gate PR then
-// wouldn't close.
+// fails closes nothing, and a close that fails (or, in a dry run, can't be
+// previewed) is a FEATURE_NOT_CLOSED warning. The ledger records each
+// close, with every ref it deleted, and a feature whose refs were deleted
+// is in res.Closed even if its gate PR then wouldn't close.
 func (e *Engine) closeMerged(ctx context.Context, pc *pairCtx, p *workspace.Pair, res *SyncResult, noClose bool) []contract.Warning {
 	if noClose {
 		return nil
@@ -231,9 +231,12 @@ func (e *Engine) closeMerged(ctx context.Context, pc *pairCtx, p *workspace.Pair
 		cr, cw, err := e.closeFeature(ctx, pc, r)
 		warns = addWarnings(warns, cw...)
 		if e.DryRun {
-			if err == nil {
-				res.Preview.Add(cr.Preview.Ops...)
+			// A close that couldn't be previewed warns, as the real one would.
+			if err != nil {
+				warns = addWarnings(warns, notClosed(r.Name, err, nil))
+				continue
 			}
+			res.Preview.Add(cr.Preview.Ops...)
 			continue
 		}
 		summary := ""
@@ -259,17 +262,28 @@ func (e *Engine) closeMerged(ctx context.Context, pc *pairCtx, p *workspace.Pair
 			res.Closed = append(res.Closed, ClosedFeature{Name: r.Name, PublicPR: pr, Deleted: cr.Deleted})
 		}
 		if err != nil {
-			ce := contract.From(err)
-			details := map[string]any{"feature": r.Name, "error_code": string(ce.Code)}
+			var gone map[string]string
 			if deleted {
-				details["deleted"] = cr.Deleted
+				gone = cr.Deleted
 			}
-			warns = addWarnings(warns, contract.Warning{Code: contract.FeatureNotClosed,
-				Message: fmt.Sprintf("couldn't close merged feature %s: %s: %s", r.Name, ce.Code, ce.Message),
-				Details: details})
+			warns = addWarnings(warns, notClosed(r.Name, err, gone))
 		}
 	}
 	return warns
+}
+
+// notClosed is the FEATURE_NOT_CLOSED warning for a merged feature sync
+// couldn't close (or, under --plan, couldn't preview closing), with the refs
+// it deleted when there are any.
+func notClosed(name string, err error, deleted map[string]string) contract.Warning {
+	ce := contract.From(err)
+	details := map[string]any{"feature": name, "error_code": string(ce.Code)}
+	if len(deleted) > 0 {
+		details["deleted"] = deleted
+	}
+	return contract.Warning{Code: contract.FeatureNotClosed,
+		Message: fmt.Sprintf("couldn't close merged feature %s: %s: %s", name, ce.Code, ce.Message),
+		Details: details}
 }
 
 // syncAction is the top-level action for main's per-branch status.

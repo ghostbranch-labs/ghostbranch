@@ -542,6 +542,48 @@ func TestSyncPlanPreviewsCloses(t *testing.T) {
 	}
 }
 
+// sync --plan warns about a merged feature whose close can't even be
+// previewed, as the real sync would, instead of dropping it silently.
+func TestSyncPlanWarnsWhenACloseCantBePreviewed(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	pr, _ := h.publish("feat-x")
+	h.forge.SetPRMerged(publicName, pr)
+	h.startFeature("feat-2", map[string]string{"two.txt": "2\n"})
+	sh := h.shadowGit()
+	head, err := sh.MustResolve(h.ctx, "refs/heads/feat-x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The metadata names another branch, at feat-x's published head so
+	// feat-x still reads as merged: closeTargets refuses it.
+	if err := sh.UpdateRef(h.ctx, "refs/heads/feat-2", head); err != nil {
+		t.Fatal(err)
+	}
+	forgeMeta(t, h, "feat-x", func(m *feature.Meta) { m.Branch = "feat-2" })
+	before := h.shadowRefs()
+	entries := len(h.ledger())
+	h.eng.DryRun = true
+	res, warns := h.syncOK(engine.SyncOptions{})
+	h.eng.DryRun = false
+	if res.Preview == nil || len(res.Closed) != 0 {
+		t.Fatalf("sync --plan = %+v", res)
+	}
+	for _, op := range res.Preview.Ops {
+		if op["op"] == "delete_ref" || op["op"] == "close_pr" {
+			t.Fatalf("sync --plan previews a close it can't make: %+v", op)
+		}
+	}
+	if len(warns) != 1 || warns[0].Code != contract.FeatureNotClosed || warns[0].Details["feature"] != "feat-x" ||
+		warns[0].Details["error_code"] != string(contract.Internal) {
+		t.Fatalf("warnings = %+v", warns)
+	}
+	if !reflect.DeepEqual(h.shadowRefs(), before) || len(h.ledger()) != entries {
+		t.Fatal("sync --plan changed something")
+	}
+}
+
 // A commit races onto the branch between the survey and the delete: the
 // close fails with FEATURE_MOVED, nothing is deleted, and sync still
 // succeeds, with a FEATURE_NOT_CLOSED warning.

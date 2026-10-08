@@ -162,6 +162,42 @@ func TestRemoveIsLocalAndNeedsAConsole(t *testing.T) {
 	}
 }
 
+// A workspace.json entry whose folder would not sit inside pairs/ is
+// refused before the console, the lock or any change: RemoveAll must never
+// reach the workspace itself or beyond.
+func TestRemoveRefusesAPairFolderOutsidePairs(t *testing.T) {
+	t.Parallel()
+	for _, public := range []string{"..", `a\..\..`, `a/..\..`, "a/..", "../.."} {
+		t.Run(public, func(t *testing.T) {
+			t.Parallel()
+			h := removeFixture(t)
+			bad := workspace.Pair{Public: public, Shadow: "acme/bad-shadow"}
+			h.eng.WS.Pairs = append(h.eng.WS.Pairs, bad)
+			if err := h.eng.WS.Save(); err != nil {
+				t.Fatal(err)
+			}
+			before := stateOf(t, h)
+			for _, dry := range []bool{true, false} {
+				h.eng.DryRun = dry
+				_, _, err := h.eng.Remove(h.ctx, bad)
+				wantCode(t, err, contract.Internal)
+				if len(h.approver.asked) != 0 {
+					t.Fatalf("the console was asked %q", h.approver.asked)
+				}
+				if got := stateOf(t, h); !equalState(got, before) {
+					t.Fatalf("a refused remove changed state:\n got %+v\nwant %+v", got, before)
+				}
+				if _, err := os.Stat(filepath.Join(h.eng.WS.Dir, "workspace.json")); err != nil {
+					t.Fatalf("the workspace is gone: %v", err)
+				}
+				if _, ok := h.eng.WS.Find(public); !ok {
+					t.Fatal("the bad entry was dropped")
+				}
+			}
+		})
+	}
+}
+
 func TestRemovePlanChangesNothing(t *testing.T) {
 	t.Parallel()
 	h := removeFixture(t)
@@ -250,6 +286,10 @@ func TestLog(t *testing.T) {
 	add(2, "agent:claude-code", "gate", "feat-x")
 	add(3, "human:octo", "promote", "feat-x")
 	add(4, "agent:codex", "gate", "feat-y")
+	if err := ledger.Append(ws.LedgerPath(), ledger.Entry{TS: t0.Add(4*time.Hour + time.Minute), Actor: "human:octo", Op: "remove",
+		Pair: "acme/other", Summary: "remove"}); err != nil {
+		t.Fatal(err)
+	}
 	ops := func(r *engine.LogResult) string {
 		var out []string
 		for _, e := range r.Entries {
@@ -262,14 +302,16 @@ func TestLog(t *testing.T) {
 		o    engine.LogOptions
 		want string
 	}{
-		{"newest first", engine.LogOptions{}, "gate/feat-y,promote/feat-x,gate/feat-x,feature start/feat-x,init/"},
+		{"newest first", engine.LogOptions{}, "remove/,gate/feat-y,promote/feat-x,gate/feat-x,feature start/feat-x,init/"},
+		{"pair", engine.LogOptions{Pair: "acme/other"}, "remove/"},
+		{"pair ignores case", engine.LogOptions{Pair: "ACME/Widget", Op: "gate"}, "gate/feat-y,gate/feat-x"},
 		{"feature", engine.LogOptions{Feature: "feat-x"}, "promote/feat-x,gate/feat-x,feature start/feat-x"},
 		{"op is exact", engine.LogOptions{Op: "gate"}, "gate/feat-y,gate/feat-x"},
 		{"op is not a prefix", engine.LogOptions{Op: "gat"}, ""},
 		{"actor prefix", engine.LogOptions{ActorPrefix: "agent:"}, "gate/feat-y,gate/feat-x,feature start/feat-x"},
-		{"actor whole", engine.LogOptions{ActorPrefix: "human:octo"}, "promote/feat-x,init/"},
-		{"since", engine.LogOptions{Since: t0.Add(3 * time.Hour)}, "gate/feat-y,promote/feat-x"},
-		{"limit", engine.LogOptions{Limit: 2}, "gate/feat-y,promote/feat-x"},
+		{"actor whole", engine.LogOptions{ActorPrefix: "human:octo"}, "remove/,promote/feat-x,init/"},
+		{"since", engine.LogOptions{Since: t0.Add(3 * time.Hour)}, "remove/,gate/feat-y,promote/feat-x"},
+		{"limit", engine.LogOptions{Limit: 2}, "remove/,gate/feat-y"},
 	} {
 		res, err := engine.Log(ws, c.o)
 		if err != nil {

@@ -147,7 +147,7 @@ func (a *app) next(err error) []contract.Next {
 		case contract.ForgeError:
 			// feature close deleted the refs, then couldn't close the gate PR.
 			if r, ok := a.result.(*engine.FeatureCloseResult); ok && len(r.Deleted) > 0 {
-				return []contract.Next{{Command: a.gb("log", "--feature", r.Feature, "--op", "feature close"), NeedsHuman: true,
+				return []contract.Next{{Command: a.scoped("log", "--feature", r.Feature, "--op", "feature close"), NeedsHuman: true,
 					Why: "the feature's refs are deleted and the ledger lists them with their SHAs; a person closes its gate draft PR in the shadow repo on GitHub (error.message names it)"}}
 			}
 		case contract.CurateInvalid, contract.CurateConflict, contract.CurateTreeMismatch:
@@ -226,6 +226,14 @@ func (a *app) next(err error) []contract.Next {
 	case *engine.PromoteResult:
 		if r.Preview == nil && r.Applied == nil && r.Plan != nil && r.PlanPath != "" {
 			out = append(out, a.applyNext(r.Plan.ID, true))
+		}
+	case *engine.FeatureCloseResult:
+		if r.Preview != nil {
+			why := "the preview lists what closing deletes; it is merged with no newer commits, so it closes without a console"
+			if r.NeedsConsole {
+				why = "the preview lists what closing deletes; it is " + string(r.State) + ", so a person closes it at the console"
+			}
+			out = append(out, contract.Next{Command: a.scoped("feature", "close", r.Feature), NeedsHuman: r.NeedsConsole, Why: why})
 		}
 	case *engine.UpgradeResult:
 		if r.Preview == nil && r.Audit != nil && a.hasAuditFindings() {

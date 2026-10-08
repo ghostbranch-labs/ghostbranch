@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
+	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/ledger"
 	"github.com/ghostbranch-labs/ghostbranch/internal/plan"
 	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
@@ -52,6 +53,11 @@ func (e *Engine) Remove(ctx context.Context, p workspace.Pair) (res *RemoveResul
 		return nil, nil, contract.New(contract.PairAmbiguous, "no repo %q in workspace %q", p.Public, e.WS.Name).WithField("repo")
 	}
 	p = reg
+	// Before the console, the lock and any change: a refused remove
+	// changes nothing.
+	if err := e.checkPairDir(p); err != nil {
+		return nil, nil, err
+	}
 	gstore, err := e.grants()
 	if err != nil {
 		return nil, nil, err
@@ -148,6 +154,22 @@ func (e *Engine) Remove(ctx context.Context, p workspace.Pair) (res *RemoveResul
 	return res, nil, nil
 }
 
+// checkPairDir refuses a pair whose folder would not be a direct child of
+// the workspace's pairs folder. workspace.json is local and unchecked, and
+// an entry such as ".." would otherwise send RemoveAll at the workspace
+// itself, or further.
+func (e *Engine) checkPairDir(p workspace.Pair) error {
+	dir, key := e.WS.PairDir(p), p.Key()
+	_, _, nameErr := forge.SplitName(p.Public)
+	if nameErr != nil || strings.Contains(key, "..") || strings.ContainsAny(key, `/\`) ||
+		filepath.Dir(dir) != filepath.Join(e.WS.Dir, "pairs") || filepath.Base(dir) != key {
+		return contract.New(contract.Internal,
+			"refusing to remove %q: workspace.json names a repo whose folder %q is not inside %q; fix workspace.json by hand",
+			p.Public, dir, filepath.Join(e.WS.Dir, "pairs"))
+	}
+	return nil
+}
+
 // pairPlans lists the plan files in dir made for public, by path.
 func pairPlans(dir, public string) ([]string, error) {
 	files, err := planFiles(dir)
@@ -221,12 +243,13 @@ func removeSummary(ws string, r *RemoveResult, waivers []string) string {
 // DefaultLogLimit is how many entries log shows unless told otherwise.
 const DefaultLogLimit = 50
 
-// LogOptions filter the ledger. Feature and Op match exactly, ActorPrefix
-// as a prefix; a zero Since is no limit, and Limit 0 is DefaultLogLimit.
+// LogOptions filter the ledger. Feature and Op match exactly, Pair (a
+// public repo) ignoring case, ActorPrefix as a prefix; a zero Since is no
+// limit, and Limit 0 is DefaultLogLimit (the CLI asks for 1 or more).
 type LogOptions struct {
-	Feature, Op, ActorPrefix string
-	Since                    time.Time
-	Limit                    int
+	Feature, Op, ActorPrefix, Pair string
+	Since                          time.Time
+	Limit                          int
 }
 
 type LogResult struct {
@@ -250,6 +273,7 @@ func Log(ws *workspace.Workspace, o LogOptions) (*LogResult, error) {
 		switch {
 		case o.Feature != "" && ent.Feature != o.Feature,
 			o.Op != "" && ent.Op != o.Op,
+			o.Pair != "" && !strings.EqualFold(ent.Pair, o.Pair),
 			!strings.HasPrefix(ent.Actor, o.ActorPrefix),
 			!o.Since.IsZero() && ent.TS.Before(o.Since):
 			continue

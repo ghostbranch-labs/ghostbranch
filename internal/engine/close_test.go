@@ -192,7 +192,7 @@ func TestCloseMergedNeedsNoConsole(t *testing.T) {
 	}
 	validateResult(t, "feature-close.schema.json", res)
 	if res.Feature != "feat-x" || res.State != feature.StateMerged || res.Approval != nil || res.Preview != nil ||
-		res.GatePR == nil || *res.GatePR != gate {
+		res.NeedsConsole || res.GatePR == nil || *res.GatePR != gate {
 		t.Fatalf("close = %+v", res)
 	}
 	if !reflect.DeepEqual(res.Deleted, want) {
@@ -245,7 +245,7 @@ func TestCloseMergedWithTheBranchGone(t *testing.T) {
 	want := h.featureRefs("feat-x", id)
 	h.eng.Approver = nil
 	res, _, err := h.eng.FeatureClose(h.ctx, h.pair, "feat-x")
-	if err != nil || res.State != feature.StateBranchGone || res.Approval != nil {
+	if err != nil || res.State != feature.StateBranchGone || res.Approval != nil || res.NeedsConsole {
 		t.Fatalf("close = %+v %v", res, err)
 	}
 	if _, ok := res.Deleted["refs/heads/feat-x"]; ok || !reflect.DeepEqual(res.Deleted, want) {
@@ -360,7 +360,7 @@ func TestCloseUnpublishedNeedsAConsole(t *testing.T) {
 				t.Fatalf("close: %v", err)
 			}
 			validateResult(t, "feature-close.schema.json", res)
-			if res.State != row.state || res.Approval == nil || res.Approval.Kind != "console" {
+			if res.State != row.state || res.Approval == nil || res.Approval.Kind != "console" || !res.NeedsConsole {
 				t.Fatalf("close = %+v", res)
 			}
 			if !reflect.DeepEqual(res.Deleted, want) {
@@ -621,6 +621,35 @@ func TestCloseReportsAGatePRItCouldNotClose(t *testing.T) {
 	}
 }
 
+// GitHub closes a gate PR whose head branch was deleted, and that can race
+// ours: our close fails, but the PR is closed. The close succeeds and
+// reports the gate PR as closed.
+func TestCloseAcceptsAGatePRGitHubClosedFirst(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	pr, id := h.publish("feat-x")
+	h.forge.SetPRMerged(publicName, pr)
+	gate := h.gatePR("feat-x")
+	want := h.featureRefs("feat-x", id)
+	h.forge.ClosePRErr = errors.New("boom")
+	observe := h.eng.OnPush
+	h.eng.OnPush = func(op, remote string, specs []string) {
+		observe(op, remote, specs)
+		if op == "feature close" {
+			h.forge.ClosePR(shadowName, gate)
+		}
+	}
+	res, _, err := h.eng.FeatureClose(h.ctx, h.pair, "feat-x")
+	if err != nil || res.GatePR == nil || *res.GatePR != gate || !reflect.DeepEqual(res.Deleted, want) {
+		t.Fatalf("close = %+v %v", res, err)
+	}
+	es := h.ledger()
+	if last := es[len(es)-1]; last.Op != "feature close" || last.ExitCode != 0 || !reflect.DeepEqual(last.Refs, want) {
+		t.Fatalf("ledger = %+v", last)
+	}
+}
+
 func TestCloseUnknownFeature(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
@@ -638,7 +667,7 @@ func TestClosePlanChangesNothing(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	h.init()
-	_, id := h.publish("feat-x")
+	pr, id := h.publish("feat-x")
 	gate := h.gatePR("feat-x")
 	before := h.shadowRefs()
 	want := h.featureRefs("feat-x", id)
@@ -648,7 +677,7 @@ func TestClosePlanChangesNothing(t *testing.T) {
 	h.eng.DryRun = true
 	res, _, err := h.eng.FeatureClose(h.ctx, h.pair, "feat-x")
 	h.eng.DryRun = false
-	if err != nil || res.Preview == nil || len(res.Deleted) != 0 || res.GatePR != nil || res.Approval != nil {
+	if err != nil || res.Preview == nil || len(res.Deleted) != 0 || res.GatePR != nil || res.Approval != nil || !res.NeedsConsole {
 		t.Fatalf("close --plan = %+v %v", res, err)
 	}
 	validateResult(t, "feature-close.schema.json", res)
@@ -674,6 +703,14 @@ func TestClosePlanChangesNothing(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(h.eng.WS.PlansDir(), id+".json")); err != nil {
 		t.Fatalf("close --plan removed the plan file: %v", err)
+	}
+	// Once merged and unmoved, the preview says no console is needed.
+	h.forge.SetPRMerged(publicName, pr)
+	h.eng.DryRun = true
+	res, _, err = h.eng.FeatureClose(h.ctx, h.pair, "feat-x")
+	h.eng.DryRun = false
+	if err != nil || res.Preview == nil || res.State != feature.StateMerged || res.NeedsConsole || res.Approval != nil {
+		t.Fatalf("close --plan of a merged feature = %+v %v", res, err)
 	}
 }
 
