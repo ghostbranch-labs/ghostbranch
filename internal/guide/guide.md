@@ -25,8 +25,9 @@ main, green CI, and a leak scan of exactly what will be published.
 
 ## Choosing the history
 
-- **`preserve` (default):** each feature commit goes public as it is, minus overlay paths and internal
-  sections; commits left empty are dropped. Tidy history on your feature branch first if it needs it.
+- **`preserve` (default unless `promote.default_mode` says otherwise):** each feature commit goes public
+  as it is, minus overlay paths and internal sections; commits left empty are dropped. Tidy history on
+  your feature branch first if it needs it.
 - **`squash`:** one commit: `--mode squash -m "<message>"`.
 - **`curated`:** write a JSON file from the gate result's `"commits"` (each has `source`, `subject`,
   `author`, `files`) to group, reorder and reword:
