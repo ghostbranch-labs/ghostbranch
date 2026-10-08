@@ -28,7 +28,9 @@ type PromoteOptions struct {
 	Message  string
 	Title    string
 	Body     string
-	Branch   string // public branch name; defaults to the feature name
+	Branch   string       // public branch name; defaults to the feature name
+	Curate   string       // path to the --curate file (curated mode)
+	Groups   []plan.Group // the --curate file's groups, as read (ValidatePromoteOptions loads them)
 	PlanOnly bool
 	Yes      bool
 }
@@ -96,8 +98,8 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	if mode != config.ModeSquash && strings.TrimSpace(opt.Message) != "" {
 		return res, warns, messageNotSquash(mode)
 	}
-	if mode == config.ModeCurated {
-		return res, warns, contract.New(contract.Internal, "curated mode arrives in Task 8")
+	if err := curateFlags(mode, opt.Curate); err != nil {
+		return res, warns, err
 	}
 	var msg string
 	if mode == config.ModeSquash {
@@ -127,6 +129,19 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 		}
 		if len(sources) > 1 {
 			return res, warns, contract.New(contract.MissingInput, "this feature has %d commits, so its PR needs a title: pass --title", len(sources)).WithField("title")
+		}
+	}
+	// A bad --curate file fails here, before any CI runs.
+	if mode == config.ModeCurated {
+		if len(opt.Groups) > 1 && strings.TrimSpace(opt.Title) == "" {
+			return res, warns, contract.New(contract.MissingInput, "the --curate file has %d groups, so the PR needs a title: pass --title", len(opt.Groups)).WithField("title")
+		}
+		sources, err := g.SourceCommits(ctx, pm, head)
+		if err != nil {
+			return res, warns, internalErr(err, "list the feature's commits")
+		}
+		if _, err := ResolveGroups(opt.Groups, sources); err != nil {
+			return res, warns, err
 		}
 	}
 
@@ -198,7 +213,16 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 		return res, warns, contract.New(contract.Internal, "the gated tree %s no longer matches its candidate (%s)", short(T), short(T2))
 	}
 
-	links, dropped, err := deriveChain(ctx, g, cfg, chainInput{mode: mode, pm: pm, T: T, tEntries: entries, commits: commits, message: msg}, nil)
+	// The gate's chain is the feature as it was gated: resolve the groups
+	// against it (the same commits unless the feature moved).
+	var groups []plan.Group
+	if mode == config.ModeCurated {
+		if groups, err = ResolveGroups(opt.Groups, sourcesOf(commits)); err != nil {
+			return res, warns, err
+		}
+	}
+	links, dropped, err := deriveChain(ctx, g, cfg, chainInput{mode: mode, pm: pm, T: T, tEntries: entries, commits: commits, message: msg, groups: groups},
+		func(cs []string, onto string) ([]string, error) { return e.replay(ctx, pc, cs, onto) })
 	if err != nil {
 		return res, warns, err
 	}
@@ -270,7 +294,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 		return res, warns, internalErr(err, "make a plan id")
 	}
 	pl := plan.Plan{SchemaVersion: plan.SchemaVersion, ID: planID, Kind: "promote", Actor: e.Actor, CreatedAt: e.now(),
-		Pair: plan.Pair{Public: p.Public, Shadow: p.Shadow}, Feature: opt.Feature, Mode: mode,
+		Pair: plan.Pair{Public: p.Public, Shadow: p.Shadow}, Feature: opt.Feature, Mode: mode, Curate: groups,
 		Fingerprint: plan.Fingerprint{PublicMain: pm, FeatureHead: head, Overlay: O, GateCandidate: C},
 		Publish: plan.Publish{Commit: P, Tree: T, Parent: pm, TargetBranch: branch, PR: plan.PR{Title: title, Body: body},
 			Commits: chain, DroppedEmpty: dropped},
@@ -321,11 +345,35 @@ func ValidatePromoteOptions(opt *PromoteOptions) error {
 	if opt.Mode != "" && opt.Mode != config.ModeSquash && strings.TrimSpace(opt.Message) != "" {
 		return messageNotSquash(opt.Mode)
 	}
+	if opt.Mode != "" {
+		if err := curateFlags(opt.Mode, opt.Curate); err != nil {
+			return err
+		}
+	}
+	if opt.Curate != "" {
+		gs, err := LoadCurate(opt.Curate)
+		if err != nil {
+			return err
+		}
+		opt.Groups = gs
+	}
 	branch := opt.Branch
 	if branch == "" {
 		branch = opt.Feature
 	}
 	return feature.ValidateName(branch, "branch")
+}
+
+// curateFlags checks --curate against the resolved mode: curated mode
+// needs the file, and no other mode takes one.
+func curateFlags(mode, curate string) error {
+	switch {
+	case curate != "" && mode != config.ModeCurated:
+		return contract.New(contract.BadFlag, "--curate applies only to --mode curated").WithField("curate")
+	case mode == config.ModeCurated && curate == "":
+		return contract.New(contract.MissingInput, "curated mode needs a --curate file").WithField("curate")
+	}
+	return nil
 }
 
 // messageNotSquash is BAD_FLAG for -m in a mode other than squash.

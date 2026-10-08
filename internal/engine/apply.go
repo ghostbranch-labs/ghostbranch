@@ -183,8 +183,27 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 	}
 	// The plan file is local and unsigned: derive the chain again from the
 	// shadow repo's objects, and refuse a plan that names any other.
+	// A curated plan replays its groups again; any other plan has none.
+	curateStale := contract.New(contract.PlanStale,
+		"plan %s's curate groups do not fit its mode %s; make a new plan with ghostbranch promote", pl.ID, pl.Mode).
+		WithDetails(stale(pl, []string{"curate"}))
+	if (pl.Mode == config.ModeCurated) != (pl.Curate != nil) {
+		return nil, warns, curateStale
+	}
+	for _, gr := range pl.Curate {
+		if len(gr.From) == 0 {
+			return nil, warns, curateStale
+		}
+	}
+	// The groups name each gated commit exactly once, by its full SHA.
+	if pl.Curate != nil {
+		if resolved, err := ResolveGroups(pl.Curate, sourcesOf(m.Gate.Commits)); err != nil || !reflect.DeepEqual(resolved, pl.Curate) {
+			return nil, warns, curateStale
+		}
+	}
 	links, dropped, err := deriveChain(ctx, g, cfg, chainInput{mode: pl.Mode, pm: pm, T: pl.Publish.Tree, tEntries: tEntries,
-		commits: m.Gate.Commits, groups: pl.Curate}, nil)
+		commits: m.Gate.Commits, groups: pl.Curate},
+		func(cs []string, onto string) ([]string, error) { return e.replay(ctx, pc, cs, onto) })
 	if err != nil {
 		return nil, warns, err
 	}

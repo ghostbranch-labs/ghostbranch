@@ -5,6 +5,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"sort"
@@ -37,7 +38,7 @@ type chainInput struct {
 	tEntries []gitx.TreeEntry     // T's entries
 	commits  []feature.GateCommit // the gate's rebased chain, oldest first
 	message  string               // squash only
-	groups   []plan.Group         // curated only, From resolved to full source SHAs (Task 8)
+	groups   []plan.Group         // curated only, From resolved to full source SHAs
 }
 
 // replayFunc cherry-picks commits onto onto in a throwaway worktree (Engine.replay).
@@ -89,7 +90,83 @@ func deriveChain(ctx context.Context, g *gitx.Git, cfg config.Config, in chainIn
 			prev = tree
 		}
 	case config.ModeCurated:
-		return nil, nil, contract.New(contract.Internal, "curated mode arrives in Task 8")
+		// Replay the gate's rebased commits in the groups' order on public
+		// main, in a throwaway worktree. Each group publishes the tree at
+		// its last commit. Those intermediate trees never ran CI: they are
+		// stripped here and scanned with every other link.
+		rebasedOf := map[string]string{}
+		for _, c := range in.commits {
+			rebasedOf[c.Source] = c.Rebased
+		}
+		var order []string
+		ends := make([]int, len(in.groups)) // index in order of each group's last commit
+		for i, gr := range in.groups {
+			if len(gr.From) == 0 {
+				return nil, nil, contract.New(contract.Internal, "curate group %d names no commits", i)
+			}
+			for _, s := range gr.From {
+				r, ok := rebasedOf[s]
+				if !ok {
+					return nil, nil, contract.New(contract.Internal, "curate group %d names %s, which the gate did not replay", i, short(s))
+				}
+				order = append(order, r)
+			}
+			ends[i] = len(order) - 1
+		}
+		if replay == nil {
+			return nil, nil, contract.New(contract.Internal, "curated mode needs a replay")
+		}
+		replayed, err := replay(order, in.pm)
+		if err != nil {
+			var ce *gitx.ConflictError
+			if errors.As(err, &ce) {
+				src, group := "", -1
+				for i, r := range order {
+					if r == ce.Commit {
+						src = sourceOfRebased(in.commits, r)
+						group = groupOf(ends, i)
+						break
+					}
+				}
+				return nil, nil, contract.New(contract.CurateConflict,
+					"replaying the curated groups in order: commit %s (group %d) conflicts in %s", short(src), group, strings.Join(ce.Files, ", ")).
+					WithDetails(map[string]any{"commit": src, "group": group, "files": ce.Files})
+			}
+			return nil, nil, err
+		}
+		if len(replayed) != len(order) {
+			return nil, nil, contract.New(contract.Internal, "the curated replay made %d commits for %d", len(replayed), len(order))
+		}
+		prev := base
+		for i, gr := range in.groups {
+			tipSHA := replayed[ends[i]]
+			tree, entries, err := publishedTree(ctx, g, tipSHA, cfg)
+			if err != nil {
+				if ce := contract.From(err); ce.Code == contract.MarkerInvalid {
+					if ce.Details == nil {
+						ce.Details = map[string]any{}
+					}
+					ce.Details["commit"] = gr.From[len(gr.From)-1]
+				}
+				return nil, nil, err
+			}
+			if tree == prev {
+				dropped = append(dropped, gr.From...)
+				continue
+			}
+			author, err := g.CommitAuthor(ctx, rebasedOf[gr.From[0]])
+			if err != nil {
+				return nil, nil, internalErr(err, "read a commit author")
+			}
+			links = append(links, link{sources: gr.From, tree: tree, entries: entries, message: gr.Message, author: author})
+			prev = tree
+		}
+		if len(links) > 0 && links[len(links)-1].tree != in.T {
+			last := links[len(links)-1].tree
+			return nil, nil, contract.New(contract.CurateTreeMismatch,
+				"the curated order ends on tree %s, but the gate's CI tested %s; keep commits that touch the same lines in order", short(last), short(in.T)).
+				WithDetails(map[string]any{"tree": last, "gated_tree": in.T})
+		}
 	default:
 		return nil, nil, contract.New(contract.Internal, "unknown history mode %q", in.mode)
 	}
@@ -102,6 +179,27 @@ func deriveChain(ctx context.Context, g *gitx.Git, cfg config.Config, in chainIn
 		return nil, nil, contract.New(contract.Internal, "the %s chain ends at tree %s, not the gated tree %s", in.mode, short(last), short(in.T))
 	}
 	return links, dropped, nil
+}
+
+// sourceOfRebased is the feature commit the gate rebased into r.
+func sourceOfRebased(cs []feature.GateCommit, r string) string {
+	for _, c := range cs {
+		if c.Rebased == r {
+			return c.Source
+		}
+	}
+	return ""
+}
+
+// groupOf is the group whose commits hold index i of the replay order,
+// given each group's last index in ends.
+func groupOf(ends []int, i int) int {
+	for gi, end := range ends {
+		if i <= end {
+			return gi
+		}
+	}
+	return -1
 }
 
 func sourcesOf(cs []feature.GateCommit) []string {
