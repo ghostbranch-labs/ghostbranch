@@ -509,7 +509,7 @@ func TestPromoteScansEveryCommitMessage(t *testing.T) {
 	}
 }
 
-func TestPromoteSavesThePlanBeforePushingItsRef(t *testing.T) {
+func TestPromoteLeavesNoPlanWhenItsRefCannotBePushed(t *testing.T) {
 	t.Parallel()
 	h := gated(t)
 	h.installShadowHook("GH013: refused")

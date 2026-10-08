@@ -180,6 +180,9 @@ func TestApplyScansTheStoredCommitMessage(t *testing.T) {
 	if _, ok, _ := h.pubGit.Resolve(h.ctx, "refs/heads/feat-x"); ok {
 		t.Fatalf("a leaking commit message was published: %v", ce)
 	}
+	if ce.Details["mode"] != "squash" || ce.Details["public"] != publicName || ce.Details["branch"] != "feat-x" {
+		t.Fatalf("details = %v", ce.Details)
+	}
 }
 
 // DEFERRED (sp2): approval is asked only after the plan is verified.
@@ -254,6 +257,19 @@ func plannedHistory(t *testing.T) (*harness, *plan.Plan) {
 // Review Focus 5.
 func TestApplyRefusesATamperedChain(t *testing.T) {
 	t.Parallel()
+	refused := func(t *testing.T, h *harness, pl *plan.Plan, field string) {
+		t.Helper()
+		_, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: pl.ID, Yes: true})
+		if ce := wantCode(t, err, contract.PlanStale); !reflect.DeepEqual(ce.Details["moved"], []string{field}) {
+			t.Fatalf("details = %v", ce.Details)
+		}
+		if len(h.approver.asked) != 0 {
+			t.Fatal("asked a person before refusing")
+		}
+		if _, ok, _ := h.pubGit.Resolve(h.ctx, "refs/heads/feat-x"); ok {
+			t.Fatal("a tampered plan was published")
+		}
+	}
 	t.Run("plan file names another middle tree", func(t *testing.T) {
 		t.Parallel()
 		h, pl := plannedHistory(t)
@@ -261,24 +277,40 @@ func TestApplyRefusesATamperedChain(t *testing.T) {
 		if _, err := plan.Save(h.eng.WS.PlansDir(), *pl); err != nil {
 			t.Fatal(err)
 		}
-		_, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: pl.ID, Yes: true})
-		_ = wantCode(t, err, contract.PlanStale)
-		if len(h.approver.asked) != 0 {
-			t.Fatal("asked a person before refusing")
-		}
+		refused(t, h, pl, "publish.commits")
 	})
 	t.Run("plan ref moved to a different chain", func(t *testing.T) {
 		t.Parallel()
 		h, pl := plannedHistory(t)
 		sg := h.shadowGit()
 		who := testutil.Author(9)
-		mid, _ := sg.CommitTree(h.ctx, pl.Publish.Commits[1].Tree, []string{pl.Publish.Parent}, "swapped", who, who)
-		forged, _ := sg.CommitTree(h.ctx, pl.Publish.Commits[1].Tree, []string{mid}, "add b", who, who)
-		_ = sg.UpdateRef(h.ctx, "refs/ghostbranch/plans/"+pl.ID, forged)
+		mid, err := sg.CommitTree(h.ctx, pl.Publish.Commits[1].Tree, []string{pl.Publish.Parent}, "swapped", who, who)
+		if err != nil {
+			t.Fatal(err)
+		}
+		forged, err := sg.CommitTree(h.ctx, pl.Publish.Commits[1].Tree, []string{mid}, "add b", who, who)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := sg.UpdateRef(h.ctx, "refs/ghostbranch/plans/"+pl.ID, forged); err != nil {
+			t.Fatal(err)
+		}
 		pl.Publish.Commit = forged
-		_, _ = plan.Save(h.eng.WS.PlansDir(), *pl)
-		_, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: pl.ID, Yes: true})
-		_ = wantCode(t, err, contract.PlanStale)
+		if _, err := plan.Save(h.eng.WS.PlansDir(), *pl); err != nil {
+			t.Fatal(err)
+		}
+		refused(t, h, pl, "publish.commits")
+	})
+	// The approval's file list is measured from the parent: a plan file
+	// whose parent is the tip would show nothing changing.
+	t.Run("plan file names the tip as its parent", func(t *testing.T) {
+		t.Parallel()
+		h, pl := plannedHistory(t)
+		pl.Publish.Parent = pl.Publish.Commit
+		if _, err := plan.Save(h.eng.WS.PlansDir(), *pl); err != nil {
+			t.Fatal(err)
+		}
+		refused(t, h, pl, "publish.parent")
 	})
 }
 
@@ -286,7 +318,9 @@ func TestApplyRefusesAnOlderPlanVersion(t *testing.T) {
 	t.Parallel()
 	h, pl := plannedHistory(t)
 	pl.SchemaVersion = "0.4"
-	_, _ = plan.Save(h.eng.WS.PlansDir(), *pl)
+	if _, err := plan.Save(h.eng.WS.PlansDir(), *pl); err != nil {
+		t.Fatal(err)
+	}
 	_, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: pl.ID, Yes: true})
 	if ce := wantCode(t, err, contract.PlanStale); !reflect.DeepEqual(ce.Details["moved"], []string{"schema_version"}) {
 		t.Fatalf("details = %v", ce.Details)

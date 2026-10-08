@@ -88,7 +88,7 @@ func (e *Engine) authorize(ctx context.Context, p workspace.Pair, planID, summar
 
 // planSummary is the "what goes public" view shown before confirming.
 // authors holds each public commit's author, read from the commit itself,
-// not the plan file.
+// not the plan file; pl.Publish.Parent must be the verified public main.
 func planSummary(pl plan.Plan, files []string, authors []string, waived []WaivedFinding, warnings []contract.Warning) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "About to publish to %s:\n", pl.Pair.Public)

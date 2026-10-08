@@ -200,6 +200,13 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 			return nil, warns, chainStale
 		}
 	}
+	// The chain publishes on public main; the approval's file list is
+	// measured from there, so the plan file's parent must be it.
+	if pl.Publish.Parent != pm {
+		return nil, warns, contract.New(contract.PlanStale,
+			"plan %s names parent %s, not public main %s; make a new plan with ghostbranch promote", pl.ID, short(pl.Publish.Parent), short(pm)).
+			WithDetails(stale(pl, []string{"publish.parent"}))
+	}
 	// The plan ref is the chain's tip: walk back from it.
 	at := P
 	for i := len(commits) - 1; i >= 0; i-- {
@@ -268,12 +275,13 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 		res.Preview = pv
 		return res, warns, nil
 	}
-	files, err := g.DiffNames(ctx, pl.Publish.Parent, P)
+	files, err := g.DiffNames(ctx, pm, P)
 	if err != nil {
 		return nil, warns, internalErr(err, "list the files going public")
 	}
 	summary := pl
 	summary.Publish.Commits = shown // subjects as stored in the commits
+	summary.Publish.Parent = pm     // the verified public main
 	if res.Approval, err = e.authorize(ctx, pc.pair, pl.ID, planSummary(summary, files, authors, waived, rep.Warnings), yes); err != nil {
 		return nil, warns, err
 	}
