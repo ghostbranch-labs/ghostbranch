@@ -10,12 +10,12 @@ main, green CI, and a leak scan of exactly what will be published.
 
 0. **Always run `ghostbranch sync --repo <public> --json` first**, before `feature start` or resuming
    a feature: features start from shadow main. Sync never writes to public. New repo? *Set up a repo*.
-1. `ghostbranch feature start <name> --json` creates the feature branch in the shadow repo.
+1. `ghostbranch feature start <name> --repo <public> --json` creates the feature branch in the shadow repo.
 2. Run the command in `data.checkout`. It fetches the branch from the shadow repo (in a checkout of the
    public repo, usually a remote named `shadow`) and switches to it. Commit there, and push **to the
    shadow repo only** (`git push shadow <name>`), never to `origin`.
-3. `ghostbranch gate <name> --json` rebases on public main, scans for leaks and runs CI.
-4. `ghostbranch promote <name> --plan --json` publishes in the repo's `promote.default_mode`
+3. `ghostbranch gate <name> --repo <public> --json` rebases on public main, scans for leaks and runs CI.
+4. `ghostbranch promote <name> --repo <public> --plan --json` publishes in the repo's `promote.default_mode`
    (`preserve` unless set); pass `--mode` to choose. With more than one commit, add
    `--title "<PR title>"`, written by you. It saves a plan of exactly what goes public: every commit,
    file, author and the PR text.
@@ -63,6 +63,20 @@ main, green CI, and a leak scan of exactly what will be published.
    scheduled sync, whether they need a `GHOSTBRANCH_SYNC_TOKEN` secret (see *Keeping up with public*).
    Guarded jobs run in the shadow repo on unreleased code: never deploy or publish credentials there.
 
+## Lifecycle
+
+- `ghostbranch status --repo <public> --json` shows the pair's health and every feature's state:
+  `draft`, `in_review`, `gate_passed`, `published`, `merged`, `merged_moved`, `pr_closed`,
+  `branch_gone`, `abandoned`. `ghostbranch feature list` and `feature show <name>` give the same by feature.
+- `ghostbranch sync` closes features whose public PR merged and whose branch hasn't moved: it deletes
+  their shadow branches and says so in `data.closed`. `--no-close` skips that.
+- `merged_moved`, `pr_closed` and an unmerged `branch_gone` are for a person: `status` gives
+  `ghostbranch feature close <name> --repo <public>` with `needs_human`. Closing deletes the feature's
+  shadow branches and needs a person at a console unless the feature is merged and unmoved.
+- `ghostbranch feature abandon <name>` parks a feature and deletes nothing; `--undo` brings it back.
+- `ghostbranch log` shows the history (`--feature`, `--op`, `--actor`, `--since`, `--limit`).
+- Never close or abandon a feature a person is still working on.
+
 ## Keeping up with public
 
 - Sync is manual by default. When a result warns `SHADOW_BEHIND`, run `ghostbranch sync` (fast-forward
@@ -91,6 +105,7 @@ main, green CI, and a leak scan of exactly what will be published.
 ## Rules
 
 - Always pass `--json`. Act on `exit_code`, `error.code` and `next`; don't parse the text.
+  JSON is on stdout and progress on stderr: never merge the two streams (no `2>&1`).
 - Run `next` commands exactly as given. Add the flags listed in `needs_input` yourself.
 - **When `needs_human` is true, stop.** Tell the person the exact command and why, and don't look
   for another way.

@@ -29,7 +29,8 @@ func TestRenderListsEveryCodeFromTheRegistry(t *testing.T) {
 	// 270: the history-modes section (sub-project 5a) added about 18 lines;
 	// 272: the adopt sentence in *Set up a repo*, with the SHADOW_CREATE_DENIED hand-off kept whole.
 	// 274: two sub-project 5b error codes (UPGRADE_NEEDED, FEATURE_MOVED).
-	if n := strings.Count(out, "\n"); n > 274 {
+	// 289: the lifecycle section, --repo in the loop, and the stdout/stderr note (sub-project 5b).
+	if n := strings.Count(out, "\n"); n > 289 {
 		t.Errorf("the guide is %d lines; keep it short (spec: about 150 plus the tables)", n)
 	}
 }
@@ -196,7 +197,7 @@ func TestGuideSaysToSyncBeforeEveryFeature(t *testing.T) {
 func TestGuideTeachesHistoryModes(t *testing.T) {
 	out := guide.Render(contract.Registry())
 	for _, want := range []string{"(`preserve` unless set); pass `--mode` to choose", "--curate", `"commits"`, "author_email", "--title", "--mode squash",
-		"`ghostbranch promote <name> --plan --json` publishes in the repo's `promote.default_mode`",
+		"`ghostbranch promote <name> --repo <public> --plan --json` publishes in the repo's `promote.default_mode`",
 		"Never waive a finding yourself; a person may waive a false positive at their console.",
 		"`git push --force-with-lease <shadow remote> <name>`", "introduce or change it"} {
 		if !strings.Contains(out, want) {
@@ -217,6 +218,27 @@ func TestGuideTellsAgentsToAdoptAnExistingShadowRepo(t *testing.T) {
 		// The SHADOW_CREATE_DENIED hand-off (whitespace-normalised here, as the guide wraps lines).
 		"show the person `error.details.steps`",
 		"(the command in `next`; its `needs_human` stands for their steps 1 and 2)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the guide lacks %q", want)
+		}
+	}
+}
+
+func TestGuideTeachesTheLifecycle(t *testing.T) {
+	out := strings.Join(strings.Fields(guide.Render(contract.Registry())), " ")
+	for _, want := range []string{
+		"## Lifecycle",
+		"`ghostbranch status --repo <public> --json` shows the pair's health and every feature's state",
+		"`ghostbranch sync` closes features whose public PR merged and whose branch hasn't moved",
+		"`ghostbranch feature close <name> --repo <public>` with `needs_human`",
+		"needs a person at a console unless the feature is merged and unmoved",
+		"`ghostbranch feature abandon <name>` parks a feature and deletes nothing",
+		"`ghostbranch log` shows the history",
+		"Never close or abandon a feature a person is still working on.",
+		"JSON is on stdout and progress on stderr: never merge the two streams",
+		"`ghostbranch feature start <name> --repo <public> --json`",
+		"`ghostbranch gate <name> --repo <public> --json`",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the guide lacks %q", want)
