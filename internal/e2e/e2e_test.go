@@ -185,16 +185,17 @@ func TestSandboxLoop(t *testing.T) {
 	reset(t, tok)
 
 	run, home := newRunner(t, tok)
-	commit := func(branch string, files map[string]string) {
+	commit := func(branch string, files map[string]string) string {
 		t.Helper()
 		g := authed(t, tok)
 		if err := g.Fetch(ctx, "shadow", "+refs/heads/"+branch+":refs/heads/"+branch); err != nil {
 			t.Fatal(err)
 		}
-		testutil.Commit(t, g, branch, "e2e work on "+branch, files)
+		sha := testutil.Commit(t, g, branch, "e2e work on "+branch, files)
 		if err := g.Push(ctx, "shadow", gitx.PushOptions{}, "refs/heads/"+branch+":refs/heads/"+branch); err != nil {
 			t.Fatal(err)
 		}
+		return sha
 	}
 	runID := time.Now().UTC().Format("20060102t150405")
 
@@ -277,6 +278,124 @@ func TestSandboxLoop(t *testing.T) {
 		t.Fatalf("internal.txt was published as %q (%v)", blob, err)
 	}
 
+	// Preserve: three feature commits, the middle one only an overlay file.
+	// The overlay-only commit is dropped, so two commits reach public, each
+	// authored by the noreply address.
+	hist := "hist-" + runID
+	run(0, "feature", "start", hist)
+	commit(hist, map[string]string{"a.txt": "a\n"})
+	commit(hist, map[string]string{".ghostbranch/notes.md": "more private notes\n"})
+	commit(hist, map[string]string{"b.txt": "b\n"})
+	run(0, "gate", hist)
+	res = run(0, "promote", hist, "--title", "History for "+runID, "--plan")
+	planID = res["data"].(map[string]any)["plan"].(map[string]any)["id"].(string)
+	run(0, "apply", planID, "--yes")
+	fetchPublished := func(branch, local string) {
+		t.Helper()
+		if err := g.Fetch(ctx, "public", "+refs/heads/main:refs/heads/main"); err != nil {
+			t.Fatal(err)
+		}
+		if err := g.Fetch(ctx, "public", "+refs/heads/"+branch+":refs/heads/"+local); err != nil {
+			t.Fatalf("published branch %s missing: %v", branch, err)
+		}
+	}
+	fetchPublished(hist, "published-hist")
+	if n, err := g.Run(ctx, "rev-list", "--count", "main..published-hist"); err != nil || strings.TrimSpace(n) != "2" {
+		t.Fatalf("preserve: %q commits on top of main, want 2 (%v)", n, err)
+	}
+	emails, err := g.Run(ctx, "log", "--format=%ae%n%ce", "main..published-hist")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, email := range strings.Fields(emails) {
+		if !strings.HasSuffix(email, "@users.noreply.github.com") {
+			t.Errorf("preserve: public commit email %q does not end in @users.noreply.github.com", email)
+		}
+	}
+	histTree, err := g.ListTree(ctx, "refs/heads/published-hist")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range histTree {
+		if set.Match(e.Path) {
+			t.Fatalf("preserve: overlay path %s reached the public repo", e.Path)
+		}
+	}
+
+	// Curated: two independent commits, published in reversed order under new
+	// messages from a curate file written from the gate's commit list.
+	cur := "cur-" + runID
+	run(0, "feature", "start", cur)
+	commit(cur, map[string]string{"c1.txt": "one\n"})
+	commit(cur, map[string]string{"c2.txt": "two\n"})
+	curGate := run(0, "gate", cur)["data"].(map[string]any)
+	srcs, _ := curGate["commits"].([]any)
+	if len(srcs) != 2 {
+		t.Fatalf("curated: gate lists %d commits, want 2: %v", len(srcs), curGate["commits"])
+	}
+	srcSHA := func(i int) string { return srcs[i].(map[string]any)["source"].(string) }
+	curateJSON, err := json.Marshal(map[string]any{"commits": []map[string]any{
+		{"from": []string{srcSHA(1)}, "message": "Add c2 for " + runID},
+		{"from": []string{srcSHA(0)}, "message": "Add c1 for " + runID},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	curateFile := filepath.Join(t.TempDir(), "curate.json")
+	if err := os.WriteFile(curateFile, curateJSON, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res = run(0, "promote", cur, "--mode", "curated", "--curate", curateFile, "--title", "Curated for "+runID, "--plan")
+	planID = res["data"].(map[string]any)["plan"].(map[string]any)["id"].(string)
+	run(0, "apply", planID, "--yes")
+	fetchPublished(cur, "published-cur")
+	subjects, err := g.Run(ctx, "log", "--reverse", "--format=%s", "main..published-cur")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantSubjects := "Add c2 for " + runID + "\nAdd c1 for " + runID
+	if strings.TrimSpace(subjects) != wantSubjects {
+		t.Fatalf("curated: public subjects (oldest first) = %q, want %q", subjects, wantSubjects)
+	}
+
+	// History leak: the secret is added in commit 1 and deleted in commit 2, so
+	// the tip is clean but the history is not. Preserve must refuse it.
+	hleak := "hleak-" + runID
+	run(0, "feature", "start", hleak)
+	leakSHA := commit(hleak, map[string]string{"config.env": "TOKEN=" + testutil.FakeGitHubToken() + "\n"})
+	commit(hleak, map[string]string{"config.env": testutil.Delete, "ok.txt": "ok\n"})
+	m = run(3, "gate", hleak)
+	lerr := m["error"].(map[string]any)
+	if lerr["code"] != "LEAK_FOUND" {
+		t.Fatalf("history leak: want LEAK_FOUND: %v", m)
+	}
+	ldet, _ := lerr["details"].(map[string]any)
+	if ldet["mode"] != "preserve" {
+		t.Fatalf("history leak: details.mode = %v, want preserve: %v", ldet["mode"], m)
+	}
+	var sawLeakCommit bool
+	findings, _ := ldet["findings"].([]any)
+	for _, f := range findings {
+		cs, _ := f.(map[string]any)["commits"].([]any)
+		for _, c := range cs {
+			sawLeakCommit = sawLeakCommit || c == leakSHA
+		}
+	}
+	if !sawLeakCommit {
+		t.Fatalf("history leak: no finding names commit %s: %v", leakSHA, ldet["findings"])
+	}
+	m = run(3, "promote", hleak, "--title", "t", "--yes")
+	if m["error"].(map[string]any)["code"] != "LEAK_FOUND" {
+		t.Fatalf("promote of a history leak: want LEAK_FOUND: %v", m)
+	}
+	refs, err := g.LsRemote(ctx, "public")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := refs["refs/heads/"+hleak]; ok {
+		t.Fatal("a history leak reached the public repo")
+	}
+
 	leaky := "leak-" + runID
 	run(0, "feature", "start", leaky)
 	commit(leaky, map[string]string{"config.env": "TOKEN=" + testutil.FakeGitHubToken() + "\n"})
@@ -288,7 +407,7 @@ func TestSandboxLoop(t *testing.T) {
 	if m["error"].(map[string]any)["code"] != "LEAK_FOUND" {
 		t.Fatalf("promote of a leaking feature: want LEAK_FOUND: %v", m)
 	}
-	refs, err := g.LsRemote(ctx, "public")
+	refs, err = g.LsRemote(ctx, "public")
 	if err != nil {
 		t.Fatal(err)
 	}
