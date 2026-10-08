@@ -128,6 +128,17 @@ func (a *app) next(err error) []contract.Next {
 				}
 				return []contract.Next{{Command: a.gb(args...), Why: "the repos moved since the plan was made; make a new plan", NeedsInput: modeInputs(mode)}}
 			}
+		case contract.FeatureMoved:
+			if f, _ := ce.Details["feature"].(string); f != "" {
+				return []contract.Next{{Command: a.scoped("feature", "show", f),
+					Why: "the feature changed while it was being closed and nothing was deleted; look at it again before closing it"}}
+			}
+		case contract.ForgeError:
+			// feature close deleted the refs, then couldn't close the gate PR.
+			if r, ok := a.result.(*engine.FeatureCloseResult); ok && len(r.Deleted) > 0 {
+				return []contract.Next{{Command: a.gb("log", "--feature", r.Feature, "--op", "feature close"), NeedsHuman: true,
+					Why: "the feature's refs are deleted and the ledger lists them with their SHAs; a person closes its gate draft PR in the shadow repo on GitHub (error.message names it)"}}
+			}
 		case contract.CurateInvalid, contract.CurateConflict, contract.CurateTreeMismatch:
 			why := map[contract.Code]string{
 				contract.CurateInvalid:      "fix the --curate file (error.details lists the problem SHAs; the gate result lists the feature's commits) and run this again",

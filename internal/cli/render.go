@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -285,6 +286,34 @@ func human(r any) string {
 		featureTable(&b, v.Features)
 	case *engine.FeatureShowResult:
 		featureShowText(&b, v)
+	case *engine.FeatureAbandonResult:
+		switch {
+		case v.Preview != nil:
+			previewText(&b, v.Preview)
+		case v.Abandoned:
+			fmt.Fprintf(&b, "Abandoned %s (its branch is kept; undo with --undo).\n", oneLine(v.Feature))
+		default:
+			fmt.Fprintf(&b, "Restored %s; it is an active feature again.\n", oneLine(v.Feature))
+		}
+	case *engine.FeatureCloseResult:
+		if v.Preview != nil {
+			previewText(&b, v.Preview)
+			break
+		}
+		fmt.Fprintf(&b, "Closed %s (%s): deleted %d ref(s) from the shadow repo", oneLine(v.Feature), v.State, len(v.Deleted))
+		if v.GatePR != nil {
+			fmt.Fprintf(&b, "; closed gate PR #%d", *v.GatePR)
+		}
+		b.WriteString(".\n")
+		refs := make([]string, 0, len(v.Deleted))
+		for ref := range v.Deleted {
+			refs = append(refs, ref)
+		}
+		sort.Strings(refs)
+		for _, ref := range refs {
+			fmt.Fprintf(&b, "  %s  %s\n", oneLine(ref), short(v.Deleted[ref]))
+		}
+		b.WriteString("The ledger keeps each SHA (ghostbranch log), so a deleted branch can be pushed back.\n")
 	case *engine.AgentsStatusResult:
 		if len(v.Grants) == 0 {
 			b.WriteString("No agent grants on this machine.\n")

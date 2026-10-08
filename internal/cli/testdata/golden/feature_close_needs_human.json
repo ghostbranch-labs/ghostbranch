@@ -1,0 +1,30 @@
+{
+  "schema_version": "0.6",
+  "command": "feature close",
+  "ok": false,
+  "exit_code": 5,
+  "data": {},
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "feature",
+        "close",
+        "feat-x"
+      ],
+      "why": "a person must run this in their own terminal and type the code it shows",
+      "needs_human": true,
+      "needs_input": []
+    }
+  ],
+  "error": {
+    "code": "APPROVAL_REQUIRED",
+    "message": "closing feature feat-x (draft; only a merged feature with no newer commits closes unattended) needs a person to type a code at a console",
+    "field": null,
+    "retryable": false,
+    "details": {
+      "reason": "no_console"
+    }
+  }
+}

@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -768,5 +769,50 @@ func TestLifecycleHumanOutput(t *testing.T) {
 	te.mustRun("gate", "feat-x")
 	if _, out, _ = te.run("feature", "list"); !strings.Contains(out, "feat-x  gate_passed  clean  passed  -\n") {
 		t.Fatalf("feature list after gate:\n%s", out)
+	}
+}
+
+// feature close: a console refusal goes to a person, a moved feature is
+// looked at again, and a gate PR left open after the deletes is closed by
+// a person on GitHub.
+func TestNextForFeatureClose(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	grantAgents(te)
+	te.mustRun("feature", "start", "feat-d")
+	code, env := te.runJSON("feature", "close", "feat-d", "--non-interactive")
+	n := nextOf(t, env)
+	if code != 5 || len(n) != 1 || n[0]["needs_human"] != true ||
+		!reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "feature", "close", "feat-d"}) {
+		t.Fatalf("no console: exit %d, next = %v", code, n)
+	}
+
+	te.forge.SetPRMerged("acme/widget", publishFeature(te, "feat-a"))
+	raced := false
+	te.env.OnPush = func(op, _ string, _ []string) {
+		if op == "feature close" && !raced {
+			raced = true
+			te.shadowCommit("feat-a", map[string]string{"race.txt": "r\n"})
+		}
+	}
+	code, env = te.runJSON("feature", "close", "feat-a")
+	te.env.OnPush = nil
+	n = nextOf(t, env)
+	if code != 4 || len(n) != 1 || n[0]["needs_human"] != false ||
+		!reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "feature", "show", "feat-a", "--repo", "acme/widget"}) {
+		t.Fatalf("moved: exit %d, next = %v", code, n)
+	}
+
+	te.forge.SetPRMerged("acme/widget", publishFeature(te, "feat-c"))
+	te.forge.ClosePRErr = errors.New("boom")
+	code, env = te.runJSON("feature", "close", "feat-c")
+	te.forge.ClosePRErr = nil
+	n = nextOf(t, env)
+	data, _ := env["data"].(map[string]any)
+	deleted, _ := data["deleted"].(map[string]any)
+	if code != 1 || len(deleted) != 4 || len(n) != 1 || n[0]["needs_human"] != true ||
+		!reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "log", "--feature", "feat-c", "--op", "feature close"}) {
+		t.Fatalf("gate PR left open: exit %d, deleted %v, next = %v", code, deleted, n)
 	}
 }

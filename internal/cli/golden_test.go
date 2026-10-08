@@ -30,6 +30,7 @@ var dataSchemas = map[string]string{
 	"guard install": "guard.schema.json", "guard uninstall": "guard.schema.json", "guard status": "guard.schema.json", "guard check": "guard.schema.json",
 	"remove": "remove.schema.json", "log": "log.schema.json",
 	"status": "status.schema.json", "feature list": "feature-list.schema.json", "feature show": "feature-show.schema.json",
+	"feature abandon": "feature-abandon.schema.json", "feature close": "feature-close.schema.json",
 }
 
 func schema(t *testing.T, name string) *jsonschema.Schema {
@@ -195,6 +196,14 @@ jobs:
 		{"feature_list", withFeature, []string{"feature", "list"}, 0},
 		{"feature_show", gatedFeature, []string{"feature", "show", "feat-x"}, 0},
 		{"feature_show_unknown", initOnly, []string{"feature", "show", "nope"}, 2},
+		{"feature_abandon", withFeature, []string{"feature", "abandon", "feat-x"}, 0},
+		{"feature_close_merged", func(te *testEnv) {
+			initOnly(te)
+			grantAgents(te)
+			te.forge.SetPRMerged("acme/widget", publishFeature(te, "feat-x"))
+		}, []string{"feature", "close", "feat-x"}, 0},
+		{"feature_close_needs_human", withFeature, []string{"feature", "close", "feat-x"}, 5},
+		{"feature_close_plan", gatedFeature, []string{"feature", "close", "feat-x", "--plan"}, 0},
 	}
 	for _, s := range scenarios {
 		t.Run(s.name, func(t *testing.T) {

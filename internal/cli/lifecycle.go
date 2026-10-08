@@ -75,3 +75,60 @@ and this pair's ledger entries for it. It only reads.`,
 		},
 	}
 }
+
+func (a *app) featureAbandonCmd() *cobra.Command {
+	var undo bool
+	c := &cobra.Command{
+		Use:   "abandon <name>",
+		Short: "Park a feature: keep its branch, but leave it out of feature list",
+		Long: `feature abandon marks a feature abandoned in its metadata in the shadow repo. Nothing is deleted:
+its branch, gate and plans stay, status still shows it, and feature list hides it unless --all.
+--undo makes it an active feature again. To delete a feature, use feature close.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			e, err := a.engine(cmd.Context())
+			if err != nil {
+				return err
+			}
+			p, err := a.pair(e)
+			if err != nil {
+				return err
+			}
+			res, w, err := e.FeatureAbandon(cmd.Context(), p, args[0], undo)
+			return done(a, res, w, err)
+		},
+	}
+	c.Flags().BoolVar(&undo, "undo", false, "restore an abandoned feature")
+	c.Flags().BoolVar(&a.dryRun, "plan", false, "preview exactly what would change, and change nothing (same as --dry-run)")
+	return c
+}
+
+func (a *app) featureCloseCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "close <name>",
+		Short: "Delete a feature from the shadow repo (a person confirms unless it merged unchanged)",
+		Long: `feature close deletes a feature from the shadow repo: its branch, its gate branch, its metadata
+and its plan refs, in one push that fails, deleting nothing, if any of them moved since it looked. Then it
+closes the gate's draft PR and removes the feature's plan files and mirror refs on this machine. The
+ledger records every ref deleted with the SHA it pointed at, so a branch can be pushed back.
+
+A feature whose public PR merged and whose branch hasn't moved since closes without asking (sync does
+this on its own). Anything else would lose work that was never published, so a person confirms by
+typing a code at the console. --plan shows what would be deleted and asks no one.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			e, err := a.engine(cmd.Context())
+			if err != nil {
+				return err
+			}
+			p, err := a.pair(e)
+			if err != nil {
+				return err
+			}
+			res, w, err := e.FeatureClose(cmd.Context(), p, args[0])
+			return done(a, res, w, err)
+		},
+	}
+	c.Flags().BoolVar(&a.dryRun, "plan", false, "preview exactly what would change, and change nothing (same as --dry-run)")
+	return c
+}
