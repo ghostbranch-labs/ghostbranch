@@ -43,9 +43,23 @@ type CI struct {
 	RewriteRepoGuards string // rewrite | warn | off
 }
 
+// History modes and author modes for promote.
+const (
+	ModeSquash   = "squash"
+	ModePreserve = "preserve"
+	ModeCurated  = "curated"
+
+	AuthorNoreply = "noreply"
+	AuthorKeep    = "keep"
+	AuthorMap     = "map"
+)
+
 type Promote struct {
 	Target      string
 	DefaultMode string
+	AuthorEmail string
+	// AuthorMap keys are lower-cased emails; values are "Name <email>".
+	AuthorMap map[string]string
 }
 
 // Markers are the tokens that open and close an internal section.
@@ -71,7 +85,7 @@ type Gate struct {
 func Default() Config {
 	return Config{
 		Version: 1,
-		Promote: Promote{Target: "pr", DefaultMode: "squash"},
+		Promote: Promote{Target: "pr", DefaultMode: ModePreserve, AuthorEmail: AuthorNoreply, AuthorMap: map[string]string{}},
 		LeakScan: LeakScan{Strip: []string{".ghostbranch/**"}, Secrets: true,
 			Markers: Markers{Begin: "BEGIN-INTERNAL", End: "END-INTERNAL"}, BlockPatterns: []string{}, LargeFile: 5 << 20},
 		Gate: Gate{CIAppearTimeout: 10 * time.Minute, CITimeout: 60 * time.Minute},
@@ -82,6 +96,7 @@ func Default() Config {
 var honoured = map[string]bool{
 	"version": true, "public": true, "shadow": true,
 	"promote.target": true, "promote.default_mode": true,
+	"promote.author_email": true, "promote.author_map": true,
 	"leak_scan.strip": true, "leak_scan.secrets": true,
 	"leak_scan.markers.begin": true, "leak_scan.markers.end": true,
 	"leak_scan.block_patterns": true, "leak_scan.large_file": true,
@@ -98,7 +113,6 @@ var repoName = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 // pointer to what replaced them.
 var replaced = map[string]string{
 	"promote.require_human": "promote.require_human is replaced by agent grants (ghostbranch agents allow) and is ignored",
-	"promote.author_email":  "promote.author_email arrives with preserve mode and is ignored",
 }
 
 // Parse reads and validates a config file.
@@ -140,6 +154,10 @@ func flatten(prefix string, m map[string]any, out map[string]any) {
 		key := k
 		if prefix != "" {
 			key = prefix + "." + k
+		}
+		if key == "promote.author_map" {
+			out[key] = v // one leaf: its keys are emails, which contain dots
+			continue
 		}
 		if sub, ok := v.(map[string]any); ok && len(sub) > 0 {
 			flatten(key, sub, out)
@@ -213,6 +231,25 @@ func set(cfg *Config, key string, v any) error {
 		cfg.Promote.Target, err = str()
 	case "promote.default_mode":
 		cfg.Promote.DefaultMode, err = str()
+	case "promote.author_email":
+		cfg.Promote.AuthorEmail, err = str()
+	case "promote.author_map":
+		m, ok := v.(map[string]any)
+		if !ok {
+			return invalid(key, "must map author emails to \"Name <email>\"")
+		}
+		cfg.Promote.AuthorMap = map[string]string{}
+		for k, raw := range m {
+			field := key + "." + k
+			if _, e, okKey := ParseIdentity("x <" + k + ">"); !okKey || e != k {
+				return invalid(field, "%q is not an email address", k)
+			}
+			s, isStr := raw.(string)
+			if _, _, okVal := ParseIdentity(s); !isStr || !okVal {
+				return invalid(field, "must be \"Name <email>\"")
+			}
+			cfg.Promote.AuthorMap[strings.ToLower(k)] = s
+		}
 	case "leak_scan.secrets":
 		cfg.LeakScan.Secrets, err = boolean()
 	case "leak_scan.strip":
@@ -300,6 +337,18 @@ func set(cfg *Config, key string, v any) error {
 		}
 	}
 	return err
+}
+
+var identity = regexp.MustCompile(`^([^<>\r\n]*[^<>\s])[ \t]*<([^<>\s@]+@[^<>\s@]+)>$`)
+
+// ParseIdentity splits "Name <email>". The name must be non-empty, and
+// neither part may hold '<', '>' or a line break.
+func ParseIdentity(s string) (name, email string, ok bool) {
+	m := identity.FindStringSubmatch(s)
+	if m == nil {
+		return "", "", false
+	}
+	return strings.TrimSpace(m[1]), m[2], true
 }
 
 var sizePattern = regexp.MustCompile(`(?i)^([0-9]+)\s*(KB|MB|GB)?$`)
@@ -390,8 +439,12 @@ func validate(c Config) error {
 		return invalid("shadow", "must be owner/repo")
 	case c.Promote.Target != "pr":
 		return invalid("promote.target", "only pr is supported in this version")
-	case c.Promote.DefaultMode != "squash":
-		return invalid("promote.default_mode", "only squash is supported in this version")
+	case c.Promote.DefaultMode != ModeSquash && c.Promote.DefaultMode != ModePreserve && c.Promote.DefaultMode != ModeCurated:
+		return invalid("promote.default_mode", "must be squash, preserve or curated")
+	case c.Promote.AuthorEmail != AuthorNoreply && c.Promote.AuthorEmail != AuthorKeep && c.Promote.AuthorEmail != AuthorMap:
+		return invalid("promote.author_email", "must be noreply, keep or map")
+	case c.Promote.AuthorEmail == AuthorMap && len(c.Promote.AuthorMap) == 0:
+		return invalid("promote.author_map", "must list at least one email when author_email is map")
 	case !c.LeakScan.Secrets:
 		return invalid("leak_scan.secrets", "secret scanning cannot be disabled")
 	case c.LeakScan.Markers.Begin == c.LeakScan.Markers.End:
@@ -410,7 +463,12 @@ shadow: %s
 
 promote:
   target: pr
-  default_mode: squash
+  # preserve publishes each feature commit; squash publishes one commit;
+  # curated regroups, reorders and rewords commits from a --curate file.
+  default_mode: preserve
+  # noreply publishes every commit as your GitHub noreply identity; keep
+  # publishes the original authors; map uses author_map.
+  author_email: noreply
 
 leak_scan:
   strip: [".ghostbranch/**"]
