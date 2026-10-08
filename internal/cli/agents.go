@@ -59,19 +59,20 @@ func (a *app) agentsRevokeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// --all with --repo revokes every grant for that repo only.
 			var pp *workspace.Pair
-			if !all {
+			if !all || a.repo != "" {
 				p, err := a.pair(e)
 				if err != nil {
 					return err
 				}
 				pp = &p
 			}
-			res, w, err := e.AgentsRevoke(cmd.Context(), pp, all)
+			res, w, err := e.AgentsRevoke(cmd.Context(), pp, all && pp == nil)
 			return done(a, res, w, err)
 		},
 	}
-	c.Flags().BoolVar(&all, "all", false, "revoke every grant in this workspace (also clears an unreadable grants.json)")
+	c.Flags().BoolVar(&all, "all", false, "revoke every grant in this workspace (also clears an unreadable grants.json); with --repo, every grant for that repo")
 	c.Flags().BoolVar(&a.dryRun, "plan", false, "preview what would be revoked")
 	return c
 }

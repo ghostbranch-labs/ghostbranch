@@ -157,6 +157,58 @@ func (e *Engine) push(ctx context.Context, pc *pairCtx, remote string, opt gitx.
 	return nil
 }
 
+// upgradeNeeded turns config.Parse's unknown-key error into UPGRADE_NEEDED:
+// a key this binary doesn't know most likely comes from a newer Ghostbranch.
+// Any other error passes through.
+func upgradeNeeded(err error) error {
+	ce := contract.From(err)
+	if ce == nil || ce.Code != contract.ConfigInvalid {
+		return err
+	}
+	key, _ := ce.Details["unknown_key"].(string)
+	if key == "" {
+		return err
+	}
+	out := contract.New(contract.UpgradeNeeded,
+		".ghostbranch.yml on the overlay branch has the key %q, which this ghostbranch doesn't know: the pair was probably set up by a newer Ghostbranch; upgrade the ghostbranch binary, or fix it if it's a typo", key).
+		WithField(key).WithDetails(map[string]any{"unknown_key": key})
+	out.Err = err
+	return out
+}
+
+// updateMirror moves the mirror's copy of ref to sha after a push to the
+// shadow repo. The push is what counts: a failure is a MIRROR_NOT_UPDATED
+// warning, and the next fetch corrects the mirror.
+func (e *Engine) updateMirror(ctx context.Context, g *gitx.Git, ref, sha string) []contract.Warning {
+	if err := g.UpdateRef(ctx, ref, sha); err != nil {
+		return []contract.Warning{mirrorNotUpdated("couldn't update the local mirror's "+ref, err, map[string]any{"ref": ref, "sha": sha})}
+	}
+	return nil
+}
+
+// deleteMirror is updateMirror for a ref the push deleted.
+func (e *Engine) deleteMirror(ctx context.Context, g *gitx.Git, ref string) []contract.Warning {
+	if err := g.DeleteRef(ctx, ref); err != nil {
+		return []contract.Warning{mirrorNotUpdated("couldn't delete the local mirror's "+ref, err, map[string]any{"ref": ref})}
+	}
+	return nil
+}
+
+// removeLocal deletes a local file whose shadow-repo counterpart a push
+// deleted (a plan file). A file already gone is fine.
+func removeLocal(path string) []contract.Warning {
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return []contract.Warning{mirrorNotUpdated("couldn't remove the local file "+path, err, map[string]any{"path": path})}
+	}
+	return nil
+}
+
+func mirrorNotUpdated(what string, err error, details map[string]any) contract.Warning {
+	return contract.Warning{Code: contract.MirrorNotUpdated,
+		Message: what + " (the shadow repo has the change; the next command's fetch corrects the mirror): " + err.Error(),
+		Details: details}
+}
+
 // readConfig reads .ghostbranch.yml from the overlay branch, never from a
 // feature, and checks the overlay branch holds only overlay paths. It
 // returns the config and the overlay commit O.
@@ -176,7 +228,7 @@ func (e *Engine) readConfig(ctx context.Context, pc *pairCtx) (config.Config, st
 	}
 	cfg, warns, err := config.Parse(raw)
 	if err != nil {
-		return config.Config{}, "", warns, err
+		return config.Config{}, "", warns, upgradeNeeded(err)
 	}
 	if !strings.EqualFold(cfg.Public, pc.pair.Public) || !strings.EqualFold(cfg.Shadow, pc.pair.Shadow) {
 		return config.Config{}, "", warns, contract.New(contract.ConfigInvalid,
@@ -246,17 +298,15 @@ func (e *Engine) saveMeta(ctx context.Context, pc *pairCtx, m feature.Meta, pare
 }
 
 // updateMeta saves and pushes new metadata, leased on the previous commit.
-func (e *Engine) updateMeta(ctx context.Context, pc *pairCtx, m feature.Meta, parent string) error {
+func (e *Engine) updateMeta(ctx context.Context, pc *pairCtx, m feature.Meta, parent string) ([]contract.Warning, error) {
 	sha, err := e.saveMeta(ctx, pc, m, parent)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	opt := gitx.PushOptions{Leases: []gitx.Lease{{Ref: remoteMetaRef(m.Name), Expect: parent}}}
 	if err := e.push(ctx, pc, remoteShadow, opt, sha+":"+remoteMetaRef(m.Name)); err != nil {
-		return err
+		return nil, err
 	}
-	if err := pc.git.UpdateRef(ctx, metaRef(m.Name), sha); err != nil {
-		return internalErr(err, "update the local metadata ref")
-	}
-	return nil
+	// The shadow repo has the metadata: a stale mirror is only a warning.
+	return e.updateMirror(ctx, pc.git, metaRef(m.Name), sha), nil
 }

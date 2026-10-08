@@ -64,6 +64,15 @@ func WriteFile(path string) Op        { return Op{"op": "write_file", "path": pa
 func RemoveFile(path string) Op       { return Op{"op": "remove_file", "path": path} }
 func MoveFile(from, to string) Op     { return Op{"op": "move_file", "from": from, "to": to} }
 
+// DeleteRef deletes ref from repo, leased on sha: the delete fails if the
+// ref no longer points there.
+func DeleteRef(repo, ref, sha string) Op {
+	return Op{"op": "delete_ref", "repo": repo, "ref": ref, "sha": sha}
+}
+
+// ClosePR closes PR number in repo without merging it.
+func ClosePR(repo string, number int) Op { return Op{"op": "close_pr", "repo": repo, "number": number} }
+
 // OverlayFile is a change to a managed file on the overlay branch.
 func OverlayFile(repo, path, action string) Op {
 	return Op{"op": "overlay_file", "repo": repo, "path": path, "action": action}
@@ -104,6 +113,10 @@ func (p *Preview) Describe() []string {
 				kind = "draft PR"
 			}
 			line = fmt.Sprintf("open a %s in %s from %s into %s", kind, o["repo"], o["head"], o["base"])
+		case "delete_ref":
+			line = fmt.Sprintf("delete %s from %s (at %s)", o["ref"], o["repo"], short(o["sha"]))
+		case "close_pr":
+			line = fmt.Sprintf("close PR #%v in %s", o["number"], o["repo"])
 		case "wait_checks":
 			line = fmt.Sprintf("wait for CI on %s in %s", short(o["sha"]), o["repo"])
 		case "run_gate":

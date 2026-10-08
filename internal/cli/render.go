@@ -2,10 +2,16 @@ package cli
 
 import (
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
+	"text/tabwriter"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
+	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 	"github.com/ghostbranch-labs/ghostbranch/internal/guard"
 	"github.com/ghostbranch-labs/ghostbranch/internal/guide"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
@@ -149,7 +155,7 @@ func human(r any) string {
 		case "fast_forward":
 			fmt.Fprintf(&b, "Shadow main fast-forwarded %s -> %s.\n", short(v.ShadowMainBefore), short(v.PublicMain))
 		default:
-			b.WriteString("Shadow main has diverged from public main; nothing was pushed.\n")
+			b.WriteString("Shadow main has diverged from public main; nothing was pushed to it.\n")
 		}
 		for _, br := range v.Branches {
 			if br.Name != "main" {
@@ -159,12 +165,15 @@ func human(r any) string {
 		if n := len(v.CancelledRuns); n > 0 {
 			fmt.Fprintf(&b, "  cancelled %d push-triggered workflow run(s) in the shadow repo\n", n)
 		}
+		for _, c := range v.Closed {
+			fmt.Fprintf(&b, "  closed merged feature %s (PR #%d)\n", c.Name, c.PublicPR)
+		}
 	case *engine.FeatureStartResult:
 		if v.Preview != nil {
 			previewText(&b, v.Preview)
 			break
 		}
-		fmt.Fprintf(&b, "Started feature %s from shadow main %s.\nCheck it out with: %s\n", v.Name, short(v.Base), v.Checkout)
+		fmt.Fprintf(&b, "Started feature %s from shadow main %s.\nCheck it out with: %s\n", v.Name, short(v.Base), v.CheckoutHint)
 	case *engine.GateResult:
 		fmt.Fprintf(&b, "Gate for %s: checks %s, leak scan %s.\n", v.Feature, v.Checks, v.Leak)
 		if v.Preview != nil {
@@ -245,6 +254,73 @@ func human(r any) string {
 			break
 		}
 		fmt.Fprintf(&b, "Revoked %d waiver(s).\n", len(v.Revoked))
+	case *engine.RemoveResult:
+		if v.Preview != nil {
+			previewText(&b, v.Preview)
+			break
+		}
+		fmt.Fprintf(&b, "Removed %s from this machine: revoked %d agent grant(s) and %d waiver(s), deleted %d plan file(s) and %s.\n",
+			v.Public, v.Grants, v.Waivers, len(v.Plans), v.Dir)
+		fmt.Fprintf(&b, "The shadow repo %s still exists on GitHub; delete it there if you no longer need it (Settings → Delete this repository).\n", v.Shadow)
+	case *engine.LogResult:
+		if len(v.Entries) == 0 {
+			b.WriteString("No ledger entries.\n")
+		}
+		for _, e := range v.Entries {
+			feat := e.Feature
+			if feat == "" {
+				feat = "-"
+			}
+			fmt.Fprintf(&b, "%s  %s  %s  %s  exit %d  %s\n", e.TS.UTC().Format(time.RFC3339),
+				oneLine(e.Actor), oneLine(e.Op), oneLine(feat), e.ExitCode, oneLine(e.Summary))
+		}
+	case *engine.StatusResult:
+		mainState := "shadow main up to date"
+		if v.ShadowBehind {
+			mainState = "shadow main behind public main"
+		}
+		schedule := "off"
+		if v.ScheduledSync {
+			schedule = "on"
+		}
+		fmt.Fprintf(&b, "%s -> %s: %s, overlay %s, scheduled sync %s\n", v.Public, v.Shadow, mainState, v.OverlayStatus, schedule)
+		featureTable(&b, v.Features)
+	case *engine.FeatureListResult:
+		featureTable(&b, v.Features)
+	case *engine.FeatureShowResult:
+		featureShowText(&b, v)
+	case *engine.FeatureAbandonResult:
+		switch {
+		case v.Preview != nil:
+			previewText(&b, v.Preview)
+		case !v.Changed && v.Abandoned:
+			fmt.Fprintf(&b, "%s was already abandoned; nothing changed.\n", oneLine(v.Feature))
+		case !v.Changed:
+			fmt.Fprintf(&b, "%s was not abandoned; nothing changed.\n", oneLine(v.Feature))
+		case v.Abandoned:
+			fmt.Fprintf(&b, "Abandoned %s (its branch is kept; undo with --undo).\n", oneLine(v.Feature))
+		default:
+			fmt.Fprintf(&b, "Restored %s; it is an active feature again.\n", oneLine(v.Feature))
+		}
+	case *engine.FeatureCloseResult:
+		if v.Preview != nil {
+			previewText(&b, v.Preview)
+			break
+		}
+		fmt.Fprintf(&b, "Closed %s (%s): deleted %d ref(s) from the shadow repo", oneLine(v.Feature), v.State, len(v.Deleted))
+		if v.GatePR != nil {
+			fmt.Fprintf(&b, "; closed gate PR #%d", *v.GatePR)
+		}
+		b.WriteString(".\n")
+		refs := make([]string, 0, len(v.Deleted))
+		for ref := range v.Deleted {
+			refs = append(refs, ref)
+		}
+		sort.Strings(refs)
+		for _, ref := range refs {
+			fmt.Fprintf(&b, "  %s  %s\n", oneLine(ref), short(v.Deleted[ref]))
+		}
+		b.WriteString("The ledger keeps each SHA (ghostbranch log), so a deleted branch can be pushed back.\n")
 	case *engine.AgentsStatusResult:
 		if len(v.Grants) == 0 {
 			b.WriteString("No agent grants on this machine.\n")
@@ -264,6 +340,17 @@ func human(r any) string {
 		}
 	}
 	return b.String()
+}
+
+// oneLine escapes what a terminal would act on rather than show (control
+// characters, bidi controls, invalid UTF-8), so a ledger field an agent
+// wrote stays on its own line and can't rewrite the screen.
+func oneLine(s string) string {
+	if utf8.ValidString(s) && !strings.ContainsFunc(s, func(r rune) bool { return !unicode.IsGraphic(r) }) {
+		return s
+	}
+	q := strconv.QuoteToGraphic(s)
+	return q[1 : len(q)-1]
 }
 
 func waivedLines(b *strings.Builder, ws []engine.WaivedFinding) {
@@ -312,5 +399,113 @@ func auditText(b *strings.Builder, v *engine.AuditResult) {
 	}
 	for _, f := range v.Overlay {
 		fmt.Fprintf(b, "  managed %s: %s\n", f.Path, f.Status)
+	}
+}
+
+// featureTable is the features table status and feature list print. Every
+// name is escaped: a feature name comes from whoever started it.
+func featureTable(b *strings.Builder, rs []engine.FeatureReport) {
+	if len(rs) == 0 {
+		b.WriteString("No features.\n")
+		return
+	}
+	tw := tabwriter.NewWriter(b, 0, 0, 2, ' ', 0)
+	_, _ = fmt.Fprintln(tw, "NAME\tSTATE\tDRIFT\tGATE\tPR")
+	for _, r := range rs {
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", oneLine(r.Name), r.State, oneLine(r.Drift.Status), gateCell(r.Gate), prCell(r))
+	}
+	_ = tw.Flush()
+}
+
+// gateCell is a feature's last gate in a word: passed, a failed check
+// status, or leak; "-" when never gated, "(stale)" when the feature or the
+// repos moved since.
+func gateCell(g *engine.GateSummary) string {
+	if g == nil {
+		return "-"
+	}
+	out := g.Checks
+	switch {
+	case g.Leak == feature.LeakFound:
+		out = "leak"
+	case g.Checks == feature.ChecksPassed && g.Leak != feature.LeakClean:
+		out = g.Leak
+	}
+	if !g.Fresh {
+		out += " (stale)"
+	}
+	return oneLine(out)
+}
+
+// prCell is a feature's public PR and its state, or "-".
+func prCell(r engine.FeatureReport) string {
+	if r.PublicPR == nil {
+		return "-"
+	}
+	out := fmt.Sprintf("#%d", *r.PublicPR)
+	if r.PRState != "" {
+		out += " " + oneLine(r.PRState)
+	}
+	return out
+}
+
+// featureShowText is feature show's detail block. Names, subjects, authors
+// and paths are escaped: they come from commits anyone could have pushed.
+func featureShowText(b *strings.Builder, v *engine.FeatureShowResult) {
+	r := v.Feature
+	fmt.Fprintf(b, "Feature %s: %s\n", oneLine(r.Name), r.State)
+	if r.Head == "" {
+		fmt.Fprintf(b, "  branch: %s (deleted), based on %s\n", oneLine(r.Branch), short(r.Base))
+	} else {
+		fmt.Fprintf(b, "  branch: %s at %s, based on %s\n", oneLine(r.Branch), short(r.Head), short(r.Base))
+	}
+	if len(r.Drift.Files) > 0 {
+		files := make([]string, len(r.Drift.Files))
+		for i, f := range r.Drift.Files {
+			files[i] = oneLine(f)
+		}
+		fmt.Fprintf(b, "  drift: %s in %s\n", oneLine(r.Drift.Status), strings.Join(files, ", "))
+	} else {
+		fmt.Fprintf(b, "  drift: %s\n", oneLine(r.Drift.Status))
+	}
+	if g := r.Gate; g == nil {
+		b.WriteString("  gate: never run\n")
+	} else {
+		fresh := "fresh"
+		if !g.Fresh {
+			fresh = "stale"
+		}
+		fmt.Fprintf(b, "  gate: checks %s, leak scan %s, scanned as %s, %s, at %s\n",
+			oneLine(g.Checks), oneLine(g.Leak), oneLine(g.ScannedAs), fresh, g.At.UTC().Format(time.RFC3339))
+	}
+	if r.PublicPR == nil {
+		b.WriteString("  public PR: none\n")
+	} else {
+		fmt.Fprintf(b, "  public PR: %s", prCell(r))
+		if r.PlanID != "" {
+			fmt.Fprintf(b, ", plan %s", oneLine(r.PlanID))
+		}
+		if r.Moved {
+			b.WriteString(", moved since publish")
+		}
+		b.WriteString("\n")
+	}
+	if r.Abandoned {
+		b.WriteString("  abandoned\n")
+	}
+	fmt.Fprintf(b, "Commits since public main (%d):\n", len(v.Commits))
+	for _, c := range v.Commits {
+		fmt.Fprintf(b, "  %s  %s  (%s)\n", short(c.Source), oneLine(c.Subject), oneLine(c.Author))
+		for _, f := range c.Files {
+			fmt.Fprintf(b, "      %s\n", oneLine(f))
+		}
+	}
+	fmt.Fprintf(b, "Ledger (%d):\n", len(v.Ledger))
+	for _, e := range v.Ledger {
+		line := fmt.Sprintf("  %s  %s  %s  exit %d", e.TS.UTC().Format(time.RFC3339), oneLine(e.Actor), oneLine(e.Op), e.ExitCode)
+		if e.Summary != "" {
+			line += "  " + oneLine(e.Summary)
+		}
+		b.WriteString(line + "\n")
 	}
 }

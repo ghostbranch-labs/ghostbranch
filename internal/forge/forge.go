@@ -34,6 +34,8 @@ type PR struct {
 	State  string
 	Draft  bool
 	URL    string
+	// Merged is true when the PR was merged; State is then closed.
+	Merged bool
 }
 
 type NewPR struct {
@@ -83,6 +85,10 @@ type Forge interface {
 	// CancelRun cancels a queued or in-progress run. A run that has already
 	// finished is not an error.
 	CancelRun(ctx context.Context, full string, id int64) error
+	// ClosePullRequest closes PR number in full. A PR that is already
+	// closed is not an error; a missing one is ErrNotFound, and a plain
+	// permission refusal ErrForbidden.
+	ClosePullRequest(ctx context.Context, full string, number int) error
 }
 
 // NoreplyEmail is the user's GitHub noreply address. Public commits use it

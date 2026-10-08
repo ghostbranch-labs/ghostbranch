@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.5",
+  "schema_version": "0.6",
   "command": "sync",
   "ok": true,
   "exit_code": 0,
@@ -19,6 +19,10 @@
       }
     ],
     "cancelled_runs": [],
+    "closed": [],
+    "surveyed": true,
+    "active_features": 0,
+    "attention": [],
     "preview": {
       "fingerprint": {
         "public_main": "178f8a91fcb0e6a374393202f9c61275c78d3dbb",

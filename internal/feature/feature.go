@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	SchemaVersion = "0.5"
+	SchemaVersion = "0.6"
 	MetaFile      = "feature.json"
 )
 
@@ -66,6 +66,10 @@ func (g *Gate) FreshFor(head, publicMain, overlay string) bool {
 type Promoted struct {
 	PublicPR int    `json:"public_pr"`
 	PlanID   string `json:"plan_id"`
+	// FeatureHead is the head the publish was planned from; empty in a
+	// record written before 0.6. A feature has moved when its branch head
+	// is no longer FeatureHead.
+	FeatureHead string `json:"feature_head,omitempty"`
 }
 
 // Meta is feature.json.
@@ -98,20 +102,29 @@ func Decode(b []byte) (Meta, error) {
 type State string
 
 const (
-	StateDraft      State = "draft"
-	StateInReview   State = "in_review"
-	StateGatePassed State = "gate_passed"
-	StatePromoted   State = "promoted"
-	StateAbandoned  State = "abandoned"
+	StateDraft       State = "draft"
+	StateInReview    State = "in_review"
+	StateGatePassed  State = "gate_passed"
+	StatePublished   State = "published"
+	StateMerged      State = "merged"
+	StateMergedMoved State = "merged_moved"
+	StatePRClosed    State = "pr_closed"
+	StateBranchGone  State = "branch_gone"
+	StateAbandoned   State = "abandoned"
 )
 
 // StateInput is everything state depends on.
 type StateInput struct {
-	Meta           Meta
-	Head           string
-	PublicMain     string
-	Overlay        string
-	PublicPRExists bool
+	Meta         Meta
+	BranchExists bool
+	Head         string
+	PublicMain   string
+	Overlay      string
+	// PRState is the forge's view of the published PR: "", "open",
+	// "merged", "closed" or "unknown".
+	PRState string
+	// Moved reports that the branch has moved since it was published.
+	Moved bool
 }
 
 // StateOf computes state. The first matching rule wins.
@@ -120,8 +133,16 @@ func StateOf(in StateInput) State {
 	switch {
 	case m.Abandoned:
 		return StateAbandoned
-	case m.Promoted != nil && in.PublicPRExists:
-		return StatePromoted
+	case !in.BranchExists:
+		return StateBranchGone
+	case m.Promoted != nil && in.PRState == "merged" && !in.Moved:
+		return StateMerged
+	case m.Promoted != nil && in.PRState == "merged":
+		return StateMergedMoved
+	case m.Promoted != nil && in.PRState == "closed":
+		return StatePRClosed
+	case m.Promoted != nil:
+		return StatePublished
 	case m.Gate.Passed() && m.Gate.FreshFor(in.Head, in.PublicMain, in.Overlay):
 		return StateGatePassed
 	case m.Gate != nil:

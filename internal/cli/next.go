@@ -128,6 +128,28 @@ func (a *app) next(err error) []contract.Next {
 				}
 				return []contract.Next{{Command: a.gb(args...), Why: "the repos moved since the plan was made; make a new plan", NeedsInput: modeInputs(mode)}}
 			}
+		case contract.ShadowBehindError:
+			return []contract.Next{
+				{Command: a.scoped("sync"), Why: "shadow main is behind public main; sync it (fast-forward only)"},
+				{Command: a.startAgain(), Why: "then start the feature again, from the synced shadow main"},
+			}
+		case contract.SyncDiverged:
+			// A person sorts out the diverged branch (error.what_to_do), but
+			// the features sync surveyed still need what they need.
+			if r, ok := a.result.(*engine.SyncResult); ok {
+				return a.featureNexts(nil, r.Attention)
+			}
+		case contract.FeatureMoved:
+			if f, _ := ce.Details["feature"].(string); f != "" {
+				return []contract.Next{{Command: a.scoped("feature", "show", f),
+					Why: "the feature changed while it was being closed and nothing was deleted; look at it again before closing it"}}
+			}
+		case contract.ForgeError:
+			// feature close deleted the refs, then couldn't close the gate PR.
+			if r, ok := a.result.(*engine.FeatureCloseResult); ok && len(r.Deleted) > 0 {
+				return []contract.Next{{Command: a.scoped("log", "--feature", r.Feature, "--op", "feature close"), NeedsHuman: true,
+					Why: "the feature's refs are deleted and the ledger lists them with their SHAs; a person closes its gate draft PR in the shadow repo on GitHub (error.message names it)"}}
+			}
 		case contract.CurateInvalid, contract.CurateConflict, contract.CurateTreeMismatch:
 			why := map[contract.Code]string{
 				contract.CurateInvalid:      "fix the --curate file (error.details lists the problem SHAs; the gate result lists the feature's commits) and run this again",
@@ -180,12 +202,14 @@ func (a *app) next(err error) []contract.Next {
 	switch r := a.result.(type) {
 	case *engine.FeatureStartResult:
 		if r.Preview == nil {
-			why := "commit on " + r.Name + ", push it with `git push " + a.shadowRemote + " " + r.Name + "` (the shadow repo, never origin), then gate it"
+			why := "check out with `" + r.CheckoutHint + "`, commit on " + r.Name + ", "
 			switch a.shadowRemote {
 			case "":
-				why = "commit on " + r.Name + ", push it to the shadow repo with the remote in data.checkout (never origin), then gate it"
+				why += "push it to the shadow repo (never origin), then gate it"
 			case "origin":
-				why = "commit on " + r.Name + ", push it with `git push origin " + r.Name + "` (origin is the shadow repo here), then gate it"
+				why += "push it with `git push origin " + r.Name + "` (origin is the shadow repo here), then gate it"
+			default:
+				why += "push it with `git push " + a.shadowRemote + " " + r.Name + "` (the shadow repo, never origin), then gate it"
 			}
 			out = append(out, contract.Next{Command: a.scoped("gate", r.Name), Why: why})
 		}
@@ -203,9 +227,28 @@ func (a *app) next(err error) []contract.Next {
 		if r.Preview == nil && r.Applied == nil && r.Plan != nil && r.PlanPath != "" {
 			out = append(out, a.applyNext(r.Plan.ID, true))
 		}
+	case *engine.FeatureCloseResult:
+		if r.Preview != nil {
+			why := "the preview lists what closing deletes; it is merged with no newer commits, so it closes without a console"
+			if r.NeedsConsole {
+				why = "the preview lists what closing deletes; it is " + string(r.State) + ", so a person closes it at the console"
+			}
+			out = append(out, contract.Next{Command: a.scoped("feature", "close", r.Feature), NeedsHuman: r.NeedsConsole, Why: why})
+		}
 	case *engine.UpgradeResult:
 		if r.Preview == nil && r.Audit != nil && a.hasAuditFindings() {
 			out = append(out, contract.Next{Command: a.scoped("audit"), Why: "the audit after upgrade has warnings; read them"})
+		}
+	case *engine.StatusResult:
+		out = a.featureNexts(out, r.Features)
+	case *engine.FeatureListResult:
+		out = a.featureNexts(out, r.Features)
+	case *engine.SyncResult:
+		// Attention holds only features sync can't close itself.
+		out = a.featureNexts(out, r.Attention)
+		if r.Preview == nil && r.Surveyed && r.ActiveFeatures == 0 {
+			out = append(out, contract.Next{Command: a.scoped("feature", "start"), NeedsInput: []string{"<name>"},
+				Why: "no feature is in progress; start one: put its name (the <name> argument) after start"})
 		}
 	}
 	switch r := a.result.(type) {
@@ -225,6 +268,16 @@ func (a *app) next(err error) []contract.Next {
 	return append(out, a.upgradeNext()...)
 }
 
+// startAgain is feature start for the name this run was given, scoped like
+// the sync before it, with --plan when this run had it.
+func (a *app) startAgain() []string {
+	args := []string{"feature", "start", a.startName}
+	if a.dryRun {
+		args = append(args, "--plan")
+	}
+	return a.scoped(args...)
+}
+
 // syncNext leads next when shadow main is behind public main. Syncing moves
 // only shadow branches, none of which a gate candidate or a plan's
 // fingerprint depends on, so it is safe before any other step.
@@ -233,6 +286,52 @@ func (a *app) syncNext() []contract.Next {
 		return nil
 	}
 	return []contract.Next{{Command: a.scoped("sync"), Why: "shadow main is behind public main; sync it (fast-forward only)"}}
+}
+
+// featureNexts adds what the features need, from their reports, to out
+// (which leads with syncNext's sync when shadow main is behind). Sync
+// closes merged, unmoved features, so they share one sync step, folded into
+// that leading sync when there is one; then, by name, the features a person
+// must close and the ones to gate again. Abandoned features need nothing.
+func (a *app) featureNexts(out []contract.Next, rs []engine.FeatureReport) []contract.Next {
+	var merged []string
+	var rest []contract.Next
+	for _, r := range rs {
+		if engine.ClosableWithoutConsole(r) {
+			merged = append(merged, r.Name)
+			continue
+		}
+		closeCmd := a.scoped("feature", "close", r.Name)
+		switch r.State {
+		case feature.StateBranchGone:
+			rest = append(rest, contract.Next{Command: closeCmd, NeedsHuman: true,
+				Why: "its branch was deleted; a person closes it at the console"})
+		case feature.StateMergedMoved:
+			rest = append(rest, contract.Next{Command: closeCmd, NeedsHuman: true,
+				Why: "its PR merged but there are newer commits; promote them or a person closes it"})
+		case feature.StatePRClosed:
+			rest = append(rest, contract.Next{Command: closeCmd, NeedsHuman: true,
+				Why: "its PR was closed without merging"})
+		case feature.StateDraft, feature.StateInReview, feature.StateGatePassed, feature.StatePublished:
+			if r.Drift.Status == "conflicts" {
+				rest = append(rest, contract.Next{Command: a.scoped("gate", r.Name),
+					Why: "no longer merges cleanly onto public main"})
+			}
+		}
+	}
+	if len(merged) > 0 {
+		closes := make([]string, len(merged))
+		for i, n := range merged {
+			closes[i] = "`feature close " + n + "`"
+		}
+		why := "sync closes merged features; or run " + strings.Join(closes, ", ")
+		if sync := a.scoped("sync"); len(out) > 0 && slices.Equal(out[0].Command, sync) {
+			out[0].Why += "; " + why
+		} else {
+			out = append(out, contract.Next{Command: sync, Why: why})
+		}
+	}
+	return append(out, rest...)
 }
 
 // upgradeNext trails next when managed overlay files are out of date.
@@ -396,18 +495,30 @@ func freeRemoteName(remotes map[string]string) string {
 	}
 }
 
-// checkoutHint is the exact git command that gets feature name into the
-// caller's checkout: through the remote that points at the shadow repo, one
-// added for it under the name free, or a fresh clone.
-func checkoutHint(name, shadow, remote, free string, inCheckout bool) string {
+// checkoutArgv is the exact git commands, in order, that get feature name
+// into the caller's checkout: through the remote that points at the shadow
+// repo, one added for it under the name free, or a fresh clone.
+func checkoutArgv(name, shadow, remote, free string, inCheckout bool) [][]string {
 	url := "https://github.com/" + shadow + ".git"
 	switch {
 	case remote != "":
-		return "git fetch " + remote + " && git switch " + name
+		return [][]string{{"git", "fetch", remote}, {"git", "switch", name}}
 	case inCheckout:
-		return "git remote add " + free + " " + url + " && git fetch " + free + " && git switch " + name
+		return [][]string{{"git", "remote", "add", free, url}, {"git", "fetch", free}, {"git", "switch", name}}
 	}
-	return "git clone --origin shadow --branch " + name + " " + url
+	return [][]string{{"git", "clone", "--origin", "shadow", "--branch", name, url}}
+}
+
+// pushRemote is the remote that reaches the shadow repo once checkoutArgv
+// has run.
+func pushRemote(remote, free string, inCheckout bool) string {
+	switch {
+	case remote != "":
+		return remote
+	case inCheckout:
+		return free
+	}
+	return "shadow"
 }
 
 // leakWheres is the set of the findings' Where values.

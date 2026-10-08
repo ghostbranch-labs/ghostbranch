@@ -189,3 +189,26 @@ func TestCommitAuthor(t *testing.T) {
 		t.Fatalf("CommitAuthor = %+v %v, want %+v", got, err, want)
 	}
 }
+
+func TestMergeTreeCheck(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	g := testutil.BareRepo(t, filepath.Join(t.TempDir(), "r.git"))
+	base := testutil.Commit(t, g, "main", "base", map[string]string{"f.txt": "f\n", "o.txt": "o\n"})
+	if err := g.UpdateRef(ctx, "refs/heads/feat", base); err != nil {
+		t.Fatal(err)
+	}
+	feat := testutil.Commit(t, g, "feat", "feature", map[string]string{"f.txt": "feature\n"})
+	main := testutil.Commit(t, g, "main", "upstream", map[string]string{"o.txt": "upstream\n"})
+	if clean, files, err := g.MergeTreeCheck(ctx, main, feat); err != nil || !clean || len(files) != 0 {
+		t.Fatalf("clean merge = %v %v %v", clean, files, err)
+	}
+	main2 := testutil.Commit(t, g, "main", "clash", map[string]string{"f.txt": "upstream f\n"})
+	clean, files, err := g.MergeTreeCheck(ctx, main2, feat)
+	if err != nil || clean || !reflect.DeepEqual(files, []string{"f.txt"}) {
+		t.Fatalf("conflict = %v %v %v", clean, files, err)
+	}
+	if _, _, err := g.MergeTreeCheck(ctx, "nonexistent", feat); err == nil {
+		t.Fatal("a bad ref must be an error, not a conflict")
+	}
+}

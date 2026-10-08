@@ -457,3 +457,49 @@ func TestCancelRun(t *testing.T) {
 		t.Fatalf("cancelled = %v", cancelled)
 	}
 }
+
+func TestGetPRReportsMerged(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /repos/acme/widget/pulls/7", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{"number": 7, "state": "closed", "merged": true,
+			"head": map[string]any{"ref": "feat"}, "base": map[string]any{"ref": "main"}})
+	})
+	c := newClient(t, mux)
+	pr, err := c.GetPR(context.Background(), "acme/widget", 7)
+	if err != nil || !pr.Merged || pr.State != "closed" {
+		t.Fatalf("GetPR = %+v %v", pr, err)
+	}
+}
+
+func TestClosePullRequest(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	var method string
+	var body map[string]any
+	mux.HandleFunc("PATCH /repos/acme/widget/pulls/3", func(w http.ResponseWriter, r *http.Request) {
+		method = r.Method
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		writeJSON(w, map[string]any{"number": 3, "state": "closed"})
+	})
+	mux.HandleFunc("PATCH /repos/acme/widget/pulls/9", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+	})
+	mux.HandleFunc("PATCH /repos/acme/widget/pulls/4", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"message":"Resource not accessible by personal access token"}`, http.StatusForbidden)
+	})
+	c := newClient(t, mux)
+	ctx := context.Background()
+	if err := c.ClosePullRequest(ctx, "acme/widget", 3); err != nil {
+		t.Fatal(err)
+	}
+	if method != "PATCH" || len(body) != 1 || body["state"] != "closed" {
+		t.Fatalf("request = %s %v", method, body)
+	}
+	if err := c.ClosePullRequest(ctx, "acme/widget", 9); !errors.Is(err, forge.ErrNotFound) {
+		t.Fatalf("404: %v", err)
+	}
+	if err := c.ClosePullRequest(ctx, "acme/widget", 4); !errors.Is(err, forge.ErrForbidden) {
+		t.Fatalf("403: %v", err)
+	}
+}

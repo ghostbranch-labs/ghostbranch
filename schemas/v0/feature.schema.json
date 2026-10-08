@@ -5,7 +5,7 @@
   "additionalProperties": false,
   "required": ["schema_version", "name", "branch", "created_by", "created_at", "base", "abandoned", "gate", "promoted"],
   "properties": {
-    "schema_version": { "const": "0.5" },
+    "schema_version": { "const": "0.6" },
     "name": { "type": "string" },
     "branch": { "type": "string" },
     "created_by": { "$ref": "common.schema.json#/$defs/actor" },
@@ -51,7 +51,11 @@
         { "type": "null" },
         {
           "type": "object", "additionalProperties": false, "required": ["public_pr", "plan_id"],
-          "properties": { "public_pr": { "type": "integer", "minimum": 1 }, "plan_id": { "$ref": "common.schema.json#/$defs/planId" } }
+          "properties": {
+            "public_pr": { "type": "integer", "minimum": 1 },
+            "plan_id": { "$ref": "common.schema.json#/$defs/planId" },
+            "feature_head": { "description": "The head the publish was planned from; absent in a record written before 0.6.", "$ref": "common.schema.json#/$defs/sha" }
+          }
         }
       ]
     }

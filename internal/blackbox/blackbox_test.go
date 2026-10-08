@@ -81,7 +81,7 @@ func workspace(t *testing.T) string {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	ws := `{"schema_version": "0.5", "pairs": [{"public": "acme/widget", "shadow": "acme/widget-shadow"}]}` + "\n"
+	ws := `{"schema_version": "0.6", "pairs": [{"public": "acme/widget", "shadow": "acme/widget-shadow"}]}` + "\n"
 	if err := os.WriteFile(filepath.Join(dir, "workspace.json"), []byte(ws), 0o644); err != nil {
 		t.Fatal(err)
 	}

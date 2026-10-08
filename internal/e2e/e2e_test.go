@@ -289,7 +289,7 @@ func TestSandboxLoop(t *testing.T) {
 	run(0, "gate", hist)
 	res = run(0, "promote", hist, "--title", "History for "+runID, "--plan")
 	planID = res["data"].(map[string]any)["plan"].(map[string]any)["id"].(string)
-	run(0, "apply", planID, "--yes")
+	histPR := int(run(0, "apply", planID, "--yes")["data"].(map[string]any)["public_pr"].(float64))
 	fetchPublished := func(branch, local string) {
 		t.Helper()
 		if err := g.Fetch(ctx, "public", "+refs/heads/main:refs/heads/main"); err != nil {
@@ -461,6 +461,92 @@ func TestSandboxLoop(t *testing.T) {
 		t.Fatalf("apply must report the waived finding: %v", res["data"])
 	}
 
+	// Lifecycle: merge the preserve PR on public with a merge commit, as a
+	// maintainer would, then sync closes the merged, unmoved feature itself.
+	ghc, err := gh.NewClient(gh.WithAuthToken(tok))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pubOwner, pubName, _ := strings.Cut(publicRepo, "/")
+	if _, _, err := ghc.PullRequests.Merge(ctx, pubOwner, pubName, histPR, "merge "+hist,
+		&gh.PullRequestOptions{MergeMethod: "merge"}); err != nil {
+		t.Fatalf("merge public PR #%d: %v", histPR, err)
+	}
+	// Deleting the gate branch makes GitHub close the gate draft PR itself,
+	// racing the close that follows the deletes, so ours may meet a PR that
+	// is closed or closing. Either way the close must end cleanly: no
+	// FEATURE_NOT_CLOSED warning for hist, and its ledger entry (checked
+	// below) exits 0. That does not by itself prove GitHub's no-op on an
+	// already-closed PR: a close that fails on a PR that is closed by then
+	// also counts as done. It does prove the close ends cleanly against the
+	// real API.
+	syncEnv := run(0, "sync")
+	syncData := syncEnv["data"].(map[string]any)
+	syncWarns, _ := syncEnv["warnings"].([]any)
+	for _, w := range syncWarns {
+		wm, _ := w.(map[string]any)
+		if d, _ := wm["details"].(map[string]any); wm["code"] == "FEATURE_NOT_CLOSED" && d["feature"] == hist {
+			t.Errorf("sync warned that it couldn't close %s: %v", hist, wm)
+		}
+	}
+	var closedHist bool
+	closedList, _ := syncData["closed"].([]any)
+	for _, c := range closedList {
+		if cm, _ := c.(map[string]any); cm["name"] == hist {
+			closedHist = true
+		}
+	}
+	if !closedHist {
+		t.Fatalf("sync must close the merged feature %s: data = %v", hist, syncData)
+	}
+	shadowRefs, err := g.LsRemote(ctx, "shadow")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ref := range []string{"refs/heads/" + hist, "refs/heads/ghostbranch-gate/" + hist, "refs/ghostbranch/features/" + hist} {
+		if _, ok := shadowRefs[ref]; ok {
+			t.Errorf("sync closed %s but %s is still in the shadow repo", hist, ref)
+		}
+	}
+
+	// The gate draft PR is closed now (by GitHub when the gate branch went, or
+	// by our close).
+	gatePRs, _, err := ghc.PullRequests.List(ctx, strings.Split(shadowRepo, "/")[0], strings.Split(shadowRepo, "/")[1],
+		&gh.PullRequestListOptions{State: "all", Head: strings.Split(shadowRepo, "/")[0] + ":ghostbranch-gate/" + hist})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gatePRs) == 0 {
+		t.Fatalf("no gate PR found for %s", hist)
+	}
+	for _, pr := range gatePRs {
+		if pr.GetState() != "closed" {
+			t.Errorf("gate PR #%d for %s is %s after sync, want closed", pr.GetNumber(), hist, pr.GetState())
+		}
+	}
+
+	// Abandon parks an unpublished feature and deletes nothing. Closing it needs
+	// a console, which this in-process run lacks (and a grant does not cover a
+	// close), so it stops with exit 5 and the branch stays. The next run's reset
+	// deletes the leftover branch.
+	thrown := "throwaway-" + runID
+	run(0, "feature", "start", thrown)
+	commit(thrown, map[string]string{"t.txt": "t\n"})
+	if ab := run(0, "feature", "abandon", thrown)["data"].(map[string]any); ab["abandoned"] != true {
+		t.Fatalf("feature abandon: data.abandoned = %v", ab["abandoned"])
+	}
+	m = run(5, "feature", "close", thrown)
+	if d, _ := m["error"].(map[string]any)["details"].(map[string]any); d["reason"] != "no_console" {
+		t.Fatalf("closing an abandoned feature without a console must stop with no_console: %v", m)
+	}
+	shadowRefs, err = g.LsRemote(ctx, "shadow")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := shadowRefs["refs/heads/"+thrown]; !ok {
+		t.Fatalf("the refused close deleted %s", thrown)
+	}
+
 	entries, err := ledger.Read(filepath.Join(home, "workspaces", "default", "ledger.jsonl"))
 	if err != nil {
 		t.Fatal(err)
@@ -469,10 +555,30 @@ func TestSandboxLoop(t *testing.T) {
 	for _, e := range entries {
 		ops[e.Op] = true
 	}
-	for _, op := range []string{"init", "sync", "feature start", "gate", "promote"} {
+	for _, op := range []string{"init", "sync", "feature start", "gate", "promote", "feature close", "feature abandon"} {
 		if !ops[op] {
 			t.Errorf("ledger has no %q entry", op)
 		}
+	}
+	var closeWithRefs bool
+	for _, e := range entries {
+		closeWithRefs = closeWithRefs || e.Op == "feature close" && len(e.Refs) > 0
+	}
+	if !closeWithRefs {
+		t.Error("no feature close ledger entry records the deleted refs")
+	}
+	// sync's close of hist ended cleanly, its gate PR included.
+	var histClose bool
+	for _, e := range entries {
+		if e.Op == "feature close" && e.Feature == hist {
+			histClose = true
+			if e.ExitCode != 0 {
+				t.Errorf("the feature close entry for %s exited %d (%s)", hist, e.ExitCode, e.ErrorCode)
+			}
+		}
+	}
+	if !histClose {
+		t.Errorf("the ledger has no feature close entry for %s", hist)
 	}
 }
 

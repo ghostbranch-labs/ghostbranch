@@ -64,28 +64,40 @@ func gateCommitInfos(ctx context.Context, g *gitx.Git, cfg config.Config, pm str
 	set := overlay.NewSet(cfg.LeakScan.Strip...)
 	prev := pm
 	for i, c := range commits {
-		msg, err := g.CommitMessage(ctx, c.Rebased)
+		info, err := commitInfo(ctx, g, set, prev, c.Rebased)
 		if err != nil {
-			return nil, internalErr(err, "read a commit message")
+			return nil, err
 		}
-		author, _, err := g.CommitIdentities(ctx, c.Rebased)
-		if err != nil {
-			return nil, internalErr(err, "read a commit author")
-		}
-		names, err := g.DiffNames(ctx, prev, c.Rebased)
-		if err != nil {
-			return nil, internalErr(err, "list a commit's files")
-		}
-		files := []string{}
-		for _, n := range names {
-			if !set.Match(n) {
-				files = append(files, n)
-			}
-		}
-		infos[i] = CommitInfo{Source: c.Source, Subject: subject(msg), Author: author, Files: files}
+		info.Source = c.Source
+		infos[i] = info
 		prev = c.Rebased
 	}
 	return infos, nil
+}
+
+// commitInfo describes commit sha: its subject, its author as committed, and
+// the paths it changes from commit from, overlay paths left out. Source is
+// sha; the caller sets it when sha is a rebased copy.
+func commitInfo(ctx context.Context, g *gitx.Git, set overlay.Set, from, sha string) (CommitInfo, error) {
+	msg, err := g.CommitMessage(ctx, sha)
+	if err != nil {
+		return CommitInfo{}, internalErr(err, "read a commit message")
+	}
+	author, _, err := g.CommitIdentities(ctx, sha)
+	if err != nil {
+		return CommitInfo{}, internalErr(err, "read a commit author")
+	}
+	names, err := g.DiffNames(ctx, from, sha)
+	if err != nil {
+		return CommitInfo{}, internalErr(err, "list a commit's files")
+	}
+	files := []string{}
+	for _, n := range names {
+		if !set.Match(n) {
+			files = append(files, n)
+		}
+	}
+	return CommitInfo{Source: sha, Subject: subject(msg), Author: author, Files: files}, nil
 }
 
 const gatePRBody = "Automated Ghostbranch gate candidate: the feature rebased onto public main, plus the overlay. " +
@@ -297,7 +309,9 @@ func (e *Engine) gate(ctx context.Context, pc *pairCtx, name, mode string) (*Gat
 		if !e.DryRun {
 			// The leak is the result that matters: a failure to record it
 			// must not replace LEAK_FOUND with a lesser error.
-			if err := e.recordGate(ctx, pc, m, metaSHA, res, b.commits); err != nil {
+			rw, err := e.recordGate(ctx, pc, m, metaSHA, res, b.commits)
+			warns = addWarnings(warns, rw...)
+			if err != nil {
 				warns = append(warns, contract.Warning{Code: contract.GateNotRecorded,
 					Message: "the gate result could not be recorded in the feature metadata: " + contract.From(err).Message})
 			}
@@ -328,7 +342,7 @@ func (e *Engine) gate(ctx context.Context, pc *pairCtx, name, mode string) (*Gat
 	if err := e.push(ctx, pc, remoteShadow, gitx.PushOptions{Leases: []gitx.Lease{{Ref: gateRef, Expect: old}}}, C+":"+gateRef); err != nil {
 		return res, warns, err
 	}
-	_ = g.UpdateRef(ctx, shadowRef(gateBranch(name)), C)
+	warns = addWarnings(warns, e.updateMirror(ctx, g, shadowRef(gateBranch(name)), C)...)
 	pr, err := e.Forge.FindOpenPR(ctx, pc.pair.Shadow, gateBranch(name), "main")
 	if err != nil {
 		return res, warns, forgeErr(err, "find the gate PR")
@@ -353,7 +367,9 @@ func (e *Engine) gate(ctx context.Context, pc *pairCtx, name, mode string) (*Gat
 			Message: "the token cannot read check runs, so only GitHub Actions workflows and commit statuses were considered; checks from other CI apps were not seen"})
 	}
 	res.Checks, res.FailedChecks = out.status, out.failed
-	if err := e.recordGate(ctx, pc, m, metaSHA, res, b.commits); err != nil {
+	rw, err := e.recordGate(ctx, pc, m, metaSHA, res, b.commits)
+	warns = addWarnings(warns, rw...)
+	if err != nil {
 		if out.status == feature.ChecksPassed {
 			return res, warns, err // a green gate that isn't recorded can't be promoted
 		}
@@ -387,7 +403,7 @@ func guardNames(pc *pairCtx) workflow.Names {
 	return n
 }
 
-func (e *Engine) recordGate(ctx context.Context, pc *pairCtx, m feature.Meta, metaSHA string, res *GateResult, commits []feature.GateCommit) error {
+func (e *Engine) recordGate(ctx context.Context, pc *pairCtx, m feature.Meta, metaSHA string, res *GateResult, commits []feature.GateCommit) ([]contract.Warning, error) {
 	m.SchemaVersion = feature.SchemaVersion
 	m.Gate = &feature.Gate{FeatureHead: res.FeatureHead, PublicMain: res.PublicMain, Overlay: res.Overlay,
 		Candidate: res.Candidate, PublishedTree: res.PublishedTree, ScannedAs: res.ScannedAs, Commits: commits, Checks: res.Checks, Leak: res.Leak, At: e.now()}

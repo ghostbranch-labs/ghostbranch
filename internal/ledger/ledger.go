@@ -26,7 +26,10 @@ type Entry struct {
 	// Waivers are the finding ids an entry waived, revoked or relied on.
 	Waivers []string `json:"waivers,omitempty"`
 	Reason  string   `json:"reason,omitempty"`
-	Summary string   `json:"summary"`
+	// Refs are the shadow-repo refs an entry deleted, each with the SHA it
+	// pointed at.
+	Refs    map[string]string `json:"refs,omitempty"`
+	Summary string            `json:"summary"`
 }
 
 // GrantRef names the grant an entry is about.

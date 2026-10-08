@@ -11,7 +11,7 @@ import (
 
 // SchemaVersion versions the envelope and every data schema. It stays 0.x
 // until launch, and 0.x versions may break.
-const SchemaVersion = "0.5"
+const SchemaVersion = "0.6"
 
 // Exit codes. Agents branch on these, so they never change meaning.
 const (
@@ -90,6 +90,19 @@ const (
 	ApprovalRequired Code = "APPROVAL_REQUIRED"
 
 	PlanStale Code = "PLAN_STALE"
+
+	// UpgradeNeeded means the pair's overlay config uses keys this binary
+	// doesn't know: the pair was set up by a newer Ghostbranch.
+	UpgradeNeeded Code = "UPGRADE_NEEDED"
+
+	// FeatureMoved means a feature's branch or refs moved while it was
+	// being closed; nothing more was deleted.
+	FeatureMoved Code = "FEATURE_MOVED"
+
+	// ShadowBehindError means feature start refused because shadow main is
+	// behind public main. It shares its string with the ShadowBehind
+	// warning: one is an error.code, the other a warnings[].code.
+	ShadowBehindError Code = "SHADOW_BEHIND"
 )
 
 var exitCodes = map[Code]int{
@@ -105,8 +118,11 @@ var exitCodes = map[Code]int{
 	RebaseConflict: ExitConflict, SyncDiverged: ExitConflict, BranchExists: ExitConflict,
 	OverlayCollision: ExitConflict, ShadowNotEmpty: ExitConflict, RefMoved: ExitConflict,
 	CurateConflict: ExitConflict, CurateTreeMismatch: ExitConflict,
-	ApprovalRequired: ExitNeedsApproval,
-	PlanStale:        ExitPlanStale,
+	ApprovalRequired:  ExitNeedsApproval,
+	PlanStale:         ExitPlanStale,
+	UpgradeNeeded:     ExitFailure,
+	FeatureMoved:      ExitConflict,
+	ShadowBehindError: ExitConflict,
 }
 
 // Exit is the process exit code for c.
@@ -219,12 +235,26 @@ const (
 	// CINotCancelled means a sync's pushes may have started workflow runs
 	// in the shadow repo that sync could not cancel.
 	CINotCancelled WarningCode = "CI_NOT_CANCELLED"
+	// PRStateUnknown means the survey couldn't read a published feature's
+	// public PR, so it doesn't know whether the PR merged.
+	PRStateUnknown WarningCode = "PR_STATE_UNKNOWN"
+	// DriftUnknown means the survey couldn't check whether a feature still
+	// merges cleanly onto public main.
+	DriftUnknown WarningCode = "DRIFT_UNKNOWN"
+	// FeatureNotClosed means sync's auto-close of a merged feature failed;
+	// the sync itself still succeeded.
+	FeatureNotClosed WarningCode = "FEATURE_NOT_CLOSED"
+	// MirrorNotUpdated means a push to the shadow repo succeeded, but the
+	// local mirror's copy of a ref (or a local plan file) couldn't be
+	// updated; the next fetch corrects the mirror.
+	MirrorNotUpdated WarningCode = "MIRROR_NOT_UPDATED"
 )
 
 var warningCodes = []WarningCode{ConfigKeyIgnored, PublicNotPublic, GateNotRecorded, ChecksLimited, ActorUnknown,
 	WorkflowChanged, LargeFile, BinaryFile, WaiversUnreadable,
 	OverlayOutdated, RepoGuard, RepoGuardUnrewritable, SecretsUnlisted, SecretsMissing, PushTriggersOnSync,
-	ActionsMinutesBilled, ShadowBehind, AuditIncomplete, CINotCancelled}
+	ActionsMinutesBilled, ShadowBehind, AuditIncomplete, CINotCancelled, PRStateUnknown, DriftUnknown, FeatureNotClosed,
+	MirrorNotUpdated}
 
 // AllWarnings lists every warning code, sorted.
 func AllWarnings() []WarningCode {

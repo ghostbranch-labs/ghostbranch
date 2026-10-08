@@ -68,6 +68,19 @@ func (e *Engine) Init(ctx context.Context, opt InitOptions) (res *InitResult, wa
 		return nil, nil, contract.New(contract.BadFlag, "%v", err).WithField("public")
 	}
 	shadow := opt.Shadow
+	// A registered pair keeps its shadow repo: init resumes it, and never
+	// quietly sets up a second one.
+	if reg, ok := e.WS.Find(opt.Public); ok {
+		switch {
+		case shadow == "":
+			shadow = reg.Shadow
+		case !strings.EqualFold(shadow, reg.Shadow):
+			return nil, nil, contract.New(contract.BadFlag,
+				"%s is registered here with the shadow repo %s, not %s. To switch shadow repos, run ghostbranch remove --repo %s, then ghostbranch init %s --shadow %s (with --adopt if that repo exists)",
+				reg.Public, reg.Shadow, shadow, reg.Public, reg.Public, shadow).WithField("shadow").
+				WithDetails(map[string]any{"public": reg.Public, "registered_shadow": reg.Shadow})
+		}
+	}
 	if shadow == "" {
 		shadow = opt.Public + "-shadow"
 	}
@@ -85,6 +98,9 @@ func (e *Engine) Init(ctx context.Context, opt InitOptions) (res *InitResult, wa
 	if pub.Private {
 		warns = append(warns, contract.Warning{Code: contract.PublicNotPublic,
 			Message: fmt.Sprintf("%s is private; Ghostbranch is meant for public repos", p.Public)})
+	}
+	if err := e.checkPublicBranches(ctx, p, pub); err != nil {
+		return res, warns, err
 	}
 	_, err = e.Forge.GetRepo(ctx, p.Shadow)
 	exists := err == nil
@@ -150,14 +166,14 @@ func (e *Engine) Init(ctx context.Context, opt InitOptions) (res *InitResult, wa
 		return res, warns, err
 	}
 
-	specs, leases, err := e.missingMirrorRefs(ctx, g, res)
+	specs, leases, err := e.missingMirrorRefs(ctx, g, res, opt.Adopt)
 	if err != nil {
 		return res, warns, err
 	}
 	_, hasOverlay, _ := g.Resolve(ctx, shadowRef(OverlayBranch))
 	if e.DryRun {
 		pv := preview.New(map[string]string{"public_main": publicMain})
-		addMirrorOps(pv, p.Shadow, specs)
+		addMirrorOps(pv, p.Shadow, specs, leases)
 		if !hasOverlay {
 			pv.Add(preview.PushRef(p.Shadow, "refs/heads/"+OverlayBranch, "", ""))
 		}
@@ -239,8 +255,13 @@ func (e *Engine) checkAdoptable(ctx context.Context, pc *pairCtx) error {
 	}
 	if O, ok := heads[shadowRef(OverlayBranch)]; ok {
 		if raw, found, err := g.ShowFile(ctx, O, ".ghostbranch.yml"); err == nil && found {
-			if cfg, _, err := config.Parse(raw); err == nil && strings.EqualFold(cfg.Public, pc.pair.Public) {
+			cfg, _, err := config.Parse(raw)
+			if err == nil && strings.EqualFold(cfg.Public, pc.pair.Public) {
 				return nil
+			}
+			// A key from a newer Ghostbranch is not unrelated content.
+			if err != nil && contract.From(upgradeNeeded(err)).Code == contract.UpgradeNeeded {
+				return upgradeNeeded(err)
 			}
 		}
 		return contract.New(contract.ShadowNotEmpty, "%s has a %q branch that is not the overlay for %s", pc.pair.Shadow, OverlayBranch, pc.pair.Public)
@@ -257,16 +278,73 @@ func (e *Engine) checkAdoptable(ctx context.Context, pc *pairCtx) error {
 		if !ok {
 			return contract.New(contract.ShadowNotEmpty, "%s has branch %q, which is not a public branch; adopt only an empty repo or a mirror", pc.pair.Shadow, b)
 		}
-		if anc, err := g.IsAncestor(ctx, sha, pubSHA); err != nil || !anc {
+		anc, err := g.IsAncestor(ctx, sha, pubSHA)
+		if err != nil {
+			return internalErr(err, "compare shadow branch "+b+" with public")
+		}
+		if !anc {
 			return contract.New(contract.ShadowNotEmpty, "%s branch %q has commits that are not in public", pc.pair.Shadow, b)
+		}
+	}
+	// Tags too: each must be a public tag, at the same object.
+	shTags, err := g.Refs(ctx, "refs/shadow-tags")
+	if err != nil {
+		return internalErr(err, "list shadow tags")
+	}
+	pubTags, err := g.Refs(ctx, "refs/public-tags")
+	if err != nil {
+		return internalErr(err, "list public tags")
+	}
+	names := make([]string, 0, len(shTags))
+	for ref := range shTags {
+		names = append(names, strings.TrimPrefix(ref, "refs/shadow-tags/"))
+	}
+	sort.Strings(names)
+	for _, t := range names {
+		if pubTags["refs/public-tags/"+t] != shTags["refs/shadow-tags/"+t] {
+			return contract.New(contract.ShadowNotEmpty, "%s has tag %q, which the public repo doesn't have at that object; adopt only an empty repo or a mirror", pc.pair.Shadow, t)
+		}
+	}
+	return nil
+}
+
+// checkPublicBranches refuses a public repo with a branch named ghostbranch
+// (or under ghostbranch/): mirroring it would collide with the overlay
+// branch. It reads the public repo's branches with ls-remote, before
+// anything is created or pushed.
+func (e *Engine) checkPublicBranches(ctx context.Context, p workspace.Pair, pub forge.Repo) error {
+	// ls-remote needs no repo. Run it in a new empty directory, with repo
+	// discovery stopped at its parent, so no repo's config applies while the
+	// token is sent.
+	dir, err := os.MkdirTemp("", "ghostbranch-ls-remote-")
+	if err != nil {
+		return internalErr(err, "make a scratch directory")
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	g := gitx.New(dir)
+	g.Config = e.gitConfig()
+	g.Env = []string{"GIT_CEILING_DIRECTORIES=" + filepath.Dir(dir)}
+	out, err := g.Run(ctx, "ls-remote", "--heads", pub.CloneURL)
+	if err != nil {
+		return remoteErr(err, "list the public repo's branches")
+	}
+	for _, line := range strings.Split(out, "\n") {
+		_, ref, ok := strings.Cut(strings.TrimSpace(line), "\t")
+		b := strings.TrimPrefix(ref, "refs/heads/")
+		if ok && (b == OverlayBranch || strings.HasPrefix(b, OverlayBranch+"/")) {
+			return contract.New(contract.NameInvalid,
+				"public repo %s has a branch %q, but Ghostbranch reserves that name for the shadow repo's overlay branch, so it can't mirror it; rename or delete that branch in the public repo, then run init again",
+				p.Public, b).WithField("public").WithDetails(map[string]any{"public": p.Public, "branch": b})
 		}
 	}
 	return nil
 }
 
 // missingMirrorRefs lists public branches and tags absent from the shadow
-// repo, main first, with must-not-exist leases.
-func (e *Engine) missingMirrorRefs(ctx context.Context, g *gitx.Git, res *InitResult) ([]string, []gitx.Lease, error) {
+// repo, main first, with must-not-exist leases. With ffMain (an adopt), a
+// shadow main that is behind public main is fast-forwarded too, leased on
+// its old head, and listed in res.MirroredBranches.
+func (e *Engine) missingMirrorRefs(ctx context.Context, g *gitx.Git, res *InitResult, ffMain bool) ([]string, []gitx.Lease, error) {
 	get := func(prefix string) (map[string]string, error) { return g.Refs(ctx, prefix) }
 	pubHeads, err := get("refs/remotes/public")
 	if err != nil {
@@ -293,8 +371,23 @@ func (e *Engine) missingMirrorRefs(ctx context.Context, g *gitx.Git, res *InitRe
 		return branches[i] < branches[j]
 	})
 	for _, b := range branches {
-		if _, ok := shHeads[shadowRef(b)]; !ok {
-			add(pubHeads[publicRef(b)], "refs/heads/"+b)
+		pb := pubHeads[publicRef(b)]
+		sb, ok := shHeads[shadowRef(b)]
+		if !ok {
+			add(pb, "refs/heads/"+b)
+			res.MirroredBranches = append(res.MirroredBranches, b)
+			continue
+		}
+		if b != "main" || !ffMain || sb == pb {
+			continue
+		}
+		anc, err := g.IsAncestor(ctx, sb, pb)
+		if err != nil {
+			return nil, nil, internalErr(err, "compare shadow main with public main")
+		}
+		if anc {
+			specs = append(specs, pb+":refs/heads/main")
+			leases = append(leases, gitx.Lease{Ref: "refs/heads/main", Expect: sb})
 			res.MirroredBranches = append(res.MirroredBranches, b)
 		}
 	}
@@ -312,10 +405,12 @@ func (e *Engine) missingMirrorRefs(ctx context.Context, g *gitx.Git, res *InitRe
 	return specs, leases, nil
 }
 
-func addMirrorOps(pv *preview.Preview, shadow string, specs []string) {
-	for _, s := range specs {
+// addMirrorOps previews specs; leases[i] guards specs[i], and its Expect
+// is the ref's current value ("" for a new ref).
+func addMirrorOps(pv *preview.Preview, shadow string, specs []string, leases []gitx.Lease) {
+	for i, s := range specs {
 		sha, dst, _ := strings.Cut(s, ":")
-		pv.Add(preview.PushRef(shadow, dst, "", sha))
+		pv.Add(preview.PushRef(shadow, dst, leases[i].Expect, sha))
 	}
 }
 
@@ -337,13 +432,13 @@ func (e *Engine) previewNewShadow(ctx context.Context, p workspace.Pair, pub for
 		return remoteErr(err, "fetch the public repo")
 	}
 	pm, _, _ := g.Resolve(ctx, publicRef("main"))
-	specs, _, err := e.missingMirrorRefs(ctx, g, res)
+	specs, leases, err := e.missingMirrorRefs(ctx, g, res, false)
 	if err != nil {
 		return err
 	}
 	pv := preview.New(map[string]string{"public_main": pm})
 	pv.Add(preview.CreateRepo(p.Shadow))
-	addMirrorOps(pv, p.Shadow, specs)
+	addMirrorOps(pv, p.Shadow, specs, leases)
 	pv.Add(preview.PushRef(p.Shadow, "refs/heads/"+OverlayBranch, "", ""), preview.SetDefaultBranch(p.Shadow, OverlayBranch))
 	if !registered {
 		pv.Add(preview.RegisterPair(p.Public, p.Shadow))

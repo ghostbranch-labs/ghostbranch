@@ -42,30 +42,48 @@ func TestEncodeDecodeRoundTrip(t *testing.T) {
 }
 
 func TestStateOf(t *testing.T) {
+	t.Parallel()
 	passed := &feature.Gate{FeatureHead: "h", PublicMain: "p", Overlay: "o", Checks: feature.ChecksPassed, Leak: feature.LeakClean}
 	failed := &feature.Gate{FeatureHead: "h", PublicMain: "p", Overlay: "o", Checks: feature.ChecksFailed, Leak: feature.LeakClean}
-	in := func(m feature.Meta, head, pm, o string, pr bool) feature.StateInput {
-		return feature.StateInput{Meta: m, Head: head, PublicMain: pm, Overlay: o, PublicPRExists: pr}
+	prom := &feature.Promoted{PublicPR: 1, FeatureHead: "h"}
+	in := func(m feature.Meta, head, pm, o string, branch bool, pr string, moved bool) feature.StateInput {
+		return feature.StateInput{Meta: m, BranchExists: branch, Head: head, PublicMain: pm, Overlay: o, PRState: pr, Moved: moved}
 	}
 	cases := []struct {
 		name string
 		in   feature.StateInput
 		want feature.State
 	}{
-		{"draft", in(feature.Meta{}, "h", "p", "o", false), feature.StateDraft},
-		{"gate passed", in(feature.Meta{Gate: passed}, "h", "p", "o", false), feature.StateGatePassed},
-		{"stale: feature moved", in(feature.Meta{Gate: passed}, "h2", "p", "o", false), feature.StateInReview},
-		{"stale: public moved", in(feature.Meta{Gate: passed}, "h", "p2", "o", false), feature.StateInReview},
-		{"stale: overlay moved", in(feature.Meta{Gate: passed}, "h", "p", "o2", false), feature.StateInReview},
-		{"failed", in(feature.Meta{Gate: failed}, "h", "p", "o", false), feature.StateInReview},
-		{"promoted", in(feature.Meta{Gate: passed, Promoted: &feature.Promoted{PublicPR: 1}}, "h", "p", "o", true), feature.StatePromoted},
-		{"promoted but PR gone", in(feature.Meta{Gate: passed, Promoted: &feature.Promoted{PublicPR: 1}}, "h", "p", "o", false), feature.StateGatePassed},
-		{"abandoned wins", in(feature.Meta{Abandoned: true, Gate: passed}, "h", "p", "o", true), feature.StateAbandoned},
+		{"draft", in(feature.Meta{}, "h", "p", "o", true, "", false), feature.StateDraft},
+		{"gate passed", in(feature.Meta{Gate: passed}, "h", "p", "o", true, "", false), feature.StateGatePassed},
+		{"stale: feature moved", in(feature.Meta{Gate: passed}, "h2", "p", "o", true, "", false), feature.StateInReview},
+		{"stale: public moved", in(feature.Meta{Gate: passed}, "h", "p2", "o", true, "", false), feature.StateInReview},
+		{"stale: overlay moved", in(feature.Meta{Gate: passed}, "h", "p", "o2", true, "", false), feature.StateInReview},
+		{"failed", in(feature.Meta{Gate: failed}, "h", "p", "o", true, "", false), feature.StateInReview},
+		{"published open", in(feature.Meta{Gate: passed, Promoted: prom}, "h", "p", "o", true, "open", false), feature.StatePublished},
+		{"published unknown", in(feature.Meta{Gate: passed, Promoted: prom}, "h", "p", "o", true, "unknown", false), feature.StatePublished},
+		{"published no state", in(feature.Meta{Promoted: prom}, "h", "p", "o", true, "", false), feature.StatePublished},
+		{"merged", in(feature.Meta{Promoted: prom}, "h", "p", "o", true, "merged", false), feature.StateMerged},
+		{"merged moved", in(feature.Meta{Promoted: prom}, "h", "p", "o", true, "merged", true), feature.StateMergedMoved},
+		{"pr closed", in(feature.Meta{Promoted: prom}, "h", "p", "o", true, "closed", false), feature.StatePRClosed},
+		{"merged state without promoted record", in(feature.Meta{Gate: passed}, "h", "p", "o", true, "merged", false), feature.StateGatePassed},
+		{"branch gone", in(feature.Meta{Gate: passed, Promoted: prom}, "h", "p", "o", false, "merged", false), feature.StateBranchGone},
+		{"abandoned wins", in(feature.Meta{Abandoned: true, Gate: passed}, "h", "p", "o", false, "open", false), feature.StateAbandoned},
 	}
 	for _, c := range cases {
 		if got := feature.StateOf(c.in); got != c.want {
 			t.Errorf("%s: got %s, want %s", c.name, got, c.want)
 		}
+	}
+}
+
+func TestDecodeOfA05FileHasNoFeatureHead(t *testing.T) {
+	t.Parallel()
+	old := `{"schema_version":"0.5","name":"x","branch":"x","created_by":"human:octo","created_at":"2026-10-05T12:00:00Z","base":"b","abandoned":false,"gate":null,` +
+		`"promoted":{"public_pr":3,"plan_id":"id"}}`
+	m, err := feature.Decode([]byte(old))
+	if err != nil || m.Promoted == nil || m.Promoted.FeatureHead != "" || m.Promoted.PublicPR != 3 {
+		t.Fatalf("decode 0.5: %+v %v", m, err)
 	}
 }
 

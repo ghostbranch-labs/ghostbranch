@@ -41,3 +41,25 @@ func TestReadMissingFileIsEmpty(t *testing.T) {
 		t.Fatalf("got %v %v", got, err)
 	}
 }
+
+func TestRefsRoundTripAndAreOmittedWhenEmpty(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "ledger.jsonl")
+	at := time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
+	e := ledger.Entry{TS: at, Actor: "human:octo", Op: "feature close", Pair: "acme/widget", Feature: "feat-x",
+		Refs: map[string]string{"refs/heads/feat-x": "0123456789abcdef0123456789abcdef01234567"}, Summary: "closed"}
+	if err := ledger.Append(path, e); err != nil {
+		t.Fatal(err)
+	}
+	if err := ledger.Append(path, ledger.Entry{TS: at, Actor: "human:octo", Op: "sync", Summary: "noop"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ledger.Read(path)
+	if err != nil || len(got) != 2 || !reflect.DeepEqual(got[0], e) {
+		t.Fatalf("Read = %+v %v", got, err)
+	}
+	raw, _ := os.ReadFile(path)
+	if strings.Contains(strings.Split(string(raw), "\n")[1], "refs") {
+		t.Fatal("an entry that deleted nothing must omit refs")
+	}
+}

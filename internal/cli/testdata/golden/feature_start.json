@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.5",
+  "schema_version": "0.6",
   "command": "feature start",
   "ok": true,
   "exit_code": 0,
@@ -7,7 +7,19 @@
     "name": "feat-x",
     "branch": "feat-x",
     "base": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
-    "checkout": "git fetch shadow && git switch feat-x",
+    "checkout": [
+      [
+        "git",
+        "fetch",
+        "shadow"
+      ],
+      [
+        "git",
+        "switch",
+        "feat-x"
+      ]
+    ],
+    "checkout_hint": "git fetch shadow && git switch feat-x",
     "preview": null
   },
   "warnings": [],
@@ -20,7 +32,7 @@
         "--repo",
         "acme/widget"
       ],
-      "why": "commit on feat-x, push it with `git push shadow feat-x` (the shadow repo, never origin), then gate it",
+      "why": "check out with `git fetch shadow && git switch feat-x`, commit on feat-x, push it with `git push shadow feat-x` (the shadow repo, never origin), then gate it",
       "needs_human": false,
       "needs_input": []
     }

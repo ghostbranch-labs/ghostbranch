@@ -1,0 +1,15 @@
+{
+  "schema_version": "0.6",
+  "command": "feature abandon",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "feature": "feat-x",
+    "abandoned": true,
+    "changed": true,
+    "preview": null
+  },
+  "warnings": [],
+  "next": [],
+  "error": null
+}

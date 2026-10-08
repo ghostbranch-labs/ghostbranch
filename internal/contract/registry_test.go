@@ -20,21 +20,24 @@ func TestEveryCodeIsDocumentedExactlyOnce(t *testing.T) {
 		if e.Summary == "" || e.WhatToDo == "" {
 			t.Errorf("%s: empty summary or what_to_do", e.Code)
 		}
-		if seen[e.Code] {
-			t.Errorf("%s listed twice", e.Code)
+		// One string may name an error and a warning (SHADOW_BEHIND), but
+		// never two entries of one kind.
+		key := string(e.Kind) + ":" + e.Code
+		if seen[key] {
+			t.Errorf("%s listed twice", key)
 		}
-		seen[e.Code] = true
+		seen[key] = true
 		if (e.Kind == KindWarning) != (e.ExitCode == nil) {
 			t.Errorf("%s: warnings and only warnings have no exit code", e.Code)
 		}
 	}
 	for _, c := range AllCodes() {
-		if !seen[string(c)] {
+		if !seen["error:"+string(c)] {
 			t.Errorf("error %s missing from the registry", c)
 		}
 	}
 	for _, w := range AllWarnings() {
-		if !seen[string(w)] {
+		if !seen["warning:"+string(w)] {
 			t.Errorf("warning %s missing from the registry", w)
 		}
 	}

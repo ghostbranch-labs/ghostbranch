@@ -3,7 +3,7 @@
   "title": "sync data",
   "type": "object",
   "additionalProperties": false,
-  "required": ["public", "shadow", "action", "public_main", "shadow_main_before", "shadow_main_after", "branches", "cancelled_runs", "preview"],
+  "required": ["public", "shadow", "action", "public_main", "shadow_main_before", "shadow_main_after", "branches", "cancelled_runs", "closed", "surveyed", "active_features", "attention", "preview"],
   "properties": {
     "public": { "$ref": "common.schema.json#/$defs/repo" },
     "shadow": { "$ref": "common.schema.json#/$defs/repo" },
@@ -37,6 +37,31 @@
           "url": { "type": "string" }
         }
       }
+    },
+    "closed": {
+      "description": "merged features sync closed (never in a dry run: the preview has their ops)",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "public_pr", "deleted"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "public_pr": { "type": "integer" },
+          "deleted": {
+            "description": "each shadow ref deleted, with the SHA it pointed at",
+            "type": "object",
+            "additionalProperties": { "$ref": "common.schema.json#/$defs/sha" }
+          }
+        }
+      }
+    },
+    "surveyed": { "description": "whether sync surveyed the features: false with --no-close or when the survey failed, and then active_features and attention say nothing", "type": "boolean" },
+    "active_features": { "description": "features not abandoned and not closable by sync", "type": "integer", "minimum": 0 },
+    "attention": {
+      "description": "merged_moved, pr_closed and branch_gone features sync won't close: a person must look at them",
+      "type": "array",
+      "items": { "$ref": "feature-report.schema.json" }
     },
     "preview": { "oneOf": [{ "type": "null" }, { "$ref": "preview.schema.json" }] }
   }

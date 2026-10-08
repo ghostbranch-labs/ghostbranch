@@ -331,7 +331,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 		res.PlanPath = ""
 		return res, warns, err
 	}
-	_ = g.UpdateRef(ctx, planRef(planID), P)
+	warns = addWarnings(warns, e.updateMirror(ctx, g, planRef(planID), P)...)
 	if opt.PlanOnly {
 		return res, warns, nil
 	}

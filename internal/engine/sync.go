@@ -7,8 +7,10 @@ import (
 	"strings"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
+	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
+	"github.com/ghostbranch-labs/ghostbranch/internal/ledger"
 	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workflow"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
@@ -23,13 +25,27 @@ type SyncResult struct {
 	ShadowMainAfter  string           `json:"shadow_main_after"`
 	Branches         []SyncBranch     `json:"branches"`
 	CancelledRuns    []CancelledRun   `json:"cancelled_runs"`
+	Closed           []ClosedFeature  `json:"closed"`          // merged features sync closed; never null
+	Surveyed         bool             `json:"surveyed"`        // the features were surveyed: false with --no-close or when the survey failed
+	ActiveFeatures   int              `json:"active_features"` // features not abandoned and not closable by sync; 0 unless Surveyed
+	Attention        []FeatureReport  `json:"attention"`       // features a person must look at; never null
 	Preview          *preview.Preview `json:"preview"`
 }
 
 // SyncOptions are sync's flags. NoCancel leaves the workflow runs the
-// sync's pushes start in the shadow repo running.
+// sync's pushes start in the shadow repo running. NoClose leaves merged
+// features in place.
 type SyncOptions struct {
 	NoCancel bool
+	NoClose  bool
+}
+
+// ClosedFeature is a merged feature sync closed: its public PR and every
+// shadow ref deleted, with the SHA it pointed at.
+type ClosedFeature struct {
+	Name     string            `json:"name"`
+	PublicPR int               `json:"public_pr"`
+	Deleted  map[string]string `json:"deleted"`
 }
 
 // CancelledRun is a workflow run sync cancelled in the shadow repo.
@@ -54,6 +70,8 @@ type SyncBranch struct {
 // The top-level main fields describe main. A push with the person's token
 // starts the shadow repo's push-triggered workflows, re-testing what public
 // CI already tested, so sync then cancels those runs unless o.NoCancel.
+// Last, unless o.NoClose, it closes the features whose public PR merged and
+// whose branch hasn't moved (see closeMerged).
 func (e *Engine) Sync(ctx context.Context, p workspace.Pair, o SyncOptions) (res *SyncResult, warns []contract.Warning, err error) {
 	defer func() {
 		summary := ""
@@ -65,6 +83,9 @@ func (e *Engine) Sync(ctx context.Context, p workspace.Pair, o SyncOptions) (res
 			summary = strings.Join(parts, ", ")
 			if n := len(res.CancelledRuns); n > 0 {
 				summary += fmt.Sprintf("; cancelled %d workflow run(s)", n)
+			}
+			if n := len(res.Closed); n > 0 {
+				summary += fmt.Sprintf("; closed %d merged feature(s)", n)
 			}
 		}
 		e.record("sync", &p, "", "", summary, err)
@@ -96,7 +117,8 @@ func (e *Engine) Sync(ctx context.Context, p workspace.Pair, o SyncOptions) (res
 	if err != nil {
 		return nil, warns, internalErr(err, "read shadow main")
 	}
-	res = &SyncResult{Public: p.Public, Shadow: p.Shadow, PublicMain: pm, ShadowMainBefore: sm, ShadowMainAfter: sm, Branches: []SyncBranch{}, CancelledRuns: []CancelledRun{}}
+	res = &SyncResult{Public: p.Public, Shadow: p.Shadow, PublicMain: pm, ShadowMainBefore: sm, ShadowMainAfter: sm, Branches: []SyncBranch{}, CancelledRuns: []CancelledRun{},
+		Closed: []ClosedFeature{}, Attention: []FeatureReport{}}
 	if e.DryRun {
 		res.Preview = preview.New(map[string]string{"public_main": pm, "shadow_main": sm})
 	}
@@ -135,7 +157,7 @@ func (e *Engine) Sync(ctx context.Context, p workspace.Pair, o SyncOptions) (res
 				if err := e.push(ctx, pc, remoteShadow, opt, pb+":refs/heads/"+b); err != nil {
 					return res, warns, err
 				}
-				_ = g.UpdateRef(ctx, shadowRef(b), pb)
+				warns = addWarnings(warns, e.updateMirror(ctx, g, shadowRef(b), pb)...)
 				br.To = pb
 				pushed = addPushed(pushed, pb, b)
 			}
@@ -151,16 +173,117 @@ func (e *Engine) Sync(ctx context.Context, p workspace.Pair, o SyncOptions) (res
 		res.CancelledRuns, cw = e.cancelPushRuns(ctx, pc, pushed)
 		warns = addWarnings(warns, cw...)
 	}
+	// The closes read only public main and the feature refs, so a diverged
+	// shadow branch doesn't hold them up.
+	warns = addWarnings(warns, e.closeMerged(ctx, pc, &p, res, o.NoClose)...)
 	if len(diverged) > 0 {
 		pronoun := "them"
 		if len(diverged) == 1 {
 			pronoun = "it"
 		}
 		return res, warns, contract.New(contract.SyncDiverged,
-			"shadow %s has commits that are not in public; nothing was pushed for %s", strings.Join(diverged, ", "), pronoun).
+			"shadow %s has commits that are not in public; nothing was pushed to %s", strings.Join(diverged, ", "), pronoun).
 			WithDetails(map[string]any{"branches": diverged, "shadow_main": sm, "public_main": pm})
 	}
 	return res, warns, nil
+}
+
+// closeMerged is sync's auto-close, under sync's pair lock. It surveys the
+// pair's features, which costs one GetPR per published feature: the only
+// way to learn which public PRs merged, and acceptable for the handful of
+// features a pair has. It sets res.ActiveFeatures and res.Attention, then
+// closes each feature that is ClosableWithoutConsole through closeFeature,
+// the same code as feature close: nothing that needs a person is ever
+// touched here. noClose skips all of it, the survey too. In a dry run the
+// closes' ops join res.Preview. Nothing here fails the sync: a survey that
+// fails closes nothing, and a close that fails (or, in a dry run, can't be
+// previewed) is a FEATURE_NOT_CLOSED warning. The ledger records each
+// close, with every ref it deleted, and a feature whose refs were deleted
+// is in res.Closed even if its gate PR then wouldn't close.
+func (e *Engine) closeMerged(ctx context.Context, pc *pairCtx, p *workspace.Pair, res *SyncResult, noClose bool) []contract.Warning {
+	if noClose {
+		return nil
+	}
+	rs, warns, err := e.survey(ctx, pc)
+	if err != nil {
+		ce := contract.From(err)
+		return addWarnings(warns, contract.Warning{Code: contract.FeatureNotClosed,
+			Message: fmt.Sprintf("couldn't survey features, so nothing was closed: %s: %s", ce.Code, ce.Message),
+			Details: map[string]any{"error_code": string(ce.Code)}})
+	}
+	res.Surveyed = true
+	for _, r := range rs {
+		closable := ClosableWithoutConsole(r)
+		if !r.Abandoned && !closable {
+			res.ActiveFeatures++
+		}
+		switch r.State {
+		case feature.StateMergedMoved, feature.StatePRClosed, feature.StateBranchGone:
+			if !closable {
+				res.Attention = append(res.Attention, r)
+			}
+		}
+	}
+	for _, r := range rs {
+		if !ClosableWithoutConsole(r) {
+			continue
+		}
+		cr, cw, err := e.closeFeature(ctx, pc, r)
+		warns = addWarnings(warns, cw...)
+		if e.DryRun {
+			// A close that couldn't be previewed warns, as the real one would.
+			if err != nil {
+				warns = addWarnings(warns, notClosed(r.Name, err, nil))
+				continue
+			}
+			res.Preview.Add(cr.Preview.Ops...)
+			continue
+		}
+		summary := ""
+		var refs map[string]string
+		if cr != nil {
+			refs = cr.Deleted
+			if err == nil {
+				summary = closeLedgerSummary(cr)
+			}
+		}
+		e.recordWith("feature close", p, r.Name, "", summary, err, func(ent *ledger.Entry) {
+			if len(refs) > 0 {
+				ent.Refs = refs
+			}
+		})
+		deleted := cr != nil && len(cr.Deleted) > 0
+		if err == nil || deleted {
+			pr := 0
+			if r.PublicPR != nil {
+				pr = *r.PublicPR
+			}
+			e.progressf("closed merged feature %s (PR #%d)", r.Name, pr)
+			res.Closed = append(res.Closed, ClosedFeature{Name: r.Name, PublicPR: pr, Deleted: cr.Deleted})
+		}
+		if err != nil {
+			var gone map[string]string
+			if deleted {
+				gone = cr.Deleted
+			}
+			warns = addWarnings(warns, notClosed(r.Name, err, gone))
+		}
+	}
+	return warns
+}
+
+// notClosed is the FEATURE_NOT_CLOSED warning for a merged feature sync
+// couldn't close (or, under --plan, couldn't preview closing), with the refs
+// it deleted when there are any.
+func notClosed(name string, err error, deleted map[string]string) contract.Warning {
+	ce := contract.From(err)
+	details := map[string]any{"feature": name, "error_code": string(ce.Code)}
+	if len(deleted) > 0 {
+		details["deleted"] = deleted
+	}
+	return contract.Warning{Code: contract.FeatureNotClosed,
+		Message: fmt.Sprintf("couldn't close merged feature %s: %s: %s", name, ce.Code, ce.Message),
+		Details: details}
 }
 
 // syncAction is the top-level action for main's per-branch status.

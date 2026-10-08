@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "feature abandon data",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["feature", "abandoned", "changed", "preview"],
+  "properties": {
+    "feature": { "type": "string" },
+    "abandoned": { "description": "the feature's new value: true when abandoned, false after --undo", "type": "boolean" },
+    "changed": { "description": "false when the feature already had that value, so nothing changed", "type": "boolean" },
+    "preview": { "oneOf": [{ "type": "null" }, { "$ref": "preview.schema.json" }] }
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "schema_version": "0.6",
+  "command": "remove",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "public": "acme/widget",
+    "shadow": "acme/widget-shadow",
+    "grants": 1,
+    "waivers": 0,
+    "plans": [
+      "<ROOT>/home/workspaces/default/plans/20261005T120005Z-0c0d0e.json"
+    ],
+    "dir": "<ROOT>/home/workspaces/default/pairs/acme__widget",
+    "preview": {
+      "fingerprint": {},
+      "ops": [
+        {
+          "op": "revoke",
+          "public": "acme/widget",
+          "shadow": "acme/widget-shadow"
+        },
+        {
+          "op": "remove_file",
+          "path": "<ROOT>/home/workspaces/default/plans/20261005T120005Z-0c0d0e.json"
+        },
+        {
+          "op": "remove_file",
+          "path": "<ROOT>/home/workspaces/default/pairs/acme__widget"
+        },
+        {
+          "op": "write_file",
+          "path": "<ROOT>/home/workspaces/default/workspace.json"
+        }
+      ]
+    }
+  },
+  "warnings": [],
+  "next": [],
+  "error": null
+}

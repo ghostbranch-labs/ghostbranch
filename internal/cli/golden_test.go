@@ -28,6 +28,9 @@ var dataSchemas = map[string]string{
 	"waivers add": "waivers-add.schema.json", "waivers list": "waivers-list.schema.json", "waivers revoke": "waivers-revoke.schema.json",
 	"explain": "explain.schema.json", "guide": "guide.schema.json", "audit": "audit.schema.json", "upgrade": "upgrade.schema.json",
 	"guard install": "guard.schema.json", "guard uninstall": "guard.schema.json", "guard status": "guard.schema.json", "guard check": "guard.schema.json",
+	"remove": "remove.schema.json", "log": "log.schema.json",
+	"status": "status.schema.json", "feature list": "feature-list.schema.json", "feature show": "feature-show.schema.json",
+	"feature abandon": "feature-abandon.schema.json", "feature close": "feature-close.schema.json",
 }
 
 func schema(t *testing.T, name string) *jsonschema.Schema {
@@ -96,7 +99,7 @@ func TestGoldenContract(t *testing.T) {
 		{"feature_start_behind", func(te *testEnv) {
 			initOnly(te)
 			testutil.Commit(te.t, te.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
-		}, []string{"feature", "start", "feat-x"}, 0},
+		}, []string{"feature", "start", "feat-x"}, 4},
 		{"feature_start_exists", withFeature, []string{"feature", "start", "feat-x"}, 4},
 		{"gate", withFeature, []string{"gate", "feat-x"}, 0},
 		{"gate_checks_failed", func(te *testEnv) { withFeature(te); te.forge.Checks = failing }, []string{"gate", "feat-x"}, 3},
@@ -178,6 +181,29 @@ jobs:
 		{"upgrade_plan", scheduled, []string{"upgrade", "--plan"}, 0},
 		{"upgrade_plan_noop", initOnly, []string{"upgrade", "--plan"}, 0},
 		{"upgrade", scheduled, []string{"upgrade"}, 0},
+		{"remove_plan", func(te *testEnv) {
+			gatedFeature(te)
+			te.mustRun("promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--plan")
+			grantAgents(te)
+		}, []string{"remove", "--plan"}, 0},
+		{"remove_no_console", initOnly, []string{"remove"}, 5},
+		{"log", withFeature, []string{"log"}, 0},
+		{"status", withFeature, []string{"status"}, 0},
+		{"status_behind", func(te *testEnv) {
+			initOnly(te)
+			testutil.Commit(te.t, te.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
+		}, []string{"status"}, 0},
+		{"feature_list", withFeature, []string{"feature", "list"}, 0},
+		{"feature_show", gatedFeature, []string{"feature", "show", "feat-x"}, 0},
+		{"feature_show_unknown", initOnly, []string{"feature", "show", "nope"}, 2},
+		{"feature_abandon", withFeature, []string{"feature", "abandon", "feat-x"}, 0},
+		{"feature_close_merged", func(te *testEnv) {
+			initOnly(te)
+			grantAgents(te)
+			te.forge.SetPRMerged("acme/widget", publishFeature(te, "feat-x"))
+		}, []string{"feature", "close", "feat-x"}, 0},
+		{"feature_close_needs_human", withFeature, []string{"feature", "close", "feat-x"}, 5},
+		{"feature_close_plan", gatedFeature, []string{"feature", "close", "feat-x", "--plan"}, 0},
 	}
 	for _, s := range scenarios {
 		t.Run(s.name, func(t *testing.T) {

@@ -1,0 +1,61 @@
+{
+  "schema_version": "0.6",
+  "command": "feature close",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "feature": "feat-x",
+    "state": "gate_passed",
+    "deleted": {},
+    "gate_pr": null,
+    "needs_console": true,
+    "approval": null,
+    "preview": {
+      "fingerprint": {
+        "feature_head": "d7407485ce685c126afcfc258f0a9eeb0092d776"
+      },
+      "ops": [
+        {
+          "op": "delete_ref",
+          "ref": "refs/ghostbranch/features/feat-x",
+          "repo": "acme/widget-shadow",
+          "sha": "7eaadfc887f6c3cbd011f4cf8e95372e3718571e"
+        },
+        {
+          "op": "delete_ref",
+          "ref": "refs/heads/feat-x",
+          "repo": "acme/widget-shadow",
+          "sha": "d7407485ce685c126afcfc258f0a9eeb0092d776"
+        },
+        {
+          "op": "delete_ref",
+          "ref": "refs/heads/ghostbranch-gate/feat-x",
+          "repo": "acme/widget-shadow",
+          "sha": "ad7c1d9752519d03b74752a472ecf072aacd2fb7"
+        },
+        {
+          "number": 1,
+          "op": "close_pr",
+          "repo": "acme/widget-shadow"
+        }
+      ]
+    }
+  },
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "feature",
+        "close",
+        "feat-x",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "the preview lists what closing deletes; it is gate_passed, so a person closes it at the console",
+      "needs_human": true,
+      "needs_input": []
+    }
+  ],
+  "error": null
+}

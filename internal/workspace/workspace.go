@@ -11,12 +11,13 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 )
 
-const SchemaVersion = "0.5"
+const SchemaVersion = "0.6"
 
 // Pair is a public repo and its shadow repo, as owner/name.
 type Pair struct {
@@ -119,6 +120,14 @@ func (w *Workspace) AddPair(p Pair) bool {
 	}
 	w.Pairs = append(w.Pairs, p)
 	return true
+}
+
+// RemovePair drops the pair whose public repo is public and reports whether
+// it was registered. The caller saves.
+func (w *Workspace) RemovePair(public string) bool {
+	n := len(w.Pairs)
+	w.Pairs = slices.DeleteFunc(w.Pairs, func(p Pair) bool { return strings.EqualFold(p.Public, public) })
+	return len(w.Pairs) != n
 }
 
 // Find returns the pair whose public or shadow repo is fullName.

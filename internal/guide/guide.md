@@ -10,12 +10,13 @@ main, green CI, and a leak scan of exactly what will be published.
 
 0. **Always run `ghostbranch sync --repo <public> --json` first**, before `feature start` or resuming
    a feature: features start from shadow main. Sync never writes to public. New repo? *Set up a repo*.
-1. `ghostbranch feature start <name> --json` creates the feature branch in the shadow repo.
-2. Run the command in `data.checkout`. It fetches the branch from the shadow repo (in a checkout of the
-   public repo, usually a remote named `shadow`) and switches to it. Commit there, and push **to the
+1. `ghostbranch feature start <name> --repo <public> --json` creates the feature branch in the shadow repo.
+2. Run the commands in `data.checkout`, in order (argvs; `data.checkout_hint` is the same as one shell
+   line). They fetch the branch from the shadow repo (in a checkout of the public repo, usually a remote
+   named `shadow`) and switch to it. Commit there, and push **to the
    shadow repo only** (`git push shadow <name>`), never to `origin`.
-3. `ghostbranch gate <name> --json` rebases on public main, scans for leaks and runs CI.
-4. `ghostbranch promote <name> --plan --json` publishes in the repo's `promote.default_mode`
+3. `ghostbranch gate <name> --repo <public> --json` rebases on public main, scans for leaks and runs CI.
+4. `ghostbranch promote <name> --repo <public> --plan --json` publishes in the repo's `promote.default_mode`
    (`preserve` unless set); pass `--mode` to choose. With more than one commit, add
    `--title "<PR title>"`, written by you. It saves a plan of exactly what goes public: every commit,
    file, author and the PR text.
@@ -63,10 +64,29 @@ main, green CI, and a leak scan of exactly what will be published.
    scheduled sync, whether they need a `GHOSTBRANCH_SYNC_TOKEN` secret (see *Keeping up with public*).
    Guarded jobs run in the shadow repo on unreleased code: never deploy or publish credentials there.
 
+## Lifecycle
+
+- `ghostbranch status --repo <public> --json` shows the pair's health and every feature's state:
+  `draft`, `in_review`, `gate_passed`, `published`, `merged`, `merged_moved`, `pr_closed`,
+  `branch_gone`, `abandoned`. `feature list --repo <public>` and `feature show <name> --repo <public>`
+  give the same by feature.
+- `ghostbranch sync --repo <public>` closes features whose public PR merged and whose branch hasn't
+  moved: it deletes their shadow branches and says so in `data.closed`. `--no-close` skips that.
+- `merged_moved`, `pr_closed` and an unmerged `branch_gone` are for a person to close (for
+  `merged_moved` you may instead promote the newer commits): `status` gives
+  `ghostbranch feature close <name> --repo <public>` with `needs_human`. A close deletes the feature's
+  shadow branches and needs a person at the console unless the feature is merged and unmoved; an agent
+  grant does not cover it, so don't ask for `agents allow` to unblock a close.
+- `ghostbranch feature abandon <name> --repo <public>` parks a feature and deletes nothing; `--undo`
+  brings it back.
+- `ghostbranch log --repo <public>` shows the history.
+- Never close or abandon a feature a person is still working on.
+
 ## Keeping up with public
 
-- Sync is manual by default. When a result warns `SHADOW_BEHIND`, run `ghostbranch sync` (fast-forward
-  only; it never resolves a conflict). The gate always rebases on public main, so it is never affected.
+- Sync is manual by default. When a result warns `SHADOW_BEHIND`, run `ghostbranch sync --repo <public>`
+  (fast-forward only; it never resolves a conflict). The gate always rebases on public main, so it is
+  never affected. `feature start` refuses instead, with the error `SHADOW_BEHIND`: sync, then start again.
 - Sync's pushes start the shadow repo's push-triggered workflows, which re-test what public CI already
   tested, so sync cancels those runs (`--no-cancel` skips that). `CI_NOT_CANCELLED` means it couldn't
   (the token needs Actions write); the runs only cost minutes. To stop them for good, the person adds
@@ -80,7 +100,7 @@ main, green CI, and a leak scan of exactly what will be published.
   `GHOSTBRANCH_SYNC_TOKEN` secret to the shadow repo: a fine-grained token with shadow Contents and
   Workflows write, never public write. A fine-grained token applies its permissions to every repo it
   selects, so for a private public repo it could write that repo too: scheduled sync isn't supported
-  there; use `ghostbranch sync`.
+  there; use `ghostbranch sync --repo <public>`.
 - `OVERLAY_OUTDATED` means run `ghostbranch upgrade --plan`, then `ghostbranch upgrade`.
 - Repo guards: the gate rewrites `github.repository == 'org/project'` guards in its CI candidate only,
   so those jobs run in the shadow repo, on unreleased code; what publishes is untouched. A guarded job
@@ -91,6 +111,7 @@ main, green CI, and a leak scan of exactly what will be published.
 ## Rules
 
 - Always pass `--json`. Act on `exit_code`, `error.code` and `next`; don't parse the text.
+  JSON is on stdout and progress on stderr: never merge the two streams (no `2>&1`).
 - Run `next` commands exactly as given. Add the flags listed in `needs_input` yourself.
 - **When `needs_human` is true, stop.** Tell the person the exact command and why, and don't look
   for another way.
@@ -162,8 +183,8 @@ feature work to the public repo. Its limits:
 - It recognizes GitHub remotes by URL; an SSH host alias (for example `git@github-work:…`) is not
   recognized.
 - It knows features from the local mirror. Feature work pushed under another branch name is caught
-  only if the mirror has seen it, so run `ghostbranch sync` now and then. A branch named after a
-  feature is always caught.
+  only if the mirror has seen it, so run `ghostbranch sync --repo <public>` now and then. A branch named
+  after a feature is always caught.
 - It covers only the checkout it is installed in, and `git push --no-verify` skips it.
 - It reads Ghostbranch's state from the default location unless `GHOSTBRANCH_HOME` is set where git
   runs the hook.

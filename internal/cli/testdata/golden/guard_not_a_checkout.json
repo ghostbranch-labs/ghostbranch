@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.5",
+  "schema_version": "0.6",
   "command": "guard status",
   "ok": false,
   "exit_code": 2,

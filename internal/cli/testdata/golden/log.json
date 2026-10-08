@@ -1,0 +1,30 @@
+{
+  "schema_version": "0.6",
+  "command": "log",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "entries": [
+      {
+        "ts": "2026-10-05T12:00:00Z",
+        "actor": "human:octo",
+        "op": "feature start",
+        "pair": "acme/widget",
+        "feature": "feat-x",
+        "exit_code": 0,
+        "summary": ""
+      },
+      {
+        "ts": "2026-10-05T12:00:00Z",
+        "actor": "human:octo",
+        "op": "init",
+        "pair": "acme/widget",
+        "exit_code": 0,
+        "summary": "shadow acme/widget-shadow ready (created=true adopted=false resumed=false)"
+      }
+    ]
+  },
+  "warnings": [],
+  "next": [],
+  "error": null
+}

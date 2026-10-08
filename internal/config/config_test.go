@@ -88,8 +88,13 @@ func TestInvalidConfigs(t *testing.T) {
 		}
 	}
 	_, _, err := config.Parse([]byte(base + "promte:\n  target: pr\n"))
-	if contract.From(err).Field != "promte.target" {
-		t.Errorf("unknown key error must name the key, got %+v", contract.From(err))
+	if ce := contract.From(err); ce.Field != "promte.target" || ce.Details["unknown_key"] != "promte.target" {
+		t.Errorf("unknown key error must name the key, also in details.unknown_key, got %+v", ce)
+	}
+	// A bad value is no unknown key.
+	_, _, err = config.Parse([]byte(base + "leak_scan:\n  large_file: huge\n"))
+	if ce := contract.From(err); ce.Details["unknown_key"] != nil {
+		t.Errorf("a bad value has details.unknown_key: %+v", ce)
 	}
 	_, _, err = config.Parse([]byte(base + "leak_scan:\n  markers:\n    end: \"#;%\"\n"))
 	if ce := contract.From(err); ce == nil || ce.Field != "leak_scan.markers.end" || !strings.Contains(ce.Message, "must contain a letter or digit") {

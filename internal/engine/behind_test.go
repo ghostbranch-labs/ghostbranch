@@ -14,7 +14,9 @@ func TestShadowBehindWarnsUntilSync(t *testing.T) {
 	h.init()
 	testutil.Commit(t, h.pubGit, "main", "up1", map[string]string{"u1": "1\n"})
 	testutil.Commit(t, h.pubGit, "main", "up2", map[string]string{"u2": "1\n"})
-	_, warns, err := h.eng.FeatureStart(h.ctx, h.pair, "feat")
+	// feature start refuses outright (TestFeatureStartRefusesWhenShadowMainIsBehind);
+	// other commands warn.
+	_, warns, err := h.eng.Audit(h.ctx, h.pair)
 	if err != nil {
 		t.Fatal(err)
 	}
