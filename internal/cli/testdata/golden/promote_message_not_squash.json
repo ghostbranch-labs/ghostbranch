@@ -1,0 +1,37 @@
+{
+  "schema_version": "0.5",
+  "command": "promote",
+  "ok": false,
+  "exit_code": 2,
+  "data": {
+    "gate": null,
+    "plan": null,
+    "plan_path": "",
+    "findings": [],
+    "waived": [],
+    "applied": null,
+    "preview": null
+  },
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "promote",
+        "feat-x",
+        "--plan",
+        "--json"
+      ],
+      "why": "-m is only for --mode squash; drop it (use --title/--body for the PR) or add --mode squash",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
+  "error": {
+    "code": "BAD_FLAG",
+    "message": "-m sets the squash commit's message, but this promote runs in preserve mode; pass --mode squash, or drop -m (use --title and --body for the PR)",
+    "field": "message",
+    "retryable": false,
+    "details": {}
+  }
+}

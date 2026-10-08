@@ -15,7 +15,9 @@
         "squash",
         "--plan",
         "--repo",
-        "acme/widget"
+        "acme/widget",
+        "--title",
+        "Add feature"
       ],
       "why": "the repos moved since the plan was made; make a new plan",
       "needs_human": false,

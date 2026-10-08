@@ -43,16 +43,14 @@
         "promote",
         "feat-x",
         "--mode",
-        "squash",
+        "preserve",
         "--plan",
         "--repo",
         "acme/widget"
       ],
       "why": "the gate passed; plan the publish",
       "needs_human": false,
-      "needs_input": [
-        "--message"
-      ]
+      "needs_input": []
     }
   ],
   "error": null

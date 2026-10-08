@@ -101,21 +101,21 @@ func TestGoldenContract(t *testing.T) {
 		{"gate", withFeature, []string{"gate", "feat-x"}, 0},
 		{"gate_checks_failed", func(te *testEnv) { withFeature(te); te.forge.Checks = failing }, []string{"gate", "feat-x"}, 3},
 		{"gate_leak", withLeakyFeature, []string{"gate", "feat-x"}, 3},
-		{"promote_plan", gatedFeature, []string{"promote", "feat-x", "-m", "Add feature", "--plan"}, 0},
+		{"promote_plan", gatedFeature, []string{"promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--plan"}, 0},
 		{"promote_needs_human", func(te *testEnv) { gatedFeature(te); te.vars["GHOSTBRANCH_ACTOR"] = "agent:claude-code" },
-			[]string{"promote", "feat-x", "-m", "Add feature", "--yes"}, 5},
-		{"promote_plan_under_grant", publishable, []string{"promote", "feat-x", "-m", "Add feature", "--plan"}, 0},
-		{"promote_grant_needs_yes", publishable, []string{"promote", "feat-x", "-m", "Add feature"}, 5},
+			[]string{"promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--yes"}, 5},
+		{"promote_plan_under_grant", publishable, []string{"promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--plan"}, 0},
+		{"promote_grant_needs_yes", publishable, []string{"promote", "feat-x", "--mode", "squash", "-m", "Add feature"}, 5},
 		{"promote_not_confirmed", func(te *testEnv) { gatedFeature(te); atConsole(te, func(string) string { return "n\n" }) },
-			[]string{"promote", "feat-x", "-m", "Add feature"}, 5},
+			[]string{"promote", "feat-x", "--mode", "squash", "-m", "Add feature"}, 5},
 		{"promote_too_many_attempts", func(te *testEnv) { gatedFeature(te); atConsole(te, func(string) string { return "X\nY\nZ\n" }) },
-			[]string{"promote", "feat-x", "-m", "Add feature"}, 5},
+			[]string{"promote", "feat-x", "--mode", "squash", "-m", "Add feature"}, 5},
 		{"promote_console_publish", func(te *testEnv) { gatedFeature(te); atConsole(te, typeTheCode) },
-			[]string{"promote", "feat-x", "-m", "Add feature"}, 0},
-		{"promote_publish", publishable, []string{"promote", "feat-x", "-m", "Add feature", "--yes"}, 0},
+			[]string{"promote", "feat-x", "--mode", "squash", "-m", "Add feature"}, 0},
+		{"promote_publish", publishable, []string{"promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--yes"}, 0},
 		{"apply_stale", func(te *testEnv) {
 			gatedFeature(te)
-			te.mustRun("promote", "feat-x", "-m", "Add feature", "--plan")
+			te.mustRun("promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--plan")
 			testutil.Commit(te.t, te.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
 		}, []string{"apply", "<PLAN>", "--yes"}, 6},
 		{"sync_plan", func(te *testEnv) {
@@ -124,10 +124,16 @@ func TestGoldenContract(t *testing.T) {
 		}, []string{"sync", "--plan"}, 0},
 		{"feature_start_plan", initOnly, []string{"feature", "start", "feat-x", "--plan"}, 0},
 		{"gate_plan", withFeature, []string{"gate", "feat-x", "--plan"}, 0},
-		{"promote_dry_run_stale_gate", withFeature, []string{"promote", "feat-x", "-m", "Add feature", "--dry-run"}, 0},
+		{"promote_preserve_plan", gatedFeature, []string{"promote", "feat-x", "--plan"}, 0},
+		{"promote_message_not_squash", gatedFeature, []string{"promote", "feat-x", "-m", "Add feature", "--plan"}, 2},
+		{"promote_title_required", func(te *testEnv) { gatedFeature(te); te.shadowCommit("feat-x", map[string]string{"two.txt": "2\n"}) },
+			[]string{"promote", "feat-x", "--plan"}, 2},
+		{"promote_curated_plan", gatedFeature, []string{"promote", "feat-x", "--mode", "curated", "--curate", "<CURATE>", "--plan"}, 0},
+		{"promote_curate_invalid", gatedFeature, []string{"promote", "feat-x", "--mode", "curated", "--curate", "<CURATE_BAD>", "--plan"}, 2},
+		{"promote_dry_run_stale_gate", withFeature, []string{"promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--dry-run"}, 0},
 		{"apply_dry_run", func(te *testEnv) {
 			gatedFeature(te)
-			te.mustRun("promote", "feat-x", "-m", "Add feature", "--plan")
+			te.mustRun("promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--plan")
 		}, []string{"apply", "<PLAN>", "--dry-run"}, 0},
 		{"bad_flag", nil, []string{"gate"}, 2},
 		{"shadow_not_private", func(te *testEnv) { initOnly(te); te.forge.SetPrivate("acme/widget-shadow", false) }, []string{"sync"}, 1},
@@ -188,6 +194,9 @@ jobs:
 				if a == "<FINDING>" {
 					args[i] = te.finding
 				}
+				if a == "<CURATE>" || a == "<CURATE_BAD>" {
+					args[i] = te.curateFile(a == "<CURATE_BAD>")
+				}
 			}
 			code, out, errOut := te.run(append(args, "--json")...)
 			if code != s.exit {
@@ -222,6 +231,26 @@ jobs:
 	}
 }
 
+// curateFile writes a --curate file under te.root: one group holding
+// feat-x's one commit under the message "Add feature", or, if bad, no
+// groups at all.
+func (te *testEnv) curateFile(bad bool) string {
+	te.t.Helper()
+	body := `{"commits": []}`
+	if !bad {
+		sha, err := gitx.New(te.forge.RepoDir("acme/widget-shadow")).MustResolve(te.t.Context(), "refs/heads/feat-x")
+		if err != nil {
+			te.t.Fatal(err)
+		}
+		body = `{"commits": [{"from": ["` + sha + `"], "message": "Add feature"}]}`
+	}
+	path := filepath.Join(te.root, "curate.json")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		te.t.Fatal(err)
+	}
+	return path
+}
+
 // scheduled is an initialized pair whose config turns scheduled sync on, so
 // the sync workflow is wanted but not yet on the overlay branch.
 func scheduled(te *testEnv) {
@@ -247,7 +276,7 @@ func TestArtifactsMatchTheirSchemas(t *testing.T) {
 	t.Parallel()
 	te := newTestEnv(t)
 	gatedFeature(te)
-	te.mustRun("promote", "feat-x", "-m", "Add feature", "--plan")
+	te.mustRun("promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--plan")
 	grantAgents(te)
 	te.mustRun("apply", te.lastPlanID(), "--yes")
 	home := te.vars["GHOSTBRANCH_HOME"]
@@ -297,7 +326,7 @@ func TestWaiverArtifactsMatchTheirSchemas(t *testing.T) {
 	}
 	validate(t, "waivers.schema.json", raw)
 	te.mustRun("gate", "feat-x")
-	te.mustRun("promote", "feat-x", "-m", "Add config", "--plan")
+	te.mustRun("promote", "feat-x", "--mode", "squash", "-m", "Add config", "--plan")
 	planRaw, err := os.ReadFile(filepath.Join(te.vars["GHOSTBRANCH_HOME"], "workspaces", "default", "plans", te.lastPlanID()+".json"))
 	if err != nil {
 		t.Fatal(err)

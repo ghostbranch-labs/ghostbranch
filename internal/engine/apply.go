@@ -81,6 +81,18 @@ func stale(pl plan.Plan, moved []string) map[string]any {
 		"mode": pl.Mode, "title": pl.Publish.PR.Title, "body": pl.Publish.PR.Body}
 }
 
+// markerReplan adds to a MARKER_INVALID the feature, public repo and mode,
+// so next can name the promote that makes a new plan once it is fixed.
+func markerReplan(err error, pl plan.Plan) error {
+	if ce := contract.From(err); ce != nil && ce.Code == contract.MarkerInvalid {
+		if ce.Details == nil {
+			ce.Details = map[string]any{}
+		}
+		ce.Details["feature"], ce.Details["public"], ce.Details["mode"] = pl.Feature, pl.Pair.Public, pl.Mode
+	}
+	return err
+}
+
 // branchExists refuses a publish to a public branch that is already at
 // another commit.
 func branchExists(branch, sha string) error {
@@ -171,10 +183,7 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 	// published tree again from the candidate's parent.
 	T2, tEntries, err := publishedTree(ctx, g, gateC+"^", cfg)
 	if err != nil {
-		if ce := contract.From(err); ce.Code == contract.MarkerInvalid {
-			ce.Details["feature"] = pl.Feature
-		}
-		return nil, warns, err
+		return nil, warns, markerReplan(err, pl)
 	}
 	if T2 != pl.Publish.Tree {
 		return nil, warns, contract.New(contract.PlanStale,
@@ -205,7 +214,7 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 		commits: m.Gate.Commits, groups: pl.Curate},
 		func(cs []string, onto string) ([]string, error) { return e.replay(ctx, pc, cs, onto) })
 	if err != nil {
-		return nil, warns, err
+		return nil, warns, markerReplan(err, pl)
 	}
 	chainStale := contract.New(contract.PlanStale,
 		"plan %s's public commits are not the ones its feature's history gives; make a new plan with ghostbranch promote", pl.ID).

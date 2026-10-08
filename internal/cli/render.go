@@ -25,7 +25,15 @@ func findings(b *strings.Builder, fs []leak.Finding) {
 		if f.Match != "" {
 			what += fmt.Sprintf(" %q", f.Match)
 		}
-		fmt.Fprintf(b, "  leak %s: %s in %s\n", f.ID, what, engine.Location(f))
+		in := ""
+		if len(f.Commits) > 0 {
+			shas := make([]string, len(f.Commits))
+			for i, c := range f.Commits {
+				shas[i] = short(c)
+			}
+			in = " (commit(s) " + strings.Join(shas, ", ") + ")"
+		}
+		fmt.Fprintf(b, "  leak %s: %s in %s%s\n", f.ID, what, engine.Location(f), in)
 	}
 }
 
@@ -163,6 +171,7 @@ func human(r any) string {
 			previewText(&b, v.Preview)
 			break
 		}
+		fmt.Fprintf(&b, "  %d commit(s), scanned as %s\n", len(v.Commits), v.ScannedAs)
 		if v.ShadowPR != nil {
 			fmt.Fprintf(&b, "  candidate %s on shadow PR #%d\n", short(v.Candidate), *v.ShadowPR)
 		}
@@ -178,7 +187,12 @@ func human(r any) string {
 		case v.Applied != nil:
 			fmt.Fprintf(&b, "Published %s as PR #%d: %s\n", v.Applied.PublicBranch, v.Applied.PublicPR, v.Applied.PRURL)
 		case v.Plan != nil && v.PlanPath != "":
-			fmt.Fprintf(&b, "Plan %s saved to %s.\nPublish it with: ghostbranch apply %s\n", v.Plan.ID, v.PlanPath, v.Plan.ID)
+			fmt.Fprintf(&b, "Plan %s saved to %s.\n", v.Plan.ID, v.PlanPath)
+			fmt.Fprintf(&b, "  %s: %d public commit(s)", v.Plan.Mode, len(v.Plan.Publish.Commits))
+			if n := len(v.Plan.Publish.DroppedEmpty); n > 0 {
+				fmt.Fprintf(&b, ", %d dropped as empty", n)
+			}
+			fmt.Fprintf(&b, "\nPublish it with: ghostbranch apply %s\n", v.Plan.ID)
 		}
 		findings(&b, v.Findings)
 		waivedLines(&b, v.Waived)

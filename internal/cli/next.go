@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ghostbranch-labs/ghostbranch/internal/config"
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
@@ -102,14 +103,46 @@ func (a *app) next(err error) []contract.Next {
 		case contract.PlanStale:
 			f, _ := ce.Details["feature"].(string)
 			pub, _ := ce.Details["public"].(string)
-			branch, _ := ce.Details["branch"].(string)
+			mode, _ := ce.Details["mode"].(string)
 			if f != "" && pub != "" {
-				args := []string{"promote", f, "--mode", "squash", "--plan", "--repo", pub}
-				if branch != "" && branch != f {
+				if mode == "" {
+					mode = config.ModeSquash // a 0.4 plan
+				}
+				args := []string{"promote", f, "--mode", mode, "--plan", "--repo", pub}
+				if branch, _ := ce.Details["branch"].(string); branch != "" && branch != f {
 					args = append(args, "--branch", branch)
 				}
-				return []contract.Next{{Command: a.gb(args...),
-					Why: "the repos moved since the plan was made; make a new plan", NeedsInput: []string{"--message"}}}
+				if title, _ := ce.Details["title"].(string); title != "" {
+					args = append(args, "--title", title)
+				}
+				if body, _ := ce.Details["body"].(string); body != "" {
+					args = append(args, "--body", body)
+				}
+				return []contract.Next{{Command: a.gb(args...), Why: "the repos moved since the plan was made; make a new plan", NeedsInput: modeInputs(mode)}}
+			}
+		case contract.CurateInvalid, contract.CurateConflict, contract.CurateTreeMismatch:
+			why := map[contract.Code]string{
+				contract.CurateInvalid:      "fix the --curate file (error.details lists the problem SHAs; the gate result lists the feature's commits) and run this again",
+				contract.CurateConflict:     "reorder the groups in the --curate file so commits that touch the same lines keep their order, or reorder on your feature branch; then run this again",
+				contract.CurateTreeMismatch: "keep commits that touch the same lines in their original order in the --curate file; then run this again",
+			}[ce.Code]
+			return []contract.Next{{Command: withoutFlags(a.again(false), "--curate"), NeedsInput: []string{"--curate"}, Why: why}}
+		case contract.AuthorUnmapped:
+			return []contract.Next{{Command: a.again(true), NeedsHuman: true,
+				Why: "a person adds error.details.emails to promote.author_map in .ghostbranch.yml on the overlay branch (or sets author_email: noreply), then runs this again"}}
+		case contract.MissingInput:
+			switch ce.Field {
+			case "title":
+				return []contract.Next{{Command: withoutFlags(a.again(false), "--title"), NeedsInput: []string{"--title"},
+					Why: "write a PR title that sums up the feature's commits"}}
+			case "curate":
+				return []contract.Next{{Command: withoutFlags(a.again(false), "--curate"), NeedsInput: []string{"--curate"},
+					Why: "write a --curate file grouping the feature's commits (the gate result lists them)"}}
+			}
+		case contract.BadFlag:
+			if ce.Field == "message" {
+				return []contract.Next{{Command: withoutFlags(a.again(false), "-m", "--message"),
+					Why: "-m is only for --mode squash; drop it (use --title/--body for the PR) or add --mode squash"}}
 			}
 		}
 		return nil
@@ -129,8 +162,13 @@ func (a *app) next(err error) []contract.Next {
 		}
 	case *engine.GateResult:
 		if r.Preview == nil && r.Checks == feature.ChecksPassed && r.Leak == feature.LeakClean {
-			out = append(out, contract.Next{Command: a.scoped("promote", r.Feature, "--mode", "squash", "--plan"),
-				Why: "the gate passed; plan the publish", NeedsInput: []string{"--message"}})
+			mode := r.ScannedAs
+			need := modeInputs(mode)
+			if mode != config.ModeSquash && len(r.Commits) > 1 {
+				need = append(need, "--title")
+			}
+			out = append(out, contract.Next{Command: a.scoped("promote", r.Feature, "--mode", mode, "--plan"),
+				Why: "the gate passed; plan the publish", NeedsInput: need})
 		}
 	case *engine.PromoteResult:
 		if r.Preview == nil && r.Applied == nil && r.Plan != nil && r.PlanPath != "" {
@@ -357,17 +395,32 @@ func typedTextLeaks(ce *contract.Error) bool {
 	return false
 }
 
-// withoutTexts drops -m/--message, --title and --body and their values, so
-// the caller supplies new text rather than repeat the leak.
-func withoutTexts(argv []string) []string {
+// leakWheres is the set of the findings' Where values.
+func leakWheres(ce *contract.Error) map[string]bool {
+	fs, _ := ce.Details["findings"].([]leak.Finding)
+	out := map[string]bool{}
+	for _, f := range fs {
+		out[f.Where] = true
+	}
+	return out
+}
+
+// withoutFlags drops each named flag and its value from argv, in both the
+// "--flag value" and "--flag=value" forms, plus "-mVALUE" when -m is named.
+func withoutFlags(argv []string, flags ...string) []string {
+	named := map[string]bool{}
+	for _, f := range flags {
+		named[f] = true
+	}
 	out := make([]string, 0, len(argv))
 	for i := 0; i < len(argv); i++ {
 		arg := argv[i]
+		name, _, hasValue := strings.Cut(arg, "=")
 		switch {
-		case arg == "-m" || arg == "--message" || arg == "--title" || arg == "--body":
+		case named[arg]:
 			i++ // and its value
-		case strings.HasPrefix(arg, "--message=") || strings.HasPrefix(arg, "--title=") || strings.HasPrefix(arg, "--body="),
-			strings.HasPrefix(arg, "-m") && !strings.HasPrefix(arg, "--"):
+		case hasValue && strings.HasPrefix(arg, "--") && named[name]:
+		case named["-m"] && strings.HasPrefix(arg, "-m") && !strings.HasPrefix(arg, "--"):
 		default:
 			out = append(out, arg)
 		}
@@ -375,22 +428,76 @@ func withoutTexts(argv []string) []string {
 	return out
 }
 
+// withoutTexts drops -m/--message, --title and --body and their values, so
+// the caller supplies new text rather than repeat the leak.
+func withoutTexts(argv []string) []string {
+	return withoutFlags(argv, "-m", "--message", "--title", "--body")
+}
+
+// historyFix is what to do about a leak in a feature commit's message or
+// author: reword or re-author those commits on the feature branch (the
+// finding's commits name them), or set new messages with curated mode.
+func historyFix(a *app, f string) contract.Next {
+	return contract.Next{Command: a.scoped("gate", f),
+		Why: "a feature commit's message or author leaks (each finding's commits names the commits): reword or re-author them on the feature branch in the shadow repo and push, then gate again; or promote with --mode curated and new messages"}
+}
+
+// modeInputs are the flags a promote in mode needs from the caller.
+func modeInputs(mode string) []string {
+	switch mode {
+	case config.ModeSquash:
+		return []string{"--message"}
+	case config.ModeCurated:
+		return []string{"--curate"}
+	}
+	return nil
+}
+
 // leakNext is what to do about LEAK_FOUND or MARKER_INVALID: fix the
 // content and run again; and, for waivable findings a person judges false
 // positives, that person waives them at their console.
 func (a *app) leakNext(ce *contract.Error) []contract.Next {
 	f, _ := ce.Details["feature"].(string)
+	mode, _ := ce.Details["mode"].(string)
+	wheres := leakWheres(ce)
 	var out []contract.Next
 	switch a.command {
 	case "promote":
-		if typedTextLeaks(ce) {
-			out = append(out, contract.Next{Command: withoutTexts(a.again(false)), NeedsInput: []string{"--message"},
-				Why: "a leak is in text this promote publishes: run it again with a new commit message, title or body (and fix any file findings on the feature branch in the shadow repo first)"})
-			break
+		switch {
+		case wheres["committer"]:
+			out = append(out, contract.Next{Command: a.again(true), NeedsHuman: true,
+				Why: "the publishing GitHub account's name or email matched a leak rule; a person changes leak_scan.block_patterns or publishes from another account"})
+		case (wheres["commit_message"] || wheres["author"]) && mode != config.ModeSquash && mode != "":
+			out = append(out, historyFix(a, f))
+		case wheres["branch"]:
+			out = append(out, contract.Next{Command: withoutFlags(a.again(false), "--branch"), NeedsInput: []string{"--branch"},
+				Why: "the public branch name leaks; run this again with another --branch"})
+		case typedTextLeaks(ce):
+			need := []string{}
+			if wheres["commit_message"] {
+				need = append(need, "--message")
+			}
+			if wheres["pr_title"] {
+				need = append(need, "--title")
+			}
+			if wheres["pr_body"] {
+				need = append(need, "--body")
+			}
+			out = append(out, contract.Next{Command: withoutTexts(a.again(false)), NeedsInput: need,
+				Why: "a leak is in text this promote publishes: run it again with new text (and fix any file findings on the feature branch in the shadow repo first)"})
+		default:
+			out = append(out, contract.Next{Command: a.again(false), Why: "after fixing the content on the feature branch in the shadow repo, run this again"})
 		}
-		out = append(out, contract.Next{Command: a.again(false), Why: "after fixing the content on the feature branch in the shadow repo, run this again"})
+	case "apply":
+		pub, _ := ce.Details["public"].(string)
+		if f != "" && pub != "" && mode != "" {
+			out = append(out, contract.Next{Command: a.gb("promote", f, "--mode", mode, "--plan", "--repo", pub),
+				Why: "fix what leaks (on the feature branch, or in the text), then make a new plan", NeedsInput: modeInputs(mode)})
+		}
 	case "gate", "waivers add":
-		if f != "" {
+		if f != "" && (wheres["commit_message"] || wheres["author"]) {
+			out = append(out, historyFix(a, f))
+		} else if f != "" {
 			out = append(out, contract.Next{Command: a.scoped("gate", f), Why: "after fixing the content on the feature branch in the shadow repo, gate again"})
 		}
 	}

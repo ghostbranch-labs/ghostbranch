@@ -29,7 +29,7 @@ func TestPipedStdinNeverApproves(t *testing.T) {
 	opened := false
 	te.env.Stdin, te.env.ConsoleUsable = r, console.Usable(r, r)
 	te.env.OpenConsole = func() (io.ReadWriteCloser, error) { opened = true; return nil, errors.New("no console") }
-	code, env := te.runJSON("promote", "feat-x", "-m", "Add feature", "--yes")
+	code, env := te.runJSON("promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--yes")
 	e, _ := env["error"].(map[string]any)
 	d, _ := e["details"].(map[string]any)
 	if code != 5 || d["reason"] != "no_console" || opened {
@@ -45,7 +45,7 @@ func TestConsoleApprovalThroughTheCLI(t *testing.T) {
 	te := newTestEnv(t)
 	gatedFeature(te)
 	ty := atConsole(te, typeTheCode)
-	code, env := te.runJSON("promote", "feat-x", "-m", "Add feature")
+	code, env := te.runJSON("promote", "feat-x", "--mode", "squash", "-m", "Add feature")
 	data, _ := env["data"].(map[string]any)
 	applied, _ := data["applied"].(map[string]any)
 	appr, _ := applied["approval"].(map[string]any)
@@ -70,7 +70,7 @@ func TestAgentsAllowThroughTheCLI(t *testing.T) {
 		t.Fatalf("at a console: %d %v", code, env)
 	}
 	te.env.ConsoleUsable, te.env.OpenConsole = false, nil
-	if code, env := te.runJSON("promote", "feat-x", "-m", "Add feature", "--yes"); code != 0 {
+	if code, env := te.runJSON("promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--yes"); code != 0 {
 		t.Fatalf("under the grant: %d %v", code, env)
 	}
 	if code, env := te.runJSON("agents", "revoke"); code != 0 {
@@ -85,7 +85,7 @@ func TestNonInteractiveNeverAsksAtTheConsole(t *testing.T) {
 	te := newTestEnv(t)
 	gatedFeature(te)
 	ty := atConsole(te, typeTheCode)
-	code, env := te.runJSON("promote", "feat-x", "-m", "Add feature", "--non-interactive")
+	code, env := te.runJSON("promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--non-interactive")
 	e, _ := env["error"].(map[string]any)
 	d, _ := e["details"].(map[string]any)
 	if code != 5 || d["reason"] != "no_console" {
