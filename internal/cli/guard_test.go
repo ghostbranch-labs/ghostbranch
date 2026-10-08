@@ -9,6 +9,7 @@ import (
 	"testing"
 )
 
+// hermeticGit uses t.Setenv: its callers must stay serial (no t.Parallel).
 func hermeticGit(t *testing.T) {
 	t.Helper()
 	cfg := filepath.Join(t.TempDir(), "gitconfig")

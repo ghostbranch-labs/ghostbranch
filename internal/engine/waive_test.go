@@ -245,6 +245,7 @@ func TestAWaiverThatDiffersInOneFieldDoesNotApply(t *testing.T) {
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			h := newHarness(t)
 			h.init()
 			h.startFeature("feat-x", fixture())

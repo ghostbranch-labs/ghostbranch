@@ -13,6 +13,7 @@ import (
 	"runtime/debug"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/zricethezav/gitleaks/v8/config"
 	"github.com/zricethezav/gitleaks/v8/detect"
@@ -98,8 +99,14 @@ type Gitleaks struct {
 	patterns []*regexp.Regexp
 }
 
+// gitleaks builds its default detector through a global viper instance, so
+// detectors are built one at a time.
+var newDetectorMu sync.Mutex
+
 func NewGitleaks(r Rules) (*Gitleaks, error) {
+	newDetectorMu.Lock()
 	d, err := detect.NewDetectorDefaultConfig()
+	newDetectorMu.Unlock()
 	if err != nil {
 		return nil, err
 	}

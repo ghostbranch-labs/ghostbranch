@@ -175,6 +175,7 @@ jobs:
 	}
 	for _, s := range scenarios {
 		t.Run(s.name, func(t *testing.T) {
+			t.Parallel()
 			te := newTestEnv(t)
 			if s.prep != nil {
 				s.prep(te)

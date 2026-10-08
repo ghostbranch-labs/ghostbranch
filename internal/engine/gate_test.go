@@ -174,6 +174,7 @@ func TestGateCheckOutcomes(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			h := newHarness(t)
 			h.init()
 			h.forge.Checks = c.checks(h)
@@ -279,6 +280,7 @@ func TestGateCompletedChecksBeatTheTimeout(t *testing.T) {
 		want       contract.Code
 	}{{"success", ""}, {"failure", contract.ChecksFailed}} {
 		t.Run(c.conclusion, func(t *testing.T) {
+			t.Parallel()
 			h := newHarness(t)
 			h.init()
 			h.startFeature("feat-x", map[string]string{"feature.txt": "x\n"})
