@@ -150,7 +150,9 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	// one would make every plan stale.
 	tip, tipOK, _ := g.Resolve(ctx, shadowRef(gateBranch(opt.Feature)))
 	candidateLive := m.Gate != nil && m.Gate.Candidate != "" && tipOK && tip == m.Gate.Candidate
-	fresh := m.Gate.Passed() && m.Gate.FreshFor(head, pm, O) && candidateLive && m.Gate.Commits != nil
+	// A gate recorded without the mode its scan covered is not reused, so
+	// the result never claims a scan that did not happen.
+	fresh := m.Gate.Passed() && m.Gate.FreshFor(head, pm, O) && candidateLive && m.Gate.Commits != nil && m.Gate.ScannedAs != ""
 	names := guardNames(pc)
 	var R, T2 string
 	var entries []gitx.TreeEntry
@@ -184,7 +186,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 			return res, warns, err
 		}
 		res.Gate = &GateResult{Feature: opt.Feature, FeatureHead: head, PublicMain: pm, Overlay: O,
-			Candidate: m.Gate.Candidate, PublishedTree: m.Gate.PublishedTree, ScannedAs: cfg.Promote.DefaultMode, Commits: infos, Checks: m.Gate.Checks,
+			Candidate: m.Gate.Candidate, PublishedTree: m.Gate.PublishedTree, ScannedAs: m.Gate.ScannedAs, Commits: infos, Checks: m.Gate.Checks,
 			FailedChecks: []string{}, Leak: m.Gate.Leak, Findings: []leak.Finding{}, Waived: []WaivedFinding{},
 			RepoGuards: &guardRep, Reused: true}
 		commits = m.Gate.Commits
@@ -196,7 +198,8 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 		return res, warns, nil
 	default:
 		e.progressf("the gate for %s is missing or stale; running it", opt.Feature)
-		gr, gw, err := e.gate(ctx, pc, opt.Feature)
+		// The internal gate scans for the mode this promote publishes.
+		gr, gw, err := e.gate(ctx, pc, opt.Feature, mode)
 		res.Gate = gr
 		warns = addWarnings(warns, gw...)
 		if err != nil {

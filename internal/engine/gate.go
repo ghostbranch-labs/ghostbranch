@@ -26,7 +26,7 @@ type GateResult struct {
 	Overlay       string          `json:"overlay"`
 	Candidate     string          `json:"candidate"`
 	PublishedTree string          `json:"published_tree"`
-	ScannedAs     string          `json:"scanned_as"` // promote.default_mode: the history scanned as it would publish
+	ScannedAs     string          `json:"scanned_as"` // the mode the leak scan covered: preserve scans every commit, squash and curated the final tree
 	Commits       []CommitInfo    `json:"commits"`    // the replayed commits, oldest first; empty when the replay didn't finish
 	Checks        string          `json:"checks"`
 	FailedChecks  []string        `json:"failed_checks"`
@@ -111,7 +111,8 @@ func (e *Engine) Gate(ctx context.Context, p workspace.Pair, name string) (res *
 		return nil, nil, err
 	}
 	defer pc.unlock()
-	res, w, err := e.gate(ctx, pc, name)
+	// A standalone gate scans for the repo's promote.default_mode.
+	res, w, err := e.gate(ctx, pc, name, "")
 	return res, addWarnings(e.behind(ctx, pc), w...), err
 }
 
@@ -129,16 +130,23 @@ type built struct {
 	entries []gitx.TreeEntry
 	report  leak.Report
 	commits []feature.GateCommit
-	// scannedAs is promote.default_mode, the history the scan covered.
+	// scannedAs is the mode the scan covered: preserve scans every rebased
+	// commit, squash and curated only the final tree.
 	scannedAs string
 	// infos describe commits; nil until the replay succeeds.
 	infos []CommitInfo
 }
 
-// build resolves the feature and public main, rebases, strips and scans.
-// Once the feature and public main are resolved it returns them even when a
-// later step fails, so callers can report what they ran against.
-func (e *Engine) build(ctx context.Context, pc *pairCtx, name string) (*built, []contract.Warning, error) {
+// build resolves the feature and public main, rebases, strips and scans as
+// mode would publish: preserve scans every rebased commit, squash and
+// curated the final tree (promote scans the exact chain it publishes in
+// every mode). An empty mode means promote.default_mode. waiving is for
+// waivers add, which only looks up tree findings: it leaves author
+// identities out of the scan, so an unmapped author can't hide a waivable
+// finding. Once the feature
+// and public main are resolved it returns them even when a later step
+// fails, so callers can report what they ran against.
+func (e *Engine) build(ctx context.Context, pc *pairCtx, name, mode string, waiving bool) (*built, []contract.Warning, error) {
 	g := pc.git
 	cfg, O, warns, err := e.readConfig(ctx, pc)
 	if err != nil {
@@ -160,7 +168,10 @@ func (e *Engine) build(ctx context.Context, pc *pairCtx, name string) (*built, [
 	if err != nil {
 		return nil, warns, internalErr(err, "read public main")
 	}
-	b := &built{cfg: cfg, meta: m, metaSHA: metaSHA, head: head, pm: pm, O: O, scannedAs: cfg.Promote.DefaultMode}
+	if mode == "" {
+		mode = cfg.Promote.DefaultMode
+	}
+	b := &built{cfg: cfg, meta: m, metaSHA: metaSHA, head: head, pm: pm, O: O, scannedAs: mode}
 	e.progressf("replaying %s onto public main %s", name, short(pm))
 	sources, err := g.SourceCommits(ctx, pm, head)
 	if err != nil {
@@ -191,12 +202,12 @@ func (e *Engine) build(ctx context.Context, pc *pairCtx, name string) (*built, [
 		return b, warns, namedMarkerErr(err, name)
 	}
 	e.progressf("scanning what %s would publish for leaks", b.scannedAs)
-	if b.scannedAs == config.ModeSquash {
-		b.report, _, err = e.scan(ctx, g, cfg, b.entries, pm, nil)
-	} else {
+	if b.scannedAs == config.ModePreserve {
 		// Stripping each older commit can hit a broken marker the tip no
 		// longer has.
-		b.report, err = e.scanHistory(ctx, g, cfg, b)
+		b.report, err = e.scanHistory(ctx, g, cfg, b, !waiving)
+	} else {
+		b.report, _, err = e.scan(ctx, g, cfg, b.entries, pm, nil)
 	}
 	if err != nil {
 		return b, warns, namedMarkerErr(err, name)
@@ -218,10 +229,11 @@ func namedMarkerErr(err error, name string) error {
 }
 
 // scanHistory scans every rebased commit as preserve would publish it: each
-// one's stripped tree, its message, and, under keep or map, its author.
-// Curated publishes new messages, which promote scans; the gate covers the
-// trees and the original messages.
-func (e *Engine) scanHistory(ctx context.Context, g *gitx.Git, cfg config.Config, b *built) (leak.Report, error) {
+// one's stripped tree, its message, and, under keep or map, its author (so
+// an author with no mapping is AUTHOR_UNMAPPED here). Only a preserve gate
+// runs it; squash and curated gates scan the final tree, and promote scans
+// whatever chain it builds.
+func (e *Engine) scanHistory(ctx context.Context, g *gitx.Git, cfg config.Config, b *built, withAuthors bool) (leak.Report, error) {
 	links, _, err := deriveChain(ctx, g, cfg, chainInput{mode: config.ModePreserve, pm: b.pm, T: b.T, tEntries: b.entries, commits: b.commits}, nil)
 	if err != nil && contract.From(err).Code == contract.NothingToPublish {
 		return leak.Report{Findings: []leak.Finding{}, Warnings: []contract.Warning{}}, nil
@@ -230,7 +242,7 @@ func (e *Engine) scanHistory(ctx context.Context, g *gitx.Git, cfg config.Config
 		return leak.Report{}, err
 	}
 	var authors []gitx.Identity
-	if cfg.Promote.AuthorEmail != config.AuthorNoreply {
+	if withAuthors && cfg.Promote.AuthorEmail != config.AuthorNoreply {
 		if authors, err = chainAuthors(cfg.Promote, config.ModePreserve, links, gitx.Identity{}); err != nil {
 			return leak.Report{}, err
 		}
@@ -247,9 +259,11 @@ func (e *Engine) scanHistory(ctx context.Context, g *gitx.Git, cfg config.Config
 	return rep, err
 }
 
-func (e *Engine) gate(ctx context.Context, pc *pairCtx, name string) (*GateResult, []contract.Warning, error) {
+// gate builds and scans for mode ("" for promote.default_mode), then runs
+// CI on the candidate and records the result.
+func (e *Engine) gate(ctx context.Context, pc *pairCtx, name, mode string) (*GateResult, []contract.Warning, error) {
 	g := pc.git
-	b, warns, err := e.build(ctx, pc, name)
+	b, warns, err := e.build(ctx, pc, name, mode, false)
 	if b == nil {
 		return nil, warns, err
 	}
@@ -376,7 +390,7 @@ func guardNames(pc *pairCtx) workflow.Names {
 func (e *Engine) recordGate(ctx context.Context, pc *pairCtx, m feature.Meta, metaSHA string, res *GateResult, commits []feature.GateCommit) error {
 	m.SchemaVersion = feature.SchemaVersion
 	m.Gate = &feature.Gate{FeatureHead: res.FeatureHead, PublicMain: res.PublicMain, Overlay: res.Overlay,
-		Candidate: res.Candidate, PublishedTree: res.PublishedTree, Commits: commits, Checks: res.Checks, Leak: res.Leak, At: e.now()}
+		Candidate: res.Candidate, PublishedTree: res.PublishedTree, ScannedAs: res.ScannedAs, Commits: commits, Checks: res.Checks, Leak: res.Leak, At: e.now()}
 	return e.updateMeta(ctx, pc, m, metaSHA)
 }
 

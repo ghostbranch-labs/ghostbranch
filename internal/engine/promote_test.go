@@ -374,6 +374,22 @@ func TestPromoteReGatesAGateWithoutCommitMapping(t *testing.T) {
 	}
 }
 
+// A reused gate reports the mode its scan covered, never the promote's or
+// the default; a gate recorded without it is not reused.
+func TestPromoteReusedGateReportsTheModeItScanned(t *testing.T) {
+	t.Parallel()
+	h := gated(t) // gated under the default, preserve
+	res, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "m", PlanOnly: true})
+	if err != nil || !res.Gate.Reused || res.Gate.ScannedAs != "preserve" {
+		t.Fatalf("reused gate = %+v %v", res.Gate, err)
+	}
+	forgeMeta(t, h, "feat-x", func(m *feature.Meta) { m.Gate.ScannedAs = "" })
+	res, err = promote(h, engine.PromoteOptions{Mode: "squash", Message: "m", PlanOnly: true})
+	if err != nil || res.Gate.Reused || res.Gate.ScannedAs != "squash" {
+		t.Fatalf("a gate without scanned_as must not be reused: %+v %v", res.Gate, err)
+	}
+}
+
 // DEFERRED: a reused gate result has no shadow PR, not PR 0.
 func TestPromoteReusedGateHasNoShadowPR(t *testing.T) {
 	t.Parallel()

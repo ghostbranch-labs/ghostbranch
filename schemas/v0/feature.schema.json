@@ -24,6 +24,10 @@
             "overlay": { "$ref": "common.schema.json#/$defs/sha" },
             "candidate": { "$ref": "common.schema.json#/$defs/sha" },
             "published_tree": { "$ref": "common.schema.json#/$defs/sha" },
+            "scanned_as": {
+              "description": "The mode the gate's leak scan covered; absent in a gate recorded by an older binary.",
+              "enum": ["squash", "preserve", "curated"]
+            },
             "checks": { "enum": ["passed", "failed", "no_ci", "timeout", "not_run"] },
             "leak": { "enum": ["clean", "found", "not_run"] },
             "commits": {

@@ -8,7 +8,7 @@
   "next": [],
   "error": {
     "code": "WAIVER_UNKNOWN",
-    "message": "f-000000000000: not a waivable finding in what feat-x would publish now; gate again for the current ids",
+    "message": "f-000000000000: not a waivable finding in any commit feat-x would publish now; gate again for the current ids",
     "field": "id",
     "retryable": false,
     "details": {

@@ -436,12 +436,47 @@ func TestGateScansHistoryForPreserve(t *testing.T) {
 	if err != nil || res.ScannedAs != "squash" || len(res.Findings) != 0 {
 		t.Fatalf("squash gate = %+v %v", res, err)
 	}
-	// Curated publishes the original trees too, so the gate scans them.
+	// Curated gates on the final tree too; promote scans the curated chain.
 	h.setConfig("default_mode: squash", "default_mode: curated")
 	res, _, err = h.eng.Gate(h.ctx, h.pair, "feat-x")
-	ce = wantCode(t, err, contract.LeakFound)
-	if res.ScannedAs != "curated" || ce.Details["mode"] != "curated" || len(res.Findings) != 1 {
-		t.Fatalf("curated gate = %+v details = %v", res, ce.Details)
+	if err != nil || res.ScannedAs != "curated" || len(res.Findings) != 0 {
+		t.Fatalf("curated gate = %+v %v", res, err)
+	}
+	raw, _, _ := h.shadowGit().ShowFile(h.ctx, "refs/ghostbranch/features/feat-x", feature.MetaFile)
+	if m, _ := feature.Decode(raw); m.Gate == nil || m.Gate.ScannedAs != "curated" {
+		t.Fatalf("recorded gate = %+v", m.Gate)
+	}
+}
+
+// The gate promote runs scans for the mode promote publishes, not the
+// default: a squash promote passes a feature whose secret is only in an
+// older commit, and a preserve promote under a squash default stops on it.
+func TestPromoteGatesForItsEffectiveMode(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.startFeature("feat-x", map[string]string{"config.env": "TOKEN=" + testutil.FakeGitHubToken() + "\n"})
+	testutil.Commit(t, h.shadowGit(), "feat-x", "remove it", map[string]string{"config.env": testutil.Delete, "a.txt": "a\n"})
+	before := h.publicRefs()
+	res, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Mode: "squash", Message: "Add a", PlanOnly: true})
+	if err != nil || res.Gate == nil || res.Gate.Reused || res.Gate.ScannedAs != "squash" || res.Plan == nil || len(res.Plan.Publish.Commits) != 1 {
+		t.Fatalf("squash promote under a preserve default = %+v %v", res, err)
+	}
+
+	h2 := newHarness(t)
+	h2.init()
+	h2.setConfig("default_mode: preserve", "default_mode: squash")
+	h2.startFeature("feat-x", map[string]string{"config.env": "TOKEN=" + testutil.FakeGitHubToken() + "\n"})
+	testutil.Commit(t, h2.shadowGit(), "feat-x", "remove it", map[string]string{"config.env": testutil.Delete, "a.txt": "a\n"})
+	before2 := h2.publicRefs()
+	res, _, err = h2.eng.Promote(h2.ctx, h2.pair, engine.PromoteOptions{Feature: "feat-x", Mode: "preserve", Title: "t", PlanOnly: true})
+	ce := wantCode(t, err, contract.LeakFound)
+	if ce.Details["mode"] != "preserve" || res.Gate == nil || res.Gate.ScannedAs != "preserve" || res.Gate.Leak != feature.LeakFound ||
+		res.Gate.ShadowPR != nil || res.Plan != nil {
+		t.Fatalf("preserve promote under a squash default = %+v details = %v", res, ce.Details)
+	}
+	if !reflect.DeepEqual(h.publicRefs(), before) || !reflect.DeepEqual(h2.publicRefs(), before2) {
+		t.Fatal("a --plan promote touched the public repo")
 	}
 }
 
@@ -484,6 +519,16 @@ func TestGateScansMessagesAndMappedAuthors(t *testing.T) {
 	_ = wantCode(t, err, contract.AuthorUnmapped)
 	if res == nil || res.Leak != feature.LeakNotRun || res.ShadowPR != nil {
 		t.Fatalf("an unmapped author stops the gate before CI: %+v", res)
+	}
+	// Only a preserve gate scans authors; squash and curated gate the tree,
+	// and promote raises AUTHOR_UNMAPPED when it builds a chain that needs it.
+	h2.setConfig("default_mode: preserve", "default_mode: squash")
+	if res, _, err = h2.eng.Gate(h2.ctx, h2.pair, "feat-x"); err != nil || res.ScannedAs != "squash" {
+		t.Fatalf("squash gate with an unmapped author = %+v %v", res, err)
+	}
+	h2.setConfig("default_mode: squash", "default_mode: curated")
+	if res, _, err = h2.eng.Gate(h2.ctx, h2.pair, "feat-x"); err != nil || res.ScannedAs != "curated" {
+		t.Fatalf("curated gate with an unmapped author = %+v %v", res, err)
 	}
 }
 

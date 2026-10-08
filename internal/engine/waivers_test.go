@@ -233,6 +233,34 @@ func TestWaiversAddCoversAFindingInAnOldCommit(t *testing.T) {
 	validateSchema(t, "gate.schema.json", raw)
 }
 
+// Under a squash default, a finding only in an older commit is invisible to
+// the default gate but blocks promote --mode preserve; waivers add scans as
+// preserve, so the person can still waive it (and an unmapped author, which
+// only matters for publishing, doesn't stop them).
+func TestWaiversAddUnderASquashDefaultCoversAnOldCommit(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.setBlockPatterns("project-falcon") // rewrites the whole config, so first
+	h.setConfig("default_mode: preserve", "default_mode: squash")
+	h.startFeature("feat-x", map[string]string{"docs/codename.txt": "project-falcon\n"})
+	testutil.Commit(t, h.shadowGit(), "feat-x", "drop it", map[string]string{"docs/codename.txt": testutil.Delete, "a.txt": "a\n"})
+	if res, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x"); err != nil || len(res.Findings) != 0 {
+		t.Fatalf("squash gate = %+v %v", res, err)
+	}
+	pr, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Mode: "preserve", Title: "t", PlanOnly: true})
+	_ = wantCode(t, err, contract.LeakFound)
+	if pr == nil || len(pr.Findings) != 1 || !pr.Findings[0].Waivable {
+		t.Fatalf("preserve promote = %+v", pr)
+	}
+	id := pr.Findings[0].ID
+	h.setConfig("author_email: noreply", "author_email: map\n  author_map:\n    \"x@y.example\": \"X <x@y.example>\"")
+	ar, err := add(h, "public name", id)
+	if err != nil || len(ar.Waivers) != 1 || ar.Waivers[0].ID != id {
+		t.Fatalf("waivers add = %+v %v", ar, err)
+	}
+}
+
 // validateSchema checks raw against schemas/v0/<name>.
 func validateSchema(t *testing.T, name string, raw []byte) {
 	t.Helper()
