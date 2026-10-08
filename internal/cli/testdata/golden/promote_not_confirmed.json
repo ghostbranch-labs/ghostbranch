@@ -53,11 +53,23 @@
           "title": "Add feature",
           "body": ""
         },
-        "author": {
-          "name": "octo",
-          "email": "42+octo@users.noreply.github.com",
-          "date": "2026-10-05T12:00:05Z"
-        }
+        "commits": [
+          {
+            "commit": "15dd9c9bcb7655bdb426fb4a24f440fc9c31fb65",
+            "tree": "ef9061717144a4bf03a0230d8f8926d019f2adeb",
+            "parent": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+            "sources": [
+              "d7407485ce685c126afcfc258f0a9eeb0092d776"
+            ],
+            "author": {
+              "name": "octo",
+              "email": "42+octo@users.noreply.github.com",
+              "date": "2026-10-05T12:00:05Z"
+            },
+            "subject": "Add feature"
+          }
+        ],
+        "dropped_empty": []
       },
       "leak": {
         "findings": [],

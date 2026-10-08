@@ -162,6 +162,9 @@ func chainAuthors(p config.Promote, mode string, links []link, publisher gitx.Id
 
 // writeChain writes the public commits on public main, oldest first.
 func writeChain(ctx context.Context, g *gitx.Git, links []link, authors []gitx.Identity, committer gitx.Identity, pm string) ([]plan.Commit, error) {
+	if len(authors) != len(links) {
+		return nil, contract.New(contract.Internal, "%d authors for %d public commits", len(authors), len(links))
+	}
 	out := make([]plan.Commit, 0, len(links))
 	parent := pm
 	for i, l := range links {

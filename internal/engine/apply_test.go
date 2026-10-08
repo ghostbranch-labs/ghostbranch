@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
@@ -18,7 +20,7 @@ import (
 func planned(t *testing.T) (*harness, string) {
 	t.Helper()
 	h := gated(t)
-	res, err := promote(h, engine.PromoteOptions{Message: "Add feature", PlanOnly: true})
+	res, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "Add feature", PlanOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +164,7 @@ func TestApplyScansTheStoredCommitMessage(t *testing.T) {
 	if err := sg.UpdateRef(h.ctx, "refs/ghostbranch/plans/"+id, leaky); err != nil {
 		t.Fatal(err)
 	}
-	pl.Publish.Commit = leaky
+	pl.Publish.Commit, pl.Publish.Commits[0].Commit = leaky, leaky
 	if _, err := plan.Save(h.eng.WS.PlansDir(), pl); err != nil {
 		t.Fatal(err)
 	}
@@ -236,5 +238,91 @@ func TestApplyRejectsATamperedTargetBranch(t *testing.T) {
 	}
 	if len(h.approver.asked) != 0 {
 		t.Fatal("a tampered plan must be refused before asking anyone")
+	}
+}
+
+func plannedHistory(t *testing.T) (*harness, *plan.Plan) {
+	t.Helper()
+	h, _ := gatedHistory(t)
+	res, err := promote(h, engine.PromoteOptions{Title: "t", PlanOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return h, res.Plan
+}
+
+// Review Focus 5.
+func TestApplyRefusesATamperedChain(t *testing.T) {
+	t.Parallel()
+	t.Run("plan file names another middle tree", func(t *testing.T) {
+		t.Parallel()
+		h, pl := plannedHistory(t)
+		pl.Publish.Commits[0].Tree = pl.Publish.Commits[1].Tree
+		if _, err := plan.Save(h.eng.WS.PlansDir(), *pl); err != nil {
+			t.Fatal(err)
+		}
+		_, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: pl.ID, Yes: true})
+		_ = wantCode(t, err, contract.PlanStale)
+		if len(h.approver.asked) != 0 {
+			t.Fatal("asked a person before refusing")
+		}
+	})
+	t.Run("plan ref moved to a different chain", func(t *testing.T) {
+		t.Parallel()
+		h, pl := plannedHistory(t)
+		sg := h.shadowGit()
+		who := testutil.Author(9)
+		mid, _ := sg.CommitTree(h.ctx, pl.Publish.Commits[1].Tree, []string{pl.Publish.Parent}, "swapped", who, who)
+		forged, _ := sg.CommitTree(h.ctx, pl.Publish.Commits[1].Tree, []string{mid}, "add b", who, who)
+		_ = sg.UpdateRef(h.ctx, "refs/ghostbranch/plans/"+pl.ID, forged)
+		pl.Publish.Commit = forged
+		_, _ = plan.Save(h.eng.WS.PlansDir(), *pl)
+		_, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: pl.ID, Yes: true})
+		_ = wantCode(t, err, contract.PlanStale)
+	})
+}
+
+func TestApplyRefusesAnOlderPlanVersion(t *testing.T) {
+	t.Parallel()
+	h, pl := plannedHistory(t)
+	pl.SchemaVersion = "0.4"
+	_, _ = plan.Save(h.eng.WS.PlansDir(), *pl)
+	_, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: pl.ID, Yes: true})
+	if ce := wantCode(t, err, contract.PlanStale); !reflect.DeepEqual(ce.Details["moved"], []string{"schema_version"}) {
+		t.Fatalf("details = %v", ce.Details)
+	}
+}
+
+func TestApplyPublishesAPreservedPlan(t *testing.T) {
+	t.Parallel()
+	h, pl := plannedHistory(t)
+	h.grant(time.Hour)
+	res, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: pl.ID, Yes: true})
+	if err != nil || res.PublicPR != 1 {
+		t.Fatalf("apply = %+v %v", res, err)
+	}
+	tip, _ := h.pubGit.MustResolve(h.ctx, "refs/heads/feat-x")
+	if tip != pl.Publish.Commits[1].Commit {
+		t.Fatal("apply must publish the planned tip")
+	}
+}
+
+// The console shows each public commit of a preserved plan, with its
+// subject and the author read from the commit object.
+func TestApplySummaryListsEachPublicCommit(t *testing.T) {
+	t.Parallel()
+	h, pl := plannedHistory(t)
+	if _, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: pl.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.approver.asked) != 1 {
+		t.Fatalf("asked %d times", len(h.approver.asked))
+	}
+	s := h.approver.asked[0]
+	author := "(octo <42+octo@users.noreply.github.com>)"
+	for _, want := range []string{"preserve, 2 commit(s)", "work on feat-x " + author, "add b " + author, "dropped  1 commit(s)"} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("summary lacks %q:\n%s", want, s)
+		}
 	}
 }

@@ -91,7 +91,7 @@ func TestOnlyPromoteAndApplyReachThePublicRepo(t *testing.T) {
 	h.eng.DryRun = true
 	_, _, err = h.eng.Gate(h.ctx, h.pair, "good")
 	run("gate --dry-run", err, "")
-	_, _, err = h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "good", Message: "m", Yes: true})
+	_, _, err = h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "good", Mode: "squash", Message: "m", Yes: true})
 	run("promote --dry-run", err, "")
 	h.eng.DryRun = false
 
@@ -99,11 +99,11 @@ func TestOnlyPromoteAndApplyReachThePublicRepo(t *testing.T) {
 	run("gate", err, "")
 	_, _, err = h.eng.Gate(h.ctx, h.pair, "leaky")
 	run("gate leaky", err, contract.LeakFound)
-	_, _, err = h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "leaky", Message: "m", Yes: true})
+	_, _, err = h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "leaky", Mode: "squash", Message: "m", Yes: true})
 	run("promote leaky", err, contract.LeakFound)
 	_, _, err = h.eng.Gate(h.ctx, h.pair, "marked")
 	run("gate marked", err, contract.MarkerInvalid)
-	_, _, err = h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "marked", Message: "m", Yes: true})
+	_, _, err = h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "marked", Mode: "squash", Message: "m", Yes: true})
 	run("promote marked", err, contract.MarkerInvalid)
 
 	h.forge.Checks = func(string, string) []forge.Check {
@@ -111,14 +111,14 @@ func TestOnlyPromoteAndApplyReachThePublicRepo(t *testing.T) {
 	}
 	_, _, err = h.eng.Gate(h.ctx, h.pair, "red")
 	run("gate red", err, contract.ChecksFailed)
-	_, _, err = h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "red", Message: "m", Yes: true})
+	_, _, err = h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "red", Mode: "squash", Message: "m", Yes: true})
 	run("promote red", err, contract.ChecksFailed)
 	h.forge.Checks = nil
 
-	res, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "good", Message: "m", PlanOnly: true})
+	res, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "good", Mode: "squash", Message: "m", PlanOnly: true})
 	run("promote --plan", err, "")
 	h.eng.Approver = nil
-	_, _, err = h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "good", Message: "m", Yes: true})
+	_, _, err = h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "good", Mode: "squash", Message: "m", Yes: true})
 	run("promote --yes without a console or grant", err, contract.ApprovalRequired)
 	_, _, err = h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: res.Plan.ID, Yes: true})
 	run("apply --yes without a console or grant", err, contract.ApprovalRequired)
@@ -151,7 +151,7 @@ func TestAShadowRepoTurnedPublicStopsEverything(t *testing.T) {
 		h := newHarness(t)
 		h.init()
 		h.startFeature("good", map[string]string{"good.txt": "g\n"})
-		res, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "good", Message: "m", PlanOnly: true})
+		res, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "good", Mode: "squash", Message: "m", PlanOnly: true})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -162,7 +162,7 @@ func TestAShadowRepoTurnedPublicStopsEverything(t *testing.T) {
 		_, _, steps["sync"] = h.eng.Sync(h.ctx, h.pair, engine.SyncOptions{})
 		_, _, steps["feature start"] = h.eng.FeatureStart(h.ctx, h.pair, "other")
 		_, _, steps["gate"] = h.eng.Gate(h.ctx, h.pair, "good")
-		_, _, steps["promote"] = h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "good", Message: "m", Yes: true})
+		_, _, steps["promote"] = h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "good", Mode: "squash", Message: "m", Yes: true})
 		_, _, steps["apply"] = h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: res.Plan.ID, Yes: true})
 		for step, err := range steps {
 			if codeOf(err) != contract.ShadowNotPrivate {

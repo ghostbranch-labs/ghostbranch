@@ -34,7 +34,7 @@ func TestGateStripsInternalSectionsBeforeCI(t *testing.T) {
 	if r, _, _ := sh.ShowFile(h.ctx, res.Candidate+"^", "app.go"); string(r) != internalSrc {
 		t.Fatalf("R must keep the internal lines, got %q", r)
 	}
-	pr, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Message: "Add app", Yes: true})
+	pr, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Mode: "squash", Message: "Add app", Yes: true})
 	if err != nil || pr.Applied == nil {
 		t.Fatalf("promote = %+v %v", pr, err)
 	}
@@ -128,7 +128,7 @@ func TestPromoteRegatesWhenTheRecordedTreeDiffers(t *testing.T) {
 		t.Fatal(err)
 	}
 	forgeRecordedTree(t, h, "feat-x", unstripped)
-	res, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Message: "m", PlanOnly: true})
+	res, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Mode: "squash", Message: "m", PlanOnly: true})
 	if err != nil || res.Gate.Reused || res.Plan.Publish.Tree != gr.PublishedTree {
 		t.Fatalf("promote = %+v %v; want a fresh gate and the stripped tree %s", res.Gate, err, gr.PublishedTree)
 	}
@@ -157,7 +157,7 @@ func TestApplyRefusesAPlanWhoseTreeWasNotStripped(t *testing.T) {
 	h := newHarness(t)
 	h.init()
 	h.startFeature("feat-x", map[string]string{"app.go": internalSrc})
-	res, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Message: "Add app", PlanOnly: true})
+	res, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Mode: "squash", Message: "Add app", PlanOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +238,7 @@ func TestApplyStampsTheMetaSchemaVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 	forgeMeta(t, h, "feat-x", func(m *feature.Meta) { m.SchemaVersion = "0.2" })
-	if _, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Message: "Add app", Yes: true}); err != nil {
+	if _, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Mode: "squash", Message: "Add app", Yes: true}); err != nil {
 		t.Fatal(err)
 	}
 	raw, _, err := h.shadowGit().ShowFile(h.ctx, "refs/ghostbranch/features/feat-x", feature.MetaFile)

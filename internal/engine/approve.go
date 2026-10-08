@@ -87,13 +87,23 @@ func (e *Engine) authorize(ctx context.Context, p workspace.Pair, planID, summar
 }
 
 // planSummary is the "what goes public" view shown before confirming.
-// author is read from the commit itself, not the plan file.
-func planSummary(pl plan.Plan, files []string, author string, waived []WaivedFinding, warnings []contract.Warning) string {
+// authors holds each public commit's author, read from the commit itself,
+// not the plan file.
+func planSummary(pl plan.Plan, files []string, authors []string, waived []WaivedFinding, warnings []contract.Warning) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "About to publish to %s:\n", pl.Pair.Public)
 	fmt.Fprintf(&b, "  branch   %s\n", pl.Publish.TargetBranch)
-	fmt.Fprintf(&b, "  commit   %s (parent %s)\n", short(pl.Publish.Commit), short(pl.Publish.Parent))
-	fmt.Fprintf(&b, "  author   %s\n", author)
+	fmt.Fprintf(&b, "  history  %s, %d commit(s) on %s\n", pl.Mode, len(pl.Publish.Commits), short(pl.Publish.Parent))
+	for i, c := range pl.Publish.Commits {
+		if i == 20 {
+			fmt.Fprintf(&b, "           … and %d more\n", len(pl.Publish.Commits)-20)
+			break
+		}
+		fmt.Fprintf(&b, "           %s %s (%s)\n", short(c.Commit), c.Subject, authors[i])
+	}
+	if n := len(pl.Publish.DroppedEmpty); n > 0 {
+		fmt.Fprintf(&b, "  dropped  %d commit(s) with nothing public in them\n", n)
+	}
 	fmt.Fprintf(&b, "  PR title %s\n", pl.Publish.PR.Title)
 	fmt.Fprintf(&b, "  files    %d changed\n", len(files))
 	for i, f := range files {

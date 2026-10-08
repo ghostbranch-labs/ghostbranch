@@ -11,7 +11,6 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
 	"github.com/ghostbranch-labs/ghostbranch/internal/overlay"
-	"github.com/ghostbranch-labs/ghostbranch/internal/plan"
 	"github.com/ghostbranch-labs/ghostbranch/internal/strip"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workflow"
 )
@@ -146,12 +145,6 @@ func (e *Engine) candidate(ctx context.Context, g *gitx.Git, R string, tEntries 
 		return "", rep, nil, internalErr(err, "write the candidate commit")
 	}
 	return c, rep, guards, nil
-}
-
-// assertPublish re-checks a one-commit chain P before it may be published.
-// Task 7 moves its callers to assertChain.
-func assertPublish(ctx context.Context, g *gitx.Git, P, T, C, publicMain string, set overlay.Set, wnames workflow.Names) error {
-	return assertChain(ctx, g, []plan.Commit{{Commit: P, Tree: T, Parent: publicMain}}, T, C, publicMain, set, wnames)
 }
 
 // assertTip checks that the chain's tip P differs from the CI candidate C

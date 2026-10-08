@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/ghostbranch-labs/ghostbranch/internal/config"
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
@@ -22,7 +24,7 @@ import (
 
 type PromoteOptions struct {
 	Feature  string
-	Mode     string // only "squash" in this version
+	Mode     string // squash, preserve or curated; "" means promote.default_mode
 	Message  string
 	Title    string
 	Body     string
@@ -47,9 +49,9 @@ const editorTemplate = "\n# Write the commit message for the public squash commi
 
 var errStaleGate = errors.New("the recorded gate's commit mapping does not end at its candidate")
 
-// Promote gates the feature (reusing a fresh green gate), builds the one
-// public commit P, scans everything that would go public, saves a plan,
-// and applies it once approved.
+// Promote gates the feature (reusing a fresh green gate), builds the chain
+// of public commits its history mode publishes, scans everything that would
+// go public, saves a plan, and applies it once approved.
 func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptions) (res *PromoteResult, warns []contract.Warning, err error) {
 	planID := ""
 	defer func() {
@@ -71,11 +73,6 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	if err := ValidatePromoteOptions(&opt); err != nil {
 		return nil, nil, err
 	}
-	msg, err := e.message(opt)
-	if err != nil {
-		return nil, nil, err
-	}
-	title, body := prTexts(msg, opt.Title, opt.Body)
 	branch := opt.Branch
 	if branch == "" {
 		branch = opt.Feature
@@ -92,6 +89,22 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	if err != nil {
 		return res, warns, err
 	}
+	mode := opt.Mode
+	if mode == "" {
+		mode = cfg.Promote.DefaultMode
+	}
+	if mode != config.ModeSquash && strings.TrimSpace(opt.Message) != "" {
+		return res, warns, messageNotSquash(mode)
+	}
+	if mode == config.ModeCurated {
+		return res, warns, contract.New(contract.Internal, "curated mode arrives in Task 8")
+	}
+	var msg string
+	if mode == config.ModeSquash {
+		if msg, err = e.message(opt); err != nil {
+			return res, warns, err
+		}
+	}
 	warns = addWarnings(warns, e.behind(ctx, pc)...)
 	m, _, err := e.readMeta(ctx, pc, opt.Feature)
 	if err != nil {
@@ -105,6 +118,17 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	if err != nil {
 		return res, warns, internalErr(err, "read public main")
 	}
+	// A preserved history of several commits has no one message to take the
+	// PR title from: ask for it before any CI runs.
+	if mode == config.ModePreserve && strings.TrimSpace(opt.Title) == "" {
+		sources, err := g.SourceCommits(ctx, pm, head)
+		if err != nil {
+			return res, warns, internalErr(err, "list the feature's commits")
+		}
+		if len(sources) > 1 {
+			return res, warns, contract.New(contract.MissingInput, "this feature has %d commits, so its PR needs a title: pass --title", len(sources)).WithField("title")
+		}
+	}
 
 	// A fresh green gate is reused only while the shadow gate branch still
 	// points at its candidate; apply checks that branch, so a deleted or moved
@@ -115,6 +139,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	names := guardNames(pc)
 	var R, T2 string
 	var entries []gitx.TreeEntry
+	var commits []feature.GateCommit
 	var guardRep workflow.GuardReport
 	if fresh {
 		// A gate recorded by a binary that built its candidate differently
@@ -143,6 +168,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 			Candidate: m.Gate.Candidate, PublishedTree: m.Gate.PublishedTree, Checks: m.Gate.Checks,
 			FailedChecks: []string{}, Leak: m.Gate.Leak, Findings: []leak.Finding{}, Waived: []WaivedFinding{},
 			RepoGuards: &guardRep, Reused: true}
+		commits = m.Gate.Commits
 	case e.DryRun:
 		// Running the gate would push; say so and stop, rather than return
 		// a plan whose checks never ran.
@@ -164,6 +190,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 			return res, warns, err
 		}
 		guardRep = *gr.RepoGuards
+		commits = gr.mapping
 	}
 	C, T := res.Gate.Candidate, res.Gate.PublishedTree
 	set := overlay.NewSet(cfg.LeakScan.Strip...)
@@ -171,20 +198,61 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 		return res, warns, contract.New(contract.Internal, "the gated tree %s no longer matches its candidate (%s)", short(T), short(T2))
 	}
 
+	links, dropped, err := deriveChain(ctx, g, cfg, chainInput{mode: mode, pm: pm, T: T, tEntries: entries, commits: commits, message: msg}, nil)
+	if err != nil {
+		return res, warns, err
+	}
 	u, err := e.Forge.CurrentUser(ctx)
 	if err != nil {
 		return res, warns, forgeErr(err, "look up the current user")
 	}
 	who := gitx.Identity{Name: u.Login, Email: forge.NoreplyEmail(u), When: e.now()}
-	P, err := g.CommitTree(ctx, T, []string{pm}, msg, who, who)
+	authors, err := chainAuthors(cfg.Promote, mode, links, who)
 	if err != nil {
-		return res, warns, internalErr(err, "write the public commit")
-	}
-	if err := assertPublish(ctx, g, P, T, C, pm, set, names); err != nil {
 		return res, warns, err
 	}
-	ident := who.Name + " <" + who.Email + ">"
-	rep, version, err := e.scan(ctx, g, cfg, entries, pm, publishTexts(msg, ident, ident, branch, title, body))
+	chain, err := writeChain(ctx, g, links, authors, who, pm)
+	if err != nil {
+		return res, warns, err
+	}
+	P := chain[len(chain)-1].Commit
+	if err := assertChain(ctx, g, chain, T, C, pm, set, names); err != nil {
+		return res, warns, err
+	}
+
+	var title, body string
+	switch {
+	case mode == config.ModeSquash:
+		title, body = prTexts(msg, opt.Title, opt.Body)
+	case len(links) == 1:
+		title, body = prTexts(links[0].message, opt.Title, opt.Body)
+	default:
+		title, body = strings.TrimSpace(opt.Title), strings.TrimSpace(opt.Body)
+		if body == "" {
+			lines := make([]string, len(chain))
+			for i, c := range chain {
+				lines[i] = "- " + c.Subject
+			}
+			body = strings.Join(lines, "\n")
+		}
+	}
+	if title == "" {
+		return res, warns, contract.New(contract.MissingInput, "the PR needs a title: pass --title").WithField("title")
+	}
+
+	steps := make([]scanStep, len(links))
+	for i, l := range links {
+		var sources []string
+		if mode != config.ModeSquash {
+			sources = l.sources
+		}
+		steps[i] = scanStep{sources: sources, entries: l.entries, texts: []leak.Text{
+			{Where: "commit_message", Content: l.message},
+			{Where: "author", Content: identityText(authors[i])},
+			{Where: "committer", Content: identityText(who)}}}
+	}
+	rep, version, err := e.scanChain(ctx, g, cfg, pm, steps, []leak.Text{
+		{Where: "branch", Content: branch}, {Where: "pr_title", Content: title}, {Where: "pr_body", Content: body}})
 	if err != nil {
 		return res, warns, err
 	}
@@ -193,18 +261,19 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	res.Waived = waived
 	if len(blocking) > 0 {
 		res.Findings = blocking
-		return res, warns, leakErr(opt.Feature, blocking)
+		ce := contract.From(leakErr(opt.Feature, blocking))
+		ce.Details["mode"] = mode
+		return res, warns, ce
 	}
 
 	if planID, err = plan.NewID(e.now(), e.Rand); err != nil {
 		return res, warns, internalErr(err, "make a plan id")
 	}
 	pl := plan.Plan{SchemaVersion: plan.SchemaVersion, ID: planID, Kind: "promote", Actor: e.Actor, CreatedAt: e.now(),
-		Pair: plan.Pair{Public: p.Public, Shadow: p.Shadow}, Feature: opt.Feature, Mode: opt.Mode,
+		Pair: plan.Pair{Public: p.Public, Shadow: p.Shadow}, Feature: opt.Feature, Mode: mode,
 		Fingerprint: plan.Fingerprint{PublicMain: pm, FeatureHead: head, Overlay: O, GateCandidate: C},
-		Publish: plan.Publish{Commit: P, Tree: T, Parent: pm,
-			Author:       plan.Identity{Name: who.Name, Email: who.Email, Date: who.When},
-			TargetBranch: branch, PR: plan.PR{Title: title, Body: body}},
+		Publish: plan.Publish{Commit: P, Tree: T, Parent: pm, TargetBranch: branch, PR: plan.PR{Title: title, Body: body},
+			Commits: chain, DroppedEmpty: dropped},
 		Leak: plan.Leak{Findings: []map[string]any{}, Waived: planWaived(waived), Warnings: append([]contract.Warning{}, rep.Warnings...), ScannerVersion: version},
 		CI:   plan.CI{RepoGuards: guardRep}}
 	res.Plan = &pl
@@ -223,13 +292,15 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 		res.Preview = pv
 		return res, warns, nil
 	}
-	if err := e.push(ctx, pc, remoteShadow, gitx.PushOptions{Leases: []gitx.Lease{{Ref: remotePlanRef(planID)}}}, P+":"+remotePlanRef(planID)); err != nil {
-		return res, warns, err
-	}
-	_ = g.UpdateRef(ctx, planRef(planID), P)
 	if res.PlanPath, err = plan.Save(e.WS.PlansDir(), pl); err != nil {
 		return res, warns, internalErr(err, "save the plan")
 	}
+	if err := e.push(ctx, pc, remoteShadow, gitx.PushOptions{Leases: []gitx.Lease{{Ref: remotePlanRef(planID)}}}, P+":"+remotePlanRef(planID)); err != nil {
+		_ = os.Remove(res.PlanPath) // a plan whose commits never reached the shadow repo can't be applied
+		res.PlanPath = ""
+		return res, warns, err
+	}
+	_ = g.UpdateRef(ctx, planRef(planID), P)
 	if opt.PlanOnly {
 		return res, warns, nil
 	}
@@ -239,19 +310,29 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 }
 
 // ValidatePromoteOptions checks everything about a promote that needs no
-// network, so a bad flag fails before any CI runs. It sets the default mode.
+// network, so a bad flag fails before any CI runs. An empty Mode means
+// promote.default_mode, which is checked once the config is read.
 func ValidatePromoteOptions(opt *PromoteOptions) error {
-	if opt.Mode == "" {
-		opt.Mode = "squash"
+	switch opt.Mode {
+	case "", config.ModeSquash, config.ModePreserve, config.ModeCurated:
+	default:
+		return contract.New(contract.BadFlag, "--mode %s: use squash, preserve or curated", opt.Mode).WithField("mode")
 	}
-	if opt.Mode != "squash" {
-		return contract.New(contract.BadFlag, "--mode %s is not supported in this version; use squash", opt.Mode).WithField("mode")
+	if opt.Mode != "" && opt.Mode != config.ModeSquash && strings.TrimSpace(opt.Message) != "" {
+		return messageNotSquash(opt.Mode)
 	}
 	branch := opt.Branch
 	if branch == "" {
 		branch = opt.Feature
 	}
 	return feature.ValidateName(branch, "branch")
+}
+
+// messageNotSquash is BAD_FLAG for -m in a mode other than squash.
+func messageNotSquash(mode string) error {
+	return contract.New(contract.BadFlag,
+		"-m sets the squash commit's message, but this promote runs in %s mode; pass --mode squash, or drop -m (use --title and --body for the PR)", mode).
+		WithField("message")
 }
 
 // prTexts derives the PR title and body: an explicit --title or --body wins,
@@ -292,17 +373,4 @@ func (e *Engine) message(opt PromoteOptions) (string, error) {
 		return "", missing
 	}
 	return msg, nil
-}
-
-// publishTexts is every piece of text that goes public besides the tree.
-// author and committer are "Name <email>".
-func publishTexts(msg, author, committer, branch, title, body string) []leak.Text {
-	return []leak.Text{
-		{Where: "commit_message", Content: msg},
-		{Where: "author", Content: author},
-		{Where: "committer", Content: committer},
-		{Where: "branch", Content: branch},
-		{Where: "pr_title", Content: title},
-		{Where: "pr_body", Content: body},
-	}
 }

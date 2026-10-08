@@ -282,3 +282,13 @@ func mustHash(t *testing.T, g *gitx.Git, s string) string {
 	}
 	return sha
 }
+
+func TestWriteChainRefusesMismatchedAuthors(t *testing.T) {
+	t.Parallel()
+	g, pm, _ := chainRepo(t)
+	who := testutil.Author(1)
+	_, err := writeChain(context.Background(), g, []link{{message: "m"}}, nil, who, pm)
+	if ce := contract.From(err); ce == nil || ce.Code != contract.Internal {
+		t.Fatalf("want INTERNAL, got %v", err)
+	}
+}

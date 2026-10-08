@@ -3,12 +3,16 @@ package engine
 import (
 	"context"
 	"fmt"
+	"reflect"
+	"slices"
 	"strings"
 
+	"github.com/ghostbranch-labs/ghostbranch/internal/config"
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
+	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
 	"github.com/ghostbranch-labs/ghostbranch/internal/ledger"
 	"github.com/ghostbranch-labs/ghostbranch/internal/overlay"
 	"github.com/ghostbranch-labs/ghostbranch/internal/plan"
@@ -70,9 +74,11 @@ func (e *Engine) Apply(ctx context.Context, opt ApplyOptions) (res *ApplyResult,
 }
 
 // stale is the PLAN_STALE details: what moved, plus the feature, public
-// repo and public branch so the re-plan command can be named exactly.
+// repo, public branch, mode and PR texts so the re-plan command can be
+// named exactly.
 func stale(pl plan.Plan, moved []string) map[string]any {
-	return map[string]any{"moved": moved, "feature": pl.Feature, "public": pl.Pair.Public, "branch": pl.Publish.TargetBranch}
+	return map[string]any{"moved": moved, "feature": pl.Feature, "public": pl.Pair.Public, "branch": pl.Publish.TargetBranch,
+		"mode": pl.Mode, "title": pl.Publish.PR.Title, "body": pl.Publish.PR.Body}
 }
 
 // branchExists refuses a publish to a public branch that is already at
@@ -106,6 +112,11 @@ func (e *Engine) previewPublish(ctx context.Context, pc *pairCtx, pv *preview.Pr
 
 func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool) (*ApplyResult, []contract.Warning, error) {
 	g := pc.git
+	if pl.SchemaVersion != plan.SchemaVersion {
+		return nil, nil, contract.New(contract.PlanStale,
+			"plan %s was made by an older Ghostbranch (schema %s); make a new plan with ghostbranch promote", pl.ID, pl.SchemaVersion).
+			WithDetails(stale(pl, []string{"schema_version"}))
+	}
 	if def := pc.public.DefaultBranch; def != "" && strings.EqualFold(pl.Publish.TargetBranch, def) {
 		return nil, nil, contract.New(contract.NameInvalid, "plan %s would publish to the public default branch %q", pl.ID, def).WithField("plan")
 	}
@@ -130,11 +141,25 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 			WithDetails(stale(pl, moved))
 	}
 	// The plan only stands while the recorded gate is green, fresh, and for
-	// the very candidate the plan was made from.
-	if !m.Gate.Passed() || m.Gate.Candidate != gateC || !m.Gate.FreshFor(head, pm, O) {
-		return nil, warns, contract.New(contract.PlanStale,
-			"the recorded gate for %q is no longer green for plan %s's candidate; run ghostbranch gate, then make a new plan", pl.Feature, pl.ID).
-			WithDetails(stale(pl, []string{"gate"}))
+	// the very candidate the plan was made from, and records the chain it
+	// rebased (a gate from an older binary does not).
+	gateStale := contract.New(contract.PlanStale,
+		"the recorded gate for %q is no longer green for plan %s's candidate; run ghostbranch gate, then make a new plan", pl.Feature, pl.ID).
+		WithDetails(stale(pl, []string{"gate"}))
+	if !m.Gate.Passed() || m.Gate.Commits == nil || m.Gate.Candidate != gateC || !m.Gate.FreshFor(head, pm, O) {
+		return nil, warns, gateStale
+	}
+	// The recorded chain must run from public main to the candidate's
+	// parent, one parent at a time.
+	prev := pm
+	for _, c := range m.Gate.Commits {
+		if parent, err := g.MustResolve(ctx, c.Rebased+"^"); err != nil || parent != prev {
+			return nil, warns, gateStale
+		}
+		prev = c.Rebased
+	}
+	if R, err := g.MustResolve(ctx, gateC+"^"); err != nil || R != prev {
+		return nil, warns, gateStale
 	}
 	P, ok, _ := g.Resolve(ctx, planRef(pl.ID))
 	if !ok || P != pl.Publish.Commit {
@@ -144,7 +169,7 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 	// P matching C proves nothing if C itself kept internal sections (a plan
 	// from a binary that did not strip, or a forged one): derive the
 	// published tree again from the candidate's parent.
-	T2, _, err := publishedTree(ctx, g, gateC+"^", cfg)
+	T2, tEntries, err := publishedTree(ctx, g, gateC+"^", cfg)
 	if err != nil {
 		if ce := contract.From(err); ce.Code == contract.MarkerInvalid {
 			ce.Details["feature"] = pl.Feature
@@ -156,31 +181,77 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 			"plan %s was not built with this version's strip of internal sections; make a new plan with ghostbranch promote", pl.ID).
 			WithDetails(stale(pl, []string{"publish.tree"}))
 	}
-	set := overlay.NewSet(cfg.LeakScan.Strip...)
-	if err := assertPublish(ctx, g, P, pl.Publish.Tree, pl.Fingerprint.GateCandidate, pm, set, guardNames(pc)); err != nil {
+	// The plan file is local and unsigned: derive the chain again from the
+	// shadow repo's objects, and refuse a plan that names any other.
+	links, dropped, err := deriveChain(ctx, g, cfg, chainInput{mode: pl.Mode, pm: pm, T: pl.Publish.Tree, tEntries: tEntries,
+		commits: m.Gate.Commits, groups: pl.Curate}, nil)
+	if err != nil {
 		return nil, warns, err
 	}
-	entries, err := g.ListTree(ctx, P)
-	if err != nil {
-		return nil, warns, internalErr(err, "list the published tree")
+	chainStale := contract.New(contract.PlanStale,
+		"plan %s's public commits are not the ones its feature's history gives; make a new plan with ghostbranch promote", pl.ID).
+		WithDetails(stale(pl, []string{"publish.commits"}))
+	commits := pl.Publish.Commits
+	if len(links) != len(commits) || !slices.Equal(dropped, pl.Publish.DroppedEmpty) {
+		return nil, warns, chainStale
 	}
-	msg, err := g.CommitMessage(ctx, P)
-	if err != nil {
-		return nil, warns, internalErr(err, "read the commit message")
+	for i, l := range links {
+		if l.tree != commits[i].Tree || !reflect.DeepEqual(l.sources, commits[i].Sources) {
+			return nil, warns, chainStale
+		}
 	}
-	author, committer, err := g.CommitIdentities(ctx, P)
-	if err != nil {
-		return nil, warns, internalErr(err, "read the published commit's author and committer")
+	// The plan ref is the chain's tip: walk back from it.
+	at := P
+	for i := len(commits) - 1; i >= 0; i-- {
+		if at != commits[i].Commit {
+			return nil, warns, chainStale
+		}
+		if i > 0 {
+			if at, err = g.MustResolve(ctx, at+"^"); err != nil {
+				return nil, warns, chainStale
+			}
+		}
 	}
-	rep, _, err := e.scan(ctx, g, cfg, entries, pm, publishTexts(msg, author, committer,
-		pl.Publish.TargetBranch, pl.Publish.PR.Title, pl.Publish.PR.Body))
+	set := overlay.NewSet(cfg.LeakScan.Strip...)
+	if err := assertChain(ctx, g, commits, pl.Publish.Tree, gateC, pm, set, guardNames(pc)); err != nil {
+		return nil, warns, err
+	}
+	// Scan what is stored in the commits, not what the plan file says.
+	steps := make([]scanStep, len(commits))
+	authors := make([]string, len(commits))
+	shown := append([]plan.Commit(nil), commits...)
+	for i, c := range commits {
+		msg, err := g.CommitMessage(ctx, c.Commit)
+		if err != nil {
+			return nil, warns, internalErr(err, "read a public commit's message")
+		}
+		author, committer, err := g.CommitIdentities(ctx, c.Commit)
+		if err != nil {
+			return nil, warns, internalErr(err, "read a public commit's author and committer")
+		}
+		var sources []string
+		if pl.Mode != config.ModeSquash {
+			sources = links[i].sources
+		}
+		steps[i] = scanStep{sources: sources, entries: links[i].entries, texts: []leak.Text{
+			{Where: "commit_message", Content: msg},
+			{Where: "author", Content: author},
+			{Where: "committer", Content: committer}}}
+		authors[i] = author
+		shown[i].Subject = subject(msg)
+	}
+	rep, _, err := e.scanChain(ctx, g, cfg, pm, steps, []leak.Text{
+		{Where: "branch", Content: pl.Publish.TargetBranch}, {Where: "pr_title", Content: pl.Publish.PR.Title},
+		{Where: "pr_body", Content: pl.Publish.PR.Body}})
 	if err != nil {
 		return nil, warns, err
 	}
 	blocking, waived, ww := e.splitFindings(pc.pair, rep.Findings)
 	warns = addWarnings(addWarnings(warns, rep.Warnings...), ww...)
 	if len(blocking) > 0 {
-		return nil, warns, leakErr(pl.Feature, blocking)
+		ce := contract.From(leakErr(pl.Feature, blocking))
+		ce.Details["mode"], ce.Details["public"], ce.Details["branch"] = pl.Mode, pl.Pair.Public, pl.Publish.TargetBranch
+		return nil, warns, ce
 	}
 
 	branch := pl.Publish.TargetBranch
@@ -201,7 +272,9 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 	if err != nil {
 		return nil, warns, internalErr(err, "list the files going public")
 	}
-	if res.Approval, err = e.authorize(ctx, pc.pair, pl.ID, planSummary(pl, files, author, waived, rep.Warnings), yes); err != nil {
+	summary := pl
+	summary.Publish.Commits = shown // subjects as stored in the commits
+	if res.Approval, err = e.authorize(ctx, pc.pair, pl.ID, planSummary(summary, files, authors, waived, rep.Warnings), yes); err != nil {
 		return nil, warns, err
 	}
 	if !exists {

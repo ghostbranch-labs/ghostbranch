@@ -46,7 +46,7 @@ func TestShadowBehindOncePerCommand(t *testing.T) {
 		t.Fatalf("gate: %+v %v", warns, err)
 	}
 	testutil.Commit(t, h.pubGit, "main", "upstream 2", map[string]string{"up.txt": "up 2\n"})
-	res, warns, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Message: "m", PlanOnly: true})
+	res, warns, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Mode: "squash", Message: "m", PlanOnly: true})
 	if err != nil || res.Gate.Reused || codes(warns)[contract.ShadowBehind] != 1 {
 		t.Fatalf("promote: %+v %v", warns, err)
 	}

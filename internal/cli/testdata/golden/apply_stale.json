@@ -30,12 +30,15 @@
     "field": null,
     "retryable": false,
     "details": {
+      "body": "",
       "branch": "feat-x",
       "feature": "feat-x",
+      "mode": "squash",
       "moved": [
         "public_main"
       ],
-      "public": "acme/widget"
+      "public": "acme/widget",
+      "title": "Add feature"
     }
   }
 }

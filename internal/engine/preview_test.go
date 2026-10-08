@@ -55,7 +55,7 @@ func TestPreviewsWriteNothing(t *testing.T) {
 		t.Fatalf("gate preview: %+v %v", gres, err)
 	}
 	// No fresh gate yet: promote --dry-run says to run the gate, and makes no plan.
-	pres, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Message: "m"})
+	pres, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Mode: "squash", Message: "m"})
 	if err != nil || pres.Plan != nil || !reflect.DeepEqual(opNames(pres.Preview), []string{"run_gate"}) {
 		t.Fatalf("promote preview with a stale gate: %+v %v", pres, err)
 	}
@@ -70,7 +70,7 @@ func TestPromoteAndApplyPreviewsWithAFreshGate(t *testing.T) {
 	h := gated(t)
 	pushes := len(h.pushes)
 	h.eng.DryRun = true
-	res, err := promote(h, engine.PromoteOptions{Message: "m"})
+	res, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "m"})
 	h.eng.DryRun = false
 	if err != nil || res.Plan == nil || !reflect.DeepEqual(opNames(res.Preview), []string{"push_ref", "push_ref", "open_pr"}) {
 		t.Fatalf("promote preview: %+v %v", res, err)
@@ -82,7 +82,7 @@ func TestPromoteAndApplyPreviewsWithAFreshGate(t *testing.T) {
 		t.Fatal("promote --dry-run pushed")
 	}
 
-	saved, err := promote(h, engine.PromoteOptions{Message: "m", PlanOnly: true})
+	saved, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "m", PlanOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestPromotePlanOnlyPreviewListsOnlyThePlan(t *testing.T) {
 	h := gated(t)
 	pushes, entries := len(h.pushes), len(h.ledger())
 	h.eng.DryRun = true
-	res, err := promote(h, engine.PromoteOptions{Message: "m", PlanOnly: true})
+	res, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "m", PlanOnly: true})
 	h.eng.DryRun = false
 	if err != nil || res.Plan == nil || !reflect.DeepEqual(opNames(res.Preview), []string{"push_ref", "write_file"}) {
 		t.Fatalf("promote --plan preview: %+v %v", res, err)
@@ -132,7 +132,7 @@ func TestPromotePreviewRefusesAnExistingPublicBranch(t *testing.T) {
 	other := testutil.Commit(t, h.pubGit, "feat-x", "someone else's", map[string]string{"x.txt": "x\n"})
 	pushes := len(h.pushes)
 	h.eng.DryRun = true
-	res, err := promote(h, engine.PromoteOptions{Message: "m"})
+	res, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "m"})
 	h.eng.DryRun = false
 	ce := wantCode(t, err, contract.BranchExists)
 	if ce.Field != "branch" || ce.Details["branch"] != "feat-x" || ce.Details["sha"] != other {
@@ -151,7 +151,7 @@ func TestPromotePreviewRefusesAnExistingPublicBranch(t *testing.T) {
 func TestPromotePreviewAfterPublishOmitsDoneSteps(t *testing.T) {
 	t.Parallel()
 	h := gated(t)
-	saved, err := promote(h, engine.PromoteOptions{Message: "m", PlanOnly: true})
+	saved, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "m", PlanOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func TestPromotePreviewAfterPublishOmitsDoneSteps(t *testing.T) {
 		t.Fatalf("apply: %v", err)
 	}
 	h.eng.DryRun = true
-	res, err := promote(h, engine.PromoteOptions{Message: "m"})
+	res, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "m"})
 	h.eng.DryRun = false
 	if err != nil || res.Plan == nil || res.Plan.Publish.Commit != saved.Plan.Publish.Commit {
 		t.Fatalf("the preview must rebuild the published commit: %+v %v", res, err)

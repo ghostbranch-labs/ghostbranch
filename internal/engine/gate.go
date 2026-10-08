@@ -39,6 +39,9 @@ type GateResult struct {
 	// Reused is set by promote when it reuses a fresh green gate instead of re-running it.
 	Reused  bool             `json:"reused"`
 	Preview *preview.Preview `json:"preview"`
+
+	// mapping is the gate's rebased chain, for promote to publish from.
+	mapping []feature.GateCommit `json:"-"`
 }
 
 const gatePRBody = "Automated Ghostbranch gate candidate: the feature rebased onto public main, plus the overlay. " +
@@ -156,6 +159,7 @@ func (e *Engine) gate(ctx context.Context, pc *pairCtx, name string) (*GateResul
 	if err != nil {
 		return res, warns, err
 	}
+	res.mapping = b.commits
 	res.Leak = feature.LeakClean
 	C, guardRep, guards, err := e.candidate(ctx, g, b.R, b.entries, O, name, guardNames(pc), cfg.CI.RewriteRepoGuards)
 	if err != nil {
@@ -253,7 +257,7 @@ func (e *Engine) gate(ctx context.Context, pc *pairCtx, name string) (*GateResul
 // guardNames are the repo names the guard rewrite uses. The gate, promote,
 // apply and the audit all take them from GitHub's canonical names for the
 // pair, never from the config or the names as typed locally, so the rewrite
-// the gate made and the one assertPublish recomputes are byte for byte the
+// the gate made and the one assertChain recomputes are byte for byte the
 // same, even for a plan made on another machine.
 func guardNames(pc *pairCtx) workflow.Names {
 	n := workflow.Names{Public: pc.public.FullName, Shadow: pc.shadow.FullName}

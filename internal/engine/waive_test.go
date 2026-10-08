@@ -38,7 +38,7 @@ func TestAWaivedFindingNoLongerBlocks(t *testing.T) {
 	if err != nil || len(res.Findings) != 0 || len(res.Waived) != 1 || res.Waived[0].ID != f.ID || res.Waived[0].Reason != "test fixture" {
 		t.Fatalf("gate = %+v %v", res, err)
 	}
-	pr, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Message: "Add feature", PlanOnly: true})
+	pr, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Mode: "squash", Message: "Add feature", PlanOnly: true})
 	if err != nil || len(pr.Waived) != 1 || len(pr.Plan.Leak.Waived) != 1 || pr.Plan.Leak.Waived[0] != (plan.Waived{ID: f.ID, Rule: f.Rule, Where: "tree", Path: f.Path, Reason: "test fixture"}) {
 		t.Fatalf("promote = %+v %v", pr, err)
 	}
@@ -75,7 +75,7 @@ func TestTypedTextIsNeverWaivable(t *testing.T) {
 	h := newHarness(t)
 	h.init()
 	h.startFeature("feat-x", map[string]string{"feature.txt": "new\n"})
-	opt := engine.PromoteOptions{Feature: "feat-x", Message: "Add feature\n\ntoken " + testutil.FakeGitHubToken(), PlanOnly: true}
+	opt := engine.PromoteOptions{Feature: "feat-x", Mode: "squash", Message: "Add feature\n\ntoken " + testutil.FakeGitHubToken(), PlanOnly: true}
 	_, _, err := h.eng.Promote(h.ctx, h.pair, opt)
 	ce := wantCode(t, err, contract.LeakFound)
 	fs := ce.Details["findings"].([]leak.Finding)
@@ -137,7 +137,7 @@ func TestApplyScansThePublishedCommitsRealAuthor(t *testing.T) {
 	h.init()
 	h.setBlockPatterns(`corp\.internal`)
 	h.startFeature("feat-x", map[string]string{"feature.txt": "new\n"})
-	pr, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Message: "Add feature", PlanOnly: true})
+	pr, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Mode: "squash", Message: "Add feature", PlanOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ func TestApplyScansThePublishedCommitsRealAuthor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pl.Publish.Commit = P2
+	pl.Publish.Commit, pl.Publish.Commits[0].Commit = P2, P2
 	if _, err := plan.Save(filepath.Dir(path), pl); err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +184,7 @@ func TestFileWarningsReachThePlanAndTheApprover(t *testing.T) {
 	if err != nil || !hasWarning(warns, contract.WorkflowChanged) {
 		t.Fatalf("gate warnings = %+v %v", warns, err)
 	}
-	pr, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Message: "Add release", PlanOnly: true})
+	pr, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Mode: "squash", Message: "Add release", PlanOnly: true})
 	if err != nil || !hasWarning(pr.Plan.Leak.Warnings, contract.WorkflowChanged) {
 		t.Fatalf("plan warnings = %+v %v", pr.Plan.Leak.Warnings, err)
 	}
@@ -218,7 +218,7 @@ func TestPromoteReportsAFileWarningOnce(t *testing.T) {
 	if _, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x"); err != nil {
 		t.Fatal(err)
 	}
-	pr, warns, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Message: "Add release", Yes: true})
+	pr, warns, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Mode: "squash", Message: "Add release", Yes: true})
 	if err != nil || pr.Applied == nil {
 		t.Fatalf("promote = %+v %v", pr, err)
 	}

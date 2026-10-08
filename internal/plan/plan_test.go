@@ -89,3 +89,17 @@ func TestSaveIsAtomic(t *testing.T) {
 		t.Fatalf("leftover temp files: %v", ents)
 	}
 }
+
+// The plan file is local and unsigned, and its ID names a shadow ref: an ID
+// that is not a plan ID is refused on load.
+func TestLoadRejectsAPlanWithABadID(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "x.json")
+	if err := os.WriteFile(path, []byte(`{"id":"../../heads/main"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := plan.Load(dir, path); contract.From(err) == nil || contract.From(err).Code != contract.BadFlag || contract.From(err).Field != "plan" {
+		t.Fatalf("want BAD_FLAG on field plan, got %v", err)
+	}
+}

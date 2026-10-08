@@ -41,7 +41,7 @@ func TestGateRewritesGuardsInTheCandidateOnly(t *testing.T) {
 		t.Fatalf("C was not rewritten:\n%s", inC)
 	}
 	// T, what publishes, is untouched
-	pres, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat", Message: "m", PlanOnly: true})
+	pres, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat", Mode: "squash", Message: "m", PlanOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestGateReportsUnrewritableGuardsAndShowsThemBeforePublishing(t *testing.T)
 	if len(res.RepoGuards.Unrewritable) != 1 || codes(warns)["REPO_GUARD_UNREWRITABLE"] != 1 {
 		t.Fatalf("repo_guards = %+v, warnings = %+v", res.RepoGuards, warns)
 	}
-	pres, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat", Message: "m", PlanOnly: true})
+	pres, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat", Mode: "squash", Message: "m", PlanOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,14 +148,15 @@ func forgeCandidate(t *testing.T, h *harness, name, C, path, content string) str
 
 // A candidate whose workflow differs from P in a way no rewrite produces,
 // forged end to end (gate branch, metadata and plan), so that apply reaches
-// assertPublish. TestRewriteOnly pins the rule itself.
+// assertChain's check of the tip against the candidate. TestRewriteOnly pins
+// the rule itself.
 func TestAssertPublishRefusesAForgedWorkflowDifference(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	testutil.Commit(t, h.pubGit, "main", "guarded", map[string]string{".github/workflows/up.yml": guardedJob})
 	h.init()
 	h.startFeature("feat", map[string]string{"f.txt": "f\n"})
-	pres, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat", Message: "m", PlanOnly: true})
+	pres, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat", Mode: "squash", Message: "m", PlanOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +200,7 @@ func TestGateWithBrokenOrDeletedWorkflow(t *testing.T) {
 				t.Fatalf("the broken workflow changed in C: %q", got)
 			}
 		}
-		if _, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: f, Message: "m", PlanOnly: true}); err != nil {
+		if _, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: f, Mode: "squash", Message: "m", PlanOnly: true}); err != nil {
 			t.Fatalf("%s: promote: %v", f, err)
 		}
 	}
@@ -218,7 +219,7 @@ func TestPromoteRegatesACandidateBuiltWithoutTheRewrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.setConfig("rewrite_repo_guards: off", "rewrite_repo_guards: rewrite")
-	res, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat", Message: "m", PlanOnly: true})
+	res, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat", Mode: "squash", Message: "m", PlanOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +242,7 @@ func TestPromoteRegatesWhenTheCandidateLacksTheRewrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	forgeCandidate(t, h, "feat", gr.Candidate, ".github/workflows/up.yml", guardedJob)
-	res, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat", Message: "m", PlanOnly: true})
+	res, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat", Mode: "squash", Message: "m", PlanOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}

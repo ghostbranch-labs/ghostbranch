@@ -88,11 +88,8 @@ type Publish struct {
 	Parent       string   `json:"parent"`
 	TargetBranch string   `json:"target_branch"`
 	PR           PR       `json:"pr"`
-	Commits      []Commit `json:"commits,omitempty"`
-	DroppedEmpty []string `json:"dropped_empty,omitempty"`
-
-	// Deprecated: removed in Task 7.
-	Author Identity `json:"author,omitempty"`
+	Commits      []Commit `json:"commits"`       // the public commits, oldest first; the last is Commit
+	DroppedEmpty []string `json:"dropped_empty"` // feature commits that publish nothing
 }
 
 // Waived is a finding the plan was approved with because a person waived it.
@@ -209,6 +206,10 @@ func Load(dir, ref string) (Plan, string, error) {
 	var p Plan
 	if err := json.Unmarshal(b, &p); err != nil {
 		return Plan{}, "", contract.Wrap(contract.BadFlag, err, "plan %q is not valid JSON", ref).WithField("plan")
+	}
+	// The file is unsigned, and its ID names a ref in the shadow repo.
+	if !ValidID(p.ID) {
+		return Plan{}, "", contract.New(contract.BadFlag, "plan %q has an invalid id %q", ref, p.ID).WithField("plan")
 	}
 	return p, path, nil
 }

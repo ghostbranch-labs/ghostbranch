@@ -4,7 +4,7 @@
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "id", "kind", "actor", "created_at", "pair", "feature", "mode", "fingerprint",
-               "publish", "leak", "ci"],
+               "curate", "publish", "leak", "ci"],
   "properties": {
     "schema_version": { "const": "0.5" },
     "id": { "$ref": "common.schema.json#/$defs/planId" },
@@ -33,19 +33,11 @@
     },
     "publish": {
       "type": "object", "additionalProperties": false,
-      "required": ["commit", "tree", "parent", "target_branch", "pr"],
+      "required": ["commit", "tree", "parent", "target_branch", "pr", "commits", "dropped_empty"],
       "properties": {
         "commit": { "$ref": "common.schema.json#/$defs/sha" },
         "tree": { "$ref": "common.schema.json#/$defs/sha" },
         "parent": { "$ref": "common.schema.json#/$defs/sha" },
-        "author": {
-          "type": "object", "additionalProperties": false, "required": ["name", "email", "date"],
-          "properties": {
-            "name": { "type": "string" },
-            "email": { "type": "string" },
-            "date": { "$ref": "common.schema.json#/$defs/time" }
-          }
-        },
         "commits": { "type": "array", "minItems": 1, "items": { "type": "object", "additionalProperties": false,
           "required": ["commit", "tree", "parent", "sources", "author", "subject"],
           "properties": {
