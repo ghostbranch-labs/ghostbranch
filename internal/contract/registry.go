@@ -157,6 +157,10 @@ var warningDocs = map[WarningCode]Doc{
 	CINotCancelled: {Summary: "Sync pushed, but its pushes may have started workflow runs in the shadow repo that it could not cancel.",
 		Causes:   []string{"the token lacks Actions write (or read) on the shadow repo", "GitHub's Actions API failed"},
 		WhatToDo: "Nothing is required: the runs only cost Actions minutes; cancel them on the shadow repo's Actions tab if you like. To let sync cancel them, give the token Actions write on the shadow repo. To stop them starting, add the guard that PUSH_TRIGGERS_ON_SYNC in ghostbranch audit suggests. ghostbranch sync --no-cancel skips cancelling."},
+	PRStateUnknown: {Summary: "Ghostbranch couldn't read a published feature's public PR state.",
+		WhatToDo: "Run the command again; a feature whose PR state is unknown is never closed automatically."},
+	DriftUnknown: {Summary: "Ghostbranch couldn't check whether a feature still merges cleanly onto public main.",
+		WhatToDo: "Run ghostbranch gate <feature>; the gate is the authority on rebasing."},
 }
 
 func intp(n int) *int { return &n }

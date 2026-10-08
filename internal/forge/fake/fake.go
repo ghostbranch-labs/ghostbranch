@@ -49,6 +49,8 @@ type Forge struct {
 	PushRunsCalls   int
 	PushRunsRepos   []string
 	CancelRunRepos  []string
+	// GetPRErr makes GetPR fail with that error.
+	GetPRErr error
 }
 
 // Run is a seeded workflow run that a push of SHA started.
@@ -235,6 +237,9 @@ func (f *Forge) CreatePR(_ context.Context, full string, in forge.NewPR) (forge.
 func (f *Forge) GetPR(_ context.Context, full string, number int) (forge.PR, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.GetPRErr != nil {
+		return forge.PR{}, f.GetPRErr
+	}
 	for _, pr := range f.prs[full] {
 		if pr.Number == number {
 			return pr, nil

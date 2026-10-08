@@ -21,7 +21,7 @@
                           "WORKFLOW_CHANGED", "LARGE_FILE", "BINARY_FILE", "WAIVERS_UNREADABLE",
                           "OVERLAY_OUTDATED", "REPO_GUARD", "REPO_GUARD_UNREWRITABLE", "SECRETS_UNLISTED", "SECRETS_MISSING",
                           "PUSH_TRIGGERS_ON_SYNC", "ACTIONS_MINUTES_BILLED", "SHADOW_BEHIND", "AUDIT_INCOMPLETE",
-                          "CI_NOT_CANCELLED"] },
+                          "CI_NOT_CANCELLED", "PR_STATE_UNKNOWN", "DRIFT_UNKNOWN"] },
           "message": { "type": "string" },
           "details": { "type": "object" }
         }

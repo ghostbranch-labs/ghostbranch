@@ -229,12 +229,18 @@ const (
 	// CINotCancelled means a sync's pushes may have started workflow runs
 	// in the shadow repo that sync could not cancel.
 	CINotCancelled WarningCode = "CI_NOT_CANCELLED"
+	// PRStateUnknown means the survey couldn't read a published feature's
+	// public PR, so it doesn't know whether the PR merged.
+	PRStateUnknown WarningCode = "PR_STATE_UNKNOWN"
+	// DriftUnknown means the survey couldn't check whether a feature still
+	// merges cleanly onto public main.
+	DriftUnknown WarningCode = "DRIFT_UNKNOWN"
 )
 
 var warningCodes = []WarningCode{ConfigKeyIgnored, PublicNotPublic, GateNotRecorded, ChecksLimited, ActorUnknown,
 	WorkflowChanged, LargeFile, BinaryFile, WaiversUnreadable,
 	OverlayOutdated, RepoGuard, RepoGuardUnrewritable, SecretsUnlisted, SecretsMissing, PushTriggersOnSync,
-	ActionsMinutesBilled, ShadowBehind, AuditIncomplete, CINotCancelled}
+	ActionsMinutesBilled, ShadowBehind, AuditIncomplete, CINotCancelled, PRStateUnknown, DriftUnknown}
 
 // AllWarnings lists every warning code, sorted.
 func AllWarnings() []WarningCode {

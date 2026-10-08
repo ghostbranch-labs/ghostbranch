@@ -3,6 +3,7 @@ package contract_test
 import (
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -170,5 +171,21 @@ func TestSubProject5bCodesAreRegistered(t *testing.T) {
 	}
 	if contract.SchemaVersion != "0.6" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
+	}
+}
+
+func TestSurveyWarningsAreRegistered(t *testing.T) {
+	t.Parallel()
+	for w, s := range map[contract.WarningCode]string{contract.PRStateUnknown: "PR_STATE_UNKNOWN", contract.DriftUnknown: "DRIFT_UNKNOWN"} {
+		if string(w) != s || !slices.Contains(contract.AllWarnings(), w) {
+			t.Fatalf("%s is not a registered warning", s)
+		}
+		es, err := contract.Explain(s)
+		if err != nil || len(es) != 1 || es[0].Kind != contract.KindWarning || es[0].Summary == "" || es[0].WhatToDo == "" {
+			t.Fatalf("%s is not documented: %+v %v", s, es, err)
+		}
+	}
+	if es, _ := contract.Explain("PR_STATE_UNKNOWN"); !strings.Contains(es[0].WhatToDo, "never closed automatically") {
+		t.Fatalf("PR_STATE_UNKNOWN must say the feature is never closed automatically: %+v", es[0])
 	}
 }
