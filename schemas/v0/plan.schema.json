@@ -42,7 +42,7 @@
           "type": "object", "additionalProperties": false, "required": ["name", "email", "date"],
           "properties": {
             "name": { "type": "string" },
-            "email": { "type": "string", "pattern": "@users\\.noreply\\.github\\.com$" },
+            "email": { "type": "string" },
             "date": { "$ref": "common.schema.json#/$defs/time" }
           }
         },
