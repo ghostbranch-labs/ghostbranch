@@ -163,7 +163,7 @@ func TestAbandonAndUndo(t *testing.T) {
 		t.Fatalf("abandon asked the console: %v", h.approver.asked)
 	}
 	_, _, err = h.eng.FeatureAbandon(h.ctx, h.pair, "nope", false)
-	wantCode(t, err, contract.FeatureNotFound)
+	_ = wantCode(t, err, contract.FeatureNotFound)
 }
 
 func TestCloseMergedNeedsNoConsole(t *testing.T) {
@@ -551,7 +551,7 @@ func TestCloseRecordsTheConsoleWhenItFails(t *testing.T) {
 		record(op, remote, specs)
 	}
 	_, _, err := h.eng.FeatureClose(h.ctx, h.pair, "feat-x")
-	wantCode(t, err, contract.FeatureMoved)
+	_ = wantCode(t, err, contract.FeatureMoved)
 	es := h.ledger()
 	if last := es[len(es)-1]; last.Op != "feature close" || last.Approval == nil || last.Approval.Kind != "console" || len(last.Refs) != 0 {
 		t.Fatalf("ledger = %+v", last)
@@ -655,7 +655,7 @@ func TestCloseUnknownFeature(t *testing.T) {
 	h := newHarness(t)
 	h.init()
 	_, _, err := h.eng.FeatureClose(h.ctx, h.pair, "nope")
-	wantCode(t, err, contract.FeatureNotFound)
+	_ = wantCode(t, err, contract.FeatureNotFound)
 	if h.closePushes() != 0 {
 		t.Fatal("close pushed")
 	}

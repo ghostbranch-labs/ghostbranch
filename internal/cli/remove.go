@@ -83,10 +83,10 @@ pair this checkout's remotes name.`,
 // of a removed pair can still be read. --repo . is the registered pair this
 // checkout's remotes name.
 func (a *app) logPair(ws *workspace.Workspace) (string, error) {
-	switch {
-	case a.repo == "":
+	switch a.repo {
+	case "":
 		return "", nil
-	case a.repo == ".":
+	case ".":
 		p, err := ws.Resolve(".", a.env.CwdRemotes())
 		if err != nil {
 			return "", err

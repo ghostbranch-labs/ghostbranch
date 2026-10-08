@@ -38,7 +38,7 @@ func TestPreviewsWriteNothing(t *testing.T) {
 	h.eng.DryRun = false
 	h.init()
 	h.startFeature("feat-x", map[string]string{"feature.txt": "new\n"})
-	before, pushes, entries := h.publicRefs(), len(h.pushes), len(h.ledger())
+	pushes, entries := len(h.pushes), len(h.ledger())
 
 	// feature start before public main moves: on a stale shadow main it
 	// refuses, preview or not.
@@ -49,7 +49,7 @@ func TestPreviewsWriteNothing(t *testing.T) {
 	}
 	h.eng.DryRun = false
 	testutil.Commit(t, h.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
-	before = h.publicRefs()
+	before := h.publicRefs()
 
 	h.eng.DryRun = true
 	sres, _, err := h.eng.Sync(h.ctx, h.pair, engine.SyncOptions{})
