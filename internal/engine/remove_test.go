@@ -180,7 +180,7 @@ func TestRemoveRefusesAPairFolderOutsidePairs(t *testing.T) {
 			for _, dry := range []bool{true, false} {
 				h.eng.DryRun = dry
 				_, _, err := h.eng.Remove(h.ctx, bad)
-				wantCode(t, err, contract.Internal)
+				_ = wantCode(t, err, contract.Internal)
 				if len(h.approver.asked) != 0 {
 					t.Fatalf("the console was asked %q", h.approver.asked)
 				}
