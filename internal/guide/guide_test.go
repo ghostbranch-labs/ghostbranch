@@ -28,7 +28,8 @@ func TestRenderListsEveryCodeFromTheRegistry(t *testing.T) {
 	}
 	// 270: the history-modes section (sub-project 5a) added about 18 lines;
 	// 272: the adopt sentence in *Set up a repo*, with the SHADOW_CREATE_DENIED hand-off kept whole.
-	if n := strings.Count(out, "\n"); n > 272 {
+	// 274: two sub-project 5b error codes (UPGRADE_NEEDED, FEATURE_MOVED).
+	if n := strings.Count(out, "\n"); n > 274 {
 		t.Errorf("the guide is %d lines; keep it short (spec: about 150 plus the tables)", n)
 	}
 }

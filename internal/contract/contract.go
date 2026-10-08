@@ -91,10 +91,12 @@ const (
 
 	PlanStale Code = "PLAN_STALE"
 
-	// UpgradeNeeded means the pair's overlay config uses keys this binary doesn't know: the pair was set up by a newer Ghostbranch.
+	// UpgradeNeeded means the pair's overlay config uses keys this binary
+	// doesn't know: the pair was set up by a newer Ghostbranch.
 	UpgradeNeeded Code = "UPGRADE_NEEDED"
 
-	// FeatureMoved means a feature's branch or refs moved while it was being closed; nothing more was deleted.
+	// FeatureMoved means a feature's branch or refs moved while it was
+	// being closed; nothing more was deleted.
 	FeatureMoved Code = "FEATURE_MOVED"
 )
 
