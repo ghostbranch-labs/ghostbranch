@@ -45,14 +45,20 @@ func (g *Git) WorktreeRemove(ctx context.Context, dir string) error {
 	return nil
 }
 
-// ConflictError means a rebase stopped on conflicts. The rebase has been
-// aborted; Files lists the conflicting paths.
+// ConflictError means a rebase or cherry-pick replay stopped on conflicts. It
+// has been aborted; Files lists the conflicting paths.
 type ConflictError struct {
 	Files []string
+	// Commit is the commit that stopped a cherry-pick replay; empty for a rebase.
+	Commit string
 }
 
 func (e *ConflictError) Error() string {
-	return "rebase conflict in " + strings.Join(e.Files, ", ")
+	s := "conflict in " + strings.Join(e.Files, ", ")
+	if e.Commit != "" {
+		s += " applying " + e.Commit
+	}
+	return s
 }
 
 // Rebase rebases this worktree's detached HEAD onto onto, committing as
