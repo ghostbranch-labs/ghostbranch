@@ -5,8 +5,8 @@
   "additionalProperties": false,
   "required": ["schema_version", "command", "ok", "exit_code", "data", "warnings", "next", "error"],
   "properties": {
-    "schema_version": { "const": "0.5" },
-    "command": { "enum": ["ghostbranch", "init", "sync", "audit", "upgrade", "feature start", "gate", "promote", "apply", "agents allow", "agents revoke", "agents status", "explain", "guide", "guard install", "guard uninstall", "guard status", "guard check", "waivers add", "waivers list", "waivers revoke"] },
+    "schema_version": { "const": "0.6" },
+    "command": { "enum": ["ghostbranch", "init", "sync", "audit", "upgrade", "feature start", "gate", "promote", "apply", "agents allow", "agents revoke", "agents status", "explain", "guide", "guard install", "guard uninstall", "guard status", "guard check", "waivers add", "waivers list", "waivers revoke", "status", "feature list", "feature show", "feature abandon", "feature close", "remove", "log"] },
     "ok": { "type": "boolean" },
     "exit_code": { "type": "integer", "minimum": 0, "maximum": 6 },
     "data": { "type": "object" },
@@ -57,7 +57,7 @@
                        "CURATE_INVALID", "CURATE_CONFLICT", "CURATE_TREE_MISMATCH", "AUTHOR_UNMAPPED", "NOTHING_TO_PUBLISH",
                        "APPROVAL_REQUIRED", "PLAN_STALE",
                        "TOKEN_CANNOT_PUBLISH", "GUARD_UNSUPPORTED", "PUSH_BLOCKED", "PUSH_REFUSED", "NOT_A_PAIR_CHECKOUT",
-                       "MARKER_INVALID", "WAIVER_UNKNOWN"]
+                       "MARKER_INVALID", "WAIVER_UNKNOWN", "UPGRADE_NEEDED", "FEATURE_MOVED"]
             },
             "message": { "type": "string" },
             "field": { "type": ["string", "null"] },

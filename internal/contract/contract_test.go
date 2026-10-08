@@ -25,6 +25,7 @@ func TestEveryCodeHasItsExitCode(t *testing.T) {
 		contract.MarkerInvalid: 3, contract.WaiverUnknown: 2,
 		contract.CurateInvalid: 2, contract.CurateConflict: 4, contract.CurateTreeMismatch: 4,
 		contract.AuthorUnmapped: 1, contract.NothingToPublish: 1,
+		contract.UpgradeNeeded: 1, contract.FeatureMoved: 4,
 	}
 	all := contract.AllCodes()
 	if len(all) != len(want) {
@@ -60,7 +61,7 @@ func TestSuccessEnvelopeShape(t *testing.T) {
 	if err := json.Unmarshal(b, &m); err != nil {
 		t.Fatal(err)
 	}
-	if m["schema_version"] != "0.5" || m["ok"] != true || m["exit_code"] != float64(0) ||
+	if m["schema_version"] != "0.6" || m["ok"] != true || m["exit_code"] != float64(0) ||
 		m["command"] != "sync" || m["error"] != nil {
 		t.Fatalf("bad envelope: %s", b)
 	}
@@ -128,7 +129,7 @@ func TestSubProject4CodesAreRegistered(t *testing.T) {
 	if err != nil || !es[0].NeedsHuman || !strings.Contains(es[0].WhatToDo, "--adopt") {
 		t.Fatalf("SHADOW_CREATE_DENIED doc: %+v %v", es, err)
 	}
-	if contract.SchemaVersion != "0.5" {
+	if contract.SchemaVersion != "0.6" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 }
@@ -151,7 +152,23 @@ func TestSubProject5aCodesAreRegistered(t *testing.T) {
 	if es, _ := contract.Explain("AUTHOR_UNMAPPED"); !es[0].NeedsHuman {
 		t.Fatal("AUTHOR_UNMAPPED needs a person: only they may edit the overlay config's author_map")
 	}
-	if contract.SchemaVersion != "0.5" {
+	if contract.SchemaVersion != "0.6" {
+		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
+	}
+}
+
+func TestSubProject5bCodesAreRegistered(t *testing.T) {
+	t.Parallel()
+	for c, exit := range map[contract.Code]int{contract.UpgradeNeeded: contract.ExitFailure, contract.FeatureMoved: contract.ExitConflict} {
+		if c.Exit() != exit {
+			t.Fatalf("%s exits %d, want %d", c, c.Exit(), exit)
+		}
+		es, err := contract.Explain(string(c))
+		if err != nil || len(es) != 1 || es[0].Summary == "" || es[0].WhatToDo == "" {
+			t.Fatalf("%s is not documented: %+v %v", c, es, err)
+		}
+	}
+	if contract.SchemaVersion != "0.6" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 }

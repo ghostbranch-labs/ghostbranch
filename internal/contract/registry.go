@@ -119,6 +119,10 @@ var errorDocs = map[Code]Doc{
 	ApprovalRequired: {Summary: "Publishing needs a person: a code typed at a console, or an agent grant.", Causes: []string{"no_console: no terminal a person can type into", "not_confirmed, timeout, too_many_attempts: the person did not confirm", "grant_needs_yes: a grant exists, but --yes was not passed"},
 		WhatToDo: "Stop and give the human the command in next. Never fake a terminal, answer the code, edit grants.json or run ghostbranch agents allow yourself.", NeedsHuman: true},
 	PlanStale: {Summary: "The repos changed since the plan was made.", WhatToDo: "Make a new plan with ghostbranch promote <feature> --plan and apply that."},
+	UpgradeNeeded: {Summary: "This pair was set up by a newer Ghostbranch: its overlay config has keys this binary doesn't know.",
+		WhatToDo: "Upgrade the ghostbranch binary to the version the pair was set up with, or newer. Don't edit the overlay config to make an older binary accept it."},
+	FeatureMoved: {Summary: "A feature's branch or refs moved while it was being closed, so the close stopped; nothing more was deleted.",
+		WhatToDo: "Run ghostbranch feature show <name> to see the new state, then close it again if that's still wanted."},
 }
 
 var warningDocs = map[WarningCode]Doc{

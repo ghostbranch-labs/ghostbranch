@@ -11,7 +11,7 @@ import (
 
 // SchemaVersion versions the envelope and every data schema. It stays 0.x
 // until launch, and 0.x versions may break.
-const SchemaVersion = "0.5"
+const SchemaVersion = "0.6"
 
 // Exit codes. Agents branch on these, so they never change meaning.
 const (
@@ -90,6 +90,12 @@ const (
 	ApprovalRequired Code = "APPROVAL_REQUIRED"
 
 	PlanStale Code = "PLAN_STALE"
+
+	// UpgradeNeeded means the pair's overlay config uses keys this binary doesn't know: the pair was set up by a newer Ghostbranch.
+	UpgradeNeeded Code = "UPGRADE_NEEDED"
+
+	// FeatureMoved means a feature's branch or refs moved while it was being closed; nothing more was deleted.
+	FeatureMoved Code = "FEATURE_MOVED"
 )
 
 var exitCodes = map[Code]int{
@@ -107,6 +113,8 @@ var exitCodes = map[Code]int{
 	CurateConflict: ExitConflict, CurateTreeMismatch: ExitConflict,
 	ApprovalRequired: ExitNeedsApproval,
 	PlanStale:        ExitPlanStale,
+	UpgradeNeeded:    ExitFailure,
+	FeatureMoved:     ExitConflict,
 }
 
 // Exit is the process exit code for c.
