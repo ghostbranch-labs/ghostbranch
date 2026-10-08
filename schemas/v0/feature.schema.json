@@ -51,7 +51,11 @@
         { "type": "null" },
         {
           "type": "object", "additionalProperties": false, "required": ["public_pr", "plan_id"],
-          "properties": { "public_pr": { "type": "integer", "minimum": 1 }, "plan_id": { "$ref": "common.schema.json#/$defs/planId" } }
+          "properties": {
+            "public_pr": { "type": "integer", "minimum": 1 },
+            "plan_id": { "$ref": "common.schema.json#/$defs/planId" },
+            "feature_head": { "description": "The head the publish was planned from; absent in a record written before 0.6.", "$ref": "common.schema.json#/$defs/sha" }
+          }
         }
       ]
     }

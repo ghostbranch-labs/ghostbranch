@@ -84,3 +84,32 @@ func (g *Git) CommitAuthor(ctx context.Context, sha string) (Identity, error) {
 	}
 	return Identity{}, fmt.Errorf("commit %s has no readable author", sha)
 }
+
+// MergeTreeCheck reports whether head merges cleanly onto base, without a
+// worktree: git merge-tree --write-tree exits 0 when clean and 1 when it
+// conflicts, listing the conflicted files after the tree line. Any other
+// failure (a bad ref, say) is an error.
+func (g *Git) MergeTreeCheck(ctx context.Context, base, head string) (bool, []string, error) {
+	out, err := g.runRaw(ctx, nil, "merge-tree", "--write-tree", "--name-only", "--no-messages", base, head)
+	if err == nil {
+		return true, nil, nil
+	}
+	if exitCode(err) != 1 {
+		return false, nil, err
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	// A bad ref also exits 1, but prints no tree id on stdout.
+	if len(lines[0]) != 40 && len(lines[0]) != 64 {
+		return false, nil, err
+	}
+	seen := map[string]bool{}
+	files := []string{}
+	for _, l := range lines[1:] { // line 1 is the tree id
+		if l = strings.TrimSpace(l); l != "" && !seen[l] {
+			seen[l] = true
+			files = append(files, l)
+		}
+	}
+	sort.Strings(files)
+	return false, files, nil
+}
