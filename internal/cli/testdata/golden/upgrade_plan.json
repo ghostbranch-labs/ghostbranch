@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.4",
+  "schema_version": "0.5",
   "command": "upgrade",
   "ok": true,
   "exit_code": 0,
@@ -19,7 +19,7 @@
     "audit": null,
     "preview": {
       "fingerprint": {
-        "overlay": "d0a04ab2d94945b184e3cca1e80a6aa171be7722"
+        "overlay": "eaeedb55e4b165c0bb7fc840379475ece9103e61"
       },
       "ops": [
         {
@@ -29,7 +29,7 @@
           "repo": "acme/widget-shadow"
         },
         {
-          "from": "d0a04ab2d94945b184e3cca1e80a6aa171be7722",
+          "from": "eaeedb55e4b165c0bb7fc840379475ece9103e61",
           "op": "push_ref",
           "ref": "refs/heads/ghostbranch",
           "repo": "acme/widget-shadow",

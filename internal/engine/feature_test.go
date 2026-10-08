@@ -22,6 +22,7 @@ func (h *harness) startFeature(name string, files map[string]string) string {
 }
 
 func TestFeatureStartCreatesBranchAndMetadata(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	res, _, err := h.eng.FeatureStart(h.ctx, h.pair, "feat-x")
@@ -45,6 +46,7 @@ func TestFeatureStartCreatesBranchAndMetadata(t *testing.T) {
 
 // Review Focus 1: ref path conflicts are reported before git hits them.
 func TestFeatureStartRefPathConflicts(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.startFeature("auth", map[string]string{"a.txt": "a\n"})
@@ -63,6 +65,7 @@ func TestFeatureStartRefPathConflicts(t *testing.T) {
 }
 
 func TestFeatureStartRejectsPublicBranchNamesAndBadNames(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	testutil.Commit(t, h.pubGit, "release", "r", map[string]string{"r.txt": "r\n"})
@@ -75,6 +78,7 @@ func TestFeatureStartRejectsPublicBranchNamesAndBadNames(t *testing.T) {
 }
 
 func TestFeatureStartPercentInExistingBranchName(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	testutil.Commit(t, h.pubGit, "pct/a%sb", "p", map[string]string{"p.txt": "p\n"})
@@ -100,6 +104,7 @@ func (h *harness) installShadowHook(msg string) {
 }
 
 func TestPushTheServerRefusesIsPushRefusedNotBranchExists(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.installShadowHook("GH013: repository rule violations found")
@@ -118,6 +123,7 @@ func TestPushTheServerRefusesIsPushRefusedNotBranchExists(t *testing.T) {
 }
 
 func TestPushRefusedForWorkflowScopeSaysWhichPermission(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.installShadowHook("refusing to allow an OAuth App to create or update workflow .github/workflows/x.yml without workflow scope")
@@ -131,6 +137,7 @@ func TestPushRefusedForWorkflowScopeSaysWhichPermission(t *testing.T) {
 // A refusal that only mentions workflows (a ruleset's required workflows)
 // is not a missing token permission: no Workflows-write hint.
 func TestPushRefusedForRequiredWorkflowsGivesNoPermissionHint(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.installShadowHook("GH013: Repository rule violations found: Required workflows must pass")

@@ -2,7 +2,10 @@ package cli_test
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -34,6 +37,7 @@ func argv(n map[string]any) []string {
 }
 
 func TestNextWalksTheLoop(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	initOnly(te)
 	_, env := te.runJSON("feature", "start", "feat-x")
@@ -43,24 +47,26 @@ func TestNextWalksTheLoop(t *testing.T) {
 	te.shadowCommit("feat-x", map[string]string{"feature.txt": "new\n"})
 	_, env = te.runJSON("gate", "feat-x")
 	n := nextOf(t, env)
-	if len(n) != 1 || !reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "promote", "feat-x", "--mode", "squash", "--plan", "--repo", "acme/widget"}) ||
-		!reflect.DeepEqual(n[0]["needs_input"], []any{"--message"}) || n[0]["needs_human"] != false {
+	// One commit, published as itself under the default preserve mode: no
+	// input needed.
+	if len(n) != 1 || !reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "promote", "feat-x", "--mode", "preserve", "--plan", "--repo", "acme/widget"}) ||
+		n[0]["needs_input"] != nil && len(n[0]["needs_input"].([]any)) != 0 || n[0]["needs_human"] != false {
 		t.Fatalf("after gate: %v", n)
 	}
-	_, env = te.runJSON("promote", "feat-x", "-m", "Add feature", "--plan")
+	_, env = te.runJSON("promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--plan")
 	n = nextOf(t, env)
 	if len(n) != 1 || argv(n[0])[1] != "apply" || n[0]["needs_human"] != true {
 		t.Fatalf("after promote --plan: %v", n)
 	}
 	grantAgents(te)
-	_, env = te.runJSON("promote", "feat-x", "-m", "Add feature", "--plan")
+	_, env = te.runJSON("promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--plan")
 	n = nextOf(t, env)
 	if a := argv(n[0]); a[len(a)-1] != "--yes" || n[0]["needs_human"] != false {
 		t.Fatalf("under a grant: %v", n)
 	}
 	// grant_needs_yes leaves a saved plan: publish that, rather than run the
 	// promote again.
-	_, env = te.runJSON("promote", "feat-x", "-m", "Add feature")
+	_, env = te.runJSON("promote", "feat-x", "--mode", "squash", "-m", "Add feature")
 	n = nextOf(t, env)
 	if a := argv(n[0]); len(n) != 1 || !reflect.DeepEqual(a, []string{"ghostbranch", "apply", te.lastPlanID(), "--yes"}) || n[0]["needs_human"] != false {
 		t.Fatalf("grant_needs_yes: %v", n)
@@ -70,6 +76,7 @@ func TestNextWalksTheLoop(t *testing.T) {
 // A command a person must run goes to their own terminal: without
 // --non-interactive (which hides the console) and without --json.
 func TestNextForAPersonDropsAgentFlags(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	initOnly(te)
 	for _, args := range [][]string{
@@ -94,6 +101,7 @@ func TestNextForAPersonDropsAgentFlags(t *testing.T) {
 
 // Every suggestion names the workspace this run used, wherever it came from.
 func TestNextCarriesTheWorkspace(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	te.vars["GHOSTBRANCH_WORKSPACE"] = "other"
 	te.env.GuardState = func(public string) (bool, bool) { return public == "acme/widget", false }
@@ -112,18 +120,21 @@ func TestNextCarriesTheWorkspace(t *testing.T) {
 
 // A stale plan for another public branch is re-planned for that branch.
 func TestNextReplansForThePlansBranch(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	gatedFeature(te)
-	te.mustRun("promote", "feat-x", "-m", "Add feature", "--branch", "public-name", "--plan")
+	te.mustRun("promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--branch", "public-name", "--plan")
 	testutil.Commit(t, te.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
 	_, env := te.runJSON("apply", te.lastPlanID())
 	n := nextOf(t, env)
-	if len(n) != 1 || !reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "promote", "feat-x", "--mode", "squash", "--plan", "--repo", "acme/widget", "--branch", "public-name"}) {
+	if len(n) != 1 || !reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "promote", "feat-x", "--mode", "squash", "--plan", "--repo", "acme/widget", "--branch", "public-name", "--title", "Add feature"}) ||
+		!reflect.DeepEqual(n[0]["needs_input"], []any{"--message"}) {
 		t.Fatalf("next = %v", n)
 	}
 }
 
 func TestNextSuggestsTheGuardInAnUnguardedCheckout(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	te.env.GuardState = func(public string) (bool, bool) { return public == "acme/widget", false }
 	_, env := te.runJSON("init", "acme/widget")
@@ -138,6 +149,7 @@ func TestNextSuggestsTheGuardInAnUnguardedCheckout(t *testing.T) {
 }
 
 func TestNextHandsWaivableLeaksToAPerson(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	leakyWithID(te)
 	_, m := te.runJSON("gate", "feat-x")
@@ -156,6 +168,7 @@ func TestNextHandsWaivableLeaksToAPerson(t *testing.T) {
 }
 
 func TestNextForBadMarkersOnlyFixes(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	initOnly(te)
 	te.mustRun("feature", "start", "feat-x")
@@ -168,23 +181,33 @@ func TestNextForBadMarkersOnlyFixes(t *testing.T) {
 }
 
 // A leak in text the caller typed is fixed by new text, not by a change on
-// the feature branch: the step drops the old text and asks for a message.
+// the feature branch: the step drops only the texts that leaked, keeps the
+// rest, and asks for each one dropped (a body taken from the message leaks
+// with it).
 func TestNextAsksForNewTextWhenTheMessageLeaks(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	gatedFeature(te)
 	leaky := "Add feature\n\nTOKEN=" + testutil.FakeGitHubToken()
-	for _, args := range [][]string{
-		{"promote", "feat-x", "-m", leaky, "--plan"},
-		{"promote", "feat-x", "--message=" + leaky, "--title", "t", "--body=b", "--plan"},
+	for _, c := range []struct {
+		args []string
+		want []string
+		need []any
+	}{
+		{[]string{"promote", "feat-x", "--mode", "squash", "-m", leaky, "--plan"},
+			[]string{"ghostbranch", "promote", "feat-x", "--mode", "squash", "--plan", "--json"}, []any{"--message", "--body"}},
+		{[]string{"promote", "feat-x", "--mode", "squash", "--message=" + leaky, "--title", "t", "--body=b", "--plan"},
+			[]string{"ghostbranch", "promote", "feat-x", "--mode", "squash", "--title", "t", "--body=b", "--plan", "--json"}, []any{"--message"}},
 	} {
+		args := c.args
 		code, env := te.runJSON(args...)
 		e, _ := env["error"].(map[string]any)
 		if code == 0 || e["code"] != "LEAK_FOUND" {
 			t.Fatalf("%v: %d %v", args, code, env)
 		}
 		n := nextOf(t, env)
-		if len(n) != 1 || !reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "promote", "feat-x", "--plan", "--json"}) ||
-			!reflect.DeepEqual(n[0]["needs_input"], []any{"--message"}) || !strings.Contains(n[0]["why"].(string), "commit message, title or body") {
+		if len(n) != 1 || !reflect.DeepEqual(argv(n[0]), c.want) ||
+			!reflect.DeepEqual(n[0]["needs_input"], c.need) || !strings.Contains(n[0]["why"].(string), "run it again with new text") {
 			t.Fatalf("%v: next = %v", args, n)
 		}
 	}
@@ -192,6 +215,7 @@ func TestNextAsksForNewTextWhenTheMessageLeaks(t *testing.T) {
 
 // An outdated managed overlay asks for upgrade, on success only.
 func TestNextAsksForUpgradeWhenTheOverlayIsOutdated(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	initOnly(te)
 	cfg := strings.Replace(string(config.Render("acme/widget", "acme/widget-shadow")), `schedule: "off"`, `schedule: "23 */6 * * *"`, 1)
@@ -207,6 +231,7 @@ func TestNextAsksForUpgradeWhenTheOverlayIsOutdated(t *testing.T) {
 // fingerprint include, so a passed gate asks to plan the publish first and
 // to upgrade after.
 func TestNextPutsUpgradeAfterTheCommandsOwnSteps(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	withFeature(te)
 	cfg := strings.Replace(string(config.Render("acme/widget", "acme/widget-shadow")), `schedule: "off"`, `schedule: "23 */6 * * *"`, 1)
@@ -215,14 +240,14 @@ func TestNextPutsUpgradeAfterTheCommandsOwnSteps(t *testing.T) {
 	code, env := te.runJSON("gate", "feat-x")
 	n := nextOf(t, env)
 	if code != 0 || len(n) != 2 ||
-		!reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "promote", "feat-x", "--mode", "squash", "--plan", "--repo", "acme/widget"}) ||
+		!reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "promote", "feat-x", "--mode", "preserve", "--plan", "--repo", "acme/widget"}) ||
 		!reflect.DeepEqual(argv(n[1]), []string{"ghostbranch", "upgrade", "--repo", "acme/widget"}) ||
 		!strings.Contains(n[1]["why"].(string), afterPlan) {
 		t.Fatalf("exit %d, next = %v", code, n)
 	}
 	// A new commit makes promote gate again, which reports the overlay.
 	te.shadowCommit("feat-x", map[string]string{"more.txt": "more\n"})
-	code, env = te.runJSON("promote", "feat-x", "-m", "Add feature", "--plan")
+	code, env = te.runJSON("promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--plan")
 	n = nextOf(t, env)
 	if code != 0 || len(n) != 2 || argv(n[0])[1] != "apply" ||
 		!reflect.DeepEqual(argv(n[1]), []string{"ghostbranch", "upgrade", "--repo", "acme/widget"}) ||
@@ -235,6 +260,7 @@ func TestNextPutsUpgradeAfterTheCommandsOwnSteps(t *testing.T) {
 // billed-minutes note every private shadow repo gets. A push-triggered
 // workflow is one: every sync starts it in the shadow repo.
 func TestNextAfterUpgradeAsksForTheAuditOnlyOnFindings(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	initOnly(te)
 	_, env := te.runJSON("upgrade")
@@ -252,6 +278,7 @@ func TestNextAfterUpgradeAsksForTheAuditOnlyOnFindings(t *testing.T) {
 
 // The audit's text names what happens to a rewritable guard in each mode.
 func TestAuditTextFollowsTheGuardMode(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	testutil.Commit(t, te.pubGit, "main", "guarded", map[string]string{".github/workflows/rel.yml": `on: push
 jobs:
@@ -279,6 +306,7 @@ jobs:
 // The push hint names the remote that points at the shadow repo, and does
 // not say "never origin" when that remote is origin.
 func TestFeatureStartPushHintNamesTheRemote(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ remote, free, checkout, why string }{
 		{"shadow", "ghostbranch-shadow", "git fetch shadow && git switch feat-x",
 			"commit on feat-x, push it with `git push shadow feat-x` (the shadow repo, never origin), then gate it"},
@@ -303,6 +331,7 @@ func TestFeatureStartPushHintNamesTheRemote(t *testing.T) {
 // A denied create waits on a person: they create the repo and add it to the
 // token (steps 1 and 2); the adopt runs after that. People see the steps.
 func TestCreateDeniedWaitsForAPersonAndShowsTheSteps(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	te.forge.CreateForbidden = true
 	code, env := te.runJSON("init", "acme/widget")
@@ -331,6 +360,7 @@ func TestCreateDeniedWaitsForAPersonAndShowsTheSteps(t *testing.T) {
 // A hand-edited managed file asks for a preview first: upgrade would
 // replace the edits.
 func TestNextPreviewsAnUpgradeThatReplacesHandEdits(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	initOnly(te)
 	editConfig(te, `schedule: "off"`, `schedule: "23 */6 * * *"`)
@@ -357,4 +387,197 @@ func handEditSync(te *testEnv) {
 		te.t.Fatalf("read the sync workflow: %v", err)
 	}
 	te.shadowCommit("ghostbranch", map[string]string{".github/workflows/ghostbranch-sync.yml": string(raw) + "# my tweak\n"})
+}
+
+// After a green gate, next plans the publish in the configured mode and asks
+// for what that mode needs.
+func TestNextAfterGateFollowsTheDefaultMode(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	te.mustRun("feature", "start", "feat-x")
+	te.shadowCommit("feat-x", map[string]string{"a.txt": "a\n"})
+	te.shadowCommit("feat-x", map[string]string{"b.txt": "b\n"})
+	_, env := te.runJSON("gate", "feat-x")
+	n := nextOf(t, env)
+	if !reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "promote", "feat-x", "--mode", "preserve", "--plan", "--repo", "acme/widget"}) ||
+		!reflect.DeepEqual(n[0]["needs_input"], []any{"--title"}) {
+		t.Fatalf("preserve, two commits: %v", n)
+	}
+	editConfig(te, "default_mode: preserve", "default_mode: curated")
+	_, env = te.runJSON("gate", "feat-x")
+	if n := nextOf(t, env); !reflect.DeepEqual(n[0]["needs_input"], []any{"--curate", "--title"}) {
+		t.Fatalf("curated: %v", n)
+	}
+	editConfig(te, "default_mode: curated", "default_mode: squash")
+	_, env = te.runJSON("gate", "feat-x")
+	if n := nextOf(t, env); !reflect.DeepEqual(n[0]["needs_input"], []any{"--message"}) {
+		t.Fatalf("squash: %v", n)
+	}
+}
+
+// A stale plan is re-planned in its own mode, with its title and body.
+func TestNextReplanKeepsModeTitleAndBody(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	gatedFeature(te)
+	te.mustRun("promote", "feat-x", "--title", "My title", "--body", "My body", "--plan")
+	testutil.Commit(te.t, te.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
+	_, env := te.runJSON("apply", te.lastPlanID(), "--yes")
+	n := nextOf(t, env)
+	want := []string{"ghostbranch", "promote", "feat-x", "--mode", "preserve", "--plan", "--repo", "acme/widget", "--title", "My title", "--body", "My body"}
+	if need, _ := n[0]["needs_input"].([]any); !reflect.DeepEqual(argv(n[0]), want) || len(need) != 0 {
+		t.Fatalf("re-plan: %v", n)
+	}
+}
+
+// A leak in a feature commit's message is fixed in history, not by typed
+// text.
+func TestNextForAMessageLeakInHistory(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	editConfig(te, "block_patterns: []", `block_patterns: ["JIRA-[0-9]+"]`)
+	te.mustRun("feature", "start", "feat-x")
+	te.shadowCommitMsg("feat-x", "fix JIRA-1", map[string]string{"a.txt": "a\n"})
+	_, env := te.runJSON("gate", "feat-x")
+	n := nextOf(t, env)
+	if len(n) != 3 || !reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "promote", "feat-x", "--mode", "squash", "--plan", "--repo", "acme/widget"}) ||
+		!reflect.DeepEqual(n[0]["needs_input"], []any{"--message"}) ||
+		!reflect.DeepEqual(argv(n[1]), []string{"ghostbranch", "promote", "feat-x", "--mode", "curated", "--plan", "--repo", "acme/widget"}) ||
+		!strings.Contains(n[1]["why"].(string), "new messages") ||
+		!reflect.DeepEqual(argv(n[2]), []string{"ghostbranch", "gate", "feat-x", "--repo", "acme/widget"}) ||
+		!strings.Contains(n[2]["why"].(string), "reword") || !strings.Contains(n[2]["why"].(string), "git push --force-with-lease shadow feat-x") {
+		t.Fatalf("history message leak: %v", n)
+	}
+}
+
+// A secret only in an older commit: the agent may publish so that commit
+// never ships, or rewrite it; it is never told to wait for a person to
+// change the default mode.
+func TestNextForALeakOnlyInAnOlderCommit(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	te.mustRun("feature", "start", "feat-x")
+	te.shadowCommit("feat-x", map[string]string{"config.env": "TOKEN=" + testutil.FakeGitHubToken() + "\n"})
+	te.shadowCommit("feat-x", map[string]string{"config.env": testutil.Delete, "a.txt": "a\n"})
+	_, env := te.runJSON("gate", "feat-x")
+	n := nextOf(t, env)
+	if len(n) < 3 || !reflect.DeepEqual(argv(n[0])[:5], []string{"ghostbranch", "promote", "feat-x", "--mode", "squash"}) ||
+		!strings.Contains(n[0]["why"].(string), "only in older commits") ||
+		!reflect.DeepEqual(n[1]["needs_input"], []any{"--curate", "--title"}) ||
+		!reflect.DeepEqual(argv(n[2])[:3], []string{"ghostbranch", "gate", "feat-x"}) ||
+		!strings.Contains(n[2]["why"].(string), "git push --force-with-lease shadow feat-x") {
+		t.Fatalf("older-commit leak: %v", n)
+	}
+	for _, x := range n {
+		if strings.Contains(x["why"].(string), "default_mode") {
+			t.Fatalf("next must not wait on a person switching the default mode: %v", x)
+		}
+	}
+	// The squash promote it suggests passes the gate and plans.
+	code, env := te.runJSON("promote", "feat-x", "--mode", "squash", "-m", "Add a", "--plan")
+	if code != 0 {
+		t.Fatalf("squash promote: exit %d %v", code, env)
+	}
+}
+
+// A broken marker only in an older commit gets the same steps, naming
+// error.details.commit.
+func TestNextForAMarkerOnlyInAnOlderCommit(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	te.mustRun("feature", "start", "feat-x")
+	te.shadowCommit("feat-x", map[string]string{"app.go": "ok\n// BEGIN-INTERNAL\nx\n"})
+	te.shadowCommit("feat-x", map[string]string{"app.go": "ok\n"})
+	_, env := te.runJSON("gate", "feat-x")
+	if e, _ := env["error"].(map[string]any); e["code"] != "MARKER_INVALID" {
+		t.Fatalf("gate = %v", env)
+	}
+	n := nextOf(t, env)
+	if len(n) != 3 || argv(n[0])[4] != "squash" || argv(n[1])[4] != "curated" || !strings.Contains(n[2]["why"].(string), "error.details.commit") {
+		t.Fatalf("older-commit marker: %v", n)
+	}
+}
+
+// An author leak needs a person to change how authors are published;
+// squash, which the publisher authors, is the agent's own way out.
+func TestNextForAnAuthorLeak(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	editConfig(te, "block_patterns: []", `block_patterns: ["author@example"]`)
+	editConfig(te, "author_email: noreply", "author_email: keep")
+	te.mustRun("feature", "start", "feat-x")
+	te.shadowCommit("feat-x", map[string]string{"a.txt": "a\n"})
+	_, env := te.runJSON("gate", "feat-x")
+	n := nextOf(t, env)
+	last := n[len(n)-1]
+	if argv(n[0])[4] != "squash" || last["needs_human"] != true || !strings.Contains(last["why"].(string), "promote.author_email: noreply") {
+		t.Fatalf("author leak: %v", n)
+	}
+	for _, x := range n {
+		if slices.Contains(argv(x), "curated") {
+			t.Fatalf("curated keeps each group's first author, so it is no fix: %v", x)
+		}
+	}
+}
+
+// A curated promote's messages come from the --curate file: a leak in them
+// asks for a new file (and a title, which came from that message), not a
+// change on the feature branch.
+func TestNextForALeakInCuratedMessages(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	gatedFeature(te)
+	editConfig(te, "block_patterns: []", `block_patterns: ["JIRA-[0-9]+"]`)
+	sha, err := gitx.New(te.forge.RepoDir("acme/widget-shadow")).MustResolve(t.Context(), "refs/heads/feat-x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(te.root, "c.json")
+	_ = os.WriteFile(file, []byte(`{"commits": [{"from": ["`+sha+`"], "message": "fix JIRA-1"}]}`), 0o644)
+	code, env := te.runJSON("promote", "feat-x", "--mode", "curated", "--curate", file, "--plan")
+	if e, _ := env["error"].(map[string]any); code != 3 || e["code"] != "LEAK_FOUND" {
+		t.Fatalf("exit %d: %v", code, env)
+	}
+	n := nextOf(t, env)
+	if !reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "promote", "feat-x", "--mode", "curated", "--plan", "--json"}) ||
+		!reflect.DeepEqual(n[0]["needs_input"], []any{"--curate", "--title"}) {
+		t.Fatalf("curated message leak: %v", n)
+	}
+}
+
+// A squash promote whose typed title alone leaks keeps its message: the
+// step plus a new --title runs.
+func TestNextForASquashTitleLeakIsRunnable(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	gatedFeature(te)
+	editConfig(te, "block_patterns: []", `block_patterns: ["JIRA-[0-9]+"]`)
+	_, env := te.runJSON("promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--title", "JIRA-1 work", "--plan")
+	n := nextOf(t, env)
+	want := []string{"ghostbranch", "promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--plan", "--json"}
+	if !reflect.DeepEqual(argv(n[0]), want) || !reflect.DeepEqual(n[0]["needs_input"], []any{"--title"}) {
+		t.Fatalf("title leak: %v", n)
+	}
+	if code, env := te.runJSON(append(argv(n[0])[1:], "--title", "Add feature")...); code != 0 {
+		t.Fatalf("the step with a new title: exit %d %v", code, env)
+	}
+}
+
+// A bad --curate file is replaced, not repeated.
+func TestNextForCurateProblems(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	gatedFeature(te)
+	bad := filepath.Join(te.root, "c.json")
+	_ = os.WriteFile(bad, []byte(`{"commits": [{"from": ["1234567"], "message": "m"}]}`), 0o644)
+	_, env := te.runJSON("promote", "feat-x", "--mode", "curated", "--curate", bad, "--plan")
+	n := nextOf(t, env)
+	if a := argv(n[0]); slices.Contains(a, "--curate") || !reflect.DeepEqual(n[0]["needs_input"], []any{"--curate"}) {
+		t.Fatalf("curate invalid: %v", n)
+	}
 }

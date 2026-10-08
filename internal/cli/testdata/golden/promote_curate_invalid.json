@@ -1,0 +1,33 @@
+{
+  "schema_version": "0.5",
+  "command": "promote",
+  "ok": false,
+  "exit_code": 2,
+  "data": {},
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "promote",
+        "feat-x",
+        "--mode",
+        "curated",
+        "--plan",
+        "--json"
+      ],
+      "why": "fix the --curate file (error.details lists the problem SHAs; the gate result lists the feature's commits) and run this again",
+      "needs_human": false,
+      "needs_input": [
+        "--curate"
+      ]
+    }
+  ],
+  "error": {
+    "code": "CURATE_INVALID",
+    "message": "the --curate file lists no commits",
+    "field": "curate",
+    "retryable": false,
+    "details": {}
+  }
+}

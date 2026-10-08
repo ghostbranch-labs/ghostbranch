@@ -21,6 +21,7 @@ func syncFile(h *harness) ([]byte, bool) {
 }
 
 func TestUpgradeAddsUpdatesAndRemovesTheSyncWorkflow(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	res, _, err := h.eng.Upgrade(h.ctx, h.pair)
@@ -70,6 +71,7 @@ func TestUpgradeAddsUpdatesAndRemovesTheSyncWorkflow(t *testing.T) {
 }
 
 func TestUpgradeRefusesWhenTheOverlayMoves(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.setConfig(`schedule: "off"`, `schedule: "23 */6 * * *"`)
@@ -94,6 +96,7 @@ func TestUpgradeRefusesWhenTheOverlayMoves(t *testing.T) {
 // The audit after upgrade names push-triggered public workflows, which a
 // sync starts in the shadow repo whether or not scheduled sync is installed.
 func TestUpgradeAuditWarnsAboutPushTriggers(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	testutil.Commit(t, h.pubGit, "main", "push ci", map[string]string{".github/workflows/push.yml": "on:\n  push:\n    branches: [main]\njobs:\n  t:\n    runs-on: x\n    steps:\n      - run: echo\n"})
 	h.init()
@@ -120,6 +123,7 @@ func TestUpgradeAuditWarnsAboutPushTriggers(t *testing.T) {
 // Upgrade rewrites only the managed path: every other overlay entry keeps
 // its mode, type and blob, an executable private workflow included.
 func TestUpgradeKeepsTheRestOfTheOverlay(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.setConfig(`schedule: "off"`, `schedule: "23 */6 * * *"`)

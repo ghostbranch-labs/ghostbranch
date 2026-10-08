@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.4",
+  "schema_version": "0.5",
   "command": "agents allow",
   "ok": true,
   "exit_code": 0,

@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"unicode/utf16"
 
@@ -360,4 +361,38 @@ func TestEmptyBlockPatternMatchesAreIgnored(t *testing.T) {
 	if err != nil || len(rep.Findings) != 1 || rep.Findings[0].Match != "xx" {
 		t.Fatalf("want one finding for xx: %+v %v", rep.Findings, err)
 	}
+}
+
+func TestFindingCommitsAreOmittedWhenEmpty(t *testing.T) {
+	b, _ := json.Marshal(leak.Finding{ID: "f-000000000000", Rule: "r", Where: "tree"})
+	if strings.Contains(string(b), "commits") {
+		t.Fatalf("empty commits must be omitted: %s", b)
+	}
+	b, _ = json.Marshal(leak.Finding{ID: "f-000000000000", Rule: "r", Where: "tree", Commits: []string{"abc"}})
+	if !strings.Contains(string(b), `"commits":["abc"]`) {
+		t.Fatalf("commits missing: %s", b)
+	}
+}
+
+// Probabilistic: the race it guards against (gitleaks' global viper) only
+// shows up when constructions overlap.
+func TestNewGitleaksIsSafeConcurrently(t *testing.T) {
+	tok := testutil.FakeGitHubToken()
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s, err := leak.NewGitleaks(leak.Rules{Overlay: overlay.NewSet("internal/**"), LargeFile: 4})
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			rep, err := s.Scan(leak.Input{Files: []leak.File{{Path: "a.env", Content: []byte("TOKEN=" + tok + "\n")}}})
+			if err != nil || len(rep.Findings) == 0 {
+				t.Errorf("token not found: %+v %v", rep.Findings, err)
+			}
+		}()
+	}
+	wg.Wait()
 }

@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/ghostbranch-labs/ghostbranch/internal/config"
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
 	"github.com/ghostbranch-labs/ghostbranch/internal/ledger"
@@ -183,7 +184,10 @@ func (e *Engine) WaiversAdd(ctx context.Context, p workspace.Pair, opt WaiversAd
 		return nil, nil, err
 	}
 	defer pc.unlock()
-	b, warns, err := e.build(ctx, pc, opt.Feature)
+	// Scan as preserve whatever the default mode: finding ids don't depend
+	// on mode or line, so the preserve scan holds every waivable finding any
+	// promote mode can raise.
+	b, warns, err := e.build(ctx, pc, opt.Feature, config.ModePreserve, true)
 	if err != nil {
 		return nil, warns, err
 	}
@@ -204,7 +208,7 @@ func (e *Engine) WaiversAdd(ctx context.Context, p workspace.Pair, opt WaiversAd
 	}
 	if len(unknown) > 0 {
 		return nil, warns, contract.New(contract.WaiverUnknown,
-			"%s: not a waivable finding in what %s would publish now; gate again for the current ids", strings.Join(unknown, ", "), opt.Feature).
+			"%s: not a waivable finding in any commit %s would publish now; gate again for the current ids", strings.Join(unknown, ", "), opt.Feature).
 			WithField("id").WithDetails(map[string]any{"ids": unknown, "feature": opt.Feature})
 	}
 	now := e.now()

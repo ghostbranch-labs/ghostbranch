@@ -16,6 +16,7 @@ import (
 // is usable, the console device is never opened, and --yes alone does not
 // publish.
 func TestPipedStdinNeverApproves(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	gatedFeature(te)
 	r, w, err := os.Pipe()
@@ -28,7 +29,7 @@ func TestPipedStdinNeverApproves(t *testing.T) {
 	opened := false
 	te.env.Stdin, te.env.ConsoleUsable = r, console.Usable(r, r)
 	te.env.OpenConsole = func() (io.ReadWriteCloser, error) { opened = true; return nil, errors.New("no console") }
-	code, env := te.runJSON("promote", "feat-x", "-m", "Add feature", "--yes")
+	code, env := te.runJSON("promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--yes")
 	e, _ := env["error"].(map[string]any)
 	d, _ := e["details"].(map[string]any)
 	if code != 5 || d["reason"] != "no_console" || opened {
@@ -40,10 +41,11 @@ func TestPipedStdinNeverApproves(t *testing.T) {
 }
 
 func TestConsoleApprovalThroughTheCLI(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	gatedFeature(te)
 	ty := atConsole(te, typeTheCode)
-	code, env := te.runJSON("promote", "feat-x", "-m", "Add feature")
+	code, env := te.runJSON("promote", "feat-x", "--mode", "squash", "-m", "Add feature")
 	data, _ := env["data"].(map[string]any)
 	applied, _ := data["applied"].(map[string]any)
 	appr, _ := applied["approval"].(map[string]any)
@@ -56,6 +58,7 @@ func TestConsoleApprovalThroughTheCLI(t *testing.T) {
 }
 
 func TestAgentsAllowThroughTheCLI(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	gatedFeature(te)
 	code, env := te.runJSON("agents", "allow")
@@ -67,7 +70,7 @@ func TestAgentsAllowThroughTheCLI(t *testing.T) {
 		t.Fatalf("at a console: %d %v", code, env)
 	}
 	te.env.ConsoleUsable, te.env.OpenConsole = false, nil
-	if code, env := te.runJSON("promote", "feat-x", "-m", "Add feature", "--yes"); code != 0 {
+	if code, env := te.runJSON("promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--yes"); code != 0 {
 		t.Fatalf("under the grant: %d %v", code, env)
 	}
 	if code, env := te.runJSON("agents", "revoke"); code != 0 {
@@ -78,10 +81,11 @@ func TestAgentsAllowThroughTheCLI(t *testing.T) {
 // --non-interactive means never ask: even with a usable console, nothing is
 // shown there and the publish needs approval.
 func TestNonInteractiveNeverAsksAtTheConsole(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	gatedFeature(te)
 	ty := atConsole(te, typeTheCode)
-	code, env := te.runJSON("promote", "feat-x", "-m", "Add feature", "--non-interactive")
+	code, env := te.runJSON("promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--non-interactive")
 	e, _ := env["error"].(map[string]any)
 	d, _ := e["details"].(map[string]any)
 	if code != 5 || d["reason"] != "no_console" {
@@ -96,6 +100,7 @@ func TestNonInteractiveNeverAsksAtTheConsole(t *testing.T) {
 }
 
 func TestWaiversAddThroughTheCLI(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	leakyWithID(te)
 	ty := atConsole(te, typeTheCode)
@@ -110,6 +115,7 @@ func TestWaiversAddThroughTheCLI(t *testing.T) {
 }
 
 func TestPipedStdinNeverWaives(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	leakyWithID(te)
 	r, w, err := os.Pipe()
@@ -134,6 +140,7 @@ func TestPipedStdinNeverWaives(t *testing.T) {
 }
 
 func TestNonInteractiveNeverWaives(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	leakyWithID(te)
 	ty := atConsole(te, typeTheCode)

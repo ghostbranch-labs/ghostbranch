@@ -96,6 +96,11 @@ func (te *testEnv) shadowCommit(branch string, files map[string]string) {
 	testutil.Commit(te.t, gitx.New(te.forge.RepoDir("acme/widget-shadow")), branch, "work", files)
 }
 
+func (te *testEnv) shadowCommitMsg(branch, msg string, files map[string]string) {
+	te.t.Helper()
+	testutil.Commit(te.t, gitx.New(te.forge.RepoDir("acme/widget-shadow")), branch, msg, files)
+}
+
 func (te *testEnv) lastPlanID() string {
 	te.t.Helper()
 	entries, _ := os.ReadDir(filepath.Join(te.vars["GHOSTBRANCH_HOME"], "workspaces", "default", "plans"))

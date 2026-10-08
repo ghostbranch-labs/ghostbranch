@@ -17,6 +17,7 @@ import (
 // A remote that answers 403 (what GitHub does for a token without write
 // access) gives a PermissionError, not a generic failure.
 func TestPushPermissionDenied(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "Write access to repository not granted.", http.StatusForbidden)
 	}))
@@ -38,6 +39,7 @@ func TestPushPermissionDenied(t *testing.T) {
 // hook; on GitHub a missing token scope or a ruleset) gives a RefusedError
 // carrying the reason, and a lost lease still gives a RejectedError.
 func TestPushRemoteRefusedIsNotRejected(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
 	remote := testutil.BareRepo(t, filepath.Join(dir, "remote.git"))

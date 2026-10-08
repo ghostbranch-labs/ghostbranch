@@ -16,6 +16,7 @@ import (
 )
 
 func TestInitCreatesShadowMirrorsAndOverlay(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	res, warns, err := h.eng.Init(h.ctx, engine.InitOptions{Public: publicName})
 	if err != nil || len(warns) != 1 || warns[0].Code != contract.ActionsMinutesBilled {
@@ -54,6 +55,7 @@ func TestInitCreatesShadowMirrorsAndOverlay(t *testing.T) {
 }
 
 func TestInitIsResumable(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	n := len(h.pushes)
@@ -64,6 +66,7 @@ func TestInitIsResumable(t *testing.T) {
 }
 
 func TestInitNeedsAdoptForAnExistingShadow(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	if _, err := h.forge.CreatePrivateRepo(h.ctx, shadowName); err != nil {
 		t.Fatal(err)
@@ -83,6 +86,7 @@ func TestInitNeedsAdoptForAnExistingShadow(t *testing.T) {
 }
 
 func TestAdoptAcceptsAPartialMirrorButNotUnrelatedContent(t *testing.T) {
+	t.Parallel()
 	// A shadow repo holding only public's main (what the E2E reset leaves
 	// behind) is adoptable.
 	h := newHarness(t)
@@ -110,6 +114,7 @@ func TestAdoptAcceptsAPartialMirrorButNotUnrelatedContent(t *testing.T) {
 }
 
 func TestInitRefusesAPublicOrForkedShadow(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	if _, err := h.forge.AddRepo(shadowName, false); err != nil {
 		t.Fatal(err)
@@ -126,6 +131,7 @@ func TestInitRefusesAPublicOrForkedShadow(t *testing.T) {
 }
 
 func TestInitRejectsOverlayPathsInPublic(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	testutil.Commit(t, h.pubGit, "main", "oops", map[string]string{".ghostbranch.yml": "x"})
 	_, _, err := h.eng.Init(h.ctx, engine.InitOptions{Public: publicName})
@@ -133,6 +139,7 @@ func TestInitRejectsOverlayPathsInPublic(t *testing.T) {
 }
 
 func TestInitDryRunWritesNothing(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.eng.DryRun = true
 	res, _, err := h.eng.Init(h.ctx, engine.InitOptions{Public: publicName})
@@ -148,6 +155,7 @@ func TestInitDryRunWritesNothing(t *testing.T) {
 }
 
 func TestInitWarnsWhenPublicIsPrivate(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.forge.SetPrivate(publicName, true)
 	_, warns, err := h.eng.Init(h.ctx, engine.InitOptions{Public: publicName})
@@ -157,6 +165,7 @@ func TestInitWarnsWhenPublicIsPrivate(t *testing.T) {
 }
 
 func TestInitDeniedCreateExplainsAdopt(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.forge.CreateForbidden = true
 	res, _, err := h.eng.Init(h.ctx, engine.InitOptions{Public: publicName})
@@ -180,6 +189,7 @@ func TestInitDeniedCreateExplainsAdopt(t *testing.T) {
 }
 
 func TestInitWritesNoSyncWorkflowByDefaultAndAudits(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	res, warns, err := h.eng.Init(h.ctx, engine.InitOptions{Public: publicName})
 	if err != nil {
@@ -197,6 +207,7 @@ func TestInitWritesNoSyncWorkflowByDefaultAndAudits(t *testing.T) {
 }
 
 func TestInitOnACompletePairWarnsWhenTheOverlayIsOutdated(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.setConfig(`schedule: "off"`, `schedule: "23 */6 * * *"`)

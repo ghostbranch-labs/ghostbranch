@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.4",
+  "schema_version": "0.5",
   "command": "gate",
   "ok": false,
   "exit_code": 3,
@@ -7,9 +7,20 @@
     "feature": "feat-x",
     "feature_head": "d7407485ce685c126afcfc258f0a9eeb0092d776",
     "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
-    "overlay": "b60402e97e1fbf747e73421d2765b542fc4b34ee",
-    "candidate": "c0f21ddad0e397f57c498e974fa5e030c47a3e8f",
+    "overlay": "a1ef151295bf2b53d15b18523ab0184d02178bbd",
+    "candidate": "ad7c1d9752519d03b74752a472ecf072aacd2fb7",
     "published_tree": "ef9061717144a4bf03a0230d8f8926d019f2adeb",
+    "scanned_as": "preserve",
+    "commits": [
+      {
+        "source": "d7407485ce685c126afcfc258f0a9eeb0092d776",
+        "subject": "work",
+        "author": "Test Author <author@example.com>",
+        "files": [
+          "feature.txt"
+        ]
+      }
+    ],
     "checks": "failed",
     "failed_checks": [
       "lint"

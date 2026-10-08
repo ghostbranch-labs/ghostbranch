@@ -16,6 +16,7 @@ import (
 // Every command and failure path runs; the public repo may change only
 // through promote/apply, and only once here.
 func TestOnlyPromoteAndApplyReachThePublicRepo(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	baseline := h.publicRefs()
@@ -82,7 +83,7 @@ func TestOnlyPromoteAndApplyReachThePublicRepo(t *testing.T) {
 			t.Fatalf("upgrade pushed to %s: %+v", p.remote, p)
 		}
 	}
-	h.startFeature("good", map[string]string{"good.txt": "g\n"})
+	good := h.startFeature("good", map[string]string{"good.txt": "g\n"})
 	h.startFeature("leaky", map[string]string{"leak.env": "T=" + testutil.FakeGitHubToken() + "\n"})
 	h.startFeature("red", map[string]string{"red.txt": "r\n"})
 	h.startFeature("marked", map[string]string{"m.go": "// BEGIN-INTERNAL\n"})
@@ -90,7 +91,7 @@ func TestOnlyPromoteAndApplyReachThePublicRepo(t *testing.T) {
 	h.eng.DryRun = true
 	_, _, err = h.eng.Gate(h.ctx, h.pair, "good")
 	run("gate --dry-run", err, "")
-	_, _, err = h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "good", Message: "m", Yes: true})
+	_, _, err = h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "good", Mode: "squash", Message: "m", Yes: true})
 	run("promote --dry-run", err, "")
 	h.eng.DryRun = false
 
@@ -98,26 +99,54 @@ func TestOnlyPromoteAndApplyReachThePublicRepo(t *testing.T) {
 	run("gate", err, "")
 	_, _, err = h.eng.Gate(h.ctx, h.pair, "leaky")
 	run("gate leaky", err, contract.LeakFound)
-	_, _, err = h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "leaky", Message: "m", Yes: true})
+	_, _, err = h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "leaky", Mode: "squash", Message: "m", Yes: true})
 	run("promote leaky", err, contract.LeakFound)
 	_, _, err = h.eng.Gate(h.ctx, h.pair, "marked")
 	run("gate marked", err, contract.MarkerInvalid)
-	_, _, err = h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "marked", Message: "m", Yes: true})
+	_, _, err = h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "marked", Mode: "squash", Message: "m", Yes: true})
 	run("promote marked", err, contract.MarkerInvalid)
+
+	// The history modes' own failures, and a --plan in each of them.
+	r1 := h.startFeature("reorder", map[string]string{"r.txt": "1\n"})
+	r2 := testutil.Commit(t, h.shadowGit(), "reorder", "edit r", map[string]string{"r.txt": "2\n"})
+	_, _, err = h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "reorder", Mode: "curated", Title: "t", Yes: true,
+		Curate: writeCurate(t, `{"commits": [{"from": ["`+r2+`"], "message": "x"}, {"from": ["`+r1+`"], "message": "y"}]}`)})
+	run("promote curated conflict", err, contract.CurateConflict)
+	// README back to public main's content: replayed first it is clean and
+	// empty, so the reorder ends on another tree than the gated one.
+	readme, _, _ := h.pubGit.ShowFile(h.ctx, "refs/heads/main", "README.md")
+	m1 := h.startFeature("mismatch", map[string]string{"README.md": "changed\n", "y.txt": "y\n"})
+	m2 := testutil.Commit(t, h.shadowGit(), "mismatch", "back", map[string]string{"README.md": string(readme)})
+	_, _, err = h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "mismatch", Mode: "curated", Title: "t", Yes: true,
+		Curate: writeCurate(t, `{"commits": [{"from": ["`+m2+`"], "message": "b"}, {"from": ["`+m1+`"], "message": "a"}]}`)})
+	run("promote curated tree mismatch", err, contract.CurateTreeMismatch)
+	h.startFeature("notes", map[string]string{".ghostbranch/notes.md": "private\n"})
+	_, _, err = h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "notes", Yes: true})
+	run("promote nothing to publish", err, contract.NothingToPublish)
+	mapped := "author_email: map\n  author_map:\n    \"x@y.example\": \"X <x@y.example>\""
+	h.setConfig("author_email: noreply", mapped)
+	_, _, err = h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "good", Yes: true})
+	run("promote preserve, unmapped author", err, contract.AuthorUnmapped)
+	h.setConfig(mapped, "author_email: noreply")
+	_, _, err = h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "good", PlanOnly: true})
+	run("promote --plan, preserve", err, "")
+	_, _, err = h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "good", Mode: "curated", PlanOnly: true,
+		Curate: writeCurate(t, `{"commits": [{"from": ["`+good+`"], "message": "add good"}]}`)})
+	run("promote --plan, curated", err, "")
 
 	h.forge.Checks = func(string, string) []forge.Check {
 		return []forge.Check{{Name: "ci", Status: "completed", Conclusion: "failure"}}
 	}
 	_, _, err = h.eng.Gate(h.ctx, h.pair, "red")
 	run("gate red", err, contract.ChecksFailed)
-	_, _, err = h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "red", Message: "m", Yes: true})
+	_, _, err = h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "red", Mode: "squash", Message: "m", Yes: true})
 	run("promote red", err, contract.ChecksFailed)
 	h.forge.Checks = nil
 
-	res, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "good", Message: "m", PlanOnly: true})
+	res, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "good", Mode: "squash", Message: "m", PlanOnly: true})
 	run("promote --plan", err, "")
 	h.eng.Approver = nil
-	_, _, err = h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "good", Message: "m", Yes: true})
+	_, _, err = h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "good", Mode: "squash", Message: "m", Yes: true})
 	run("promote --yes without a console or grant", err, contract.ApprovalRequired)
 	_, _, err = h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: res.Plan.ID, Yes: true})
 	run("apply --yes without a console or grant", err, contract.ApprovalRequired)
@@ -142,6 +171,7 @@ func TestOnlyPromoteAndApplyReachThePublicRepo(t *testing.T) {
 
 // Review Focus 5.
 func TestAShadowRepoTurnedPublicStopsEverything(t *testing.T) {
+	t.Parallel()
 	for _, mutate := range []func(*harness){
 		func(h *harness) { h.forge.SetPrivate(shadowName, false) },
 		func(h *harness) { h.forge.SetFork(shadowName, true) },
@@ -149,7 +179,7 @@ func TestAShadowRepoTurnedPublicStopsEverything(t *testing.T) {
 		h := newHarness(t)
 		h.init()
 		h.startFeature("good", map[string]string{"good.txt": "g\n"})
-		res, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "good", Message: "m", PlanOnly: true})
+		res, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "good", Mode: "squash", Message: "m", PlanOnly: true})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -160,7 +190,7 @@ func TestAShadowRepoTurnedPublicStopsEverything(t *testing.T) {
 		_, _, steps["sync"] = h.eng.Sync(h.ctx, h.pair, engine.SyncOptions{})
 		_, _, steps["feature start"] = h.eng.FeatureStart(h.ctx, h.pair, "other")
 		_, _, steps["gate"] = h.eng.Gate(h.ctx, h.pair, "good")
-		_, _, steps["promote"] = h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "good", Message: "m", Yes: true})
+		_, _, steps["promote"] = h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "good", Mode: "squash", Message: "m", Yes: true})
 		_, _, steps["apply"] = h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: res.Plan.ID, Yes: true})
 		for step, err := range steps {
 			if codeOf(err) != contract.ShadowNotPrivate {

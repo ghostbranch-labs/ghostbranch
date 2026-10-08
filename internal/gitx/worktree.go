@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 )
 
@@ -45,33 +44,18 @@ func (g *Git) WorktreeRemove(ctx context.Context, dir string) error {
 	return nil
 }
 
-// ConflictError means a rebase stopped on conflicts. The rebase has been
-// aborted; Files lists the conflicting paths.
+// ConflictError means a rebase or cherry-pick replay stopped on conflicts. It
+// has been aborted; Files lists the conflicting paths.
 type ConflictError struct {
 	Files []string
+	// Commit is the commit that stopped a cherry-pick replay; empty for a rebase.
+	Commit string
 }
 
 func (e *ConflictError) Error() string {
-	return "rebase conflict in " + strings.Join(e.Files, ", ")
-}
-
-// Rebase rebases this worktree's detached HEAD onto onto, committing as
-// committer. On conflict it aborts and returns *ConflictError.
-func (g *Git) Rebase(ctx context.Context, onto string, committer Identity) error {
-	rg := g.With(g.Dir)
-	rg.Env = append(rg.Env, committer.env("GIT_COMMITTER")...)
-	_, err := rg.Run(ctx, "rebase", "--quiet", onto)
-	if err == nil {
-		return nil
+	s := "conflict in " + strings.Join(e.Files, ", ")
+	if e.Commit != "" {
+		s += " applying " + e.Commit
 	}
-	out, derr := rg.runRaw(ctx, nil, "diff", "--name-only", "--diff-filter=U", "-z")
-	if _, aerr := rg.Run(ctx, "rebase", "--abort"); aerr != nil {
-		return fmt.Errorf("rebase failed and abort failed, worktree may be mid-rebase: %w", errors.Join(err, aerr))
-	}
-	files := splitNUL(out)
-	if derr == nil && len(files) > 0 {
-		sort.Strings(files)
-		return &ConflictError{Files: files}
-	}
-	return err
+	return s
 }

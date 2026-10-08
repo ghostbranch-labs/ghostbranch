@@ -9,6 +9,7 @@ import (
 )
 
 func TestShadowBehindWarnsUntilSync(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	testutil.Commit(t, h.pubGit, "main", "up1", map[string]string{"u1": "1\n"})
@@ -37,6 +38,7 @@ func TestShadowBehindWarnsUntilSync(t *testing.T) {
 
 // A promote that re-runs the gate raises SHADOW_BEHIND once, like the gate.
 func TestShadowBehindOncePerCommand(t *testing.T) {
+	t.Parallel()
 	h := gated(t)
 	testutil.Commit(t, h.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
 	_, warns, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
@@ -44,7 +46,7 @@ func TestShadowBehindOncePerCommand(t *testing.T) {
 		t.Fatalf("gate: %+v %v", warns, err)
 	}
 	testutil.Commit(t, h.pubGit, "main", "upstream 2", map[string]string{"up.txt": "up 2\n"})
-	res, warns, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Message: "m", PlanOnly: true})
+	res, warns, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Mode: "squash", Message: "m", PlanOnly: true})
 	if err != nil || res.Gate.Reused || codes(warns)[contract.ShadowBehind] != 1 {
 		t.Fatalf("promote: %+v %v", warns, err)
 	}
@@ -52,6 +54,7 @@ func TestShadowBehindOncePerCommand(t *testing.T) {
 
 // A diverged shadow main is for sync to report, not a reminder to run it.
 func TestShadowBehindSilentWhenShadowMainDiverged(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	testutil.Commit(t, h.shadowGit(), "main", "shadow-only", map[string]string{"x": "1\n"})
@@ -63,6 +66,7 @@ func TestShadowBehindSilentWhenShadowMainDiverged(t *testing.T) {
 }
 
 func TestShadowBehindSilentWhenShadowMainMissing(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	if _, err := h.shadowGit().Run(h.ctx, "update-ref", "-d", "refs/heads/main"); err != nil {

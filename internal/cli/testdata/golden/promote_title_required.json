@@ -1,0 +1,39 @@
+{
+  "schema_version": "0.5",
+  "command": "promote",
+  "ok": false,
+  "exit_code": 2,
+  "data": {
+    "gate": null,
+    "plan": null,
+    "plan_path": "",
+    "findings": [],
+    "waived": [],
+    "applied": null,
+    "preview": null
+  },
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "promote",
+        "feat-x",
+        "--plan",
+        "--json"
+      ],
+      "why": "write a PR title that sums up the feature's commits",
+      "needs_human": false,
+      "needs_input": [
+        "--title"
+      ]
+    }
+  ],
+  "error": {
+    "code": "MISSING_INPUT",
+    "message": "this feature has 2 commits, so its PR needs a title: pass --title",
+    "field": "title",
+    "retryable": false,
+    "details": {}
+  }
+}

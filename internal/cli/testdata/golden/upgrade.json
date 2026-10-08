@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.4",
+  "schema_version": "0.5",
   "command": "upgrade",
   "ok": true,
   "exit_code": 0,
@@ -15,7 +15,7 @@
         "replaces_local_edits": false
       }
     ],
-    "commit": "7683308c8f3345db85f452b7dc33d47b63de83de",
+    "commit": "032b5443a2c8e62ccbdc21589bcfbfc5f85ade1e",
     "audit": {
       "public": "acme/widget",
       "shadow": "acme/widget-shadow",

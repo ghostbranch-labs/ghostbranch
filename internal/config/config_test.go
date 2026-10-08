@@ -43,15 +43,13 @@ agents:
   default_tier: read
   overrides:
     claude-code: shadow-write
-promote:
-  author_email: noreply
 `
 	_, warns, err := config.Parse([]byte(y))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(warns) != 3 {
-		t.Fatalf("want 3 warnings (agents.default_tier, agents.overrides.claude-code, promote.author_email), got %v", warns)
+	if len(warns) != 2 {
+		t.Fatalf("want 2 warnings (agents.default_tier, agents.overrides.claude-code), got %v", warns)
 	}
 	for _, w := range warns {
 		if w.Code != contract.ConfigKeyIgnored {
@@ -67,7 +65,7 @@ func TestInvalidConfigs(t *testing.T) {
 		"bad version":       "version: 2\npublic: a/b\nshadow: a/b-shadow\n",
 		"missing public":    "version: 1\nshadow: a/b-shadow\n",
 		"merge target":      base + "promote:\n  target: merge\n",
-		"preserve mode":     base + "promote:\n  default_mode: preserve\n",
+		"rebase mode":       base + "promote:\n  default_mode: rebase\n",
 		"secrets disabled":  base + "leak_scan:\n  secrets: false\n",
 		"bad duration":      base + "gate:\n  ci_timeout: soon\n",
 		"strip not list":    base + "leak_scan:\n  strip: .ghostbranch/**\n",
@@ -144,10 +142,73 @@ func TestParseSize(t *testing.T) {
 	}
 }
 
-func TestAuthorEmailWaitsForPreserveMode(t *testing.T) {
-	_, warns, err := config.Parse([]byte("version: 1\npublic: a/b\nshadow: a/b-shadow\npromote:\n  author_email: keep\n"))
-	if err != nil || len(warns) != 1 || !strings.Contains(warns[0].Message, "preserve mode") {
-		t.Fatalf("%v %v", warns, err)
+func TestPromoteModesAndAuthors(t *testing.T) {
+	base := string(config.Render("acme/widget", "acme/widget-shadow"))
+	cfg, warns, err := config.Parse([]byte(base))
+	if err != nil || len(warns) != 0 || cfg.Promote.DefaultMode != config.ModePreserve || cfg.Promote.AuthorEmail != config.AuthorNoreply {
+		t.Fatalf("rendered config: %+v %v %v", cfg.Promote, warns, err)
+	}
+	for _, mode := range []string{"squash", "preserve", "curated"} {
+		c, _, err := config.Parse([]byte(strings.Replace(base, "default_mode: preserve", "default_mode: "+mode, 1)))
+		if err != nil || c.Promote.DefaultMode != mode {
+			t.Fatalf("%s: %+v %v", mode, c.Promote, err)
+		}
+	}
+	bad := strings.Replace(base, "default_mode: preserve", "default_mode: rebase", 1)
+	if _, _, err := config.Parse([]byte(bad)); contract.From(err) == nil || contract.From(err).Field != "promote.default_mode" {
+		t.Fatalf("bad mode: %v", err)
+	}
+}
+
+func TestAuthorMapKeepsDottedEmails(t *testing.T) {
+	src := strings.Replace(string(config.Render("acme/widget", "acme/widget-shadow")), "author_email: noreply",
+		"author_email: map\n  author_map:\n    \"Jane.Doe@Corp.example\": \"Jane Doe <123+jane@users.noreply.github.com>\"", 1)
+	cfg, _, err := config.Parse([]byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Promote.AuthorMap["jane.doe@corp.example"]; got != "Jane Doe <123+jane@users.noreply.github.com>" {
+		t.Fatalf("author_map = %#v", cfg.Promote.AuthorMap)
+	}
+}
+
+func TestAuthorConfigRejects(t *testing.T) {
+	base := string(config.Render("acme/widget", "acme/widget-shadow"))
+	for name, repl := range map[string]string{
+		"unknown mode":   "author_email: someone",
+		"map but empty":  "author_email: map",
+		"bad identity":   "author_email: map\n  author_map:\n    \"a@b.example\": \"no email here\"",
+		"key not email":  "author_email: map\n  author_map:\n    \"nobody\": \"N <n@b.example>\"",
+		"case duplicate": "author_email: map\n  author_map:\n    \"A@b.example\": \"N <n@b.example>\"\n    \"a@b.example\": \"M <m@b.example>\"",
+		"vtab in key":    "author_email: map\n  author_map:\n    \"a\\v@b.example\": \"N <n@b.example>\"",
+		"newline in val": "author_email: map\n  author_map:\n    \"a@b.example\": \"N\\n <n@b.example>\"",
+	} {
+		_, _, err := config.Parse([]byte(strings.Replace(base, "author_email: noreply", repl, 1)))
+		if ce := contract.From(err); ce == nil || ce.Code != contract.ConfigInvalid || !strings.HasPrefix(ce.Field, "promote.author_") {
+			t.Fatalf("%s: want CONFIG_INVALID on promote.author_*, got %v", name, err)
+		}
+	}
+}
+
+func TestParseIdentity(t *testing.T) {
+	for in, want := range map[string][2]string{
+		"Jane Doe <jane@x.example>": {"Jane Doe", "jane@x.example"},
+		"<jane@x.example>":          {"", ""},
+		"Jane <not-an-email>":       {"", ""},
+		"Jane <a@b> trailing":       {"", ""},
+		"Ja<ne <a@b.example>":       {"", ""},
+		"  <a@b.example>":           {"", ""},
+		"  <a@b.example>":           {"", ""},
+		"N\x00 <a@b.example>":       {"", ""},
+		"N <a@b.example\x7f>":       {"", ""},
+		"N\x1b[31m <a@b.example>":   {"", ""},
+		"N M <a@b.example>":         {"", ""},
+		"N <a@b.example >":          {"", ""},
+	} {
+		n, e, ok := config.ParseIdentity(in)
+		if ok != (want[0] != "") || n != want[0] || e != want[1] {
+			t.Fatalf("ParseIdentity(%q) = %q %q %v", in, n, e, ok)
+		}
 	}
 }
 

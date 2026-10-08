@@ -197,6 +197,7 @@ every check. It records the result and never touches the public repo. Exit 3 mea
 			if err != nil {
 				return err
 			}
+			a.noteShadowRemote(p)
 			res, w, err := e.Gate(cmd.Context(), p, args[0])
 			return done(a, res, w, err)
 		},
@@ -210,8 +211,10 @@ func (a *app) promoteCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "promote <feature>",
 		Short: "Publish a gated feature to the public repo as a branch and PR",
-		Long: `promote reuses a fresh green gate (or runs one), builds one squash commit on public main with
-exactly the gated tree, scans it and its message, branch name and PR text for leaks, and saves a plan.
+		Long: `promote reuses a fresh green gate (or runs one), builds the public commits (each feature commit
+with --mode preserve, one with squash, or the groups of a --curate file) on public main, ending on
+exactly the gated tree, scans every commit's files, message and author, the branch name and PR text
+for leaks, and saves a plan.
 With --plan it stops there. Otherwise a person confirms by typing a code shown on the console, or, if they have allowed agents with "ghostbranch agents allow", --yes publishes. Without either it stops at the plan with exit 5.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -230,15 +233,17 @@ With --plan it stops there. Otherwise a person confirms by typing a code shown o
 			if err != nil {
 				return err
 			}
+			a.noteShadowRemote(p)
 			res, w, err := e.Promote(cmd.Context(), p, o)
 			return done(a, res, w, err)
 		},
 	}
 	f := c.Flags()
-	f.StringVar(&o.Mode, "mode", "squash", "history mode; this version supports squash")
-	f.StringVarP(&o.Message, "message", "m", "", "commit message for the public squash commit")
-	f.StringVar(&o.Title, "title", "", "PR title (default: the message's first line)")
-	f.StringVar(&o.Body, "body", "", "PR body (default: the rest of the message)")
+	f.StringVar(&o.Mode, "mode", "", "history mode: preserve (each commit), squash (one commit) or curated (a --curate file); default promote.default_mode, which is preserve unless set")
+	f.StringVarP(&o.Message, "message", "m", "", "the squash commit's message (squash mode only)")
+	f.StringVar(&o.Curate, "curate", "", `curated mode: a JSON file {"commits": [{"from": [<sha>...], "message": "..."}]} naming every feature commit once, in the order to publish`)
+	f.StringVar(&o.Title, "title", "", "PR title (needed when more than one commit is published; default: the only commit's subject, or the squash message's first line)")
+	f.StringVar(&o.Body, "body", "", "PR body (default: the commit's body, or one line per commit)")
 	f.StringVar(&o.Branch, "branch", "", "public branch name (default: the feature name)")
 	f.BoolVar(&o.PlanOnly, "plan", false, "save and print the plan without publishing")
 	f.BoolVar(&o.Yes, "yes", false, "publish under an agent grant (ghostbranch agents allow); on its own it never skips the console")

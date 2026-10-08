@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -15,6 +16,7 @@ import (
 )
 
 func TestFullLoopThroughTheCLI(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	for _, args := range [][]string{{"init", "acme/widget"}, {"sync"}, {"feature", "start", "feat-x"}} {
 		if code, env := te.runJSON(args...); code != 0 || env["ok"] != true {
@@ -27,7 +29,7 @@ func TestFullLoopThroughTheCLI(t *testing.T) {
 		t.Fatalf("gate: %d %v", code, env)
 	}
 	grantAgents(te)
-	code, env = te.runJSON("promote", "feat-x", "-m", "Add feature", "--yes")
+	code, env = te.runJSON("promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--yes")
 	data, _ := env["data"].(map[string]any)
 	applied, _ := data["applied"].(map[string]any)
 	if code != 0 || applied["public_pr"] != float64(1) {
@@ -36,6 +38,7 @@ func TestFullLoopThroughTheCLI(t *testing.T) {
 }
 
 func TestUsageErrorsAreBadFlagWithExit2(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	for _, args := range [][]string{{"gate"}, {"--bogus"}, {"frobnicate"}, {"promote", "x", "--mode"}} {
 		code, env := te.runJSON(args...)
@@ -47,6 +50,7 @@ func TestUsageErrorsAreBadFlagWithExit2(t *testing.T) {
 }
 
 func TestAuthMissing(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	delete(te.vars, "GHOSTBRANCH_TOKEN")
 	code, env := te.runJSON("sync")
@@ -56,6 +60,7 @@ func TestAuthMissing(t *testing.T) {
 }
 
 func TestActorMustBeWellFormed(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	te.vars["GHOSTBRANCH_ACTOR"] = "robot"
 	code, env := te.runJSON("sync")
@@ -65,6 +70,7 @@ func TestActorMustBeWellFormed(t *testing.T) {
 }
 
 func TestHumanOutputAndHelp(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	code, out, _ := te.run("init", "acme/widget")
 	if code != 0 || !strings.Contains(out, "acme/widget-shadow") || strings.HasPrefix(strings.TrimSpace(out), "{") {
@@ -80,16 +86,40 @@ func TestHumanOutputAndHelp(t *testing.T) {
 	}
 }
 
+// Human output says how the history was scanned and will publish, and which
+// commits a finding is in.
+func TestHumanOutputForHistoryModes(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	withFeature(te)
+	code, out, errOut := te.run("gate", "feat-x")
+	if code != 0 || !strings.Contains(out, "  1 commit(s), scanned as preserve\n") {
+		t.Fatalf("gate: %d %q %q", code, out, errOut)
+	}
+	code, out, errOut = te.run("promote", "feat-x", "--plan")
+	if code != 0 || !strings.Contains(out, "  preserve: 1 public commit(s)\nPublish it with: ghostbranch apply ") {
+		t.Fatalf("promote --plan: %d %q %q", code, out, errOut)
+	}
+	editConfig(te, "block_patterns: []", `block_patterns: ["JIRA-[0-9]+"]`)
+	te.shadowCommitMsg("feat-x", "fix JIRA-1", map[string]string{"b.txt": "b\n"})
+	code, out, errOut = te.run("gate", "feat-x")
+	if code != 3 || !regexp.MustCompile(`leak f-[0-9a-f]+: .* \(commit\(s\) [0-9a-f]{12}\)\n`).MatchString(out) {
+		t.Fatalf("gate with a message leak: %d %q %q", code, out, errOut)
+	}
+}
+
 func TestPromoteWithoutYesAndNoTTYNeedsApproval(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	gatedFeature(te)
-	code, _, errOut := te.run("promote", "feat-x", "-m", "Add feature")
+	code, _, errOut := te.run("promote", "feat-x", "--mode", "squash", "-m", "Add feature")
 	if code != 5 || !strings.Contains(errOut, "APPROVAL_REQUIRED") {
 		t.Fatalf("%d %q", code, errOut)
 	}
 }
 
 func TestPlumbingFailureIsInternalNotUsage(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	dir := filepath.Join(te.vars["GHOSTBRANCH_HOME"], "workspaces", "default")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -106,6 +136,7 @@ func TestPlumbingFailureIsInternalNotUsage(t *testing.T) {
 }
 
 func TestPlanIsAPreview(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	initOnly(te)
 	testutil.Commit(t, te.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
@@ -121,6 +152,7 @@ func TestPlanIsAPreview(t *testing.T) {
 
 // DEFERRED (sp2): a malformed actor is reported before auth or network.
 func TestActorIsCheckedFirst(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	delete(te.vars, "GHOSTBRANCH_TOKEN")
 	te.vars["GHOSTBRANCH_ACTOR"] = "robot"
@@ -132,6 +164,7 @@ func TestActorIsCheckedFirst(t *testing.T) {
 
 // DEFERRED (sp2): --json=true is honoured even when flag parsing fails.
 func TestJSONEqualsTrue(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	code, out, _ := te.run("gate", "--json=true")
 	if code != 2 || !strings.HasPrefix(strings.TrimSpace(out), "{") {
@@ -140,6 +173,7 @@ func TestJSONEqualsTrue(t *testing.T) {
 }
 
 func TestGuideNeedsNoTokenAndMatchesItsSchema(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	delete(te.vars, "GHOSTBRANCH_TOKEN")
 	code, out, _ := te.run("guide", "--json")
@@ -187,6 +221,7 @@ func TestNewCommandsNeverPush(t *testing.T) {
 // --all revokes every waiver in the workspace, whatever the repo, so an
 // explicit --repo beside it is refused rather than silently ignored.
 func TestWaiversRevokeAllRefusesRepo(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	waiveLeak(te)
 	code, env := te.runJSON("waivers", "revoke", "--all", "--repo", "acme/widget")
@@ -202,6 +237,7 @@ func TestWaiversRevokeAllRefusesRepo(t *testing.T) {
 // sync cancels the workflow runs its push starts in the shadow repo and
 // says so; --no-cancel leaves them running.
 func TestSyncCancelsPushRunsAndNoCancelSkips(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	initOnly(te)
 	up := testutil.Commit(t, te.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n",

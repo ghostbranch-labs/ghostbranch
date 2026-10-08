@@ -3,7 +3,8 @@
   "title": "gate data",
   "type": "object",
   "additionalProperties": false,
-  "required": ["feature", "feature_head", "public_main", "overlay", "candidate", "published_tree", "checks",
+  "required": ["feature", "feature_head", "public_main", "overlay", "candidate", "published_tree", "scanned_as",
+               "commits", "checks",
                "failed_checks", "leak", "findings", "waived", "repo_guards", "shadow_pr", "reused", "preview"],
   "properties": {
     "feature": { "type": "string" },
@@ -12,9 +13,31 @@
     "overlay": { "$ref": "common.schema.json#/$defs/sha" },
     "candidate": { "$ref": "common.schema.json#/$defs/shaOrEmpty" },
     "published_tree": { "$ref": "common.schema.json#/$defs/shaOrEmpty" },
+    "scanned_as": {
+      "description": "the mode the leak scan covered: preserve scans every commit, squash and curated the final tree",
+      "enum": ["squash", "preserve", "curated"]
+    },
+    "commits": {
+      "description": "The feature's commits as the gate replayed them, oldest first, for drafting a --curate file; empty when the replay didn't finish.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source", "subject", "author", "files"],
+        "properties": {
+          "source": { "$ref": "common.schema.json#/$defs/sha" },
+          "subject": { "type": "string" },
+          "author": { "type": "string" },
+          "files": {
+            "description": "paths each commit changes on the feature branch, overlay paths left out; may include internal-only changes",
+            "type": "array", "items": { "type": "string" }
+          }
+        }
+      }
+    },
     "checks": { "enum": ["passed", "failed", "no_ci", "timeout", "not_run"] },
     "failed_checks": { "type": "array", "items": { "type": "string" } },
-    "leak": { "enum": ["clean", "found"] },
+    "leak": { "enum": ["clean", "found", "not_run"] },
     "findings": { "type": "array", "items": { "$ref": "finding.schema.json" } },
     "waived": { "type": "array", "items": { "$ref": "waived.schema.json" } },
     "repo_guards": { "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/guardReport" }] },

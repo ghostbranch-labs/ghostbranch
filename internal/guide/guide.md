@@ -8,18 +8,43 @@ main, green CI, and a leak scan of exactly what will be published.
 
 ## The loop
 
-0. New repo? See *Set up a repo*. Before starting a feature, if a result warns `SHADOW_BEHIND`, run
-   `ghostbranch sync` (its `next` says so).
+0. **Always run `ghostbranch sync --repo <public> --json` first**, before `feature start` or resuming
+   a feature: features start from shadow main. Sync never writes to public. New repo? *Set up a repo*.
 1. `ghostbranch feature start <name> --json` creates the feature branch in the shadow repo.
 2. Run the command in `data.checkout`. It fetches the branch from the shadow repo (in a checkout of the
    public repo, usually a remote named `shadow`) and switches to it. Commit there, and push **to the
    shadow repo only** (`git push shadow <name>`), never to `origin`.
 3. `ghostbranch gate <name> --json` rebases on public main, scans for leaks and runs CI.
-4. `ghostbranch promote <name> --mode squash -m "<message>" --plan --json` saves a plan of exactly
-   what would be published.
+4. `ghostbranch promote <name> --plan --json` publishes in the repo's `promote.default_mode`
+   (`preserve` unless set); pass `--mode` to choose. With more than one commit, add
+   `--title "<PR title>"`, written by you. It saves a plan of exactly what goes public: every commit,
+   file, author and the PR text.
 5. Follow `next`:
    - `needs_human: true`: stop, and give the person that exact command.
    - `needs_human: false`: a person has allowed agents to publish here; you may run it.
+
+## Choosing the history
+
+- **`preserve` (default unless `promote.default_mode` says otherwise):** each feature commit goes public
+  as it is, minus overlay paths and internal sections; commits left empty are dropped. Tidy history on
+  your feature branch first if it needs it.
+- **`squash`:** one commit: `--mode squash -m "<message>"`.
+- **`curated`:** write a JSON file from the gate result's `"commits"` (each has `source`, `subject`,
+  `author`, `files`) to group, reorder and reword:
+  `{"commits": [{"from": ["<source sha>", "<source sha>"], "message": "feat(x): what this does"},
+  {"from": ["<source sha>"], "message": "fix(y): ..."}]}`
+  then `ghostbranch promote <name> --mode curated --curate groups.json --title "<PR title>" --plan --json`.
+  Every commit must appear exactly once. Reordering commits that touch the same lines fails with
+  `CURATE_CONFLICT` or `CURATE_TREE_MISMATCH`: keep those in order, or reorder on your branch.
+- **Authors:** `promote.author_email` (`noreply` by default) decides who each public commit says wrote
+  it. Never rewrite authors on your branch to hide them.
+- **History leaks:** a preserve publish (and its gate) checks every commit, so a secret added and
+  later deleted still blocks; squash and curated check what they publish. A finding's `commits` are
+  the feature commits that introduce or change it (a later commit that only carries it unchanged is
+  not listed). To fix an older commit, rewrite it on your branch and push with
+  `git push --force-with-lease <shadow remote> <name>`, or publish with `--mode squash` or
+  `--mode curated` so it never ships. A leaking commit message: reword it, or use curated mode with
+  new messages. Never waive a finding yourself; a person may waive a false positive at their console.
 
 ## Set up a repo
 
@@ -73,8 +98,8 @@ main, green CI, and a leak scan of exactly what will be published.
 - Set `GHOSTBRANCH_ACTOR=agent:<your-name>` (for example `agent:claude-code`) on every
   `ghostbranch` command, so the ledger records that an agent acted. It is a label only; it never
   grants or blocks anything.
-- Write the promote `--message` yourself from the change (it becomes the public commit and PR text),
-  and show it to the person; use theirs if they give one.
+- Write the PR `--title` (and, for squash, `-m`; for curated, each group's message) yourself from the
+  change: they go public. Show them to the person; use theirs if they give them.
 - Don't know a code? `ghostbranch explain <CODE> --json`.
 - Want to see what a command would do? Add `--plan` (or `--dry-run`): it returns the exact operations
   and changes nothing.

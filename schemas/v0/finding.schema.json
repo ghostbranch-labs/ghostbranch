@@ -12,6 +12,7 @@
     "line": { "type": "integer", "minimum": 1 },
     "secret": { "const": "[REDACTED]" },
     "match": { "type": "string" },
-    "waivable": { "type": "boolean" }
+    "waivable": { "type": "boolean" },
+    "commits": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/sha" } }
   }
 }

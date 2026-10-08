@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.4",
+  "schema_version": "0.5",
   "command": "promote",
   "ok": true,
   "exit_code": 0,
@@ -8,9 +8,20 @@
       "feature": "feat-x",
       "feature_head": "d7407485ce685c126afcfc258f0a9eeb0092d776",
       "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
-      "overlay": "b60402e97e1fbf747e73421d2765b542fc4b34ee",
-      "candidate": "c0f21ddad0e397f57c498e974fa5e030c47a3e8f",
+      "overlay": "a1ef151295bf2b53d15b18523ab0184d02178bbd",
+      "candidate": "ad7c1d9752519d03b74752a472ecf072aacd2fb7",
       "published_tree": "ef9061717144a4bf03a0230d8f8926d019f2adeb",
+      "scanned_as": "preserve",
+      "commits": [
+        {
+          "source": "d7407485ce685c126afcfc258f0a9eeb0092d776",
+          "subject": "work",
+          "author": "Test Author <author@example.com>",
+          "files": [
+            "feature.txt"
+          ]
+        }
+      ],
       "checks": "passed",
       "failed_checks": [],
       "leak": "clean",
@@ -26,7 +37,7 @@
       "preview": null
     },
     "plan": {
-      "schema_version": "0.4",
+      "schema_version": "0.5",
       "id": "20261005T120005Z-0c0d0e",
       "kind": "promote",
       "actor": "human:octo",
@@ -40,23 +51,36 @@
       "fingerprint": {
         "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
         "feature_head": "d7407485ce685c126afcfc258f0a9eeb0092d776",
-        "overlay": "b60402e97e1fbf747e73421d2765b542fc4b34ee",
-        "gate_candidate": "c0f21ddad0e397f57c498e974fa5e030c47a3e8f"
+        "overlay": "a1ef151295bf2b53d15b18523ab0184d02178bbd",
+        "gate_candidate": "ad7c1d9752519d03b74752a472ecf072aacd2fb7"
       },
+      "curate": null,
       "publish": {
         "commit": "15dd9c9bcb7655bdb426fb4a24f440fc9c31fb65",
         "tree": "ef9061717144a4bf03a0230d8f8926d019f2adeb",
         "parent": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
-        "author": {
-          "name": "octo",
-          "email": "42+octo@users.noreply.github.com",
-          "date": "2026-10-05T12:00:05Z"
-        },
         "target_branch": "feat-x",
         "pr": {
           "title": "Add feature",
           "body": ""
-        }
+        },
+        "commits": [
+          {
+            "commit": "15dd9c9bcb7655bdb426fb4a24f440fc9c31fb65",
+            "tree": "ef9061717144a4bf03a0230d8f8926d019f2adeb",
+            "parent": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+            "sources": [
+              "d7407485ce685c126afcfc258f0a9eeb0092d776"
+            ],
+            "author": {
+              "name": "octo",
+              "email": "42+octo@users.noreply.github.com",
+              "date": "2026-10-05T12:00:05Z"
+            },
+            "subject": "Add feature"
+          }
+        ],
+        "dropped_empty": []
       },
       "leak": {
         "findings": [],

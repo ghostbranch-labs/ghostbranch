@@ -13,6 +13,7 @@
     "secret": { "const": "[REDACTED]" },
     "match": { "type": "string" },
     "waivable": { "type": "boolean" },
+    "commits": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/sha" } },
     "reason": { "type": "string" }
   }
 }

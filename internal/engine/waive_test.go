@@ -21,6 +21,7 @@ func fixture() map[string]string {
 }
 
 func TestAWaivedFindingNoLongerBlocks(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.startFeature("feat-x", fixture())
@@ -37,7 +38,7 @@ func TestAWaivedFindingNoLongerBlocks(t *testing.T) {
 	if err != nil || len(res.Findings) != 0 || len(res.Waived) != 1 || res.Waived[0].ID != f.ID || res.Waived[0].Reason != "test fixture" {
 		t.Fatalf("gate = %+v %v", res, err)
 	}
-	pr, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Message: "Add feature", PlanOnly: true})
+	pr, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Mode: "squash", Message: "Add feature", PlanOnly: true})
 	if err != nil || len(pr.Waived) != 1 || len(pr.Plan.Leak.Waived) != 1 || pr.Plan.Leak.Waived[0] != (plan.Waived{ID: f.ID, Rule: f.Rule, Where: "tree", Path: f.Path, Reason: "test fixture"}) {
 		t.Fatalf("promote = %+v %v", pr, err)
 	}
@@ -70,10 +71,11 @@ func TestAWaivedFindingNoLongerBlocks(t *testing.T) {
 }
 
 func TestTypedTextIsNeverWaivable(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.startFeature("feat-x", map[string]string{"feature.txt": "new\n"})
-	opt := engine.PromoteOptions{Feature: "feat-x", Message: "Add feature\n\ntoken " + testutil.FakeGitHubToken(), PlanOnly: true}
+	opt := engine.PromoteOptions{Feature: "feat-x", Mode: "squash", Message: "Add feature\n\ntoken " + testutil.FakeGitHubToken(), PlanOnly: true}
 	_, _, err := h.eng.Promote(h.ctx, h.pair, opt)
 	ce := wantCode(t, err, contract.LeakFound)
 	fs := ce.Details["findings"].([]leak.Finding)
@@ -89,6 +91,7 @@ func TestTypedTextIsNeverWaivable(t *testing.T) {
 
 // Review Focus 4.
 func TestAWaiverCoversOneFileOnly(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	body := "token: " + testutil.FakeGitHubToken() + "\n"
@@ -108,6 +111,7 @@ func TestAWaiverCoversOneFileOnly(t *testing.T) {
 
 // Review Focus 5.
 func TestACorruptWaiversFileBlocksWithAWarning(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.startFeature("feat-x", fixture())
@@ -128,11 +132,12 @@ func TestACorruptWaiversFileBlocksWithAWarning(t *testing.T) {
 }
 
 func TestApplyScansThePublishedCommitsRealAuthor(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.setBlockPatterns(`corp\.internal`)
 	h.startFeature("feat-x", map[string]string{"feature.txt": "new\n"})
-	pr, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Message: "Add feature", PlanOnly: true})
+	pr, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Mode: "squash", Message: "Add feature", PlanOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +156,7 @@ func TestApplyScansThePublishedCommitsRealAuthor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pl.Publish.Commit = P2
+	pl.Publish.Commit, pl.Publish.Commits[0].Commit = P2, P2
 	if _, err := plan.Save(filepath.Dir(path), pl); err != nil {
 		t.Fatal(err)
 	}
@@ -171,6 +176,7 @@ func TestApplyScansThePublishedCommitsRealAuthor(t *testing.T) {
 }
 
 func TestFileWarningsReachThePlanAndTheApprover(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.startFeature("feat-x", map[string]string{".github/workflows/release.yml": "on: push\n"})
@@ -178,7 +184,7 @@ func TestFileWarningsReachThePlanAndTheApprover(t *testing.T) {
 	if err != nil || !hasWarning(warns, contract.WorkflowChanged) {
 		t.Fatalf("gate warnings = %+v %v", warns, err)
 	}
-	pr, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Message: "Add release", PlanOnly: true})
+	pr, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Mode: "squash", Message: "Add release", PlanOnly: true})
 	if err != nil || !hasWarning(pr.Plan.Leak.Warnings, contract.WorkflowChanged) {
 		t.Fatalf("plan warnings = %+v %v", pr.Plan.Leak.Warnings, err)
 	}
@@ -205,13 +211,14 @@ func hasWarning(ws []contract.Warning, code contract.WarningCode) bool {
 }
 
 func TestPromoteReportsAFileWarningOnce(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.startFeature("feat-x", map[string]string{".github/workflows/release.yml": "on: push\n"})
 	if _, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x"); err != nil {
 		t.Fatal(err)
 	}
-	pr, warns, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Message: "Add release", Yes: true})
+	pr, warns, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Mode: "squash", Message: "Add release", Yes: true})
 	if err != nil || pr.Applied == nil {
 		t.Fatalf("promote = %+v %v", pr, err)
 	}
@@ -229,6 +236,7 @@ func TestPromoteReportsAFileWarningOnce(t *testing.T) {
 // A waiver covers exactly the finding it was made for: every field of the
 // match must agree.
 func TestAWaiverThatDiffersInOneFieldDoesNotApply(t *testing.T) {
+	t.Parallel()
 	cases := map[string]func(w *waiver.Waiver){
 		"match hash": func(w *waiver.Waiver) { w.MatchSHA256 = strings.Repeat("0", 64) },
 		"rule":       func(w *waiver.Waiver) { w.Rule = "other-rule" },
@@ -237,6 +245,7 @@ func TestAWaiverThatDiffersInOneFieldDoesNotApply(t *testing.T) {
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			h := newHarness(t)
 			h.init()
 			h.startFeature("feat-x", fixture())

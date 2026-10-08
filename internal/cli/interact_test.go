@@ -9,6 +9,7 @@ import (
 
 // DEFERRED (sp2): editor settings with spaces, quotes and Windows paths.
 func TestSplitCommand(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	spaced := filepath.Join(dir, "My Editor", "edit.exe")
 	if err := os.MkdirAll(filepath.Dir(spaced), 0o755); err != nil {

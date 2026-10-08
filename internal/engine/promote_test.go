@@ -14,6 +14,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
+	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
 	"github.com/ghostbranch-labs/ghostbranch/internal/plan"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
 )
@@ -38,16 +39,17 @@ func promote(h *harness, o engine.PromoteOptions) (*engine.PromoteResult, error)
 }
 
 func TestPromotePlanOnlyWritesAPlanAndTouchesNothingPublic(t *testing.T) {
+	t.Parallel()
 	h := gated(t)
 	before := h.publicRefs()
-	res, err := promote(h, engine.PromoteOptions{Message: "Add feature\n\nIt does things.", PlanOnly: true})
+	res, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "Add feature\n\nIt does things.", PlanOnly: true})
 	if err != nil || res.Plan == nil || res.Applied != nil || !res.Gate.Reused {
 		t.Fatalf("promote = %+v %v", res, err)
 	}
 	p := res.Plan
 	pubMain, _ := h.pubGit.MustResolve(h.ctx, "refs/heads/main")
 	if p.Publish.Parent != pubMain || p.Publish.Tree != res.Gate.PublishedTree || p.Publish.TargetBranch != "feat-x" ||
-		p.Publish.Author.Email != "42+octo@users.noreply.github.com" || p.Publish.PR.Title != "Add feature" ||
+		len(p.Publish.Commits) != 1 || p.Publish.Commits[0].Author.Email != "42+octo@users.noreply.github.com" || p.Publish.PR.Title != "Add feature" ||
 		p.Publish.PR.Body != "It does things." {
 		t.Fatalf("plan = %+v", p)
 	}
@@ -64,8 +66,9 @@ func TestPromotePlanOnlyWritesAPlanAndTouchesNothingPublic(t *testing.T) {
 }
 
 func TestPromoteYesPublishesExactlyTheGatedTree(t *testing.T) {
+	t.Parallel()
 	h := gated(t)
-	res, err := promote(h, engine.PromoteOptions{Message: "Add feature", Yes: true})
+	res, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "Add feature", Yes: true})
 	if err != nil || res.Applied == nil || res.Applied.PublicPR != 1 {
 		t.Fatalf("promote = %+v %v", res, err)
 	}
@@ -99,25 +102,28 @@ func TestPromoteYesPublishesExactlyTheGatedTree(t *testing.T) {
 
 // Review Focus 3a: a stale gate is re-run, never trusted.
 func TestPromoteReGatesWhenPublicMainMoved(t *testing.T) {
+	t.Parallel()
 	h := gated(t)
 	newMain := testutil.Commit(t, h.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
-	res, err := promote(h, engine.PromoteOptions{Message: "Add feature", PlanOnly: true})
+	res, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "Add feature", PlanOnly: true})
 	if err != nil || res.Gate.Reused || res.Plan.Fingerprint.PublicMain != newMain || res.Plan.Publish.Parent != newMain {
 		t.Fatalf("promote = %+v %v", res, err)
 	}
 }
 
 func TestPromoteReusesAFreshGate(t *testing.T) {
+	t.Parallel()
 	h := gated(t)
 	var calls atomic.Int32
 	h.forge.Checks = func(string, string) []forge.Check { calls.Add(1); return nil }
-	res, err := promote(h, engine.PromoteOptions{Message: "m", PlanOnly: true})
+	res, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "m", PlanOnly: true})
 	if err != nil || !res.Gate.Reused || calls.Load() != 0 {
 		t.Fatalf("reuse = %+v %v calls=%d", res, err, calls.Load())
 	}
 }
 
 func TestPromoteApprovalRules(t *testing.T) {
+	t.Parallel()
 	published := func(h *harness) bool { _, ok, _ := h.pubGit.Resolve(h.ctx, "refs/heads/feat-x"); return ok }
 	reasonOf := func(t *testing.T, err error) string {
 		t.Helper()
@@ -127,7 +133,7 @@ func TestPromoteApprovalRules(t *testing.T) {
 	t.Run("--yes without a grant or a console stops at the plan", func(t *testing.T) {
 		h := gated(t)
 		h.eng.Approver = nil
-		res, err := promote(h, engine.PromoteOptions{Message: "m", Yes: true})
+		res, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "m", Yes: true})
 		if r := reasonOf(t, err); r != "no_console" || published(h) || res.Plan == nil {
 			t.Fatalf("reason %q, published %v", r, published(h))
 		}
@@ -139,12 +145,12 @@ func TestPromoteApprovalRules(t *testing.T) {
 		for _, actor := range []string{"human:octo", "agent:claude-code", "app"} {
 			h := gated(t)
 			h.eng.Actor, h.eng.Approver = actor, nil
-			if _, err := promote(h, engine.PromoteOptions{Message: "m", Yes: true}); reasonOf(t, err) != "no_console" {
+			if _, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "m", Yes: true}); reasonOf(t, err) != "no_console" {
 				t.Fatalf("%s without a console: %v", actor, err)
 			}
 			h = gated(t)
 			h.eng.Actor = actor
-			if _, err := promote(h, engine.PromoteOptions{Message: "m"}); err != nil || !published(h) {
+			if _, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "m"}); err != nil || !published(h) {
 				t.Fatalf("%s confirmed at the console: %v", actor, err)
 			}
 		}
@@ -153,7 +159,7 @@ func TestPromoteApprovalRules(t *testing.T) {
 		h := gated(t)
 		h.eng.Approver = nil
 		h.grant(6 * time.Hour)
-		res, err := promote(h, engine.PromoteOptions{Message: "m", Yes: true})
+		res, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "m", Yes: true})
 		if err != nil || !published(h) || res.Applied.Approval == nil || res.Applied.Approval.Kind != "grant" ||
 			res.Applied.Approval.GrantID != "g-000001" || res.Applied.Approval.CreatedBy != "human:octo" {
 			t.Fatalf("promote = %+v %v", res, err)
@@ -167,7 +173,7 @@ func TestPromoteApprovalRules(t *testing.T) {
 		h := gated(t)
 		h.eng.Approver = nil
 		h.grant(6 * time.Hour)
-		if _, err := promote(h, engine.PromoteOptions{Message: "m"}); reasonOf(t, err) != "grant_needs_yes" || published(h) {
+		if _, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "m"}); reasonOf(t, err) != "grant_needs_yes" || published(h) {
 			t.Fatal(err)
 		}
 	})
@@ -176,13 +182,13 @@ func TestPromoteApprovalRules(t *testing.T) {
 		h.eng.Approver = nil
 		h.grant(time.Hour)
 		h.clock.Sleep(2 * time.Hour)
-		if _, err := promote(h, engine.PromoteOptions{Message: "m", Yes: true}); reasonOf(t, err) != "no_console" || published(h) {
+		if _, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "m", Yes: true}); reasonOf(t, err) != "no_console" || published(h) {
 			t.Fatal(err)
 		}
 	})
 	t.Run("--yes at a console still asks", func(t *testing.T) {
 		h := gated(t)
-		if _, err := promote(h, engine.PromoteOptions{Message: "m", Yes: true}); err != nil {
+		if _, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "m", Yes: true}); err != nil {
 			t.Fatal(err)
 		}
 		if len(h.approver.asked) != 1 {
@@ -193,7 +199,7 @@ func TestPromoteApprovalRules(t *testing.T) {
 		for _, r := range []approval.Reason{approval.NotConfirmed, approval.Timeout, approval.TooManyAttempts} {
 			h := gated(t)
 			h.approver.err = &approval.Refusal{Reason: r}
-			if _, err := promote(h, engine.PromoteOptions{Message: "m"}); reasonOf(t, err) != string(r) || published(h) {
+			if _, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "m"}); reasonOf(t, err) != string(r) || published(h) {
 				t.Fatalf("%s: %v", r, err)
 			}
 		}
@@ -201,7 +207,7 @@ func TestPromoteApprovalRules(t *testing.T) {
 	t.Run("a console failure is INTERNAL", func(t *testing.T) {
 		h := gated(t)
 		h.approver.err = errors.New("console vanished")
-		_, err := promote(h, engine.PromoteOptions{Message: "m"})
+		_, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "m"})
 		_ = wantCode(t, err, contract.Internal)
 		if published(h) {
 			t.Fatal("a console failure must not publish")
@@ -210,7 +216,7 @@ func TestPromoteApprovalRules(t *testing.T) {
 	t.Run("the console shows the branch and the files going public", func(t *testing.T) {
 		h := gated(t)
 		h.approver.err = &approval.Refusal{Reason: approval.NotConfirmed}
-		_, _ = promote(h, engine.PromoteOptions{Message: "m"})
+		_, _ = promote(h, engine.PromoteOptions{Mode: "squash", Message: "m"})
 		if len(h.approver.asked) != 1 || !strings.Contains(h.approver.asked[0], "feat-x") || !strings.Contains(h.approver.asked[0], "feature.txt") {
 			t.Fatalf("summary = %v", h.approver.asked)
 		}
@@ -225,7 +231,7 @@ func TestPromoteApprovalRules(t *testing.T) {
 			if err := os.WriteFile(h.eng.WS.GrantsPath(), []byte("{nope"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			_, err := promote(h, engine.PromoteOptions{Message: "m", Yes: true})
+			_, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "m", Yes: true})
 			if ce := wantCode(t, err, contract.Internal); !strings.Contains(ce.Message, "grants.json") || published(h) {
 				t.Fatalf("console=%v: %s", console, ce.Message)
 			}
@@ -238,6 +244,7 @@ func TestPromoteApprovalRules(t *testing.T) {
 
 // DEFERRED (sp2): input problems are reported before the gate can run.
 func TestPromoteChecksInputBeforeAnyCI(t *testing.T) {
+	t.Parallel()
 	h := gated(t)
 	testutil.Commit(t, h.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"}) // the gate is now stale
 	var calls atomic.Int32
@@ -247,8 +254,8 @@ func TestPromoteChecksInputBeforeAnyCI(t *testing.T) {
 		o    engine.PromoteOptions
 		code contract.Code
 	}{
-		{engine.PromoteOptions{}, contract.MissingInput},
-		{engine.PromoteOptions{Message: "m", Branch: "main"}, contract.NameInvalid},
+		{engine.PromoteOptions{Mode: "squash"}, contract.MissingInput},
+		{engine.PromoteOptions{Mode: "squash", Message: "m", Branch: "main"}, contract.NameInvalid},
 		{engine.PromoteOptions{Message: "m", Mode: "preserve"}, contract.BadFlag},
 	} {
 		_, err := promote(h, c.o)
@@ -261,42 +268,45 @@ func TestPromoteChecksInputBeforeAnyCI(t *testing.T) {
 
 // DEFERRED (sp2): --title alone keeps the body; both are trimmed.
 func TestPromoteTitleAndBody(t *testing.T) {
+	t.Parallel()
 	h := gated(t)
-	res, err := promote(h, engine.PromoteOptions{Message: "Subject\n\nBody text", Title: "  Custom title  ", PlanOnly: true})
+	res, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "Subject\n\nBody text", Title: "  Custom title  ", PlanOnly: true})
 	if err != nil || res.Plan.Publish.PR.Title != "Custom title" || res.Plan.Publish.PR.Body != "Body text" {
 		t.Fatalf("plan PR = %+v %v", res.Plan.Publish.PR, err)
 	}
-	res, err = promote(h, engine.PromoteOptions{Message: "Subject", Body: "  only body  ", PlanOnly: true})
+	res, err = promote(h, engine.PromoteOptions{Mode: "squash", Message: "Subject", Body: "  only body  ", PlanOnly: true})
 	if err != nil || res.Plan.Publish.PR.Title != "Subject" || res.Plan.Publish.PR.Body != "only body" {
 		t.Fatalf("plan PR = %+v %v", res.Plan.Publish.PR, err)
 	}
 }
 
 func TestPromoteInputErrors(t *testing.T) {
+	t.Parallel()
 	h := gated(t)
-	_, err := promote(h, engine.PromoteOptions{PlanOnly: true})
+	_, err := promote(h, engine.PromoteOptions{Mode: "squash", PlanOnly: true})
 	if ce := wantCode(t, err, contract.MissingInput); ce.Field != "message" {
 		t.Fatalf("field = %q", ce.Field)
 	}
 	h.eng.Editor = func(string) (string, error) { return "# only a comment\n\n", nil }
-	_, err = promote(h, engine.PromoteOptions{PlanOnly: true})
+	_, err = promote(h, engine.PromoteOptions{Mode: "squash", PlanOnly: true})
 	_ = wantCode(t, err, contract.MissingInput)
 	h.eng.Editor = func(string) (string, error) { return "From the editor\n# ignored\nbody line\n", nil }
-	res, err := promote(h, engine.PromoteOptions{PlanOnly: true})
+	res, err := promote(h, engine.PromoteOptions{Mode: "squash", PlanOnly: true})
 	if err != nil || res.Plan.Publish.PR.Title != "From the editor" || res.Plan.Publish.PR.Body != "body line" {
 		t.Fatalf("editor message = %+v %v", res, err)
 	}
-	_, err = promote(h, engine.PromoteOptions{Message: "m", Mode: "preserve"})
+	_, err = promote(h, engine.PromoteOptions{Message: "m", Mode: "rebase"})
 	if ce := wantCode(t, err, contract.BadFlag); ce.Field != "mode" {
 		t.Fatalf("field = %q", ce.Field)
 	}
-	_, err = promote(h, engine.PromoteOptions{Message: "m", Branch: "main", PlanOnly: true})
+	_, err = promote(h, engine.PromoteOptions{Mode: "squash", Message: "m", Branch: "main", PlanOnly: true})
 	_ = wantCode(t, err, contract.NameInvalid)
 }
 
 func TestPromoteScansTheMessageAndPRText(t *testing.T) {
+	t.Parallel()
 	h := gated(t)
-	res, err := promote(h, engine.PromoteOptions{Message: "Add feature with " + testutil.FakeGitHubToken(), PlanOnly: true})
+	res, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "Add feature with " + testutil.FakeGitHubToken(), PlanOnly: true})
 	_ = wantCode(t, err, contract.LeakFound)
 	if res.Plan != nil || len(res.Findings) == 0 || res.Findings[0].Where != "commit_message" {
 		t.Fatalf("promote = %+v", res)
@@ -304,8 +314,9 @@ func TestPromoteScansTheMessageAndPRText(t *testing.T) {
 }
 
 func TestPromoteUnderAnotherBranchName(t *testing.T) {
+	t.Parallel()
 	h := gated(t)
-	res, err := promote(h, engine.PromoteOptions{Message: "m", Branch: "public-name", Yes: true})
+	res, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "m", Branch: "public-name", Yes: true})
 	if err != nil || res.Applied.PublicBranch != "public-name" {
 		t.Fatalf("promote = %+v %v", res, err)
 	}
@@ -318,11 +329,12 @@ func TestPromoteUnderAnotherBranchName(t *testing.T) {
 }
 
 func TestPromoteReGatesWhenTheGateBranchIsGone(t *testing.T) {
+	t.Parallel()
 	h := gated(t)
 	if err := h.shadowGit().DeleteRef(h.ctx, "refs/heads/ghostbranch-gate/feat-x"); err != nil {
 		t.Fatal(err)
 	}
-	res, err := promote(h, engine.PromoteOptions{Message: "m", PlanOnly: true})
+	res, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "m", PlanOnly: true})
 	if err != nil || res.Gate.Reused {
 		t.Fatalf("promote = %+v %v", res, err)
 	}
@@ -332,10 +344,11 @@ func TestPromoteReGatesWhenTheGateBranchIsGone(t *testing.T) {
 }
 
 func TestPromoteReportsAFileWarningOnceWhenItRunsTheGate(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.startFeature("feat-x", map[string]string{".github/workflows/release.yml": "on: push\n"})
-	_, warns, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Message: "m", PlanOnly: true})
+	_, warns, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Mode: "squash", Message: "m", PlanOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,5 +360,178 @@ func TestPromoteReportsAFileWarningOnceWhenItRunsTheGate(t *testing.T) {
 	}
 	if n != 1 {
 		t.Fatalf("want exactly one WORKFLOW_CHANGED warning, got %d in %+v", n, warns)
+	}
+}
+
+// A gate recorded without the commit mapping (an older binary) is stale.
+func TestPromoteReGatesAGateWithoutCommitMapping(t *testing.T) {
+	t.Parallel()
+	h := gated(t)
+	forgeMeta(t, h, "feat-x", func(m *feature.Meta) { m.Gate.Commits = nil })
+	res, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "m", PlanOnly: true})
+	if err != nil || res.Gate.Reused {
+		t.Fatalf("promote must re-gate: %+v %v", res, err)
+	}
+}
+
+// A reused gate reports the mode its scan covered, never the promote's or
+// the default; a gate recorded without it is not reused.
+func TestPromoteReusedGateReportsTheModeItScanned(t *testing.T) {
+	t.Parallel()
+	h := gated(t) // gated under the default, preserve
+	res, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "m", PlanOnly: true})
+	if err != nil || !res.Gate.Reused || res.Gate.ScannedAs != "preserve" {
+		t.Fatalf("reused gate = %+v %v", res.Gate, err)
+	}
+	forgeMeta(t, h, "feat-x", func(m *feature.Meta) { m.Gate.ScannedAs = "" })
+	res, err = promote(h, engine.PromoteOptions{Mode: "squash", Message: "m", PlanOnly: true})
+	if err != nil || res.Gate.Reused || res.Gate.ScannedAs != "squash" {
+		t.Fatalf("a gate without scanned_as must not be reused: %+v %v", res.Gate, err)
+	}
+}
+
+// DEFERRED: a reused gate result has no shadow PR, not PR 0.
+func TestPromoteReusedGateHasNoShadowPR(t *testing.T) {
+	t.Parallel()
+	h := gated(t)
+	res, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "m", PlanOnly: true})
+	if err != nil || !res.Gate.Reused || res.Gate.ShadowPR != nil {
+		t.Fatalf("reused gate = %+v %v", res.Gate, err)
+	}
+}
+
+// gatedHistory gates a feature of three commits: a, notes only, b.
+func gatedHistory(t *testing.T) (*harness, []string) {
+	t.Helper()
+	h := newHarness(t)
+	h.init()
+	s1 := h.startFeature("feat-x", map[string]string{"a.txt": "a\n"})
+	sg := h.shadowGit()
+	s2 := testutil.Commit(t, sg, "feat-x", "notes", map[string]string{".ghostbranch/notes.md": "private\n"})
+	s3 := testutil.Commit(t, sg, "feat-x", "add b\n\nb matters", map[string]string{"b.txt": "b\n"})
+	if _, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x"); err != nil {
+		t.Fatalf("gate: %v", err)
+	}
+	return h, []string{s1, s2, s3}
+}
+
+func TestPromotePreservePublishesEachCommit(t *testing.T) {
+	t.Parallel()
+	h, src := gatedHistory(t)
+	res, err := promote(h, engine.PromoteOptions{Title: "Add a and b", Yes: true}) // mode from config: preserve
+	if err != nil || res.Plan.Mode != "preserve" || len(res.Plan.Publish.Commits) != 2 ||
+		!reflect.DeepEqual(res.Plan.Publish.DroppedEmpty, []string{src[1]}) {
+		t.Fatalf("promote = %+v %v", res.Plan, err)
+	}
+	c := res.Plan.Publish.Commits
+	if !reflect.DeepEqual(c[0].Sources, []string{src[0]}) || !reflect.DeepEqual(c[1].Sources, []string{src[2]}) ||
+		c[1].Subject != "add b" || c[1].Author.Email != "42+octo@users.noreply.github.com" ||
+		!c[1].Author.Date.Equal(testutil.Author(3).When) {
+		t.Fatalf("commits = %+v", c)
+	}
+	tipSHA, _ := h.pubGit.MustResolve(h.ctx, "refs/heads/feat-x")
+	if tipSHA != c[1].Commit || res.Plan.Publish.Commit != tipSHA {
+		t.Fatalf("public tip %s, plan %+v", tipSHA, res.Plan.Publish)
+	}
+	if p, _ := h.pubGit.MustResolve(h.ctx, tipSHA+"^"); p != c[0].Commit {
+		t.Fatal("public history must be the two commits on public main")
+	}
+	msg, _ := h.pubGit.CommitMessage(h.ctx, tipSHA)
+	if msg != "add b\n\nb matters\n" {
+		t.Fatalf("message = %q", msg)
+	}
+	// The fake forge keeps no PR texts; apply opens the PR with the plan's.
+	if pr := res.Plan.Publish.PR; pr.Title != "Add a and b" || pr.Body != "- work on feat-x\n- add b" || len(h.forge.PRs(publicName)) != 1 {
+		t.Fatalf("PR = %+v", pr)
+	}
+}
+
+func TestPromotePreserveNeedsATitleBeforeCI(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.startFeature("feat-x", map[string]string{"a.txt": "a\n"})
+	testutil.Commit(t, h.shadowGit(), "feat-x", "add b", map[string]string{"b.txt": "b\n"})
+	var calls atomic.Int32
+	h.forge.Checks = func(string, string) []forge.Check { calls.Add(1); return nil }
+	_, err := promote(h, engine.PromoteOptions{PlanOnly: true})
+	if ce := wantCode(t, err, contract.MissingInput); ce.Field != "title" || calls.Load() != 0 {
+		t.Fatalf("field %q, checks polled %d times", ce.Field, calls.Load())
+	}
+}
+
+func TestPromotePreserveOneCommitUsesItsSubject(t *testing.T) {
+	t.Parallel()
+	h := gated(t) // one commit: "work on feat-x", feature.txt plus notes
+	res, err := promote(h, engine.PromoteOptions{PlanOnly: true})
+	if err != nil || res.Plan.Publish.PR.Title != "work on feat-x" || len(res.Plan.Publish.Commits) != 1 {
+		t.Fatalf("promote = %+v %v", res.Plan, err)
+	}
+}
+
+func TestPromoteMessageOnlyForSquash(t *testing.T) {
+	t.Parallel()
+	h := gated(t)
+	_, err := promote(h, engine.PromoteOptions{Message: "m", PlanOnly: true}) // default preserve
+	if ce := wantCode(t, err, contract.BadFlag); ce.Field != "message" {
+		t.Fatalf("field = %q", ce.Field)
+	}
+	if err := engine.ValidatePromoteOptions(&engine.PromoteOptions{Feature: "feat-x", Mode: "preserve", Message: "m"}); contract.From(err).Field != "message" {
+		t.Fatalf("explicit preserve with -m: %v", err)
+	}
+}
+
+func TestPromoteNothingToPublish(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.startFeature("feat-x", map[string]string{".ghostbranch/notes.md": "private\n"})
+	if _, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x"); err != nil {
+		t.Fatal(err)
+	}
+	for _, o := range []engine.PromoteOptions{{PlanOnly: true}, {Mode: "squash", Message: "m", PlanOnly: true}} {
+		_, err := promote(h, o)
+		_ = wantCode(t, err, contract.NothingToPublish)
+	}
+}
+
+func TestPromoteKeepAndMapAuthors(t *testing.T) {
+	t.Parallel()
+	h, _ := gatedHistory(t)
+	h.setConfig("author_email: noreply", "author_email: keep")
+	res, err := promote(h, engine.PromoteOptions{Title: "t", PlanOnly: true})
+	if err != nil || res.Plan.Publish.Commits[0].Author.Email != "author@example.com" {
+		t.Fatalf("keep = %+v %v", res.Plan, err)
+	}
+	h.setConfig("author_email: keep", "author_email: map\n  author_map:\n    \"someone@else.example\": \"S <s@else.example>\"")
+	_, err = promote(h, engine.PromoteOptions{Title: "t", PlanOnly: true})
+	if ce := wantCode(t, err, contract.AuthorUnmapped); !reflect.DeepEqual(ce.Details["emails"], []string{"author@example.com"}) {
+		t.Fatalf("details = %v", ce.Details)
+	}
+}
+
+func TestPromoteScansEveryCommitMessage(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.setBlockPatterns("JIRA-[0-9]+")
+	h.startFeature("feat-x", map[string]string{"a.txt": "a\n"})
+	leaky := testutil.Commit(t, h.shadowGit(), "feat-x", "fix JIRA-123", map[string]string{"a.txt": "a2\n"})
+	_, err := promote(h, engine.PromoteOptions{Title: "t", Body: "b", PlanOnly: true}) // the default body would repeat the subject
+	ce := wantCode(t, err, contract.LeakFound)
+	fs := ce.Details["findings"].([]leak.Finding)
+	if len(fs) != 1 || fs[0].Where != "commit_message" || !reflect.DeepEqual(fs[0].Commits, []string{leaky}) || ce.Details["mode"] != "preserve" {
+		t.Fatalf("findings = %+v details = %v", fs, ce.Details)
+	}
+}
+
+func TestPromoteLeavesNoPlanWhenItsRefCannotBePushed(t *testing.T) {
+	t.Parallel()
+	h := gated(t)
+	h.installShadowHook("GH013: refused")
+	_, err := promote(h, engine.PromoteOptions{PlanOnly: true})
+	_ = wantCode(t, err, contract.PushRefused)
+	if ents, _ := os.ReadDir(h.eng.WS.PlansDir()); len(ents) != 0 {
+		t.Fatalf("a plan whose ref never reached the shadow repo must not be left behind: %v", ents)
 	}
 }

@@ -12,6 +12,7 @@ import (
 )
 
 func TestPublicPushWithoutWriteAccessIsTokenCannotPublish(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "denied", http.StatusForbidden)
 	}))

@@ -19,6 +19,7 @@ const internalSrc = "package app\n\n// BEGIN-INTERNAL\nconst internal = 1\n// EN
 const publicSrc = "package app\n\nconst public = 2\n"
 
 func TestGateStripsInternalSectionsBeforeCI(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.startFeature("feat-x", map[string]string{"app.go": internalSrc})
@@ -33,7 +34,7 @@ func TestGateStripsInternalSectionsBeforeCI(t *testing.T) {
 	if r, _, _ := sh.ShowFile(h.ctx, res.Candidate+"^", "app.go"); string(r) != internalSrc {
 		t.Fatalf("R must keep the internal lines, got %q", r)
 	}
-	pr, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Message: "Add app", Yes: true})
+	pr, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Mode: "squash", Message: "Add app", Yes: true})
 	if err != nil || pr.Applied == nil {
 		t.Fatalf("promote = %+v %v", pr, err)
 	}
@@ -43,6 +44,7 @@ func TestGateStripsInternalSectionsBeforeCI(t *testing.T) {
 }
 
 func TestGateStopsOnInvalidMarkersBeforeAnyPush(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.startFeature("feat-x", map[string]string{"app.go": "ok\n// BEGIN-INTERNAL\nx\n"})
@@ -113,6 +115,7 @@ func forgeRecordedTree(t *testing.T, h *harness, name, tree string) {
 // Review Focus 1: a gate recorded by the SP2 binary kept the internal lines
 // in its published tree. Promote must re-gate, never publish that tree.
 func TestPromoteRegatesWhenTheRecordedTreeDiffers(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.startFeature("feat-x", map[string]string{"app.go": internalSrc})
@@ -125,7 +128,7 @@ func TestPromoteRegatesWhenTheRecordedTreeDiffers(t *testing.T) {
 		t.Fatal(err)
 	}
 	forgeRecordedTree(t, h, "feat-x", unstripped)
-	res, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Message: "m", PlanOnly: true})
+	res, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Mode: "squash", Message: "m", PlanOnly: true})
 	if err != nil || res.Gate.Reused || res.Plan.Publish.Tree != gr.PublishedTree {
 		t.Fatalf("promote = %+v %v; want a fresh gate and the stripped tree %s", res.Gate, err, gr.PublishedTree)
 	}
@@ -150,10 +153,11 @@ func withFile(t *testing.T, entries []gitx.TreeEntry, path, sha string) []gitx.T
 // so only re-deriving T from the candidate's parent catches it. Forged here
 // end to end: gate branch, feature metadata, plan ref and plan file.
 func TestApplyRefusesAPlanWhoseTreeWasNotStripped(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.startFeature("feat-x", map[string]string{"app.go": internalSrc})
-	res, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Message: "Add app", PlanOnly: true})
+	res, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Mode: "squash", Message: "Add app", PlanOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,6 +230,7 @@ func TestApplyRefusesAPlanWhoseTreeWasNotStripped(t *testing.T) {
 
 // Applying rewrites feature.json at the current schema version.
 func TestApplyStampsTheMetaSchemaVersion(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.startFeature("feat-x", map[string]string{"app.go": publicSrc})
@@ -233,7 +238,7 @@ func TestApplyStampsTheMetaSchemaVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 	forgeMeta(t, h, "feat-x", func(m *feature.Meta) { m.SchemaVersion = "0.2" })
-	if _, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Message: "Add app", Yes: true}); err != nil {
+	if _, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Mode: "squash", Message: "Add app", Yes: true}); err != nil {
 		t.Fatal(err)
 	}
 	raw, _, err := h.shadowGit().ShowFile(h.ctx, "refs/ghostbranch/features/feat-x", feature.MetaFile)
@@ -247,6 +252,7 @@ func TestApplyStampsTheMetaSchemaVersion(t *testing.T) {
 }
 
 func TestTheMirrorProtectsItsAttributes(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	got, err := os.ReadFile(filepath.Join(h.eng.WS.MirrorDir(h.pair), "info", "attributes"))

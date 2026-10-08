@@ -11,7 +11,7 @@ import (
 
 // SchemaVersion versions the envelope and every data schema. It stays 0.x
 // until launch, and 0.x versions may break.
-const SchemaVersion = "0.4"
+const SchemaVersion = "0.5"
 
 // Exit codes. Agents branch on these, so they never change meaning.
 const (
@@ -48,6 +48,15 @@ const (
 	// WaiverUnknown means waivers add named an id that is not a waivable
 	// finding in what the gate would publish now.
 	WaiverUnknown Code = "WAIVER_UNKNOWN"
+	// CurateInvalid means a --curate file is malformed, or its groups do not
+	// name every feature commit exactly once.
+	CurateInvalid Code = "CURATE_INVALID"
+	// NothingToPublish means every feature commit is empty once overlay
+	// paths and internal sections are stripped.
+	NothingToPublish Code = "NOTHING_TO_PUBLISH"
+	// AuthorUnmapped means promote.author_email is map and a commit's author
+	// email is not in promote.author_map.
+	AuthorUnmapped Code = "AUTHOR_UNMAPPED"
 
 	NotAPairCheckout Code = "NOT_A_PAIR_CHECKOUT"
 
@@ -71,6 +80,12 @@ const (
 	// ShadowCreateDenied means the token may not create the shadow repo; a
 	// person creates it and init adopts it.
 	ShadowCreateDenied Code = "SHADOW_CREATE_DENIED"
+	// CurateConflict means replaying the curated groups in their order hit
+	// a conflict; Ghostbranch never resolves it.
+	CurateConflict Code = "CURATE_CONFLICT"
+	// CurateTreeMismatch means the curated replay ends on a tree other than
+	// the one the gate's CI tested.
+	CurateTreeMismatch Code = "CURATE_TREE_MISMATCH"
 
 	ApprovalRequired Code = "APPROVAL_REQUIRED"
 
@@ -81,13 +96,15 @@ var exitCodes = map[Code]int{
 	AuthMissing: ExitFailure, ShadowCreateDenied: ExitFailure, ForgeError: ExitFailure, ShadowNotPrivate: ExitFailure,
 	ConfigInvalid: ExitFailure, Locked: ExitFailure, Internal: ExitFailure,
 	TokenCannotPublish: ExitFailure, GuardUnsupported: ExitFailure, PushBlocked: ExitFailure, PushRefused: ExitFailure,
+	AuthorUnmapped: ExitFailure, NothingToPublish: ExitFailure,
 	NotAPairCheckout: ExitUsage,
 	BadFlag:          ExitUsage, MissingInput: ExitUsage, PairAmbiguous: ExitUsage,
 	NameInvalid: ExitUsage, FeatureNotFound: ExitUsage,
 	ChecksFailed: ExitGateFailed, NoCI: ExitGateFailed, CITimeout: ExitGateFailed, LeakFound: ExitGateFailed,
-	MarkerInvalid: ExitGateFailed, WaiverUnknown: ExitUsage,
+	MarkerInvalid: ExitGateFailed, WaiverUnknown: ExitUsage, CurateInvalid: ExitUsage,
 	RebaseConflict: ExitConflict, SyncDiverged: ExitConflict, BranchExists: ExitConflict,
 	OverlayCollision: ExitConflict, ShadowNotEmpty: ExitConflict, RefMoved: ExitConflict,
+	CurateConflict: ExitConflict, CurateTreeMismatch: ExitConflict,
 	ApprovalRequired: ExitNeedsApproval,
 	PlanStale:        ExitPlanStale,
 }
