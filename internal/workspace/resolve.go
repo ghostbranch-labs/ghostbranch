@@ -39,7 +39,7 @@ func publicFromRemotes(remotes []Remote) string {
 			continue
 		}
 		name, ok := ParseRemoteURL(r.URL)
-		if !ok {
+		if !ok || strings.HasSuffix(strings.ToLower(name), "-shadow") {
 			continue
 		}
 		if r.Name == "origin" {

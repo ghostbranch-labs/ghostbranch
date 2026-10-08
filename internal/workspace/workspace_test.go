@@ -170,8 +170,8 @@ func TestResolveNotRegisteredNamesThePublicRepo(t *testing.T) {
 	if _, err := ws.Resolve("acme/x", nil); !errors.As(err, &ce) || ce.Details["public"] != "acme/x" {
 		t.Fatalf("unknown --repo: %+v", err)
 	}
-	// Empty workspace inside a checkout: the first remote that parses names the repo.
-	_, err := ws.Resolve("", []workspace.Remote{{Name: "origin", URL: "https://example.com/nope.git"}, {Name: "origin", URL: "git@github.com:acme/widget.git"}})
+	// Empty workspace inside a checkout: the remote that parses names the repo.
+	_, err := ws.Resolve("", []workspace.Remote{{Name: "upstream", URL: "https://example.com/nope.git"}, {Name: "origin", URL: "git@github.com:acme/widget.git"}})
 	if !errors.As(err, &ce) || ce.Code != contract.PairAmbiguous || ce.Details["public"] != "acme/widget" {
 		t.Fatalf("empty workspace: %+v", err)
 	}
@@ -200,6 +200,10 @@ func TestResolveNeverGuessesTheShadowRepoAsPublic(t *testing.T) {
 	}
 	if _, err := ws.Resolve("acme/widget-shadow", nil); !errors.As(err, &ce) || ce.Details["public"] != nil {
 		t.Fatalf("--repo naming a shadow: %+v", err)
+	}
+	shadowOrigin := []workspace.Remote{{Name: "origin", URL: "https://github.com/acme/widget-shadow"}}
+	if _, err := ws.Resolve("", shadowOrigin); !errors.As(err, &ce) || ce.Details["public"] != nil {
+		t.Fatalf("origin is the shadow repo: %+v", err)
 	}
 	two := []workspace.Remote{{Name: "a", URL: "git@github.com:acme/one.git"}, {Name: "b", URL: "git@github.com:acme/two.git"}}
 	if _, err := ws.Resolve("", two); !errors.As(err, &ce) || ce.Details["public"] != nil {
