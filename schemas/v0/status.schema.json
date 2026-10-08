@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "status data",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["public", "shadow", "public_main", "shadow_main", "shadow_behind", "overlay", "overlay_status", "scheduled_sync", "features"],
+  "properties": {
+    "public": { "$ref": "common.schema.json#/$defs/repo" },
+    "shadow": { "$ref": "common.schema.json#/$defs/repo" },
+    "public_main": { "$ref": "common.schema.json#/$defs/sha" },
+    "shadow_main": { "description": "empty when the shadow repo has no main", "$ref": "common.schema.json#/$defs/shaOrEmpty" },
+    "shadow_behind": { "description": "shadow main is a strict ancestor of public main; run sync", "type": "boolean" },
+    "overlay": { "description": "the overlay branch's commit", "$ref": "common.schema.json#/$defs/sha" },
+    "overlay_status": { "description": "outdated when a managed overlay file needs ghostbranch upgrade", "enum": ["current", "outdated"] },
+    "scheduled_sync": { "type": "boolean" },
+    "features": { "description": "every feature, abandoned included, sorted by name", "type": "array", "items": { "$ref": "feature-report.schema.json" } }
+  }
+}

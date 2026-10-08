@@ -168,6 +168,20 @@ func TestOnlyPromoteAndApplyReachThePublicRepo(t *testing.T) {
 		t.Fatalf("public pushes = %+v", public)
 	}
 
+	// status, feature list and feature show only read, a published feature
+	// among the ones they report.
+	baseline = h.publicRefs()
+	n = len(h.pushes)
+	_, _, err = h.eng.Status(h.ctx, h.pair)
+	run("status", err, "")
+	_, _, err = h.eng.FeatureList(h.ctx, h.pair, true)
+	run("feature list --all", err, "")
+	_, _, err = h.eng.FeatureShow(h.ctx, h.pair, "good")
+	run("feature show", err, "")
+	if len(h.pushes) != n {
+		t.Fatal("status, feature list and feature show must never push")
+	}
+
 	// remove is local: it unregisters the pair and touches no repo. It goes
 	// last, since nothing runs on the pair after it.
 	baseline = h.publicRefs()
@@ -202,6 +216,9 @@ func TestAShadowRepoTurnedPublicStopsEverything(t *testing.T) {
 		_, _, steps["gate"] = h.eng.Gate(h.ctx, h.pair, "good")
 		_, _, steps["promote"] = h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "good", Mode: "squash", Message: "m", Yes: true})
 		_, _, steps["apply"] = h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: res.Plan.ID, Yes: true})
+		_, _, steps["status"] = h.eng.Status(h.ctx, h.pair)
+		_, _, steps["feature list"] = h.eng.FeatureList(h.ctx, h.pair, true)
+		_, _, steps["feature show"] = h.eng.FeatureShow(h.ctx, h.pair, "good")
 		for step, err := range steps {
 			if codeOf(err) != contract.ShadowNotPrivate {
 				t.Errorf("%s: want SHADOW_NOT_PRIVATE, got %v", step, err)

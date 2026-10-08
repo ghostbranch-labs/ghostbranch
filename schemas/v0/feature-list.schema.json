@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "feature list data",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["features"],
+  "properties": {
+    "features": { "description": "sorted by name; abandoned features only with --all", "type": "array", "items": { "$ref": "feature-report.schema.json" } }
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "One feature as the survey reports it (status, feature list, feature show)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "state", "branch", "head", "base", "drift", "gate", "public_pr", "pr_state", "plan_id", "moved", "abandoned"],
+  "properties": {
+    "name": { "type": "string" },
+    "state": { "enum": ["draft", "in_review", "gate_passed", "published", "merged", "merged_moved", "pr_closed", "branch_gone", "abandoned"] },
+    "branch": { "type": "string" },
+    "head": { "description": "the feature branch's head; empty when the branch is gone", "$ref": "common.schema.json#/$defs/shaOrEmpty" },
+    "base": { "$ref": "common.schema.json#/$defs/sha" },
+    "drift": {
+      "description": "whether the feature still merges cleanly onto public main; n/a when the branch is gone",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "files"],
+      "properties": {
+        "status": { "enum": ["clean", "conflicts", "unknown", "n/a"] },
+        "files": { "description": "the files that conflict", "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "gate": {
+      "description": "the last gate result; null when never gated",
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["checks", "leak", "scanned_as", "fresh", "at"],
+          "properties": {
+            "checks": { "enum": ["passed", "failed", "no_ci", "timeout", "not_run"] },
+            "leak": { "enum": ["clean", "found", "not_run"] },
+            "scanned_as": {
+              "description": "the mode the gate's leak scan covered; empty in a gate recorded by an older binary",
+              "enum": ["", "squash", "preserve", "curated"]
+            },
+            "fresh": { "description": "the gate still matches the feature head, public main and the overlay", "type": "boolean" },
+            "at": { "$ref": "common.schema.json#/$defs/time" }
+          }
+        }
+      ]
+    },
+    "public_pr": { "description": "null when never published", "type": ["integer", "null"], "minimum": 1 },
+    "pr_state": {
+      "description": "the public PR's state; empty when never published, unknown when GitHub couldn't be asked",
+      "enum": ["", "open", "merged", "closed", "unknown"]
+    },
+    "plan_id": {
+      "description": "the plan the feature was published from; empty when never published",
+      "oneOf": [{ "const": "" }, { "$ref": "common.schema.json#/$defs/planId" }]
+    },
+    "moved": { "description": "the branch moved since it was published; false when unpublished", "type": "boolean" },
+    "abandoned": { "type": "boolean" }
+  }
+}

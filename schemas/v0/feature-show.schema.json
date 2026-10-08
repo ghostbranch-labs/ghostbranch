@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "feature show data",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["feature", "commits", "ledger"],
+  "properties": {
+    "feature": { "$ref": "feature-report.schema.json" },
+    "commits": {
+      "description": "the feature's commits since public main, oldest first; empty when the branch is gone",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source", "subject", "author", "files"],
+        "properties": {
+          "source": { "$ref": "common.schema.json#/$defs/sha" },
+          "subject": { "type": "string" },
+          "author": { "type": "string" },
+          "files": {
+            "description": "paths the commit changes from its parent, overlay paths left out",
+            "type": "array", "items": { "type": "string" }
+          }
+        }
+      }
+    },
+    "ledger": { "description": "this pair's ledger entries for the feature, oldest first", "type": "array", "items": { "$ref": "ledger-entry.schema.json" } }
+  }
+}

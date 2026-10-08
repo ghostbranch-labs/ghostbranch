@@ -64,28 +64,40 @@ func gateCommitInfos(ctx context.Context, g *gitx.Git, cfg config.Config, pm str
 	set := overlay.NewSet(cfg.LeakScan.Strip...)
 	prev := pm
 	for i, c := range commits {
-		msg, err := g.CommitMessage(ctx, c.Rebased)
+		info, err := commitInfo(ctx, g, set, prev, c.Rebased)
 		if err != nil {
-			return nil, internalErr(err, "read a commit message")
+			return nil, err
 		}
-		author, _, err := g.CommitIdentities(ctx, c.Rebased)
-		if err != nil {
-			return nil, internalErr(err, "read a commit author")
-		}
-		names, err := g.DiffNames(ctx, prev, c.Rebased)
-		if err != nil {
-			return nil, internalErr(err, "list a commit's files")
-		}
-		files := []string{}
-		for _, n := range names {
-			if !set.Match(n) {
-				files = append(files, n)
-			}
-		}
-		infos[i] = CommitInfo{Source: c.Source, Subject: subject(msg), Author: author, Files: files}
+		info.Source = c.Source
+		infos[i] = info
 		prev = c.Rebased
 	}
 	return infos, nil
+}
+
+// commitInfo describes commit sha: its subject, its author as committed, and
+// the paths it changes from commit from, overlay paths left out. Source is
+// sha; the caller sets it when sha is a rebased copy.
+func commitInfo(ctx context.Context, g *gitx.Git, set overlay.Set, from, sha string) (CommitInfo, error) {
+	msg, err := g.CommitMessage(ctx, sha)
+	if err != nil {
+		return CommitInfo{}, internalErr(err, "read a commit message")
+	}
+	author, _, err := g.CommitIdentities(ctx, sha)
+	if err != nil {
+		return CommitInfo{}, internalErr(err, "read a commit author")
+	}
+	names, err := g.DiffNames(ctx, from, sha)
+	if err != nil {
+		return CommitInfo{}, internalErr(err, "list a commit's files")
+	}
+	files := []string{}
+	for _, n := range names {
+		if !set.Match(n) {
+			files = append(files, n)
+		}
+	}
+	return CommitInfo{Source: sha, Subject: subject(msg), Author: author, Files: files}, nil
 }
 
 const gatePRBody = "Automated Ghostbranch gate candidate: the feature rebased onto public main, plus the overlay. " +
