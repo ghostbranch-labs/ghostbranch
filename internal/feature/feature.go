@@ -38,18 +38,18 @@ type GateCommit struct {
 
 // Gate is the last gate result, pinned to the inputs it was computed from.
 type Gate struct {
-	FeatureHead   string `json:"feature_head"`
-	PublicMain    string `json:"public_main"`
-	Overlay       string `json:"overlay"`
-	Candidate     string `json:"candidate"`
-	PublishedTree string `json:"published_tree"`
+	FeatureHead   string       `json:"feature_head"`
+	PublicMain    string       `json:"public_main"`
+	Overlay       string       `json:"overlay"`
+	Candidate     string       `json:"candidate"`
+	PublishedTree string       `json:"published_tree"`
+	Commits       []GateCommit `json:"commits"`
+	Checks        string       `json:"checks"`
+	Leak          string       `json:"leak"`
+	At            time.Time    `json:"at"`
 	// ScannedAs is the mode the gate's leak scan covered; empty in a gate
 	// recorded before it was stored, which promote does not reuse.
-	ScannedAs string       `json:"scanned_as,omitempty"`
-	Commits   []GateCommit `json:"commits"`
-	Checks    string       `json:"checks"`
-	Leak      string       `json:"leak"`
-	At        time.Time    `json:"at"`
+	ScannedAs string `json:"scanned_as,omitempty"`
 }
 
 // Passed reports a green gate: checks passed and no leak findings.

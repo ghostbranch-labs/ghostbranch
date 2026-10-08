@@ -143,9 +143,9 @@ type built struct {
 // every mode). An empty mode means promote.default_mode. waiving is for
 // waivers add, which only looks up tree findings: it leaves author
 // identities out of the scan, so an unmapped author can't hide a waivable
-// finding. Once the feature
-// and public main are resolved it returns them even when a later step
-// fails, so callers can report what they ran against.
+// finding. Once the feature and public main are resolved it returns them
+// even when a later step fails, so callers can report what they ran
+// against.
 func (e *Engine) build(ctx context.Context, pc *pairCtx, name, mode string, waiving bool) (*built, []contract.Warning, error) {
 	g := pc.git
 	cfg, O, warns, err := e.readConfig(ctx, pc)
