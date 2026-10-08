@@ -361,3 +361,14 @@ func TestEmptyBlockPatternMatchesAreIgnored(t *testing.T) {
 		t.Fatalf("want one finding for xx: %+v %v", rep.Findings, err)
 	}
 }
+
+func TestFindingCommitsAreOmittedWhenEmpty(t *testing.T) {
+	b, _ := json.Marshal(leak.Finding{ID: "f-000000000000", Rule: "r", Where: "tree"})
+	if strings.Contains(string(b), "commits") {
+		t.Fatalf("empty commits must be omitted: %s", b)
+	}
+	b, _ = json.Marshal(leak.Finding{ID: "f-000000000000", Rule: "r", Where: "tree", Commits: []string{"abc"}})
+	if !strings.Contains(string(b), `"commits":["abc"]`) {
+		t.Fatalf("commits missing: %s", b)
+	}
+}

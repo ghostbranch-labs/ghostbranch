@@ -5,7 +5,7 @@
   "additionalProperties": false,
   "required": ["schema_version", "name", "branch", "created_by", "created_at", "base", "abandoned", "gate", "promoted"],
   "properties": {
-    "schema_version": { "const": "0.4" },
+    "schema_version": { "const": "0.5" },
     "name": { "type": "string" },
     "branch": { "type": "string" },
     "created_by": { "$ref": "common.schema.json#/$defs/actor" },
