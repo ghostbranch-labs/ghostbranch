@@ -638,10 +638,12 @@ func TestSyncRecordsTheDeletesWhenTheGatePRWontClose(t *testing.T) {
 	want := h.featureRefs("feat-x", id)
 	h.forge.ClosePRErr = errors.New("boom")
 	res, warns := h.syncOK(engine.SyncOptions{})
-	if len(warns) != 1 || warns[0].Code != contract.FeatureNotClosed || !strings.Contains(warns[0].Message, string(contract.ForgeError)) {
+	if len(warns) != 1 || warns[0].Code != contract.FeatureNotClosed || !strings.Contains(warns[0].Message, string(contract.ForgeError)) ||
+		!reflect.DeepEqual(warns[0].Details["deleted"], want) {
 		t.Fatalf("warnings = %+v", warns)
 	}
-	if len(res.Closed) != 0 {
+	// Its refs are gone, so it is closed; the warning keeps the PR in view.
+	if len(res.Closed) != 1 || res.Closed[0].Name != "feat-x" || res.Closed[0].PublicPR != pr || !reflect.DeepEqual(res.Closed[0].Deleted, want) {
 		t.Fatalf("closed = %+v", res.Closed)
 	}
 	after := h.shadowRefs()
@@ -652,5 +654,128 @@ func TestSyncRecordsTheDeletesWhenTheGatePRWontClose(t *testing.T) {
 	}
 	if closes := h.closeEntries(); len(closes) != 1 || closes[0].ErrorCode != string(contract.ForgeError) || !reflect.DeepEqual(closes[0].Refs, want) {
 		t.Fatalf("feature close entries = %+v", closes)
+	}
+}
+
+// corruptMeta points name's metadata ref in the shadow repo at a commit
+// whose feature.json doesn't parse, so every survey of the pair fails.
+func (h *harness) corruptMeta(name string) {
+	h.t.Helper()
+	sh := h.shadowGit()
+	sha := testutil.Commit(h.t, sh, "tmp-corrupt", "corrupt", map[string]string{feature.MetaFile: "not json\n"})
+	if _, err := sh.Run(h.ctx, "update-ref", "refs/ghostbranch/features/"+name, sha); err != nil {
+		h.t.Fatal(err)
+	}
+	if err := sh.DeleteRef(h.ctx, "refs/heads/tmp-corrupt"); err != nil {
+		h.t.Fatal(err)
+	}
+}
+
+// A survey that fails never fails the sync: it closes nothing and says so
+// in a FEATURE_NOT_CLOSED warning with no feature. --no-close never surveys.
+func TestSyncSurveyFailureIsAWarning(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	pr, _ := h.publish("feat-x")
+	h.forge.SetPRMerged(publicName, pr)
+	h.corruptMeta("feat-bad")
+	next := testutil.Commit(t, h.pubGit, "main", "upstream", map[string]string{"up.txt": "1\n"})
+	before := h.shadowRefs()
+	delete(before, "refs/heads/main")
+
+	res, warns := h.syncOK(engine.SyncOptions{})
+	if res.ShadowMainAfter != next || len(res.Closed) != 0 || len(res.Attention) != 0 || res.ActiveFeatures != 0 {
+		t.Fatalf("sync = %+v", res)
+	}
+	if len(warns) != 1 || warns[0].Code != contract.FeatureNotClosed ||
+		!strings.HasPrefix(warns[0].Message, "couldn't survey features, so nothing was closed: INTERNAL: ") ||
+		warns[0].Details["error_code"] != string(contract.Internal) || warns[0].Details["feature"] != nil {
+		t.Fatalf("warnings = %+v", warns)
+	}
+	after := h.shadowRefs()
+	delete(after, "refs/heads/main")
+	if !reflect.DeepEqual(after, before) || len(h.closeEntries()) != 0 {
+		t.Fatal("sync deleted something without a survey")
+	}
+
+	_, warns = h.syncOK(engine.SyncOptions{NoClose: true})
+	if len(warns) != 0 {
+		t.Fatalf("--no-close surveyed: %+v", warns)
+	}
+}
+
+// A failed survey doesn't mask a diverged branch: still SYNC_DIVERGED.
+func TestSyncSurveyFailureKeepsSyncDiverged(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.startFeature("feat-x", map[string]string{"x.txt": "x\n"})
+	h.corruptMeta("feat-bad")
+	testutil.Commit(t, h.shadowGit(), "main", "rogue", map[string]string{"rogue.txt": "x\n"})
+	res, warns, err := h.eng.Sync(h.ctx, h.pair, engine.SyncOptions{})
+	_ = wantCode(t, err, contract.SyncDiverged)
+	if res == nil || res.Action != "diverged" || len(warns) != 1 || warns[0].Code != contract.FeatureNotClosed {
+		t.Fatalf("sync = %+v %+v", res, warns)
+	}
+}
+
+// Main diverged, and a merged feature: sync still closes the feature, then
+// fails with SYNC_DIVERGED, whose message is only about the branch.
+func TestSyncDivergedStillCloses(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	pr, id := h.publish("feat-x")
+	h.forge.SetPRMerged(publicName, pr)
+	want := h.featureRefs("feat-x", id)
+	testutil.Commit(t, h.shadowGit(), "main", "rogue", map[string]string{"rogue.txt": "x\n"})
+	res, _, err := h.eng.Sync(h.ctx, h.pair, engine.SyncOptions{})
+	ce := wantCode(t, err, contract.SyncDiverged)
+	if !strings.Contains(ce.Message, "nothing was pushed to it") {
+		t.Fatalf("message = %q", ce.Message)
+	}
+	if len(res.Closed) != 1 || res.Closed[0].Name != "feat-x" || !reflect.DeepEqual(res.Closed[0].Deleted, want) {
+		t.Fatalf("closed = %+v", res.Closed)
+	}
+}
+
+// A published feature whose branch was deleted: closed by sync once its PR
+// merged, left in attention while the PR is open.
+func TestSyncBranchGoneFeatures(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	sh := h.shadowGit()
+	mergedPR, _ := h.publish("feat-merged")
+	h.forge.SetPRMerged(publicName, mergedPR)
+	h.publish("feat-open")
+	for _, b := range []string{"feat-merged", "feat-open"} {
+		if err := sh.DeleteRef(h.ctx, "refs/heads/"+b); err != nil {
+			t.Fatal(err)
+		}
+	}
+	keep := h.shadowRefs()["refs/ghostbranch/features/feat-open"]
+	h.eng.Approver = nil
+
+	res, warns := h.syncOK(engine.SyncOptions{})
+	if len(warns) != 0 {
+		t.Fatalf("warnings = %+v", warns)
+	}
+	if len(res.Closed) != 1 || res.Closed[0].Name != "feat-merged" || res.Closed[0].PublicPR != mergedPR {
+		t.Fatalf("closed = %+v", res.Closed)
+	}
+	if _, ok := res.Closed[0].Deleted["refs/heads/feat-merged"]; ok {
+		t.Fatalf("deleted a branch that was already gone: %+v", res.Closed[0].Deleted)
+	}
+	if len(res.Attention) != 1 || res.Attention[0].Name != "feat-open" || res.Attention[0].State != feature.StateBranchGone {
+		t.Fatalf("attention = %+v", res.Attention)
+	}
+	after := h.shadowRefs()
+	if _, ok := after["refs/ghostbranch/features/feat-merged"]; ok {
+		t.Fatal("the merged feature's metadata is still there")
+	}
+	if after["refs/ghostbranch/features/feat-open"] != keep {
+		t.Fatal("sync touched the feature whose PR is open")
 	}
 }

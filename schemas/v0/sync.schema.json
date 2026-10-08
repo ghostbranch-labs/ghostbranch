@@ -56,7 +56,7 @@
         }
       }
     },
-    "active_features": { "description": "features neither abandoned nor merged", "type": "integer", "minimum": 0 },
+    "active_features": { "description": "features not abandoned and not closable by sync", "type": "integer", "minimum": 0 },
     "attention": {
       "description": "merged_moved, pr_closed and branch_gone features sync won't close: a person must look at them",
       "type": "array",

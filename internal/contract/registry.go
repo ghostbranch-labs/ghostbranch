@@ -162,7 +162,7 @@ var warningDocs = map[WarningCode]Doc{
 	DriftUnknown: {Summary: "Ghostbranch couldn't check whether a feature still merges cleanly onto public main.",
 		WhatToDo: "Run ghostbranch gate <feature>; the gate is the authority on rebasing."},
 	FeatureNotClosed: {Summary: "Sync couldn't close a merged feature.",
-		WhatToDo: "Run ghostbranch feature show <name>, then feature close <name>."},
+		WhatToDo: "If details.deleted is set, the feature is gone: close its gate draft PR in the shadow repo by hand. Otherwise run ghostbranch feature show <name>, then feature close <name>. With no details.feature, sync couldn't survey the features and closed none: run ghostbranch status to see why."},
 }
 
 func intp(n int) *int { return &n }

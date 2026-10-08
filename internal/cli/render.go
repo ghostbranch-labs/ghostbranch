@@ -155,7 +155,7 @@ func human(r any) string {
 		case "fast_forward":
 			fmt.Fprintf(&b, "Shadow main fast-forwarded %s -> %s.\n", short(v.ShadowMainBefore), short(v.PublicMain))
 		default:
-			b.WriteString("Shadow main has diverged from public main; nothing was pushed.\n")
+			b.WriteString("Shadow main has diverged from public main; nothing was pushed to it.\n")
 		}
 		for _, br := range v.Branches {
 			if br.Name != "main" {

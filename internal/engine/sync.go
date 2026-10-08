@@ -26,7 +26,7 @@ type SyncResult struct {
 	Branches         []SyncBranch     `json:"branches"`
 	CancelledRuns    []CancelledRun   `json:"cancelled_runs"`
 	Closed           []ClosedFeature  `json:"closed"`          // merged features sync closed; never null
-	ActiveFeatures   int              `json:"active_features"` // features neither abandoned nor merged
+	ActiveFeatures   int              `json:"active_features"` // features not abandoned and not closable by sync
 	Attention        []FeatureReport  `json:"attention"`       // features a person must look at; never null
 	Preview          *preview.Preview `json:"preview"`
 }
@@ -174,18 +174,14 @@ func (e *Engine) Sync(ctx context.Context, p workspace.Pair, o SyncOptions) (res
 	}
 	// The closes read only public main and the feature refs, so a diverged
 	// shadow branch doesn't hold them up.
-	cw, err := e.closeMerged(ctx, pc, &p, res, o.NoClose)
-	warns = addWarnings(warns, cw...)
-	if err != nil {
-		return res, warns, err
-	}
+	warns = addWarnings(warns, e.closeMerged(ctx, pc, &p, res, o.NoClose)...)
 	if len(diverged) > 0 {
 		pronoun := "them"
 		if len(diverged) == 1 {
 			pronoun = "it"
 		}
 		return res, warns, contract.New(contract.SyncDiverged,
-			"shadow %s has commits that are not in public; nothing was pushed for %s", strings.Join(diverged, ", "), pronoun).
+			"shadow %s has commits that are not in public; nothing was pushed to %s", strings.Join(diverged, ", "), pronoun).
 			WithDetails(map[string]any{"branches": diverged, "shadow_main": sm, "public_main": pm})
 	}
 	return res, warns, nil
@@ -194,17 +190,25 @@ func (e *Engine) Sync(ctx context.Context, p workspace.Pair, o SyncOptions) (res
 // closeMerged is sync's auto-close, under sync's pair lock. It surveys the
 // pair's features, which costs one GetPR per published feature: the only
 // way to learn which public PRs merged, and acceptable for the handful of
-// features a pair has. It sets res.ActiveFeatures and res.Attention, then,
-// unless noClose, closes each feature that is ClosableWithoutConsole
-// through closeFeature, the same code as feature close: nothing that needs
-// a person is ever touched here. In a dry run the closes' ops join
-// res.Preview. A failed close never fails the sync: it is a
-// FEATURE_NOT_CLOSED warning, and the ledger still records it, with every
-// ref it deleted before failing.
-func (e *Engine) closeMerged(ctx context.Context, pc *pairCtx, p *workspace.Pair, res *SyncResult, noClose bool) ([]contract.Warning, error) {
+// features a pair has. It sets res.ActiveFeatures and res.Attention, then
+// closes each feature that is ClosableWithoutConsole through closeFeature,
+// the same code as feature close: nothing that needs a person is ever
+// touched here. noClose skips all of it, the survey too. In a dry run the
+// closes' ops join res.Preview. Nothing here fails the sync: a survey that
+// fails closes nothing, and a close that fails is a FEATURE_NOT_CLOSED
+// warning. The ledger records each close, with every ref it deleted, and a
+// feature whose refs were deleted is in res.Closed even if its gate PR then
+// wouldn't close.
+func (e *Engine) closeMerged(ctx context.Context, pc *pairCtx, p *workspace.Pair, res *SyncResult, noClose bool) []contract.Warning {
+	if noClose {
+		return nil
+	}
 	rs, warns, err := e.survey(ctx, pc)
 	if err != nil {
-		return warns, err
+		ce := contract.From(err)
+		return addWarnings(warns, contract.Warning{Code: contract.FeatureNotClosed,
+			Message: fmt.Sprintf("couldn't survey features, so nothing was closed: %s: %s", ce.Code, ce.Message),
+			Details: map[string]any{"error_code": string(ce.Code)}})
 	}
 	for _, r := range rs {
 		closable := ClosableWithoutConsole(r)
@@ -218,9 +222,6 @@ func (e *Engine) closeMerged(ctx context.Context, pc *pairCtx, p *workspace.Pair
 			}
 		}
 	}
-	if noClose {
-		return warns, nil
-	}
 	for _, r := range rs {
 		if !ClosableWithoutConsole(r) {
 			continue
@@ -230,33 +231,23 @@ func (e *Engine) closeMerged(ctx context.Context, pc *pairCtx, p *workspace.Pair
 			if err == nil {
 				res.Preview.Add(cr.Preview.Ops...)
 			}
-		} else {
-			summary := ""
-			var refs map[string]string
-			if cr != nil {
-				refs = cr.Deleted
-				if err == nil {
-					summary = closeLedgerSummary(cr)
-				}
-			}
-			e.recordWith("feature close", p, r.Name, "", summary, err, func(ent *ledger.Entry) {
-				if len(refs) > 0 {
-					ent.Refs = refs
-				}
-			})
-		}
-		if err != nil {
-			ce := contract.From(err)
-			details := map[string]any{"feature": r.Name, "error_code": string(ce.Code)}
-			if cr != nil && len(cr.Deleted) > 0 {
-				details["deleted"] = cr.Deleted
-			}
-			warns = addWarnings(warns, contract.Warning{Code: contract.FeatureNotClosed,
-				Message: fmt.Sprintf("couldn't close merged feature %s: %s: %s", r.Name, ce.Code, ce.Message),
-				Details: details})
 			continue
 		}
-		if !e.DryRun {
+		summary := ""
+		var refs map[string]string
+		if cr != nil {
+			refs = cr.Deleted
+			if err == nil {
+				summary = closeLedgerSummary(cr)
+			}
+		}
+		e.recordWith("feature close", p, r.Name, "", summary, err, func(ent *ledger.Entry) {
+			if len(refs) > 0 {
+				ent.Refs = refs
+			}
+		})
+		deleted := cr != nil && len(cr.Deleted) > 0
+		if err == nil || deleted {
 			pr := 0
 			if r.PublicPR != nil {
 				pr = *r.PublicPR
@@ -264,8 +255,18 @@ func (e *Engine) closeMerged(ctx context.Context, pc *pairCtx, p *workspace.Pair
 			e.progressf("closed merged feature %s (PR #%d)", r.Name, pr)
 			res.Closed = append(res.Closed, ClosedFeature{Name: r.Name, PublicPR: pr, Deleted: cr.Deleted})
 		}
+		if err != nil {
+			ce := contract.From(err)
+			details := map[string]any{"feature": r.Name, "error_code": string(ce.Code)}
+			if deleted {
+				details["deleted"] = cr.Deleted
+			}
+			warns = addWarnings(warns, contract.Warning{Code: contract.FeatureNotClosed,
+				Message: fmt.Sprintf("couldn't close merged feature %s: %s: %s", r.Name, ce.Code, ce.Message),
+				Details: details})
+		}
 	}
-	return warns, nil
+	return warns
 }
 
 // syncAction is the top-level action for main's per-branch status.

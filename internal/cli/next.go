@@ -128,6 +128,12 @@ func (a *app) next(err error) []contract.Next {
 				}
 				return []contract.Next{{Command: a.gb(args...), Why: "the repos moved since the plan was made; make a new plan", NeedsInput: modeInputs(mode)}}
 			}
+		case contract.SyncDiverged:
+			// A person sorts out the diverged branch (error.what_to_do), but
+			// the features sync surveyed still need what they need.
+			if r, ok := a.result.(*engine.SyncResult); ok {
+				return a.featureNexts(nil, r.Attention)
+			}
 		case contract.FeatureMoved:
 			if f, _ := ce.Details["feature"].(string); f != "" {
 				return []contract.Next{{Command: a.scoped("feature", "show", f),

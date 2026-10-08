@@ -708,7 +708,10 @@ func TestNextForSyncAttention(t *testing.T) {
 		{[]string{"ghostbranch", "feature", "close", "feat-b", "--repo", "acme/widget"}, "its PR merged but there are newer commits; promote them or a person closes it"},
 		{[]string{"ghostbranch", "feature", "close", "feat-c", "--repo", "acme/widget"}, "its PR was closed without merging"},
 	}
-	check := func(env map[string]any, closed []string) {
+	check := func(env map[string]any, closed []string, active int, want []struct {
+		cmd []string
+		why string
+	}) {
 		t.Helper()
 		data, _ := env["data"].(map[string]any)
 		var names []string
@@ -719,8 +722,8 @@ func TestNextForSyncAttention(t *testing.T) {
 		for _, c := range cl {
 			names = append(names, c.(map[string]any)["name"].(string))
 		}
-		if !slices.Equal(names, closed) || data["active_features"] != float64(2) {
-			t.Fatalf("closed = %v, active = %v; want %v, 2", names, data["active_features"], closed)
+		if !slices.Equal(names, closed) || data["active_features"] != float64(active) {
+			t.Fatalf("closed = %v, active = %v; want %v, %d", names, data["active_features"], closed, active)
 		}
 		n := nextOf(t, env)
 		if len(n) != len(want) {
@@ -736,12 +739,12 @@ func TestNextForSyncAttention(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("sync --no-close: exit %d %v", code, env)
 	}
-	check(env, nil)
+	check(env, nil, 0, nil) // --no-close doesn't survey
 	code, env = te.runJSON("sync")
 	if code != 0 {
 		t.Fatalf("sync: exit %d %v", code, env)
 	}
-	check(env, []string{"feat-a"})
+	check(env, []string{"feat-a"}, 2, want)
 	if _, env := te.runJSON("feature", "show", "feat-a"); env["ok"] != false {
 		t.Fatalf("feat-a is still there: %v", env)
 	}
@@ -751,6 +754,36 @@ func TestNextForSyncAttention(t *testing.T) {
 	code, out, _ := te.run("sync")
 	if line := fmt.Sprintf("closed merged feature feat-d (PR #%d)", prD); code != 0 || !strings.Contains(out, line) {
 		t.Fatalf("exit %d, output lacks %q:\n%s", code, line, out)
+	}
+}
+
+// A diverged shadow main fails sync with exit 4, but sync still closes the
+// merged feature and next still names the features a person must close.
+func TestNextForSyncDivergedKeepsAttention(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	grantAgents(te)
+	te.forge.SetPRMerged("acme/widget", publishFeature(te, "feat-a"))
+	te.forge.ClosePR("acme/widget", publishFeature(te, "feat-c"))
+	te.shadowCommit("main", map[string]string{"rogue.txt": "x\n"})
+	code, env := te.runJSON("sync")
+	e, _ := env["error"].(map[string]any)
+	if code != 4 || e["code"] != "SYNC_DIVERGED" {
+		t.Fatalf("exit %d %v", code, env)
+	}
+	data, _ := env["data"].(map[string]any)
+	if cl, _ := data["closed"].([]any); len(cl) != 1 || cl[0].(map[string]any)["name"] != "feat-a" {
+		t.Fatalf("closed = %v", data["closed"])
+	}
+	n := nextOf(t, env)
+	if len(n) != 1 || !reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "feature", "close", "feat-c", "--repo", "acme/widget"}) ||
+		n[0]["needs_human"] != true {
+		t.Fatalf("next = %v", n)
+	}
+	code, out, _ := te.run("sync")
+	if code != 4 || !strings.Contains(out, "Shadow main has diverged from public main; nothing was pushed to it.\n") {
+		t.Fatalf("exit %d:\n%s", code, out)
 	}
 }
 
