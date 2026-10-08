@@ -1,0 +1,16 @@
+{
+  "schema_version": "0.6",
+  "command": "feature show",
+  "ok": false,
+  "exit_code": 2,
+  "data": {},
+  "warnings": [],
+  "next": [],
+  "error": {
+    "code": "FEATURE_NOT_FOUND",
+    "message": "no feature \"nope\" in acme/widget-shadow; list them with ghostbranch feature list --all",
+    "field": "feature",
+    "retryable": false,
+    "details": {}
+  }
+}

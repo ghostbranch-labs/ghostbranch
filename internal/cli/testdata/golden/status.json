@@ -1,0 +1,38 @@
+{
+  "schema_version": "0.6",
+  "command": "status",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "public": "acme/widget",
+    "shadow": "acme/widget-shadow",
+    "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+    "shadow_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+    "shadow_behind": false,
+    "overlay": "a1ef151295bf2b53d15b18523ab0184d02178bbd",
+    "overlay_status": "current",
+    "scheduled_sync": false,
+    "features": [
+      {
+        "name": "feat-x",
+        "state": "draft",
+        "branch": "feat-x",
+        "head": "d7407485ce685c126afcfc258f0a9eeb0092d776",
+        "base": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+        "drift": {
+          "status": "clean",
+          "files": []
+        },
+        "gate": null,
+        "public_pr": null,
+        "pr_state": "",
+        "plan_id": "",
+        "moved": false,
+        "abandoned": false
+      }
+    ]
+  },
+  "warnings": [],
+  "next": [],
+  "error": null
+}

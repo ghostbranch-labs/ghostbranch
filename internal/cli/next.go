@@ -207,6 +207,10 @@ func (a *app) next(err error) []contract.Next {
 		if r.Preview == nil && r.Audit != nil && a.hasAuditFindings() {
 			out = append(out, contract.Next{Command: a.scoped("audit"), Why: "the audit after upgrade has warnings; read them"})
 		}
+	case *engine.StatusResult:
+		out = a.featureNexts(out, r.Features)
+	case *engine.FeatureListResult:
+		out = a.featureNexts(out, r.Features)
 	}
 	switch r := a.result.(type) {
 	case *engine.InitResult:
@@ -233,6 +237,54 @@ func (a *app) syncNext() []contract.Next {
 		return nil
 	}
 	return []contract.Next{{Command: a.scoped("sync"), Why: "shadow main is behind public main; sync it (fast-forward only)"}}
+}
+
+// featureNexts adds what the features need, from their reports, to out
+// (which leads with syncNext's sync when shadow main is behind). Sync
+// closes merged, unmoved features, so they share one sync step, folded into
+// that leading sync when there is one; then, by name, the features a person
+// must close and the ones to gate again. Abandoned features need nothing.
+func (a *app) featureNexts(out []contract.Next, rs []engine.FeatureReport) []contract.Next {
+	var merged []string
+	var rest []contract.Next
+	for _, r := range rs {
+		closeCmd := a.scoped("feature", "close", r.Name)
+		switch r.State {
+		case feature.StateMerged:
+			merged = append(merged, r.Name)
+		case feature.StateBranchGone:
+			if r.PRState == "merged" {
+				merged = append(merged, r.Name)
+				break
+			}
+			rest = append(rest, contract.Next{Command: closeCmd, NeedsHuman: true,
+				Why: "its branch was deleted; a person closes it at the console"})
+		case feature.StateMergedMoved:
+			rest = append(rest, contract.Next{Command: closeCmd, NeedsHuman: true,
+				Why: "its PR merged but there are newer commits; promote them or a person closes it"})
+		case feature.StatePRClosed:
+			rest = append(rest, contract.Next{Command: closeCmd, NeedsHuman: true,
+				Why: "its PR was closed without merging"})
+		case feature.StateDraft, feature.StateInReview, feature.StateGatePassed, feature.StatePublished:
+			if r.Drift.Status == "conflicts" {
+				rest = append(rest, contract.Next{Command: a.scoped("gate", r.Name),
+					Why: "no longer merges cleanly onto public main"})
+			}
+		}
+	}
+	if len(merged) > 0 {
+		closes := make([]string, len(merged))
+		for i, n := range merged {
+			closes[i] = "`feature close " + n + "`"
+		}
+		why := "sync closes merged features; or run " + strings.Join(closes, ", ")
+		if sync := a.scoped("sync"); len(out) > 0 && slices.Equal(out[0].Command, sync) {
+			out[0].Why += "; " + why
+		} else {
+			out = append(out, contract.Next{Command: sync, Why: why})
+		}
+	}
+	return append(out, rest...)
 }
 
 // upgradeNext trails next when managed overlay files are out of date.

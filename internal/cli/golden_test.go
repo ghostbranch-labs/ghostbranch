@@ -29,6 +29,7 @@ var dataSchemas = map[string]string{
 	"explain": "explain.schema.json", "guide": "guide.schema.json", "audit": "audit.schema.json", "upgrade": "upgrade.schema.json",
 	"guard install": "guard.schema.json", "guard uninstall": "guard.schema.json", "guard status": "guard.schema.json", "guard check": "guard.schema.json",
 	"remove": "remove.schema.json", "log": "log.schema.json",
+	"status": "status.schema.json", "feature list": "feature-list.schema.json", "feature show": "feature-show.schema.json",
 }
 
 func schema(t *testing.T, name string) *jsonschema.Schema {
@@ -186,6 +187,14 @@ jobs:
 		}, []string{"remove", "--plan"}, 0},
 		{"remove_no_console", initOnly, []string{"remove"}, 5},
 		{"log", withFeature, []string{"log"}, 0},
+		{"status", withFeature, []string{"status"}, 0},
+		{"status_behind", func(te *testEnv) {
+			initOnly(te)
+			testutil.Commit(te.t, te.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
+		}, []string{"status"}, 0},
+		{"feature_list", withFeature, []string{"feature", "list"}, 0},
+		{"feature_show", gatedFeature, []string{"feature", "show", "feat-x"}, 0},
+		{"feature_show_unknown", initOnly, []string{"feature", "show", "nope"}, 2},
 	}
 	for _, s := range scenarios {
 		t.Run(s.name, func(t *testing.T) {

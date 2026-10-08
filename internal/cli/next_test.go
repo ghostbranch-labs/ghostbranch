@@ -611,3 +611,162 @@ func TestNextAdoptStepsKeepTheWorkspace(t *testing.T) {
 		t.Fatalf("exit %d, next = %v", code, n)
 	}
 }
+
+// publishFeature starts, commits, gates and publishes name under an agent
+// grant, and returns its public PR number.
+func publishFeature(te *testEnv, name string) int {
+	te.t.Helper()
+	te.mustRun("feature", "start", name)
+	te.shadowCommit(name, map[string]string{name + ".txt": name + "\n"})
+	te.mustRun("gate", name)
+	code, env := te.runJSON("promote", name, "--mode", "squash", "-m", "Add "+name, "--yes")
+	data, _ := env["data"].(map[string]any)
+	applied, _ := data["applied"].(map[string]any)
+	pr, ok := applied["public_pr"].(float64)
+	if code != 0 || !ok {
+		te.t.Fatalf("publish %s: exit %d, %v", name, code, env)
+	}
+	return int(pr)
+}
+
+// status leads with sync when shadow main is behind public main, from its
+// SHADOW_BEHIND warning, as every pair command does.
+func TestNextForStatusLeadsWithSync(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	testutil.Commit(t, te.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
+	code, env := te.runJSON("status")
+	n := nextOf(t, env)
+	if code != 0 || len(n) != 1 || !reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "sync", "--repo", "acme/widget"}) ||
+		n[0]["needs_human"] != false {
+		t.Fatalf("exit %d, next = %v", code, n)
+	}
+}
+
+// A merged feature is closed by sync; one merged with newer commits, or
+// whose PR was closed, needs a person to close it.
+func TestNextForLifecycleStates(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	grantAgents(te)
+	te.forge.SetPRMerged("acme/widget", publishFeature(te, "feat-a"))
+	te.forge.SetPRMerged("acme/widget", publishFeature(te, "feat-b"))
+	te.shadowCommit("feat-b", map[string]string{"later.txt": "later\n"})
+	te.forge.ClosePR("acme/widget", publishFeature(te, "feat-c"))
+	te.mustRun("feature", "start", "feat-d") // draft, clean: nothing to do
+	want := []struct {
+		cmd   []string
+		human bool
+		why   string
+	}{
+		{[]string{"ghostbranch", "sync", "--repo", "acme/widget"}, false, "sync closes merged features; or run `feature close feat-a`"},
+		{[]string{"ghostbranch", "feature", "close", "feat-b", "--repo", "acme/widget"}, true, "its PR merged but there are newer commits; promote them or a person closes it"},
+		{[]string{"ghostbranch", "feature", "close", "feat-c", "--repo", "acme/widget"}, true, "its PR was closed without merging"},
+	}
+	for _, args := range [][]string{{"status"}, {"feature", "list"}} {
+		code, env := te.runJSON(args...)
+		n := nextOf(t, env)
+		if code != 0 || len(n) != len(want) {
+			t.Fatalf("%v: exit %d, next = %v", args, code, n)
+		}
+		for i, w := range want {
+			if !reflect.DeepEqual(argv(n[i]), w.cmd) || n[i]["needs_human"] != w.human || n[i]["why"] != w.why {
+				t.Errorf("%v: next[%d] = %v, want %+v", args, i, n[i], w)
+			}
+		}
+	}
+	// Behind public main too: one sync does both.
+	testutil.Commit(t, te.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
+	_, env := te.runJSON("status")
+	n := nextOf(t, env)
+	if len(n) != 3 || !reflect.DeepEqual(argv(n[0]), want[0].cmd) ||
+		n[0]["why"] != "shadow main is behind public main; sync it (fast-forward only); "+want[0].why || argv(n[1])[2] != "close" {
+		t.Fatalf("behind: next = %v", n)
+	}
+}
+
+// A feature whose branch was deleted is closed by sync if its PR merged,
+// and otherwise by a person.
+func TestNextForLifecycleBranchGone(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	grantAgents(te)
+	te.forge.SetPRMerged("acme/widget", publishFeature(te, "feat-a"))
+	publishFeature(te, "feat-b")
+	sh := gitx.New(te.forge.RepoDir("acme/widget-shadow"))
+	for _, b := range []string{"feat-a", "feat-b"} {
+		if err := sh.DeleteRef(t.Context(), "refs/heads/"+b); err != nil {
+			t.Fatal(err)
+		}
+	}
+	code, env := te.runJSON("status")
+	n := nextOf(t, env)
+	if code != 0 || len(n) != 2 ||
+		!reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "sync", "--repo", "acme/widget"}) || n[0]["needs_human"] != false ||
+		!reflect.DeepEqual(argv(n[1]), []string{"ghostbranch", "feature", "close", "feat-b", "--repo", "acme/widget"}) || n[1]["needs_human"] != true ||
+		n[1]["why"] != "its branch was deleted; a person closes it at the console" {
+		t.Fatalf("exit %d, next = %v", code, n)
+	}
+}
+
+// A feature that no longer merges cleanly onto public main is gated again,
+// after the sync that brings public main in.
+func TestNextForLifecycleConflicts(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	withFeature(te)
+	testutil.Commit(t, te.pubGit, "main", "upstream", map[string]string{"feature.txt": "other\n"})
+	code, env := te.runJSON("status")
+	n := nextOf(t, env)
+	if code != 0 || len(n) != 2 ||
+		!reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "sync", "--repo", "acme/widget"}) ||
+		!reflect.DeepEqual(argv(n[1]), []string{"ghostbranch", "gate", "feat-x", "--repo", "acme/widget"}) ||
+		n[1]["why"] != "no longer merges cleanly onto public main" {
+		t.Fatalf("exit %d, next = %v", code, n)
+	}
+}
+
+// An outdated managed overlay trails status's next with upgrade, after the
+// sync that leads it.
+func TestNextForStatusTrailsWithUpgrade(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	scheduled(te)
+	testutil.Commit(t, te.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
+	_, env := te.runJSON("status")
+	n := nextOf(t, env)
+	if len(n) != 2 || argv(n[0])[1] != "sync" ||
+		!reflect.DeepEqual(argv(n[1]), []string{"ghostbranch", "upgrade", "--repo", "acme/widget"}) {
+		t.Fatalf("next = %v", n)
+	}
+}
+
+// status, feature list and feature show print for people, escaping what a
+// terminal would act on in commit subjects.
+func TestLifecycleHumanOutput(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	withFeature(te)
+	te.shadowCommitMsg("feat-x", "evil \x1b[2J subject", map[string]string{"two.txt": "2\n"})
+	code, out, errOut := te.run("status")
+	if code != 0 || !strings.Contains(out, "acme/widget -> acme/widget-shadow: shadow main up to date, overlay current, scheduled sync off\n") ||
+		!strings.Contains(out, "NAME    STATE  DRIFT  GATE  PR\nfeat-x  draft  clean  -     -\n") {
+		t.Fatalf("status: %d\n%s%s", code, out, errOut)
+	}
+	if code, out, errOut = te.run("feature", "list"); code != 0 || !strings.HasPrefix(out, "NAME    STATE  DRIFT  GATE  PR\nfeat-x  draft") {
+		t.Fatalf("feature list: %d\n%s%s", code, out, errOut)
+	}
+	code, out, errOut = te.run("feature", "show", "feat-x")
+	if code != 0 || !strings.HasPrefix(out, "Feature feat-x: draft\n") || !strings.Contains(out, "  gate: never run\n") ||
+		!strings.Contains(out, "Commits since public main (2):\n") || !strings.Contains(out, `evil \x1b[2J subject`) ||
+		strings.Contains(out, "\x1b") || !strings.Contains(out, "Ledger (1):\n") {
+		t.Fatalf("feature show: %d\n%s%s", code, out, errOut)
+	}
+	te.mustRun("gate", "feat-x")
+	if _, out, _ = te.run("feature", "list"); !strings.Contains(out, "feat-x  gate_passed  clean  passed  -\n") {
+		t.Fatalf("feature list after gate:\n%s", out)
+	}
+}

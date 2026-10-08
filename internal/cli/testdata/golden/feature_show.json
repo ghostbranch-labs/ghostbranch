@@ -1,0 +1,64 @@
+{
+  "schema_version": "0.6",
+  "command": "feature show",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "feature": {
+      "name": "feat-x",
+      "state": "gate_passed",
+      "branch": "feat-x",
+      "head": "d7407485ce685c126afcfc258f0a9eeb0092d776",
+      "base": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+      "drift": {
+        "status": "clean",
+        "files": []
+      },
+      "gate": {
+        "checks": "passed",
+        "leak": "clean",
+        "scanned_as": "preserve",
+        "fresh": true,
+        "at": "2026-10-05T12:00:05Z"
+      },
+      "public_pr": null,
+      "pr_state": "",
+      "plan_id": "",
+      "moved": false,
+      "abandoned": false
+    },
+    "commits": [
+      {
+        "source": "d7407485ce685c126afcfc258f0a9eeb0092d776",
+        "subject": "work",
+        "author": "Test Author <author@example.com>",
+        "files": [
+          "feature.txt"
+        ]
+      }
+    ],
+    "ledger": [
+      {
+        "ts": "2026-10-05T12:00:00Z",
+        "actor": "human:octo",
+        "op": "feature start",
+        "pair": "acme/widget",
+        "feature": "feat-x",
+        "exit_code": 0,
+        "summary": ""
+      },
+      {
+        "ts": "2026-10-05T12:00:05Z",
+        "actor": "human:octo",
+        "op": "gate",
+        "pair": "acme/widget",
+        "feature": "feat-x",
+        "exit_code": 0,
+        "summary": "checks passed, leak clean, candidate ad7c1d975251"
+      }
+    ]
+  },
+  "warnings": [],
+  "next": [],
+  "error": null
+}

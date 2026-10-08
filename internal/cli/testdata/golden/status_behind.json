@@ -1,0 +1,42 @@
+{
+  "schema_version": "0.6",
+  "command": "status",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "public": "acme/widget",
+    "shadow": "acme/widget-shadow",
+    "public_main": "178f8a91fcb0e6a374393202f9c61275c78d3dbb",
+    "shadow_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+    "shadow_behind": true,
+    "overlay": "a1ef151295bf2b53d15b18523ab0184d02178bbd",
+    "overlay_status": "current",
+    "scheduled_sync": false,
+    "features": []
+  },
+  "warnings": [
+    {
+      "code": "SHADOW_BEHIND",
+      "message": "shadow main is 1 commit(s) behind public main; run ghostbranch sync",
+      "details": {
+        "behind": 1,
+        "public_main": "178f8a91fcb0e6a374393202f9c61275c78d3dbb",
+        "shadow_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7"
+      }
+    }
+  ],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "sync",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "shadow main is behind public main; sync it (fast-forward only)",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
+  "error": null
+}
