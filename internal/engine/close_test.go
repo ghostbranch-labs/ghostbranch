@@ -150,6 +150,14 @@ func TestAbandonAndUndo(t *testing.T) {
 	if last := es[len(es)-1]; last.Op != "feature abandon" || last.Summary != "restored" {
 		t.Fatalf("ledger = %+v", last)
 	}
+	same := h.shadowRefs()
+	if _, _, err := h.eng.FeatureAbandon(h.ctx, h.pair, "feat-x", true); err != nil {
+		t.Fatal(err)
+	}
+	es = h.ledger()
+	if last := es[len(es)-1]; last.Summary != "already active; nothing changed" || !reflect.DeepEqual(h.shadowRefs(), same) {
+		t.Fatalf("a second --undo: ledger %+v", last)
+	}
 	if len(h.approver.asked) != 0 {
 		t.Fatalf("abandon asked the console: %v", h.approver.asked)
 	}
@@ -248,42 +256,67 @@ func TestCloseUnpublishedNeedsAConsole(t *testing.T) {
 	t.Parallel()
 	rows := []struct {
 		state feature.State
+		name  string                  // the subtest, when not the state
 		setup func(h *harness) string // returns the plan ID, or ""
 	}{
-		{feature.StateDraft, func(h *harness) string {
+		{feature.StateInReview, "", func(h *harness) string {
+			h.startFeature("feat-x", map[string]string{"x.txt": "x\n"})
+			h.gateFeature("feat-x")
+			testutil.Commit(h.t, h.shadowGit(), "feat-x", "after the gate", map[string]string{"y.txt": "y\n"})
+			return ""
+		}},
+		{feature.StateBranchGone, "branch_gone_unpublished", func(h *harness) string {
+			h.startFeature("feat-x", map[string]string{"x.txt": "x\n"})
+			if err := h.shadowGit().DeleteRef(h.ctx, "refs/heads/feat-x"); err != nil {
+				h.t.Fatal(err)
+			}
+			return ""
+		}},
+		{feature.StateBranchGone, "branch_gone_pr_open", func(h *harness) string {
+			_, id := h.publish("feat-x")
+			if err := h.shadowGit().DeleteRef(h.ctx, "refs/heads/feat-x"); err != nil {
+				h.t.Fatal(err)
+			}
+			return id
+		}},
+		{feature.StateDraft, "", func(h *harness) string {
 			h.startFeature("feat-x", map[string]string{"x.txt": "x\n"})
 			return ""
 		}},
-		{feature.StateGatePassed, func(h *harness) string {
+		{feature.StateGatePassed, "", func(h *harness) string {
 			h.startFeature("feat-x", map[string]string{"x.txt": "x\n"})
 			h.gateFeature("feat-x")
 			return ""
 		}},
-		{feature.StateAbandoned, func(h *harness) string {
+		{feature.StateAbandoned, "", func(h *harness) string {
 			h.startFeature("feat-x", map[string]string{"x.txt": "x\n"})
 			if _, _, err := h.eng.FeatureAbandon(h.ctx, h.pair, "feat-x", false); err != nil {
 				h.t.Fatal(err)
 			}
 			return ""
 		}},
-		{feature.StatePublished, func(h *harness) string {
+		{feature.StatePublished, "", func(h *harness) string {
 			_, id := h.publish("feat-x")
 			return id
 		}},
-		{feature.StateMergedMoved, func(h *harness) string {
+		{feature.StateMergedMoved, "", func(h *harness) string {
 			pr, id := h.publish("feat-x")
 			h.forge.SetPRMerged(publicName, pr)
 			testutil.Commit(h.t, h.shadowGit(), "feat-x", "after the merge", map[string]string{"later.txt": "l\n"})
 			return id
 		}},
-		{feature.StatePRClosed, func(h *harness) string {
+		{feature.StatePRClosed, "", func(h *harness) string {
 			pr, id := h.publish("feat-x")
 			h.forge.ClosePR(publicName, pr)
 			return id
 		}},
 	}
 	for _, row := range rows {
-		t.Run(string(row.state), func(t *testing.T) {
+		name := row.name
+		if name == "" {
+			name = string(row.state)
+		}
+		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			h := newHarness(t)
 			h.init()
@@ -341,8 +374,13 @@ func TestCloseUnpublishedNeedsAConsole(t *testing.T) {
 					t.Errorf("the summary doesn't name %s at %s:\n%s", ref, sha[:12], summary)
 				}
 			}
-			if !strings.Contains(summary, string(row.state)) || !strings.Contains(summary, want["refs/heads/feat-x"]+":refs/heads/feat-x") {
-				t.Errorf("the summary lacks the state or the recovery command:\n%s", summary)
+			if !strings.Contains(summary, string(row.state)) {
+				t.Errorf("the summary lacks the state:\n%s", summary)
+			}
+			for ref, sha := range want {
+				if strings.HasPrefix(ref, "refs/heads/") && !strings.Contains(summary, sha+":"+ref) {
+					t.Errorf("the summary lacks the recovery command for %s:\n%s", ref, summary)
+				}
 			}
 			for ref := range want {
 				if _, ok := h.shadowRefs()[ref]; ok {
@@ -407,6 +445,114 @@ func TestCloseAbortsWhenTheBranchMoved(t *testing.T) {
 	}
 	es := h.ledger()
 	if last := es[len(es)-1]; last.Op != "feature close" || last.ErrorCode != string(contract.FeatureMoved) || len(last.Refs) != 0 {
+		t.Fatalf("ledger = %+v", last)
+	}
+}
+
+// The gate PR went between the look and the close: not an error.
+func TestCloseToleratesAGatePRThatVanished(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	pr, id := h.publish("feat-x")
+	h.forge.SetPRMerged(publicName, pr)
+	want := h.featureRefs("feat-x", id)
+	h.forge.ClosePRErr = fmt.Errorf("PR %s#%d: %w", shadowName, h.gatePR("feat-x"), forge.ErrNotFound)
+	res, _, err := h.eng.FeatureClose(h.ctx, h.pair, "feat-x")
+	if err != nil || res.GatePR != nil || !reflect.DeepEqual(res.Deleted, want) {
+		t.Fatalf("close = %+v %v", res, err)
+	}
+}
+
+// The metadata names another feature's branch: close refuses before it
+// deletes anything, even on the merged path that asks no console.
+func TestCloseRefusesABranchThatIsNotTheFeatures(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	pr, _ := h.publish("feat-x")
+	h.forge.SetPRMerged(publicName, pr)
+	h.startFeature("feat-2", map[string]string{"two.txt": "2\n"})
+	sh := h.shadowGit()
+	head, err := sh.MustResolve(h.ctx, "refs/heads/feat-x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// feat-2 at feat-x's published head, so feat-x still reads as merged.
+	if err := sh.UpdateRef(h.ctx, "refs/heads/feat-2", head); err != nil {
+		t.Fatal(err)
+	}
+	forgeMeta(t, h, "feat-x", func(m *feature.Meta) { m.Branch = "feat-2" })
+	if st := h.report("feat-x").State; st != feature.StateMerged {
+		t.Fatalf("state = %s, want merged", st)
+	}
+	before := h.shadowRefs()
+	gate := h.gatePR("feat-x")
+	h.eng.Approver = nil
+	_, _, err = h.eng.FeatureClose(h.ctx, h.pair, "feat-x")
+	ce := wantCode(t, err, contract.Internal)
+	if !strings.Contains(ce.Message, `"feat-2"`) || !strings.Contains(ce.Message, `"feat-x"`) {
+		t.Fatalf("message = %q", ce.Message)
+	}
+	if !reflect.DeepEqual(h.shadowRefs(), before) || h.closePushes() != 0 || h.gatePR("feat-x") != gate {
+		t.Fatal("close deleted something")
+	}
+}
+
+// A server-side hook refuses only the metadata ref: the push is atomic, so
+// every ref survives and nothing is recorded as deleted.
+func TestCloseDeletesAllOrNothing(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	pr, id := h.publish("feat-x")
+	h.forge.SetPRMerged(publicName, pr)
+	gate := h.gatePR("feat-x")
+	before := h.shadowRefs()
+	want := h.featureRefs("feat-x", id)
+	hook := "#!/bin/sh\ncase \"$1\" in\n  refs/ghostbranch/features/*) echo \"no deleting metadata\" >&2; exit 1 ;;\nesac\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(h.forge.RepoDir(shadowName), "hooks", "update"), []byte(hook), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	h.eng.Approver = nil
+	res, _, err := h.eng.FeatureClose(h.ctx, h.pair, "feat-x")
+	if err == nil || res != nil {
+		t.Fatalf("close = %+v %v, want an error and no result", res, err)
+	}
+	after := h.shadowRefs()
+	for ref, sha := range want {
+		if after[ref] != sha {
+			t.Errorf("%s = %q, want %q: the push must delete all or nothing", ref, after[ref], sha)
+		}
+	}
+	if !reflect.DeepEqual(after, before) || h.gatePR("feat-x") != gate {
+		t.Fatal("close changed the shadow repo or closed the gate PR")
+	}
+	es := h.ledger()
+	if last := es[len(es)-1]; last.Op != "feature close" || last.ExitCode == 0 || len(last.Refs) != 0 {
+		t.Fatalf("ledger = %+v", last)
+	}
+}
+
+// A close the console said yes to, that then fails, still records the yes.
+func TestCloseRecordsTheConsoleWhenItFails(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.startFeature("feat-x", map[string]string{"x.txt": "x\n"})
+	record := h.eng.OnPush
+	raced := false
+	h.eng.OnPush = func(op, remote string, specs []string) {
+		if op == "feature close" && !raced {
+			raced = true
+			testutil.Commit(t, h.shadowGit(), "feat-x", "racing commit", map[string]string{"race.txt": "r\n"})
+		}
+		record(op, remote, specs)
+	}
+	_, _, err := h.eng.FeatureClose(h.ctx, h.pair, "feat-x")
+	wantCode(t, err, contract.FeatureMoved)
+	es := h.ledger()
+	if last := es[len(es)-1]; last.Op != "feature close" || last.Approval == nil || last.Approval.Kind != "console" || len(last.Refs) != 0 {
 		t.Fatalf("ledger = %+v", last)
 	}
 }

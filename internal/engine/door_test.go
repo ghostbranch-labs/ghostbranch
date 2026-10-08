@@ -210,6 +210,14 @@ func TestOnlyPromoteAndApplyReachThePublicRepo(t *testing.T) {
 			t.Fatalf("%s pushed to %s: %+v", p.op, p.remote, p)
 		}
 	}
+	if len(h.forge.ClosePRRepos) == 0 {
+		t.Fatal("feature close closed no gate PR")
+	}
+	for _, repo := range h.forge.ClosePRRepos {
+		if repo != shadowName {
+			t.Fatalf("feature close closed a PR in %s", repo)
+		}
+	}
 
 	// remove is local: it unregisters the pair and touches no repo. It goes
 	// last, since nothing runs on the pair after it.

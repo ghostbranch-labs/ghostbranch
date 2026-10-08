@@ -148,17 +148,41 @@ func (e *Engine) Remove(ctx context.Context, p workspace.Pair) (res *RemoveResul
 	return res, nil, nil
 }
 
-// pairPlans lists the plan files in dir made for public, by path. A file
-// that isn't a readable plan is left alone.
+// pairPlans lists the plan files in dir made for public, by path.
 func pairPlans(dir, public string) ([]string, error) {
-	entries, err := os.ReadDir(dir)
-	if errors.Is(err, fs.ErrNotExist) {
-		return []string{}, nil
-	}
+	files, err := planFiles(dir)
 	if err != nil {
 		return nil, err
 	}
 	out := []string{}
+	for _, f := range files {
+		if strings.EqualFold(f.Pair.Public, public) {
+			out = append(out, f.Path)
+		}
+	}
+	return out, nil
+}
+
+// planFile is the part of a plan file that says whose it is.
+type planFile struct {
+	ID      string    `json:"id"`
+	Pair    plan.Pair `json:"pair"`
+	Feature string    `json:"feature"`
+	Path    string    `json:"-"`
+}
+
+// planFiles decodes every plan file in dir, in name order. A file that
+// isn't JSON is left out; one that can't be read is an error. Nothing here
+// is checked: the files are local and unsigned.
+func planFiles(dir string) ([]planFile, error) {
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var out []planFile
 	for _, ent := range entries {
 		if ent.IsDir() || !strings.HasSuffix(ent.Name(), ".json") {
 			continue
@@ -168,11 +192,10 @@ func pairPlans(dir, public string) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		var pl struct {
-			Pair plan.Pair `json:"pair"`
-		}
-		if json.Unmarshal(b, &pl) == nil && strings.EqualFold(pl.Pair.Public, public) {
-			out = append(out, path)
+		var f planFile
+		if json.Unmarshal(b, &f) == nil {
+			f.Path = path
+			out = append(out, f)
 		}
 	}
 	return out, nil

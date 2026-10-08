@@ -2,12 +2,9 @@ package engine
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -42,12 +39,19 @@ type FeatureCloseResult struct {
 // Abandoned in its metadata, a leased push to the shadow repo. Its branch,
 // gate and plans stay; nothing is deleted, so no console is asked.
 func (e *Engine) FeatureAbandon(ctx context.Context, p workspace.Pair, name string, undo bool) (res *FeatureAbandonResult, warns []contract.Warning, err error) {
+	changed := false
 	defer func() {
 		summary := ""
 		if err == nil && res != nil && res.Preview == nil {
-			summary = "abandoned"
-			if undo {
+			switch {
+			case changed && undo:
 				summary = "restored"
+			case changed:
+				summary = "abandoned"
+			case undo:
+				summary = "already active; nothing changed"
+			default:
+				summary = "already abandoned; nothing changed"
 			}
 		}
 		e.record("feature abandon", &p, name, "", summary, err)
@@ -68,7 +72,7 @@ func (e *Engine) FeatureAbandon(ctx context.Context, p workspace.Pair, name stri
 		return nil, warns, err
 	}
 	res = &FeatureAbandonResult{Feature: name, Abandoned: !undo}
-	changed := m.Abandoned != !undo
+	changed = m.Abandoned != !undo
 	if e.DryRun {
 		res.Preview = preview.New(nil)
 		if changed {
@@ -94,14 +98,15 @@ func (e *Engine) FeatureAbandon(ctx context.Context, p workspace.Pair, name stri
 // branch is gone) closes without a person at a console; --plan asks no one
 // and changes nothing.
 func (e *Engine) FeatureClose(ctx context.Context, p workspace.Pair, name string) (res *FeatureCloseResult, warns []contract.Warning, err error) {
+	// The console's yes is recorded even when the close then fails.
+	var appr *ledger.Approval
 	defer func() {
 		summary := ""
 		var refs map[string]string
-		var appr *ledger.Approval
 		// A close can fail after its deletes (the gate PR); the ledger
 		// still records every ref deleted.
 		if res != nil && res.Preview == nil {
-			refs, appr = res.Deleted, res.Approval
+			refs = res.Deleted
 			if err == nil {
 				summary = closeLedgerSummary(res)
 			}
@@ -139,7 +144,6 @@ func (e *Engine) FeatureClose(ctx context.Context, p workspace.Pair, name string
 		return nil, warns, err
 	}
 	// The console comes before anything changes.
-	var appr *ledger.Approval
 	if !e.DryRun && !closableWithoutConsole(r) {
 		if e.Approver == nil {
 			return nil, warns, noConsole("closing feature " + name + " (" + string(r.State) +
@@ -193,8 +197,12 @@ func (t closeTargets) sorted() []string {
 // this feature, and only if the mirror has it.
 func (e *Engine) closeTargets(ctx context.Context, pc *pairCtx, r FeatureReport) (closeTargets, error) {
 	t := closeTargets{refs: map[string]string{}}
-	if r.Branch == "main" || r.Branch == OverlayBranch || r.Branch == "" {
-		return t, contract.New(contract.Internal, "feature %s names the branch %q; refusing to delete it", r.Name, r.Branch)
+	// The branch name comes from metadata in the shadow repo: delete only
+	// the branch feature start made, which is always named for the feature.
+	if r.Branch != r.Name {
+		return t, contract.New(contract.Internal,
+			"feature %s's metadata names the branch %q, not %q; refusing to delete another branch", r.Name, r.Branch, r.Name).
+			WithDetails(map[string]any{"feature": r.Name, "branch": r.Branch})
 	}
 	add := func(remote, local string) error {
 		sha, ok, err := pc.git.Resolve(ctx, local)
@@ -220,13 +228,16 @@ func (e *Engine) closeTargets(ctx context.Context, pc *pairCtx, r FeatureReport)
 	if plan.ValidID(r.PlanID) {
 		ids[r.PlanID] = true
 	}
-	files, err := featurePlans(e.WS.PlansDir(), pc.pair.Public, r.Name)
+	files, err := planFiles(e.WS.PlansDir())
 	if err != nil {
 		return t, internalErr(err, "list plan files")
 	}
-	for id, path := range files {
-		ids[id] = true
-		t.plans = append(t.plans, path)
+	for _, f := range files {
+		// The ID names a ref, so it must be a plan ID.
+		if f.Feature == r.Name && strings.EqualFold(f.Pair.Public, pc.pair.Public) && plan.ValidID(f.ID) {
+			ids[f.ID] = true
+			t.plans = append(t.plans, f.Path)
+		}
 	}
 	sort.Strings(t.plans)
 	for id := range ids {
@@ -337,39 +348,6 @@ func movedErr(name, shadow string, err error) error {
 	return ce
 }
 
-// featurePlans maps the ID of each plan file in dir made for public's
-// feature name to its path. A file that isn't a readable plan is left alone.
-func featurePlans(dir, public, name string) (map[string]string, error) {
-	out := map[string]string{}
-	entries, err := os.ReadDir(dir)
-	if errors.Is(err, fs.ErrNotExist) {
-		return out, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	for _, ent := range entries {
-		if ent.IsDir() || !strings.HasSuffix(ent.Name(), ".json") {
-			continue
-		}
-		path := filepath.Join(dir, ent.Name())
-		b, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-		var pl struct {
-			ID      string    `json:"id"`
-			Pair    plan.Pair `json:"pair"`
-			Feature string    `json:"feature"`
-		}
-		// The ID names a ref, so it must be a plan ID.
-		if json.Unmarshal(b, &pl) == nil && plan.ValidID(pl.ID) && pl.Feature == name && strings.EqualFold(pl.Pair.Public, public) {
-			out[pl.ID] = path
-		}
-	}
-	return out, nil
-}
-
 // closeSummary is what the person sees before typing the code.
 func closeSummary(pc *pairCtx, r FeatureReport, t closeTargets) string {
 	var b strings.Builder
@@ -386,7 +364,7 @@ func closeSummary(pc *pairCtx, r FeatureReport, t closeTargets) string {
 		}
 	}
 	if len(branches) > 0 {
-		b.WriteString("Recover a branch with:\n")
+		b.WriteString("Recover a branch from a clone that still has its commits (your working clone, for example) with:\n")
 		for _, ref := range branches {
 			fmt.Fprintf(&b, "  git push %s %s:%s\n", visible(pc.shadow.CloneURL), t.refs[ref], visible(ref))
 		}

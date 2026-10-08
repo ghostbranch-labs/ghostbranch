@@ -51,8 +51,10 @@ type Forge struct {
 	CancelRunRepos  []string
 	// GetPRErr makes GetPR fail with that error.
 	GetPRErr error
-	// ClosePRErr makes ClosePullRequest fail with that error.
-	ClosePRErr error
+	// ClosePRErr makes ClosePullRequest fail with that error; ClosePRRepos
+	// records the repo each ClosePullRequest call named.
+	ClosePRErr   error
+	ClosePRRepos []string
 }
 
 // Run is a seeded workflow run that a push of SHA started.
@@ -160,6 +162,7 @@ func (f *Forge) SetPRMerged(full string, n int) {
 func (f *Forge) ClosePullRequest(_ context.Context, full string, number int) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.ClosePRRepos = append(f.ClosePRRepos, full)
 	if f.ClosePRErr != nil {
 		return f.ClosePRErr
 	}
