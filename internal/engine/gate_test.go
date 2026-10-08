@@ -436,6 +436,31 @@ func TestGateScansHistoryForPreserve(t *testing.T) {
 	if err != nil || res.ScannedAs != "squash" || len(res.Findings) != 0 {
 		t.Fatalf("squash gate = %+v %v", res, err)
 	}
+	// Curated publishes the original trees too, so the gate scans them.
+	h.setConfig("default_mode: squash", "default_mode: curated")
+	res, _, err = h.eng.Gate(h.ctx, h.pair, "feat-x")
+	ce = wantCode(t, err, contract.LeakFound)
+	if res.ScannedAs != "curated" || ce.Details["mode"] != "curated" || len(res.Findings) != 1 {
+		t.Fatalf("curated gate = %+v details = %v", res, ce.Details)
+	}
+}
+
+// A broken marker in an older commit fails the gate under preserve even
+// though the tip fixed it, and the error names the feature and the commit.
+func TestGateNamesTheFeatureOnAMarkerInAnOlderCommit(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	first := h.startFeature("feat-x", map[string]string{"app.go": "ok\n// BEGIN-INTERNAL\nx\n"})
+	testutil.Commit(t, h.shadowGit(), "feat-x", "close it", map[string]string{"app.go": "ok\n"})
+	res, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
+	ce := wantCode(t, err, contract.MarkerInvalid)
+	if ce.Details["feature"] != "feat-x" || ce.Details["commit"] != first {
+		t.Fatalf("details = %v", ce.Details)
+	}
+	if res == nil || res.Leak != feature.LeakNotRun || res.ShadowPR != nil {
+		t.Fatalf("gate = %+v", res)
+	}
 }
 
 func TestGateScansMessagesAndMappedAuthors(t *testing.T) {
@@ -444,9 +469,12 @@ func TestGateScansMessagesAndMappedAuthors(t *testing.T) {
 	h.init()
 	h.setBlockPatterns("JIRA-[0-9]+")
 	h.startFeature("feat-x", map[string]string{"a.txt": "a\n"})
-	testutil.Commit(t, h.shadowGit(), "feat-x", "fix JIRA-9", map[string]string{"a.txt": "b\n"})
-	_, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
+	jira := testutil.Commit(t, h.shadowGit(), "feat-x", "fix JIRA-9", map[string]string{"a.txt": "b\n"})
+	gr, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
 	_ = wantCode(t, err, contract.LeakFound)
+	if len(gr.Findings) != 1 || gr.Findings[0].Where != "commit_message" || !reflect.DeepEqual(gr.Findings[0].Commits, []string{jira}) {
+		t.Fatalf("findings = %+v", gr.Findings)
+	}
 
 	h2 := newHarness(t)
 	h2.init()

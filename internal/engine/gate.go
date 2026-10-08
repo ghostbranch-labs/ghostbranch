@@ -188,21 +188,33 @@ func (e *Engine) build(ctx context.Context, pc *pairCtx, name string) (*built, [
 	}
 	b.infos = infos
 	if b.T, b.entries, err = publishedTree(ctx, g, b.R, cfg); err != nil {
-		if ce := contract.From(err); ce.Code == contract.MarkerInvalid {
-			ce.Details["feature"] = name
-		}
-		return b, warns, err
+		return b, warns, namedMarkerErr(err, name)
 	}
 	e.progressf("scanning what %s would publish for leaks", b.scannedAs)
 	if b.scannedAs == config.ModeSquash {
 		b.report, _, err = e.scan(ctx, g, cfg, b.entries, pm, nil)
 	} else {
+		// Stripping each older commit can hit a broken marker the tip no
+		// longer has.
 		b.report, err = e.scanHistory(ctx, g, cfg, b)
 	}
 	if err != nil {
-		return b, warns, err
+		return b, warns, namedMarkerErr(err, name)
 	}
 	return b, addWarnings(warns, b.report.Warnings...), nil
+}
+
+// namedMarkerErr names the feature on a MARKER_INVALID error, so the agent
+// is told to gate it again once the marker is fixed. Other errors pass
+// through unchanged.
+func namedMarkerErr(err error, name string) error {
+	if ce := contract.From(err); ce != nil && ce.Code == contract.MarkerInvalid {
+		if ce.Details == nil {
+			ce.Details = map[string]any{}
+		}
+		ce.Details["feature"] = name
+	}
+	return err
 }
 
 // scanHistory scans every rebased commit as preserve would publish it: each
