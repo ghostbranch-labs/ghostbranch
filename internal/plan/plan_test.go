@@ -2,6 +2,8 @@ package plan_test
 
 import (
 	"bytes"
+	"errors"
+	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -52,5 +54,38 @@ func TestSaveLoadByIDAndPath(t *testing.T) {
 	_, _, err = plan.Load(dir, "nope")
 	if ce := contract.From(err); ce == nil || ce.Code != contract.BadFlag || ce.Field != "plan" {
 		t.Fatalf("unknown plan: %v", err)
+	}
+}
+
+func TestLoadRejectsPathsAndKeepsReadErrorsApart(t *testing.T) {
+	dir := t.TempDir()
+	for _, ref := range []string{"../x", "..\\x", "a/b", "20261008T120000Z-abcdef/../../etc"} {
+		if _, _, err := plan.Load(dir, ref); contract.From(err).Code != contract.BadFlag {
+			t.Fatalf("%q: want BAD_FLAG, got %v", ref, err)
+		}
+	}
+	if _, _, err := plan.Load(dir, "20261008T120000Z-abcdef"); !errors.Is(err, plan.ErrNotFound) || contract.From(err).Code != contract.BadFlag {
+		t.Fatalf("missing plan: %v", err)
+	}
+	// A path to a plan file still loads, as apply <path> promises.
+	p := plan.Plan{SchemaVersion: plan.SchemaVersion, ID: "20261008T120000Z-abcdef", Kind: "promote"}
+	path, err := plan.Save(dir, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _, err := plan.Load(dir, path); err != nil || got.ID != p.ID {
+		t.Fatalf("load by path: %+v %v", got, err)
+	}
+}
+
+func TestSaveIsAtomic(t *testing.T) {
+	dir := t.TempDir()
+	p := plan.Plan{SchemaVersion: plan.SchemaVersion, ID: "20261008T120000Z-abcdef", Kind: "promote"}
+	if _, err := plan.Save(dir, p); err != nil {
+		t.Fatal(err)
+	}
+	ents, _ := os.ReadDir(dir)
+	if len(ents) != 1 || ents[0].Name() != p.ID+".json" {
+		t.Fatalf("leftover temp files: %v", ents)
 	}
 }
