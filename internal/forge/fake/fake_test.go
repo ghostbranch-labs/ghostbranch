@@ -102,3 +102,35 @@ func TestSecretsAndCreateForbidden(t *testing.T) {
 		t.Fatalf("a refused create must not add the repo: %v", err)
 	}
 }
+
+func TestFakePRMergedAndClose(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	f := fake.New(filepath.Join(t.TempDir(), "forge"))
+	if _, err := f.CreatePrivateRepo(ctx, "acme/s"); err != nil {
+		t.Fatal(err)
+	}
+	g := gitx.New(f.RepoDir("acme/s"))
+	testutil.Commit(t, g, "feat", "c", map[string]string{"a": "1"})
+	for i := 0; i < 2; i++ {
+		if _, err := f.CreatePR(ctx, "acme/s", forge.NewPR{Head: "feat", Base: "main"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.SetPRMerged("acme/s", 1)
+	if pr, _ := f.GetPR(ctx, "acme/s", 1); !pr.Merged || pr.State != "closed" {
+		t.Fatalf("merged PR = %+v", pr)
+	}
+	if err := f.ClosePullRequest(ctx, "acme/s", 2); err != nil {
+		t.Fatal(err)
+	}
+	if pr, _ := f.GetPR(ctx, "acme/s", 2); pr.State != "closed" || pr.Merged {
+		t.Fatalf("closed PR = %+v", pr)
+	}
+	if err := f.ClosePullRequest(ctx, "acme/s", 2); err != nil {
+		t.Fatalf("closing a closed PR: %v", err)
+	}
+	if err := f.ClosePullRequest(ctx, "acme/s", 99); !errors.Is(err, forge.ErrNotFound) {
+		t.Fatalf("unknown PR: %v", err)
+	}
+}

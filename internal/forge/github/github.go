@@ -78,7 +78,7 @@ func toRepo(r *gh.Repository) forge.Repo {
 
 func toPR(p *gh.PullRequest) forge.PR {
 	return forge.PR{Number: p.GetNumber(), Head: p.GetHead().GetRef(), Base: p.GetBase().GetRef(),
-		State: p.GetState(), Draft: p.GetDraft(), URL: p.GetHTMLURL()}
+		State: p.GetState(), Draft: p.GetDraft(), URL: p.GetHTMLURL(), Merged: p.GetMerged()}
 }
 
 func (c *Client) GetRepo(ctx context.Context, full string) (forge.Repo, error) {
@@ -431,5 +431,15 @@ func (c *Client) CancelRun(ctx context.Context, full string, id int64) error {
 	if isForbidden(resp, err) {
 		return fmt.Errorf("%w: cancel workflow run %d of %s: %v", forge.ErrForbidden, id, full, err)
 	}
+	return wrap(resp, err)
+}
+
+// ClosePullRequest closes PR number. Closing a closed PR is a no-op on GitHub.
+func (c *Client) ClosePullRequest(ctx context.Context, full string, number int) error {
+	owner, name, err := forge.SplitName(full)
+	if err != nil {
+		return err
+	}
+	_, resp, err := c.c.PullRequests.Edit(ctx, owner, name, number, &gh.PullRequest{State: new("closed")})
 	return wrap(resp, err)
 }

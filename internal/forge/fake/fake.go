@@ -139,6 +139,32 @@ func (f *Forge) ClosePR(full string, n int) {
 	}
 }
 
+// SetPRMerged marks PR n in full as merged (and so closed).
+func (f *Forge) SetPRMerged(full string, n int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.prs[full] {
+		if f.prs[full][i].Number == n {
+			f.prs[full][i].State = "closed"
+			f.prs[full][i].Merged = true
+		}
+	}
+}
+
+// ClosePullRequest closes PR number without merging. A closed PR is not an
+// error; an unknown one is ErrNotFound.
+func (f *Forge) ClosePullRequest(_ context.Context, full string, number int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.prs[full] {
+		if f.prs[full][i].Number == number {
+			f.prs[full][i].State = "closed"
+			return nil
+		}
+	}
+	return fmt.Errorf("PR %s#%d: %w", full, number, forge.ErrNotFound)
+}
+
 func (f *Forge) GetRepo(_ context.Context, full string) (forge.Repo, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
