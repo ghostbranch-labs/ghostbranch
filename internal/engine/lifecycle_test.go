@@ -8,6 +8,8 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
+	"github.com/ghostbranch-labs/ghostbranch/internal/ledger"
+	"github.com/ghostbranch-labs/ghostbranch/internal/managed"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
 )
 
@@ -21,24 +23,30 @@ func validateResult(t *testing.T, name string, v any) {
 	validateSchema(t, name, raw)
 }
 
-func (h *harness) status() *engine.StatusResult {
+// status runs Status, checks its result against the schema, and fails
+// unless the warnings are exactly want, one each.
+func (h *harness) status(want ...contract.WarningCode) (*engine.StatusResult, []contract.Warning) {
 	h.t.Helper()
 	res, warns, err := h.eng.Status(h.ctx, h.pair)
 	if err != nil {
 		h.t.Fatalf("status: %v", err)
 	}
-	if len(warns) != 0 {
-		h.t.Fatalf("status warnings = %+v", warns)
+	wantCodes := map[contract.WarningCode]int{}
+	for _, c := range want {
+		wantCodes[c]++
+	}
+	if !reflect.DeepEqual(codes(warns), wantCodes) {
+		h.t.Fatalf("status warnings = %+v, want %v", warns, want)
 	}
 	validateResult(h.t, "status.schema.json", res)
-	return res
+	return res, warns
 }
 
 func TestStatusFreshPair(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	h.init()
-	res := h.status()
+	res, _ := h.status()
 	if res.Public != publicName || res.Shadow != shadowName {
 		t.Fatalf("pair = %s -> %s", res.Public, res.Shadow)
 	}
@@ -58,9 +66,12 @@ func TestStatusShadowBehind(t *testing.T) {
 	h := newHarness(t)
 	h.init()
 	pm := testutil.Commit(t, h.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
-	res := h.status()
+	res, warns := h.status(contract.ShadowBehind)
 	if !res.ShadowBehind || res.PublicMain != pm || res.ShadowMain == pm {
 		t.Fatalf("public %q shadow %q behind %v; want behind at public %s", res.PublicMain, res.ShadowMain, res.ShadowBehind, pm)
+	}
+	if d := warns[0].Details; d["behind"] != 1 || d["shadow_main"] != res.ShadowMain || d["public_main"] != pm {
+		t.Fatalf("SHADOW_BEHIND details = %+v", d)
 	}
 }
 
@@ -72,7 +83,7 @@ func TestStatusDivergedShadowIsNotBehind(t *testing.T) {
 	h.init()
 	testutil.Commit(t, h.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
 	testutil.Commit(t, h.shadowGit(), "main", "shadow only", map[string]string{"sh.txt": "sh\n"})
-	if res := h.status(); res.ShadowBehind {
+	if res, _ := h.status(); res.ShadowBehind {
 		t.Fatalf("diverged shadow main reported behind")
 	}
 }
@@ -84,9 +95,12 @@ func TestStatusOverlayOutdatedAndScheduledSync(t *testing.T) {
 	h := newHarness(t)
 	h.init()
 	h.setConfig(`schedule: "off"`, `schedule: "23 */6 * * *"`)
-	res := h.status()
+	res, warns := h.status(contract.OverlayOutdated)
 	if res.OverlayStatus != "outdated" || !res.ScheduledSync {
 		t.Fatalf("overlay status %q scheduled %v", res.OverlayStatus, res.ScheduledSync)
+	}
+	if files, _ := warns[0].Details["files"].([]string); !reflect.DeepEqual(files, []string{managed.SyncPath + " (missing)"}) {
+		t.Fatalf("OVERLAY_OUTDATED details = %+v", warns[0].Details)
 	}
 }
 
@@ -95,7 +109,7 @@ func TestStatusWithFeature(t *testing.T) {
 	h := newHarness(t)
 	h.init()
 	head := h.startFeature("feat-x", map[string]string{"x.txt": "x\n"})
-	res := h.status()
+	res, _ := h.status()
 	if len(res.Features) != 1 {
 		t.Fatalf("features = %+v", res.Features)
 	}
@@ -111,7 +125,7 @@ func TestStatusPublishedFeatureMatchesTheSchema(t *testing.T) {
 	h := newHarness(t)
 	h.init()
 	pr, planID := h.publish("feat-x")
-	res := h.status()
+	res, _ := h.status()
 	if len(res.Features) != 1 {
 		t.Fatalf("features = %+v", res.Features)
 	}
@@ -127,7 +141,7 @@ func TestStatusIncludesAbandoned(t *testing.T) {
 	h.init()
 	h.startFeature("feat-x", map[string]string{"x.txt": "x\n"})
 	forgeMeta(t, h, "feat-x", func(m *feature.Meta) { m.Abandoned = true })
-	if res := h.status(); len(res.Features) != 1 || res.Features[0].State != feature.StateAbandoned {
+	if res, _ := h.status(); len(res.Features) != 1 || res.Features[0].State != feature.StateAbandoned {
 		t.Fatalf("features = %+v", res.Features)
 	}
 }
@@ -204,6 +218,26 @@ func TestFeatureShow(t *testing.T) {
 	}
 	if !reflect.DeepEqual(ops, []string{"feature start", "gate"}) {
 		t.Fatalf("ledger ops = %v, want [feature start gate] oldest first", ops)
+	}
+}
+
+// Another pair's feature of the same name shares the workspace ledger; its
+// entries aren't this feature's.
+func TestFeatureShowLeavesOutAnotherPairsLedgerEntries(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.startFeature("feat-x", map[string]string{"x.txt": "x\n"})
+	if err := ledger.Append(h.eng.WS.LedgerPath(), ledger.Entry{TS: h.clock.Now(), Actor: "human:octo", Op: "gate",
+		Pair: "acme/other", Feature: "feat-x", Summary: "another pair's gate"}); err != nil {
+		t.Fatal(err)
+	}
+	res, _, err := h.eng.FeatureShow(h.ctx, h.pair, "feat-x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Ledger) != 1 || res.Ledger[0].Op != "feature start" || res.Ledger[0].Pair != publicName {
+		t.Fatalf("ledger = %+v, want only this pair's feature start", res.Ledger)
 	}
 }
 

@@ -44,12 +44,21 @@ func (e *Engine) managedFiles(ctx context.Context, g *gitx.Git, O string, cfg co
 	return out, nil
 }
 
+// needsUpgrade is whether upgrade would write a managed file in status s.
+// A file a newer binary wrote doesn't: upgrade leaves it alone.
+func needsUpgrade(s managed.Status) bool {
+	switch s {
+	case managed.Missing, managed.Outdated, managed.Modified:
+		return true
+	}
+	return false
+}
+
 // outdatedWarnings is OVERLAY_OUTDATED when any managed file needs upgrade.
 func outdatedWarnings(files []ManagedFile) []contract.Warning {
 	var bad []string
 	for _, f := range files {
-		switch f.Status {
-		case managed.Missing, managed.Outdated, managed.Modified:
+		if needsUpgrade(f.Status) {
 			bad = append(bad, f.Path+" ("+string(f.Status)+")")
 		}
 	}

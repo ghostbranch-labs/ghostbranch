@@ -2,13 +2,13 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/config"
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/ledger"
-	"github.com/ghostbranch-labs/ghostbranch/internal/managed"
 	"github.com/ghostbranch-labs/ghostbranch/internal/overlay"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
@@ -45,7 +45,8 @@ type FeatureShowResult struct {
 }
 
 // Status reports the pair's health (shadow main behind, the managed
-// overlay files, scheduled sync) and surveys every feature. It only reads:
+// overlay files, scheduled sync) and surveys every feature. Like the other
+// pair commands it warns SHADOW_BEHIND and OVERLAY_OUTDATED. It only reads:
 // no push and no ledger entry.
 func (e *Engine) Status(ctx context.Context, p workspace.Pair) (*StatusResult, []contract.Warning, error) {
 	pc, err := e.open(ctx, "status", p, false)
@@ -58,27 +59,22 @@ func (e *Engine) Status(ctx context.Context, p workspace.Pair) (*StatusResult, [
 	if err != nil {
 		return nil, warns, err
 	}
-	pm, err := g.MustResolve(ctx, publicRef("main"))
+	m, err := compareMains(ctx, g)
 	if err != nil {
-		return nil, warns, internalErr(err, "read public main")
+		return nil, warns, internalErr(err, "compare shadow main with public main")
 	}
-	sm, ok, err := g.Resolve(ctx, shadowRef("main"))
-	if err != nil {
-		return nil, warns, internalErr(err, "read shadow main")
-	}
-	behind := false
-	if ok && sm != pm {
-		if behind, err = g.IsAncestor(ctx, sm, pm); err != nil {
-			return nil, warns, internalErr(err, "compare shadow main with public main")
-		}
+	if m.Public == "" {
+		return nil, warns, internalErr(fmt.Errorf("git: %s does not exist", publicRef("main")), "read public main")
 	}
 	files, err := e.managedFiles(ctx, g, O, cfg)
 	if err != nil {
 		return nil, warns, err
 	}
-	res := &StatusResult{Public: pc.pair.Public, Shadow: pc.pair.Shadow, PublicMain: pm, ShadowMain: sm,
-		ShadowBehind: behind, Overlay: O, OverlayStatus: overlayStatus(files),
+	res := &StatusResult{Public: pc.pair.Public, Shadow: pc.pair.Shadow, PublicMain: m.Public, ShadowMain: m.Shadow,
+		ShadowBehind: m.Behind > 0, Overlay: O, OverlayStatus: overlayStatus(files),
 		ScheduledSync: cfg.Sync.Schedule != config.ScheduleOff}
+	warns = addWarnings(warns, m.warnings()...)
+	warns = addWarnings(warns, outdatedWarnings(files)...)
 	rs, sw, err := e.survey(ctx, pc)
 	warns = addWarnings(warns, sw...)
 	if err != nil {
@@ -89,12 +85,10 @@ func (e *Engine) Status(ctx context.Context, p workspace.Pair) (*StatusResult, [
 }
 
 // overlayStatus is outdated when any managed file needs upgrade, as
-// OVERLAY_OUTDATED counts it. A file a newer binary wrote doesn't: upgrade
-// leaves it alone.
+// OVERLAY_OUTDATED counts it.
 func overlayStatus(files []ManagedFile) string {
 	for _, f := range files {
-		switch f.Status {
-		case managed.Missing, managed.Outdated, managed.Modified:
+		if needsUpgrade(f.Status) {
 			return overlayOutdated
 		}
 	}
