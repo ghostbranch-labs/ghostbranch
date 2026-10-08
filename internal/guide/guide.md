@@ -67,14 +67,18 @@ main, green CI, and a leak scan of exactly what will be published.
 
 - `ghostbranch status --repo <public> --json` shows the pair's health and every feature's state:
   `draft`, `in_review`, `gate_passed`, `published`, `merged`, `merged_moved`, `pr_closed`,
-  `branch_gone`, `abandoned`. `ghostbranch feature list` and `feature show <name>` give the same by feature.
-- `ghostbranch sync` closes features whose public PR merged and whose branch hasn't moved: it deletes
-  their shadow branches and says so in `data.closed`. `--no-close` skips that.
-- `merged_moved`, `pr_closed` and an unmerged `branch_gone` are for a person: `status` gives
-  `ghostbranch feature close <name> --repo <public>` with `needs_human`. Closing deletes the feature's
-  shadow branches and needs a person at a console unless the feature is merged and unmoved.
-- `ghostbranch feature abandon <name>` parks a feature and deletes nothing; `--undo` brings it back.
-- `ghostbranch log` shows the history (`--feature`, `--op`, `--actor`, `--since`, `--limit`).
+  `branch_gone`, `abandoned`. `feature list --repo <public>` and `feature show <name> --repo <public>`
+  give the same by feature.
+- `ghostbranch sync --repo <public>` closes features whose public PR merged and whose branch hasn't
+  moved: it deletes their shadow branches and says so in `data.closed`. `--no-close` skips that.
+- `merged_moved`, `pr_closed` and an unmerged `branch_gone` are for a person to close (for
+  `merged_moved` you may instead promote the newer commits): `status` gives
+  `ghostbranch feature close <name> --repo <public>` with `needs_human`. A close deletes the feature's
+  shadow branches and needs a person at the console unless the feature is merged and unmoved; an agent
+  grant does not cover it, so don't ask for `agents allow` to unblock a close.
+- `ghostbranch feature abandon <name> --repo <public>` parks a feature and deletes nothing; `--undo`
+  brings it back.
+- `ghostbranch log --repo <public>` shows the history.
 - Never close or abandon a feature a person is still working on.
 
 ## Keeping up with public

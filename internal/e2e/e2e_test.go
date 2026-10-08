@@ -484,7 +484,7 @@ func TestSandboxLoop(t *testing.T) {
 		}
 	}
 	if !closedHist {
-		t.Fatalf("sync must close the merged feature %s: data.closed = %v", hist, syncData["closed"])
+		t.Fatalf("sync must close the merged feature %s: data = %v", hist, syncData)
 	}
 	shadowRefs, err := g.LsRemote(ctx, "shadow")
 	if err != nil {
@@ -493,6 +493,22 @@ func TestSandboxLoop(t *testing.T) {
 	for _, ref := range []string{"refs/heads/" + hist, "refs/heads/ghostbranch-gate/" + hist, "refs/ghostbranch/features/" + hist} {
 		if _, ok := shadowRefs[ref]; ok {
 			t.Errorf("sync closed %s but %s is still in the shadow repo", hist, ref)
+		}
+	}
+
+	// The gate draft PR is closed now (by GitHub when the gate branch went, then
+	// the no-op close).
+	gatePRs, _, err := ghc.PullRequests.List(ctx, strings.Split(shadowRepo, "/")[0], strings.Split(shadowRepo, "/")[1],
+		&gh.PullRequestListOptions{State: "all", Head: strings.Split(shadowRepo, "/")[0] + ":ghostbranch-gate/" + hist})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gatePRs) == 0 {
+		t.Fatalf("no gate PR found for %s", hist)
+	}
+	for _, pr := range gatePRs {
+		if pr.GetState() != "closed" {
+			t.Errorf("gate PR #%d for %s is %s after sync, want closed", pr.GetNumber(), hist, pr.GetState())
 		}
 	}
 
@@ -526,10 +542,17 @@ func TestSandboxLoop(t *testing.T) {
 	for _, e := range entries {
 		ops[e.Op] = true
 	}
-	for _, op := range []string{"init", "sync", "feature start", "gate", "promote"} {
+	for _, op := range []string{"init", "sync", "feature start", "gate", "promote", "feature close", "feature abandon"} {
 		if !ops[op] {
 			t.Errorf("ledger has no %q entry", op)
 		}
+	}
+	var closeWithRefs bool
+	for _, e := range entries {
+		closeWithRefs = closeWithRefs || e.Op == "feature close" && len(e.Refs) > 0
+	}
+	if !closeWithRefs {
+		t.Error("no feature close ledger entry records the deleted refs")
 	}
 }
 
