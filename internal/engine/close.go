@@ -142,7 +142,8 @@ func (e *Engine) FeatureClose(ctx context.Context, p workspace.Pair, name string
 	var appr *ledger.Approval
 	if !e.DryRun && !closableWithoutConsole(r) {
 		if e.Approver == nil {
-			return nil, warns, noConsole("closing feature " + name + " (" + string(r.State) + ", not published, merged and unmoved)")
+			return nil, warns, noConsole("closing feature " + name + " (" + string(r.State) +
+				"; only a merged feature with no newer commits closes unattended)")
 		}
 		if err := e.confirm(ctx, "", closeSummary(pc, r, t)); err != nil {
 			return nil, warns, err
