@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -21,12 +22,35 @@ func ParseRemoteURL(u string) (string, bool) {
 
 var ownerName = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 
-// firstRemoteRepo is the owner/name of the first remote URL that parses.
-func firstRemoteRepo(remoteURLs []string) string {
-	for _, u := range remoteURLs {
-		if name, ok := ParseRemoteURL(u); ok {
+// Remote is a git remote of the current checkout.
+type Remote struct{ Name, URL string }
+
+func isShadowRemote(name string) bool {
+	return name == "shadow" || strings.HasPrefix(name, "ghostbranch-shadow")
+}
+
+// publicFromRemotes is the public repo the checkout's remotes name, or "".
+// Remotes Ghostbranch uses for the shadow repo are skipped. origin wins;
+// otherwise the remotes must name exactly one distinct repo.
+func publicFromRemotes(remotes []Remote) string {
+	var found []string
+	for _, r := range remotes {
+		if isShadowRemote(r.Name) {
+			continue
+		}
+		name, ok := ParseRemoteURL(r.URL)
+		if !ok {
+			continue
+		}
+		if r.Name == "origin" {
 			return name
 		}
+		if !slices.Contains(found, name) {
+			found = append(found, name)
+		}
+	}
+	if len(found) == 1 {
+		return found[0]
 	}
 	return ""
 }
@@ -38,7 +62,7 @@ func firstRemoteRepo(remoteURLs []string) string {
 //
 // When nothing is registered for the repo asked about, the error carries
 // details.public (the public repo it can name) so next can offer init.
-func (w *Workspace) Resolve(repoFlag string, remoteURLs []string) (Pair, error) {
+func (w *Workspace) Resolve(repoFlag string, remotes []Remote) (Pair, error) {
 	here := repoFlag == "."
 	if here {
 		repoFlag = ""
@@ -54,26 +78,35 @@ func (w *Workspace) Resolve(repoFlag string, remoteURLs []string) (Pair, error) 
 			return p, nil
 		}
 		public := ""
-		if ownerName.MatchString(repoFlag) {
+		if ownerName.MatchString(repoFlag) && !strings.HasSuffix(strings.ToLower(repoFlag), "-shadow") {
 			public = repoFlag
 		}
 		return Pair{}, notRegistered(contract.New(contract.PairAmbiguous, "no repo %q in workspace %q; run ghostbranch init first", repoFlag, w.Name).WithField("repo"), public)
 	}
-	for _, u := range remoteURLs {
-		if name, ok := ParseRemoteURL(u); ok {
+	for _, r := range remotes {
+		if name, ok := ParseRemoteURL(r.URL); ok {
 			if p, ok := w.Find(name); ok {
 				return p, nil
 			}
 		}
 	}
 	if here {
-		return Pair{}, notRegistered(contract.New(contract.PairAmbiguous, "the remotes of this checkout name no repo in workspace %q", w.Name).WithField("repo"), firstRemoteRepo(remoteURLs))
+		hasGitHub := false
+		for _, r := range remotes {
+			if _, ok := ParseRemoteURL(r.URL); ok {
+				hasGitHub = true
+			}
+		}
+		if !hasGitHub {
+			return Pair{}, contract.New(contract.PairAmbiguous, "this directory is not a checkout with a GitHub remote").WithField("repo")
+		}
+		return Pair{}, notRegistered(contract.New(contract.PairAmbiguous, "the remotes of this checkout name no repo in workspace %q", w.Name).WithField("repo"), publicFromRemotes(remotes))
 	}
 	switch len(w.Pairs) {
 	case 1:
 		return w.Pairs[0], nil
 	case 0:
-		return Pair{}, notRegistered(contract.New(contract.PairAmbiguous, "workspace %q has no repos; run ghostbranch init <owner/repo>", w.Name), firstRemoteRepo(remoteURLs))
+		return Pair{}, notRegistered(contract.New(contract.PairAmbiguous, "workspace %q has no repos; run ghostbranch init <owner/repo>", w.Name), publicFromRemotes(remotes))
 	}
 	var names []string
 	for _, p := range w.Pairs {

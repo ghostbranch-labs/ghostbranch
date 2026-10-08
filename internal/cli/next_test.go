@@ -599,3 +599,15 @@ func TestNextOffersAdoptWhenThePairIsNotRegistered(t *testing.T) {
 		t.Fatalf("next = %v", n)
 	}
 }
+
+func TestNextAdoptStepsKeepTheWorkspace(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	code, env := te.runJSON("gate", "feat-x", "--repo", "acme/widget", "--workspace", "other")
+	n := nextOf(t, env)
+	if code != 2 || len(n) != 2 ||
+		!reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "init", "acme/widget", "--adopt", "--plan", "--json", "--workspace", "other"}) ||
+		!reflect.DeepEqual(argv(n[1]), []string{"ghostbranch", "init", "acme/widget", "--plan", "--json", "--workspace", "other"}) {
+		t.Fatalf("exit %d, next = %v", code, n)
+	}
+}

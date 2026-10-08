@@ -27,8 +27,8 @@ func TestRenderListsEveryCodeFromTheRegistry(t *testing.T) {
 		}
 	}
 	// 270: the history-modes section (sub-project 5a) added about 18 lines;
-	// 271: the adopt sentence in *Set up a repo* (the setup steps were tightened to fit).
-	if n := strings.Count(out, "\n"); n > 271 {
+	// 272: the adopt sentence in *Set up a repo*, with the SHADOW_CREATE_DENIED hand-off kept whole.
+	if n := strings.Count(out, "\n"); n > 272 {
 		t.Errorf("the guide is %d lines; keep it short (spec: about 150 plus the tables)", n)
 	}
 }
@@ -210,9 +210,12 @@ func TestGuideTeachesHistoryModes(t *testing.T) {
 func TestGuideTellsAgentsToAdoptAnExistingShadowRepo(t *testing.T) {
 	out := strings.Join(strings.Fields(guide.Render(contract.Registry())), " ")
 	for _, want := range []string{
-		"The shadow repo already exists (set up on another machine, or with a fresh `GHOSTBRANCH_HOME`)?",
+		"Shadow repo already exists (another machine, or a fresh `GHOSTBRANCH_HOME`)?",
 		"`ghostbranch init <public> --adopt --plan --json`",
-		"it only registers the pair on this machine and checks the shadow repo",
+		"it only registers the pair here and checks the shadow repo",
+		// The SHADOW_CREATE_DENIED hand-off (whitespace-normalised here, as the guide wraps lines).
+		"show the person `error.details.steps`",
+		"(the command in `next`; its `needs_human` stands for their steps 1 and 2)",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the guide lacks %q", want)

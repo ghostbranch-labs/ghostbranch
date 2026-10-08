@@ -20,6 +20,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/grant"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
+	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
 type testEnv struct {
@@ -55,7 +56,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		Rand:         &testutil.SeqReader{},
 		NewForge:     func(string) (forge.Forge, error) { return f, nil },
 		GHToken:      func() (string, error) { return "", errors.New("gh is not logged in") },
-		CwdRemotes:   func() []string { return nil },
+		CwdRemotes:   func() []workspace.Remote { return nil },
 		NewScanner:   func(r leak.Rules) (leak.Scanner, error) { return leak.NewGitleaks(r) },
 		PollInterval: time.Second, SettleWindow: 5 * time.Second,
 		Executable:   func() (string, error) { return filepath.Join(root, "bin", "ghostbranch"), nil },
