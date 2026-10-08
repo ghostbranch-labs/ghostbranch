@@ -8,8 +8,8 @@ main, green CI, and a leak scan of exactly what will be published.
 
 ## The loop
 
-0. New repo? See *Set up a repo*. Before starting a feature, if a result warns `SHADOW_BEHIND`, run
-   `ghostbranch sync` (its `next` says so).
+0. New repo? See *Set up a repo*. **Always run `ghostbranch sync --repo <public> --json` first**, before
+   `feature start` or resuming a feature (features start from shadow main); it never writes to public.
 1. `ghostbranch feature start <name> --json` creates the feature branch in the shadow repo.
 2. Run the command in `data.checkout`. It fetches the branch from the shadow repo (in a checkout of the
    public repo, usually a remote named `shadow`) and switches to it. Commit there, and push **to the

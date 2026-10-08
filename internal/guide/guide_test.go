@@ -178,3 +178,14 @@ func TestTokenTableGrantsPublicWriteOnlyToPromote(t *testing.T) {
 		t.Fatalf("found %d token rows, want 6", rows)
 	}
 }
+
+// An agent syncs before every feature, not only after a SHADOW_BEHIND warning,
+// which feature start reports only once the branch already exists.
+func TestGuideSaysToSyncBeforeEveryFeature(t *testing.T) {
+	out := guide.Render(contract.Registry())
+	for _, want := range []string{"**Always run `ghostbranch sync --repo <public> --json` first**", "before\n   `feature start`"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("guide is missing %q", want)
+		}
+	}
+}
