@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/guard"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
 	"github.com/ghostbranch-labs/ghostbranch/internal/managed"
+	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
 // usedWorkspace is the workspace this run acted in: the engine's when there
@@ -432,16 +434,118 @@ func withoutFlags(argv []string, flags ...string) []string {
 	return out
 }
 
-// historyFix is what to do about a leak in a feature commit's message or
-// author: reword or re-author those commits on the feature branch (the
-// finding's commits name them), then gate again.
-func historyFix(a *app, f string, files bool) contract.Next {
-	why := "a feature commit's message or author leaks (each finding's commits names the commits): reword or re-author those commits on the feature branch in the shadow repo"
-	if files {
-		why += " and fix the file findings there too"
+// historyNexts is what to do about a problem the scan found in the
+// feature's commits (each finding's commits, or a marker error's
+// details.commit, names them), which may be only in an older commit that
+// the final tree no longer has. The steps an agent can run come first:
+// publish so those commits never ship as they are (squash; curated, which
+// can fold a commit into the one that undoes it or give it a new message),
+// or rewrite them on the feature branch and gate again. An author leak also
+// needs a person to change how authors are published. cmd builds a command
+// for the pair; mode is the mode the problem was found in.
+func (a *app) historyNexts(cmd func(...string) []string, f, mode string, wheres map[string]bool, marker bool) []contract.Next {
+	files := marker || wheres["tree"] || wheres["path"]
+	msgs, authors := wheres["commit_message"], wheres["author"]
+	var out []contract.Next
+	if mode != config.ModeSquash {
+		why := "publish the feature as one commit"
+		switch {
+		case files:
+			why = "if the problem is only in older commits (the final tree no longer has it), " + why + ", so they never ship"
+		default:
+			why += ", so the feature commits never ship as they are"
+		}
+		if msgs {
+			why += "; write a --message that doesn't leak"
+		}
+		if authors {
+			why += "; the publishing account authors it"
+		}
+		out = append(out, contract.Next{Command: cmd("promote", f, "--mode", config.ModeSquash, "--plan"), NeedsInput: []string{"--message"}, Why: why})
 	}
-	why += ", push with `git push --force-with-lease shadow " + f + "`, then gate again (or a person switches promote.default_mode to squash or curated)"
-	return contract.Next{Command: a.scoped("gate", f), Why: why}
+	if mode != config.ModeCurated && (files || msgs) {
+		why := "or curate the commits in a --curate file (see the gate result's commits)"
+		if files {
+			why += ": group each commit the finding names with a later one that removes the problem"
+		}
+		if msgs {
+			why += ", with new messages that don't leak"
+		}
+		out = append(out, contract.Next{Command: cmd("promote", f, "--mode", config.ModeCurated, "--plan"), NeedsInput: []string{"--curate", "--title"}, Why: why})
+	}
+	var fix []string
+	if files {
+		fix = append(fix, "fix the files")
+	}
+	if msgs {
+		fix = append(fix, "reword the messages")
+	}
+	if authors {
+		fix = append(fix, "re-author them")
+	}
+	where := "each finding's commits"
+	if marker {
+		where = "error.details.commit"
+	}
+	out = append(out, contract.Next{Command: cmd("gate", f),
+		Why: "or rewrite the commits in " + where + " on the feature branch in the shadow repo (" + strings.Join(fix, ", ") +
+			"), push with " + a.forcePush(f) + ", then gate again"})
+	if authors {
+		out = append(out, contract.Next{Command: cmd("gate", f), NeedsHuman: true,
+			Why: "to publish those commits with other authors, a person sets promote.author_email: noreply, or adds a promote.author_map entry (they edit the overlay config), then gate again"})
+	}
+	return out
+}
+
+// noteShadowRemote records the checkout's remote for the pair's shadow
+// repo, for next to name in a push command.
+func (a *app) noteShadowRemote(p workspace.Pair) {
+	if a.env.ShadowRemote != nil && a.shadowRemote == "" {
+		a.shadowRemote, _, _ = a.env.ShadowRemote(p.Shadow)
+	}
+}
+
+// forcePush is the command that pushes a rewritten feature branch to the
+// shadow repo, with the checkout's remote for it when known.
+func (a *app) forcePush(f string) string {
+	if a.shadowRemote != "" {
+		return "`git push --force-with-lease " + a.shadowRemote + " " + f + "`"
+	}
+	return "`git push --force-with-lease <remote> " + f + "`, <remote> being the shadow repo's remote"
+}
+
+// historyFound is whether the problem was found in an older feature
+// commit, one before the tip: a finding whose commits leave out the tip, or
+// a marker error that names another commit. A finding the tip itself
+// introduces or changes is in the final tree, so the plain fix applies.
+// tip is "" when this run doesn't know the feature's commits.
+func historyFound(ce *contract.Error, tip string) bool {
+	if c, _ := ce.Details["commit"].(string); ce.Code == contract.MarkerInvalid && c != "" {
+		return c != tip
+	}
+	fs, _ := ce.Details["findings"].([]leak.Finding)
+	for _, f := range fs {
+		if len(f.Commits) > 0 && !slices.Contains(f.Commits, tip) {
+			return true
+		}
+	}
+	return false
+}
+
+// featureTip is the last feature commit the gate this run ran or reused
+// replayed, or "" when there is none.
+func (a *app) featureTip() string {
+	var g *engine.GateResult
+	switch r := a.result.(type) {
+	case *engine.GateResult:
+		g = r
+	case *engine.PromoteResult:
+		g = r.Gate
+	}
+	if g == nil || len(g.Commits) == 0 {
+		return ""
+	}
+	return g.Commits[len(g.Commits)-1].Source
 }
 
 // publisherFix is what to do when the publishing account's identity leaks:
@@ -525,29 +629,34 @@ func modeInputs(mode string) []string {
 }
 
 // leakNext is what to do about LEAK_FOUND or MARKER_INVALID: fix the
-// content and run again; and, for waivable findings a person judges false
-// positives, that person waives them at their console.
+// content and run again, or, when the problem is in the feature's commits,
+// the steps historyNexts gives; and, for waivable findings a person judges
+// false positives, that person waives them at their console.
 func (a *app) leakNext(ce *contract.Error) []contract.Next {
 	f, _ := ce.Details["feature"].(string)
 	mode, _ := ce.Details["mode"].(string)
 	wheres := leakWheres(ce)
 	files := wheres["tree"] || wheres["path"]
+	older := historyFound(ce, a.featureTip())
+	// What a gate scans of a message or author is in a commit even at the tip.
+	history := older || wheres["commit_message"] || wheres["author"]
+	marker := ce.Code == contract.MarkerInvalid
 	var out []contract.Next
 	switch a.command {
 	case "promote":
 		drop, need, curateMsg := textFix(wheres, mode)
 		switch {
-		case a.promoteGateLeaked():
+		case a.promoteGateLeaked() || (marker && f != ""):
 			// The gate this promote ran found it: fix it as after a gate.
-			if f != "" && (wheres["commit_message"] || wheres["author"]) {
-				out = append(out, historyFix(a, f, files))
+			if f != "" && history {
+				out = append(out, a.historyNexts(a.scoped, f, mode, wheres, marker)...)
 				break
 			}
 			out = append(out, contract.Next{Command: a.again(false), Why: "after fixing the content on the feature branch in the shadow repo, run this again"})
 		case publisherLeaks(wheres, mode):
 			out = append(out, a.publisherFix())
-		case f != "" && historyLeaks(wheres, mode):
-			out = append(out, historyFix(a, f, files))
+		case f != "" && (historyLeaks(wheres, mode) || (older && files)):
+			out = append(out, a.historyNexts(a.scoped, f, mode, wheres, false)...)
 		case len(need) > 0:
 			why := "a leak is in text this promote publishes: run it again with new text for " + strings.Join(need, ", ")
 			if curateMsg {
@@ -562,12 +671,13 @@ func (a *app) leakNext(ce *contract.Error) []contract.Next {
 		}
 	case "apply":
 		pub, _ := ce.Details["public"].(string)
+		inPair := func(args ...string) []string { return a.gb(append(args, "--repo", pub)...) }
 		switch {
 		case f == "" || pub == "" || mode == "":
 		case publisherLeaks(wheres, mode):
 			out = append(out, a.publisherFix())
-		case historyLeaks(wheres, mode):
-			out = append(out, historyFix(a, f, files))
+		case historyLeaks(wheres, mode) || (older && files):
+			out = append(out, a.historyNexts(inPair, f, mode, wheres, false)...)
 		default:
 			need := modeInputs(mode)
 			for _, w := range []struct{ where, input string }{{"pr_title", "--title"}, {"pr_body", "--body"}, {"branch", "--branch"}} {
@@ -579,9 +689,10 @@ func (a *app) leakNext(ce *contract.Error) []contract.Next {
 				Why: "fix what leaks (on the feature branch, or in the text), then make a new plan", NeedsInput: need})
 		}
 	case "gate", "waivers add":
-		if f != "" && (wheres["commit_message"] || wheres["author"]) {
-			out = append(out, historyFix(a, f, files))
-		} else if f != "" {
+		switch {
+		case f != "" && history:
+			out = append(out, a.historyNexts(a.scoped, f, mode, wheres, marker)...)
+		case f != "":
 			out = append(out, contract.Next{Command: a.scoped("gate", f), Why: "after fixing the content on the feature branch in the shadow repo, gate again"})
 		}
 	}

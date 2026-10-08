@@ -48,9 +48,10 @@ type Finding struct {
 	Secret   string `json:"secret,omitempty"`
 	Match    string `json:"match,omitempty"`
 	Waivable bool   `json:"waivable"`
-	// Commits are the feature branch commits (source SHAs) whose published
-	// tree or text holds this finding. The engine fills it; empty for the
-	// branch name, PR text and a squash tree.
+	// Commits are the feature commits (source SHAs) that introduce or
+	// change this finding (a later commit that only carries it unchanged is
+	// not listed). The engine fills it; empty for the branch name, PR text
+	// and a squash tree.
 	Commits []string `json:"commits,omitempty"`
 	// MatchSHA256 binds a waiver to the exact content. Hint is a secret's
 	// first and last four characters, for the person at the console.

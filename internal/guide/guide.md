@@ -15,9 +15,10 @@ main, green CI, and a leak scan of exactly what will be published.
    public repo, usually a remote named `shadow`) and switches to it. Commit there, and push **to the
    shadow repo only** (`git push shadow <name>`), never to `origin`.
 3. `ghostbranch gate <name> --json` rebases on public main, scans for leaks and runs CI.
-4. `ghostbranch promote <name> --plan --json` publishes the feature's commits as they are (the default,
-   `--mode preserve`). With more than one commit, add `--title "<PR title>"`, written by you. It
-   saves a plan of exactly what goes public: every commit, file, author and the PR text.
+4. `ghostbranch promote <name> --plan --json` publishes in the repo's `promote.default_mode`
+   (`preserve` unless set); pass `--mode` to choose. With more than one commit, add
+   `--title "<PR title>"`, written by you. It saves a plan of exactly what goes public: every commit,
+   file, author and the PR text.
 5. Follow `next`:
    - `needs_human: true`: stop, and give the person that exact command.
    - `needs_human: false`: a person has allowed agents to publish here; you may run it.
@@ -29,15 +30,20 @@ main, green CI, and a leak scan of exactly what will be published.
 - **`squash`:** one commit: `--mode squash -m "<message>"`.
 - **`curated`:** write a JSON file from the gate result's `"commits"` (each has `source`, `subject`,
   `author`, `files`) to group, reorder and reword:
-  `{"commits": [{"from": ["<source sha>", "<source sha>"], "message": "feat(x): what this does"}, {"from": ["<source sha>"], "message": "fix(y): ..."}]}`
+  `{"commits": [{"from": ["<source sha>", "<source sha>"], "message": "feat(x): what this does"},
+  {"from": ["<source sha>"], "message": "fix(y): ..."}]}`
   then `ghostbranch promote <name> --mode curated --curate groups.json --title "<PR title>" --plan --json`.
   Every commit must appear exactly once. Reordering commits that touch the same lines fails with
   `CURATE_CONFLICT` or `CURATE_TREE_MISMATCH`: keep those in order, or reorder on your branch.
 - **Authors:** `promote.author_email` (`noreply` by default) decides who each public commit says wrote
   it. Never rewrite authors on your branch to hide them.
-- **History leaks:** the gate and promote scan every commit, so a secret added and later deleted still
-  blocks. Fix it by rewriting the commits on your feature branch, never with a waiver. Findings list
-  the `commits` they are in.
+- **History leaks:** a preserve publish (and its gate) checks every commit, so a secret added and
+  later deleted still blocks; squash and curated check what they publish. A finding's `commits` are
+  the feature commits that introduce or change it (a later commit that only carries it unchanged is
+  not listed). To fix an older commit, rewrite it on your branch and push with
+  `git push --force-with-lease <shadow remote> <name>`, or publish with `--mode squash` or
+  `--mode curated` so it never ships. A leaking commit message: reword it, or use curated mode with
+  new messages. Never waive a finding yourself; a person may waive a false positive at their console.
 
 ## Set up a repo
 

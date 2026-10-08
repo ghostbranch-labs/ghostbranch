@@ -38,7 +38,7 @@
         "exit_code": 3,
         "summary": "The leak scan found something in what would be published.",
         "causes": [],
-        "what_to_do": "Remove the content in details.findings from the feature and gate again. If a person judges a finding in details.waivable a false positive, they run the waivers add command in next. Agents never waive findings or edit waivers.json.",
+        "what_to_do": "Remove the content in details.findings from the feature and gate again. A finding whose commits are listed may be only in older commits: publish with --mode squash or --mode curated so they never ship, or rewrite those commits on the feature branch, force-push it to the shadow repo, and gate again. If a person judges a finding in details.waivable a false positive, they run the waivers add command in next. Agents never waive findings or edit waivers.json.",
         "needs_human": false
       },
       {
@@ -53,7 +53,7 @@
           "malformed: a line that looks like a marker but is not exactly one (more text, a doubled prefix, or a multi-line comment)",
           "unsupported_encoding: markers in a UTF-16 or UTF-32 file, or in a file read as binary"
         ],
-        "what_to_do": "Fix the marker lines at details.problems on the feature branch, push it to the shadow repo, and gate again. Never delete only the marker lines: the internal lines would then be published.",
+        "what_to_do": "Fix the marker lines at details.problems on the feature branch, push it to the shadow repo, and gate again. When details.commit names an older commit and the final tree no longer has the problem, publish with --mode squash or --mode curated so it never ships, or rewrite that commit on the feature branch and force-push it to the shadow repo. Never delete only the marker lines: the internal lines would then be published.",
         "needs_human": false
       },
       {

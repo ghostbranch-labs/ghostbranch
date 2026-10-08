@@ -193,7 +193,10 @@ func TestGuideSaysToSyncBeforeEveryFeature(t *testing.T) {
 
 func TestGuideTeachesHistoryModes(t *testing.T) {
 	out := guide.Render(contract.Registry())
-	for _, want := range []string{"--mode preserve", "--curate", `"commits"`, "author_email", "--title", "--mode squash"} {
+	for _, want := range []string{"(`preserve` unless set); pass `--mode` to choose", "--curate", `"commits"`, "author_email", "--title", "--mode squash",
+		"`ghostbranch promote <name> --plan --json` publishes in the repo's `promote.default_mode`",
+		"Never waive a finding yourself; a person may waive a false positive at their console.",
+		"`git push --force-with-lease <shadow remote> <name>`", "introduce or change it"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("guide is missing %q", want)
 		}

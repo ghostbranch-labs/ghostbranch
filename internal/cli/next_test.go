@@ -442,10 +442,86 @@ func TestNextForAMessageLeakInHistory(t *testing.T) {
 	te.shadowCommitMsg("feat-x", "fix JIRA-1", map[string]string{"a.txt": "a\n"})
 	_, env := te.runJSON("gate", "feat-x")
 	n := nextOf(t, env)
-	if !reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "gate", "feat-x", "--repo", "acme/widget"}) ||
-		!strings.Contains(n[0]["why"].(string), "reword") || !strings.Contains(n[0]["why"].(string), "git push --force-with-lease shadow feat-x") ||
-		strings.Contains(n[0]["why"].(string), "--mode curated") {
+	if len(n) != 3 || !reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "promote", "feat-x", "--mode", "squash", "--plan", "--repo", "acme/widget"}) ||
+		!reflect.DeepEqual(n[0]["needs_input"], []any{"--message"}) ||
+		!reflect.DeepEqual(argv(n[1]), []string{"ghostbranch", "promote", "feat-x", "--mode", "curated", "--plan", "--repo", "acme/widget"}) ||
+		!strings.Contains(n[1]["why"].(string), "new messages") ||
+		!reflect.DeepEqual(argv(n[2]), []string{"ghostbranch", "gate", "feat-x", "--repo", "acme/widget"}) ||
+		!strings.Contains(n[2]["why"].(string), "reword") || !strings.Contains(n[2]["why"].(string), "git push --force-with-lease shadow feat-x") {
 		t.Fatalf("history message leak: %v", n)
+	}
+}
+
+// A secret only in an older commit: the agent may publish so that commit
+// never ships, or rewrite it; it is never told to wait for a person to
+// change the default mode.
+func TestNextForALeakOnlyInAnOlderCommit(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	te.mustRun("feature", "start", "feat-x")
+	te.shadowCommit("feat-x", map[string]string{"config.env": "TOKEN=" + testutil.FakeGitHubToken() + "\n"})
+	te.shadowCommit("feat-x", map[string]string{"config.env": testutil.Delete, "a.txt": "a\n"})
+	_, env := te.runJSON("gate", "feat-x")
+	n := nextOf(t, env)
+	if len(n) < 3 || !reflect.DeepEqual(argv(n[0])[:5], []string{"ghostbranch", "promote", "feat-x", "--mode", "squash"}) ||
+		!strings.Contains(n[0]["why"].(string), "only in older commits") ||
+		!reflect.DeepEqual(n[1]["needs_input"], []any{"--curate", "--title"}) ||
+		!reflect.DeepEqual(argv(n[2])[:3], []string{"ghostbranch", "gate", "feat-x"}) ||
+		!strings.Contains(n[2]["why"].(string), "git push --force-with-lease shadow feat-x") {
+		t.Fatalf("older-commit leak: %v", n)
+	}
+	for _, x := range n {
+		if strings.Contains(x["why"].(string), "default_mode") {
+			t.Fatalf("next must not wait on a person switching the default mode: %v", x)
+		}
+	}
+	// The squash promote it suggests passes the gate and plans.
+	code, env := te.runJSON("promote", "feat-x", "--mode", "squash", "-m", "Add a", "--plan")
+	if code != 0 {
+		t.Fatalf("squash promote: exit %d %v", code, env)
+	}
+}
+
+// A broken marker only in an older commit gets the same steps, naming
+// error.details.commit.
+func TestNextForAMarkerOnlyInAnOlderCommit(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	te.mustRun("feature", "start", "feat-x")
+	te.shadowCommit("feat-x", map[string]string{"app.go": "ok\n// BEGIN-INTERNAL\nx\n"})
+	te.shadowCommit("feat-x", map[string]string{"app.go": "ok\n"})
+	_, env := te.runJSON("gate", "feat-x")
+	if e, _ := env["error"].(map[string]any); e["code"] != "MARKER_INVALID" {
+		t.Fatalf("gate = %v", env)
+	}
+	n := nextOf(t, env)
+	if len(n) != 3 || argv(n[0])[4] != "squash" || argv(n[1])[4] != "curated" || !strings.Contains(n[2]["why"].(string), "error.details.commit") {
+		t.Fatalf("older-commit marker: %v", n)
+	}
+}
+
+// An author leak needs a person to change how authors are published;
+// squash, which the publisher authors, is the agent's own way out.
+func TestNextForAnAuthorLeak(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	editConfig(te, "block_patterns: []", `block_patterns: ["author@example"]`)
+	editConfig(te, "author_email: noreply", "author_email: keep")
+	te.mustRun("feature", "start", "feat-x")
+	te.shadowCommit("feat-x", map[string]string{"a.txt": "a\n"})
+	_, env := te.runJSON("gate", "feat-x")
+	n := nextOf(t, env)
+	last := n[len(n)-1]
+	if argv(n[0])[4] != "squash" || last["needs_human"] != true || !strings.Contains(last["why"].(string), "promote.author_email: noreply") {
+		t.Fatalf("author leak: %v", n)
+	}
+	for _, x := range n {
+		if slices.Contains(argv(x), "curated") {
+			t.Fatalf("curated keeps each group's first author, so it is no fix: %v", x)
+		}
 	}
 }
 

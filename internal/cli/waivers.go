@@ -40,6 +40,7 @@ Waivers live on this machine only.`,
 			if err != nil {
 				return err
 			}
+			a.noteShadowRemote(p)
 			res, w, err := e.WaiversAdd(cmd.Context(), p, o)
 			return done(a, res, w, err)
 		},

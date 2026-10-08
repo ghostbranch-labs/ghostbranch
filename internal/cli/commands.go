@@ -197,6 +197,7 @@ every check. It records the result and never touches the public repo. Exit 3 mea
 			if err != nil {
 				return err
 			}
+			a.noteShadowRemote(p)
 			res, w, err := e.Gate(cmd.Context(), p, args[0])
 			return done(a, res, w, err)
 		},
@@ -232,6 +233,7 @@ With --plan it stops there. Otherwise a person confirms by typing a code shown o
 			if err != nil {
 				return err
 			}
+			a.noteShadowRemote(p)
 			res, w, err := e.Promote(cmd.Context(), p, o)
 			return done(a, res, w, err)
 		},
