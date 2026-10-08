@@ -181,8 +181,9 @@ func TestNextForBadMarkersOnlyFixes(t *testing.T) {
 }
 
 // A leak in text the caller typed is fixed by new text, not by a change on
-// the feature branch: the step drops the old text and asks for each text
-// that leaked (a body taken from the message leaks with it).
+// the feature branch: the step drops only the texts that leaked, keeps the
+// rest, and asks for each one dropped (a body taken from the message leaks
+// with it).
 func TestNextAsksForNewTextWhenTheMessageLeaks(t *testing.T) {
 	t.Parallel()
 	te := newTestEnv(t)
@@ -190,10 +191,13 @@ func TestNextAsksForNewTextWhenTheMessageLeaks(t *testing.T) {
 	leaky := "Add feature\n\nTOKEN=" + testutil.FakeGitHubToken()
 	for _, c := range []struct {
 		args []string
+		want []string
 		need []any
 	}{
-		{[]string{"promote", "feat-x", "--mode", "squash", "-m", leaky, "--plan"}, []any{"--message", "--body"}},
-		{[]string{"promote", "feat-x", "--mode", "squash", "--message=" + leaky, "--title", "t", "--body=b", "--plan"}, []any{"--message"}},
+		{[]string{"promote", "feat-x", "--mode", "squash", "-m", leaky, "--plan"},
+			[]string{"ghostbranch", "promote", "feat-x", "--mode", "squash", "--plan", "--json"}, []any{"--message", "--body"}},
+		{[]string{"promote", "feat-x", "--mode", "squash", "--message=" + leaky, "--title", "t", "--body=b", "--plan"},
+			[]string{"ghostbranch", "promote", "feat-x", "--mode", "squash", "--title", "t", "--body=b", "--plan", "--json"}, []any{"--message"}},
 	} {
 		args := c.args
 		code, env := te.runJSON(args...)
@@ -202,7 +206,7 @@ func TestNextAsksForNewTextWhenTheMessageLeaks(t *testing.T) {
 			t.Fatalf("%v: %d %v", args, code, env)
 		}
 		n := nextOf(t, env)
-		if len(n) != 1 || !reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "promote", "feat-x", "--mode", "squash", "--plan", "--json"}) ||
+		if len(n) != 1 || !reflect.DeepEqual(argv(n[0]), c.want) ||
 			!reflect.DeepEqual(n[0]["needs_input"], c.need) || !strings.Contains(n[0]["why"].(string), "run it again with new text") {
 			t.Fatalf("%v: next = %v", args, n)
 		}
@@ -439,8 +443,52 @@ func TestNextForAMessageLeakInHistory(t *testing.T) {
 	_, env := te.runJSON("gate", "feat-x")
 	n := nextOf(t, env)
 	if !reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "gate", "feat-x", "--repo", "acme/widget"}) ||
-		!strings.Contains(n[0]["why"].(string), "reword") {
+		!strings.Contains(n[0]["why"].(string), "reword") || !strings.Contains(n[0]["why"].(string), "git push --force-with-lease shadow feat-x") ||
+		strings.Contains(n[0]["why"].(string), "--mode curated") {
 		t.Fatalf("history message leak: %v", n)
+	}
+}
+
+// A curated promote's messages come from the --curate file: a leak in them
+// asks for a new file (and a title, which came from that message), not a
+// change on the feature branch.
+func TestNextForALeakInCuratedMessages(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	gatedFeature(te)
+	editConfig(te, "block_patterns: []", `block_patterns: ["JIRA-[0-9]+"]`)
+	sha, err := gitx.New(te.forge.RepoDir("acme/widget-shadow")).MustResolve(t.Context(), "refs/heads/feat-x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(te.root, "c.json")
+	_ = os.WriteFile(file, []byte(`{"commits": [{"from": ["`+sha+`"], "message": "fix JIRA-1"}]}`), 0o644)
+	code, env := te.runJSON("promote", "feat-x", "--mode", "curated", "--curate", file, "--plan")
+	if e, _ := env["error"].(map[string]any); code != 3 || e["code"] != "LEAK_FOUND" {
+		t.Fatalf("exit %d: %v", code, env)
+	}
+	n := nextOf(t, env)
+	if !reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "promote", "feat-x", "--mode", "curated", "--plan", "--json"}) ||
+		!reflect.DeepEqual(n[0]["needs_input"], []any{"--curate", "--title"}) {
+		t.Fatalf("curated message leak: %v", n)
+	}
+}
+
+// A squash promote whose typed title alone leaks keeps its message: the
+// step plus a new --title runs.
+func TestNextForASquashTitleLeakIsRunnable(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	gatedFeature(te)
+	editConfig(te, "block_patterns: []", `block_patterns: ["JIRA-[0-9]+"]`)
+	_, env := te.runJSON("promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--title", "JIRA-1 work", "--plan")
+	n := nextOf(t, env)
+	want := []string{"ghostbranch", "promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--plan", "--json"}
+	if !reflect.DeepEqual(argv(n[0]), want) || !reflect.DeepEqual(n[0]["needs_input"], []any{"--title"}) {
+		t.Fatalf("title leak: %v", n)
+	}
+	if code, env := te.runJSON(append(argv(n[0])[1:], "--title", "Add feature")...); code != 0 {
+		t.Fatalf("the step with a new title: exit %d %v", code, env)
 	}
 }
 

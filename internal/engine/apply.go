@@ -81,14 +81,21 @@ func stale(pl plan.Plan, moved []string) map[string]any {
 		"mode": pl.Mode, "title": pl.Publish.PR.Title, "body": pl.Publish.PR.Body}
 }
 
-// markerReplan adds to a MARKER_INVALID the feature, public repo and mode,
-// so next can name the promote that makes a new plan once it is fixed.
-func markerReplan(err error, pl plan.Plan) error {
-	if ce := contract.From(err); ce != nil && ce.Code == contract.MarkerInvalid {
+// replanDetails adds to a MARKER_INVALID, CURATE_CONFLICT or
+// CURATE_TREE_MISMATCH the plan's feature, public repo, public branch and
+// mode, so next can name the promote that makes a new plan.
+func replanDetails(err error, pl plan.Plan) error {
+	ce := contract.From(err)
+	if ce == nil {
+		return err
+	}
+	switch ce.Code {
+	case contract.MarkerInvalid, contract.CurateConflict, contract.CurateTreeMismatch:
 		if ce.Details == nil {
 			ce.Details = map[string]any{}
 		}
 		ce.Details["feature"], ce.Details["public"], ce.Details["mode"] = pl.Feature, pl.Pair.Public, pl.Mode
+		ce.Details["branch"] = pl.Publish.TargetBranch
 	}
 	return err
 }
@@ -183,7 +190,7 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 	// published tree again from the candidate's parent.
 	T2, tEntries, err := publishedTree(ctx, g, gateC+"^", cfg)
 	if err != nil {
-		return nil, warns, markerReplan(err, pl)
+		return nil, warns, replanDetails(err, pl)
 	}
 	if T2 != pl.Publish.Tree {
 		return nil, warns, contract.New(contract.PlanStale,
@@ -214,7 +221,7 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 		commits: m.Gate.Commits, groups: pl.Curate},
 		func(cs []string, onto string) ([]string, error) { return e.replay(ctx, pc, cs, onto) })
 	if err != nil {
-		return nil, warns, markerReplan(err, pl)
+		return nil, warns, replanDetails(err, pl)
 	}
 	chainStale := contract.New(contract.PlanStale,
 		"plan %s's public commits are not the ones its feature's history gives; make a new plan with ghostbranch promote", pl.ID).
