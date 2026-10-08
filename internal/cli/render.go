@@ -2,8 +2,11 @@ package cli
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/guard"
@@ -245,6 +248,26 @@ func human(r any) string {
 			break
 		}
 		fmt.Fprintf(&b, "Revoked %d waiver(s).\n", len(v.Revoked))
+	case *engine.RemoveResult:
+		if v.Preview != nil {
+			previewText(&b, v.Preview)
+			break
+		}
+		fmt.Fprintf(&b, "Removed %s from this machine: revoked %d agent grant(s) and %d waiver(s), deleted %d plan file(s) and %s.\n",
+			v.Public, v.Grants, v.Waivers, len(v.Plans), v.Dir)
+		fmt.Fprintf(&b, "The shadow repo %s still exists on GitHub; delete it there if you no longer need it (Settings → Delete this repository).\n", v.Shadow)
+	case *engine.LogResult:
+		if len(v.Entries) == 0 {
+			b.WriteString("No ledger entries.\n")
+		}
+		for _, e := range v.Entries {
+			feat := e.Feature
+			if feat == "" {
+				feat = "-"
+			}
+			fmt.Fprintf(&b, "%s  %s  %s  %s  exit %d  %s\n", e.TS.UTC().Format(time.RFC3339),
+				oneLine(e.Actor), oneLine(e.Op), oneLine(feat), e.ExitCode, oneLine(e.Summary))
+		}
 	case *engine.AgentsStatusResult:
 		if len(v.Grants) == 0 {
 			b.WriteString("No agent grants on this machine.\n")
@@ -264,6 +287,17 @@ func human(r any) string {
 		}
 	}
 	return b.String()
+}
+
+// oneLine escapes what a terminal would act on rather than show (control
+// characters, bidi controls, invalid UTF-8), so a ledger field an agent
+// wrote stays on its own line and can't rewrite the screen.
+func oneLine(s string) string {
+	if utf8.ValidString(s) && !strings.ContainsFunc(s, func(r rune) bool { return !unicode.IsGraphic(r) }) {
+		return s
+	}
+	q := strconv.QuoteToGraphic(s)
+	return q[1 : len(q)-1]
 }
 
 func waivedLines(b *strings.Builder, ws []engine.WaivedFinding) {

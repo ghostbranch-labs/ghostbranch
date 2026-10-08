@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "remove data",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["public", "shadow", "grants", "waivers", "plans", "dir", "preview"],
+  "properties": {
+    "public": { "$ref": "common.schema.json#/$defs/repo" },
+    "shadow": { "$ref": "common.schema.json#/$defs/repo" },
+    "grants": { "type": "integer", "minimum": 0 },
+    "waivers": { "type": "integer", "minimum": 0 },
+    "plans": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "dir": { "type": "string", "minLength": 1 },
+    "preview": { "oneOf": [{ "type": "null" }, { "$ref": "preview.schema.json" }] }
+  }
+}

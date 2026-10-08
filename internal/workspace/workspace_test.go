@@ -214,3 +214,35 @@ func TestResolveNeverGuessesTheShadowRepoAsPublic(t *testing.T) {
 		t.Fatalf("--repo . outside a checkout: %+v", err)
 	}
 }
+
+func TestRemovePair(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	ws, err := workspace.Open(root, "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := workspace.Pair{Public: "acme/widget", Shadow: "acme/widget-shadow"}
+	b := workspace.Pair{Public: "acme/other", Shadow: "acme/other-shadow"}
+	ws.AddPair(a)
+	ws.AddPair(b)
+	if ws.RemovePair("acme/nope") {
+		t.Fatal("removing an unregistered pair must report false")
+	}
+	if !ws.RemovePair("ACME/Widget") {
+		t.Fatal("RemovePair is case-insensitive on the public repo")
+	}
+	if _, ok := ws.Find("acme/widget"); ok || len(ws.Pairs) != 1 || ws.Pairs[0] != b {
+		t.Fatalf("pairs after remove: %+v", ws.Pairs)
+	}
+	if ws.RemovePair("acme/widget") {
+		t.Fatal("a second remove must report false")
+	}
+	if err := ws.Save(); err != nil {
+		t.Fatal(err)
+	}
+	again, _ := workspace.Open(root, "default")
+	if len(again.Pairs) != 1 || again.Pairs[0] != b {
+		t.Fatalf("saved pairs: %+v", again.Pairs)
+	}
+}

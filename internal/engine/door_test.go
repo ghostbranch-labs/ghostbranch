@@ -167,6 +167,16 @@ func TestOnlyPromoteAndApplyReachThePublicRepo(t *testing.T) {
 	if len(public) != 1 || public[0].op != "apply" {
 		t.Fatalf("public pushes = %+v", public)
 	}
+
+	// remove is local: it unregisters the pair and touches no repo. It goes
+	// last, since nothing runs on the pair after it.
+	baseline = h.publicRefs()
+	n = len(h.pushes)
+	_, _, err = h.eng.Remove(h.ctx, h.pair)
+	run("remove", err, "")
+	if len(h.pushes) != n {
+		t.Fatal("remove must never push")
+	}
 }
 
 // Review Focus 5.

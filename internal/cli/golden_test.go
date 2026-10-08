@@ -28,6 +28,7 @@ var dataSchemas = map[string]string{
 	"waivers add": "waivers-add.schema.json", "waivers list": "waivers-list.schema.json", "waivers revoke": "waivers-revoke.schema.json",
 	"explain": "explain.schema.json", "guide": "guide.schema.json", "audit": "audit.schema.json", "upgrade": "upgrade.schema.json",
 	"guard install": "guard.schema.json", "guard uninstall": "guard.schema.json", "guard status": "guard.schema.json", "guard check": "guard.schema.json",
+	"remove": "remove.schema.json", "log": "log.schema.json",
 }
 
 func schema(t *testing.T, name string) *jsonschema.Schema {
@@ -178,6 +179,13 @@ jobs:
 		{"upgrade_plan", scheduled, []string{"upgrade", "--plan"}, 0},
 		{"upgrade_plan_noop", initOnly, []string{"upgrade", "--plan"}, 0},
 		{"upgrade", scheduled, []string{"upgrade"}, 0},
+		{"remove_plan", func(te *testEnv) {
+			gatedFeature(te)
+			te.mustRun("promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--plan")
+			grantAgents(te)
+		}, []string{"remove", "--plan"}, 0},
+		{"remove_no_console", initOnly, []string{"remove"}, 5},
+		{"log", withFeature, []string{"log"}, 0},
 	}
 	for _, s := range scenarios {
 		t.Run(s.name, func(t *testing.T) {
