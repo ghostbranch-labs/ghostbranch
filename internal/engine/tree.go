@@ -11,6 +11,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
 	"github.com/ghostbranch-labs/ghostbranch/internal/overlay"
+	"github.com/ghostbranch-labs/ghostbranch/internal/plan"
 	"github.com/ghostbranch-labs/ghostbranch/internal/strip"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workflow"
 )
@@ -147,22 +148,16 @@ func (e *Engine) candidate(ctx context.Context, g *gitx.Git, R string, tEntries 
 	return c, rep, guards, nil
 }
 
-// assertPublish re-checks P before it may be published: its tree is the
-// gated tree, its only parent is public main, and it differs from the CI
-// candidate only in overlay paths and in workflows whose only difference
-// is the gate's guard rewrite for wnames.
+// assertPublish re-checks a one-commit chain P before it may be published.
+// Task 7 moves its callers to assertChain.
 func assertPublish(ctx context.Context, g *gitx.Git, P, T, C, publicMain string, set overlay.Set, wnames workflow.Names) error {
-	tree, err := g.TreeOf(ctx, P)
-	if err != nil || tree != T {
-		return contract.Wrap(contract.Internal, err, "published tree %s does not match the gated tree %s", short(tree), short(T))
-	}
-	parent, err := g.MustResolve(ctx, P+"^")
-	if err != nil || parent != publicMain {
-		return contract.Wrap(contract.Internal, err, "published commit's parent %s is not public main %s", short(parent), short(publicMain))
-	}
-	if _, ok, _ := g.Resolve(ctx, P+"^2"); ok {
-		return contract.New(contract.Internal, "published commit must have exactly one parent")
-	}
+	return assertChain(ctx, g, []plan.Commit{{Commit: P, Tree: T, Parent: publicMain}}, T, C, publicMain, set, wnames)
+}
+
+// assertTip checks that the chain's tip P differs from the CI candidate C
+// only in overlay paths and in workflows whose only difference is the
+// gate's guard rewrite for wnames.
+func assertTip(ctx context.Context, g *gitx.Git, P, C string, set overlay.Set, wnames workflow.Names) error {
 	paths, err := g.DiffNames(ctx, C, P)
 	if err != nil {
 		return internalErr(err, "compare the published commit with the CI candidate")
@@ -211,14 +206,34 @@ func (e *Engine) scan(ctx context.Context, g *gitx.Git, cfg config.Config, entri
 	if err != nil {
 		return leak.Report{}, "", internalErr(err, "start the leak scanner")
 	}
-	old := map[string]string{}
-	baseEntries, err := g.ListTree(ctx, base)
+	old, err := blobsByPath(ctx, g, base)
 	if err != nil {
-		return leak.Report{}, "", internalErr(err, "list public main")
+		return leak.Report{}, "", err
 	}
-	for _, en := range baseEntries {
-		old[en.Path] = en.SHA
+	rep, err := scanWith(ctx, g, sc, entries, old, texts)
+	if err != nil {
+		return leak.Report{}, "", err
 	}
+	return rep, sc.Version(), nil
+}
+
+// blobsByPath maps rev's paths to their blob SHAs.
+func blobsByPath(ctx context.Context, g *gitx.Git, rev string) (map[string]string, error) {
+	es, err := g.ListTree(ctx, rev)
+	if err != nil {
+		return nil, internalErr(err, "list public main")
+	}
+	out := make(map[string]string, len(es))
+	for _, en := range es {
+		out[en.Path] = en.SHA
+	}
+	return out, nil
+}
+
+// scanWith scans entries and texts with sc. old maps public main's paths to
+// blob SHAs; files that match it raise no warnings. Findings and warnings
+// are never nil.
+func scanWith(ctx context.Context, g *gitx.Git, sc leak.Scanner, entries []gitx.TreeEntry, old map[string]string, texts []leak.Text) (leak.Report, error) {
 	paths := make([]string, 0, len(entries))
 	var shas []string
 	seen := map[string]bool{}
@@ -231,7 +246,7 @@ func (e *Engine) scan(ctx context.Context, g *gitx.Git, cfg config.Config, entri
 	}
 	blobs, err := g.ReadBlobs(ctx, shas)
 	if err != nil {
-		return leak.Report{}, "", internalErr(err, "read files to scan")
+		return leak.Report{}, internalErr(err, "read files to scan")
 	}
 	var files []leak.File
 	for _, en := range entries {
@@ -241,7 +256,7 @@ func (e *Engine) scan(ctx context.Context, g *gitx.Git, cfg config.Config, entri
 	}
 	rep, err := sc.Scan(leak.Input{Paths: paths, Files: files, Texts: texts})
 	if err != nil {
-		return leak.Report{}, "", internalErr(err, "leak scan")
+		return leak.Report{}, internalErr(err, "leak scan")
 	}
 	if rep.Findings == nil {
 		rep.Findings = []leak.Finding{}
@@ -249,7 +264,7 @@ func (e *Engine) scan(ctx context.Context, g *gitx.Git, cfg config.Config, entri
 	if rep.Warnings == nil {
 		rep.Warnings = []contract.Warning{}
 	}
-	return rep, sc.Version(), nil
+	return rep, nil
 }
 
 // addWarnings appends more to dst, skipping any warning that dst already
