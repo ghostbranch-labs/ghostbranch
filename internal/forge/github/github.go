@@ -434,12 +434,16 @@ func (c *Client) CancelRun(ctx context.Context, full string, id int64) error {
 	return wrap(resp, err)
 }
 
-// ClosePullRequest closes PR number. Closing a closed PR is a no-op on GitHub.
+// ClosePullRequest closes PR number. Closing a closed PR is a no-op on
+// GitHub; a plain 403 is forge.ErrForbidden.
 func (c *Client) ClosePullRequest(ctx context.Context, full string, number int) error {
 	owner, name, err := forge.SplitName(full)
 	if err != nil {
 		return err
 	}
 	_, resp, err := c.c.PullRequests.Edit(ctx, owner, name, number, &gh.PullRequest{State: new("closed")})
+	if isForbidden(resp, err) {
+		return fmt.Errorf("%w: close PR #%d of %s: %v", forge.ErrForbidden, number, full, err)
+	}
 	return wrap(resp, err)
 }

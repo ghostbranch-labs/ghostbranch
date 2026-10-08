@@ -42,3 +42,20 @@ func TestDescribe(t *testing.T) {
 		}
 	}
 }
+
+func TestDeleteRefAndClosePR(t *testing.T) {
+	t.Parallel()
+	p := preview.New(nil)
+	p.Add(preview.ClosePR("acme/x-shadow", 7), preview.DeleteRef("acme/x-shadow", "refs/heads/feat-x", "0123456789abcdef"))
+	b, _ := json.Marshal(p)
+	want := `{"fingerprint":{},"ops":[{"number":7,"op":"close_pr","repo":"acme/x-shadow"},` +
+		`{"op":"delete_ref","ref":"refs/heads/feat-x","repo":"acme/x-shadow","sha":"0123456789abcdef"}]}`
+	if string(b) != want {
+		t.Fatalf("got  %s\nwant %s", b, want)
+	}
+	got := strings.Join(p.Describe(), "\n")
+	want = "close PR #7 in acme/x-shadow\ndelete refs/heads/feat-x from acme/x-shadow (at 0123456789ab)"
+	if got != want {
+		t.Fatalf("got  %q\nwant %q", got, want)
+	}
+}

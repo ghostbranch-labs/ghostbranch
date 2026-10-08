@@ -155,7 +155,8 @@ func TestOnlyPromoteAndApplyReachThePublicRepo(t *testing.T) {
 	run("declined apply", err, contract.ApprovalRequired)
 	h.eng.Approver = h.approver
 
-	if _, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: res.Plan.ID}); err != nil {
+	applied, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: res.Plan.ID})
+	if err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 	var public []pushEvent
@@ -180,6 +181,34 @@ func TestOnlyPromoteAndApplyReachThePublicRepo(t *testing.T) {
 	run("feature show", err, "")
 	if len(h.pushes) != n {
 		t.Fatal("status, feature list and feature show must never push")
+	}
+
+	// abandon and close write only to the shadow repo: a park and its undo,
+	// a close --plan, a close refused for want of a console, a close at the
+	// console, and a merged feature's close with no console.
+	_, _, err = h.eng.FeatureAbandon(h.ctx, h.pair, "leaky", false)
+	run("feature abandon", err, "")
+	_, _, err = h.eng.FeatureAbandon(h.ctx, h.pair, "leaky", true)
+	run("feature abandon --undo", err, "")
+	h.eng.DryRun = true
+	_, _, err = h.eng.FeatureClose(h.ctx, h.pair, "good")
+	run("feature close --plan", err, "")
+	h.eng.DryRun = false
+	h.eng.Approver = nil
+	_, _, err = h.eng.FeatureClose(h.ctx, h.pair, "red")
+	run("feature close without a console", err, contract.ApprovalRequired)
+	h.eng.Approver = h.approver
+	_, _, err = h.eng.FeatureClose(h.ctx, h.pair, "red")
+	run("feature close at the console", err, "")
+	h.forge.SetPRMerged(publicName, applied.PublicPR)
+	h.eng.Approver = nil
+	_, _, err = h.eng.FeatureClose(h.ctx, h.pair, "good")
+	run("feature close, merged", err, "")
+	h.eng.Approver = h.approver
+	for _, p := range h.pushes[n:] {
+		if p.remote != "shadow" {
+			t.Fatalf("%s pushed to %s: %+v", p.op, p.remote, p)
+		}
 	}
 
 	// remove is local: it unregisters the pair and touches no repo. It goes
@@ -219,6 +248,8 @@ func TestAShadowRepoTurnedPublicStopsEverything(t *testing.T) {
 		_, _, steps["status"] = h.eng.Status(h.ctx, h.pair)
 		_, _, steps["feature list"] = h.eng.FeatureList(h.ctx, h.pair, true)
 		_, _, steps["feature show"] = h.eng.FeatureShow(h.ctx, h.pair, "good")
+		_, _, steps["feature abandon"] = h.eng.FeatureAbandon(h.ctx, h.pair, "good", false)
+		_, _, steps["feature close"] = h.eng.FeatureClose(h.ctx, h.pair, "good")
 		for step, err := range steps {
 			if codeOf(err) != contract.ShadowNotPrivate {
 				t.Errorf("%s: want SHADOW_NOT_PRIVATE, got %v", step, err)

@@ -86,7 +86,8 @@ type Forge interface {
 	// finished is not an error.
 	CancelRun(ctx context.Context, full string, id int64) error
 	// ClosePullRequest closes PR number in full. A PR that is already
-	// closed is not an error; a missing one is ErrNotFound.
+	// closed is not an error; a missing one is ErrNotFound, and a plain
+	// permission refusal ErrForbidden.
 	ClosePullRequest(ctx context.Context, full string, number int) error
 }
 

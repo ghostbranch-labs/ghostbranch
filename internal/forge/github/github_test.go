@@ -485,6 +485,9 @@ func TestClosePullRequest(t *testing.T) {
 	mux.HandleFunc("PATCH /repos/acme/widget/pulls/9", func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
 	})
+	mux.HandleFunc("PATCH /repos/acme/widget/pulls/4", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"message":"Resource not accessible by personal access token"}`, http.StatusForbidden)
+	})
 	c := newClient(t, mux)
 	ctx := context.Background()
 	if err := c.ClosePullRequest(ctx, "acme/widget", 3); err != nil {
@@ -495,5 +498,8 @@ func TestClosePullRequest(t *testing.T) {
 	}
 	if err := c.ClosePullRequest(ctx, "acme/widget", 9); !errors.Is(err, forge.ErrNotFound) {
 		t.Fatalf("404: %v", err)
+	}
+	if err := c.ClosePullRequest(ctx, "acme/widget", 4); !errors.Is(err, forge.ErrForbidden) {
+		t.Fatalf("403: %v", err)
 	}
 }
