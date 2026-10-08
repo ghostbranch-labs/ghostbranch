@@ -341,6 +341,34 @@ func TestApplyPublishesAPreservedPlan(t *testing.T) {
 	}
 }
 
+// A control sequence in a commit subject or the PR text is shown escaped
+// on the console, never acted on, and the PR body is shown, cut to ten
+// lines.
+func TestApplySummaryEscapesControlCharacters(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.startFeature("feat-x", map[string]string{"a.txt": "a\n"})
+	testutil.Commit(t, h.shadowGit(), "feat-x", "\x1b[2K\rinnocent", map[string]string{"b.txt": "b\n"})
+	body := "line 1\u202e\n" + strings.Repeat("more\n", 11) + "last"
+	res, err := promote(h, engine.PromoteOptions{Title: "t\x07itle", Body: body, PlanOnly: true})
+	if err != nil {
+		t.Fatalf("promote: %v", err)
+	}
+	if _, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: res.Plan.ID}); err != nil || len(h.approver.asked) != 1 {
+		t.Fatalf("apply: %v, asked %d times", err, len(h.approver.asked))
+	}
+	s := h.approver.asked[0]
+	for _, want := range []string{`\u001b[2K\u000dinnocent (octo`, `PR title t\u0007itle`, `line 1\u202e`, "… 3 more lines", "work on feat-x"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("summary lacks %q:\n%s", want, s)
+		}
+	}
+	if strings.ContainsAny(s, "\x1b\r\x07\u202e") || strings.Contains(s, "last") {
+		t.Fatalf("summary holds a raw control character or untruncated body:\n%q", s)
+	}
+}
+
 // The console shows each public commit of a preserved plan, with its
 // subject and the author read from the commit object.
 func TestApplySummaryListsEachPublicCommit(t *testing.T) {
