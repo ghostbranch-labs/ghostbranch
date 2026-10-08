@@ -155,7 +155,7 @@ func TestPromoteModesAndAuthors(t *testing.T) {
 		}
 	}
 	bad := strings.Replace(base, "default_mode: preserve", "default_mode: rebase", 1)
-	if _, _, err := config.Parse([]byte(bad)); contract.From(err).Field != "promote.default_mode" {
+	if _, _, err := config.Parse([]byte(bad)); contract.From(err) == nil || contract.From(err).Field != "promote.default_mode" {
 		t.Fatalf("bad mode: %v", err)
 	}
 }
@@ -179,6 +179,8 @@ func TestAuthorConfigRejects(t *testing.T) {
 		"map but empty":  "author_email: map",
 		"bad identity":   "author_email: map\n  author_map:\n    \"a@b.example\": \"no email here\"",
 		"key not email":  "author_email: map\n  author_map:\n    \"nobody\": \"N <n@b.example>\"",
+		"case duplicate": "author_email: map\n  author_map:\n    \"A@b.example\": \"N <n@b.example>\"\n    \"a@b.example\": \"M <m@b.example>\"",
+		"vtab in key":    "author_email: map\n  author_map:\n    \"a\\v@b.example\": \"N <n@b.example>\"",
 		"newline in val": "author_email: map\n  author_map:\n    \"a@b.example\": \"N\\n <n@b.example>\"",
 	} {
 		_, _, err := config.Parse([]byte(strings.Replace(base, "author_email: noreply", repl, 1)))
@@ -195,6 +197,13 @@ func TestParseIdentity(t *testing.T) {
 		"Jane <not-an-email>":       {"", ""},
 		"Jane <a@b> trailing":       {"", ""},
 		"Ja<ne <a@b.example>":       {"", ""},
+		"  <a@b.example>":           {"", ""},
+		"  <a@b.example>":           {"", ""},
+		"N\x00 <a@b.example>":       {"", ""},
+		"N <a@b.example\x7f>":       {"", ""},
+		"N\x1b[31m <a@b.example>":   {"", ""},
+		"N M <a@b.example>":         {"", ""},
+		"N <a@b.example >":          {"", ""},
 	} {
 		n, e, ok := config.ParseIdentity(in)
 		if ok != (want[0] != "") || n != want[0] || e != want[1] {

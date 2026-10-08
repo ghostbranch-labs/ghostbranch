@@ -248,7 +248,11 @@ func set(cfg *Config, key string, v any) error {
 			if _, _, okVal := ParseIdentity(s); !isStr || !okVal {
 				return invalid(field, "must be \"Name <email>\"")
 			}
-			cfg.Promote.AuthorMap[strings.ToLower(k)] = s
+			lk := strings.ToLower(k)
+			if _, dup := cfg.Promote.AuthorMap[lk]; dup {
+				return invalid(field, "duplicates another key (emails match case-insensitively)")
+			}
+			cfg.Promote.AuthorMap[lk] = s
 		}
 	case "leak_scan.secrets":
 		cfg.LeakScan.Secrets, err = boolean()
@@ -339,16 +343,21 @@ func set(cfg *Config, key string, v any) error {
 	return err
 }
 
-var identity = regexp.MustCompile(`^([^<>\r\n]*[^<>\s])[ \t]*<([^<>\s@]+@[^<>\s@]+)>$`)
+var identity = regexp.MustCompile(`^([^<>\p{Cc}\p{Zl}\p{Zp}]*[^<>\s\p{Cc}\p{Zl}\p{Zp}])[ \t]*<([^<>\s\p{Z}\p{Cc}@]+@[^<>\s\p{Z}\p{Cc}@]+)>$`)
 
-// ParseIdentity splits "Name <email>". The name must be non-empty, and
-// neither part may hold '<', '>' or a line break.
+// ParseIdentity splits "Name <email>". The name must be non-empty after
+// trimming, and neither part may hold '<', '>', a line break or a control
+// character.
 func ParseIdentity(s string) (name, email string, ok bool) {
 	m := identity.FindStringSubmatch(s)
 	if m == nil {
 		return "", "", false
 	}
-	return strings.TrimSpace(m[1]), m[2], true
+	name = strings.TrimSpace(m[1])
+	if name == "" {
+		return "", "", false
+	}
+	return name, m[2], true
 }
 
 var sizePattern = regexp.MustCompile(`(?i)^([0-9]+)\s*(KB|MB|GB)?$`)
