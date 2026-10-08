@@ -117,7 +117,7 @@ func TestSurveyStates(t *testing.T) {
 			t.Errorf("%s: abandoned %v", r.Name, r.Abandoned)
 		}
 		if engine.ClosableWithoutConsole(r) != (r.Name == "f-merged") {
-			t.Errorf("%s: closable without a console = %v", r.Name, !engine.ClosableWithoutConsole(r))
+			t.Errorf("%s: closable without a console = %v, want %v", r.Name, engine.ClosableWithoutConsole(r), r.Name == "f-merged")
 		}
 	}
 	if want := []string{"f-abandoned", "f-closed", "f-draft", "f-gated", "f-merged", "f-moved", "f-published"}; !reflect.DeepEqual(names, want) {
@@ -154,42 +154,93 @@ func TestSurveyMovedFallbacks(t *testing.T) {
 		}
 	}
 
-	// Without the gate record too, so only the recorded head can say unmoved.
+	closable := func(step string, want bool) {
+		t.Helper()
+		if got := engine.ClosableWithoutConsole(h.report("feat-x")); got != want {
+			t.Fatalf("%s: closable without a console = %v, want %v", step, got, want)
+		}
+	}
+
+	// Each step keeps only the baseline it is about, so no other one can
+	// say unmoved for it.
 	var gate *feature.Gate
 	forgeMeta(t, h, "feat-x", func(m *feature.Meta) { gate, m.Gate = m.Gate, nil })
 	if err := os.Remove(planPath); err != nil {
 		t.Fatal(err)
 	}
-	check("recorded head, no plan file, no gate record", feature.StateMerged)
+	check("recorded head only", feature.StateMerged)
 
 	if err := os.WriteFile(planPath, saved, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	forgeMeta(t, h, "feat-x", func(m *feature.Meta) { m.Gate, m.Promoted.FeatureHead = gate, "" })
-	check("no recorded head, plan file present", feature.StateMerged)
+	forgeMeta(t, h, "feat-x", func(m *feature.Meta) { m.Promoted.FeatureHead = "" })
+	check("plan file only", feature.StateMerged)
 
 	// A plan without a feature head falls back to the gate record only when
 	// the gate's candidate is the one the plan published.
+	forgeMeta(t, h, "feat-x", func(m *feature.Meta) { m.Gate = gate })
 	pl, _, err := plan.Load(h.eng.WS.PlansDir(), id)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if pl.Fingerprint.GateCandidate != gate.Candidate {
+		t.Fatalf("plan gate candidate %s != gate candidate %s", pl.Fingerprint.GateCandidate, gate.Candidate)
+	}
 	pl.Fingerprint.FeatureHead = ""
+	if _, err := plan.Save(h.eng.WS.PlansDir(), pl); err != nil {
+		t.Fatal(err)
+	}
+	check("plan without a head, gate candidate matches", feature.StateMerged)
 	pl.Fingerprint.GateCandidate = "0000000000000000000000000000000000000000"
 	if _, err := plan.Save(h.eng.WS.PlansDir(), pl); err != nil {
 		t.Fatal(err)
 	}
 	check("plan without a head, gate candidate differs", feature.StateMergedMoved)
 
+	// Without the plan, nothing ties the gate record to the publish: a
+	// re-gate may have overwritten it.
 	if err := os.Remove(planPath); err != nil {
 		t.Fatal(err)
 	}
-	check("no recorded head, no plan file, gate record", feature.StateMerged)
+	check("no recorded head, no plan file, gate record", feature.StateMergedMoved)
+	closable("no recorded head, no plan file, gate record", false)
 
 	forgeMeta(t, h, "feat-x", func(m *feature.Meta) { m.Gate = nil })
 	check("nothing to compare against", feature.StateMergedMoved)
-	if engine.ClosableWithoutConsole(h.report("feat-x")) {
-		t.Fatal("a feature with no baseline must never close without a console")
+	closable("nothing to compare against", false)
+
+	// Only the plan file records the published head, and the branch moved.
+	if err := os.WriteFile(planPath, saved, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	check("plan file only, before the branch moved", feature.StateMerged)
+	testutil.Commit(t, h.shadowGit(), "feat-x", "after the merge", map[string]string{"later.txt": "l\n"})
+	check("plan file only, branch moved", feature.StateMergedMoved)
+	closable("plan file only, branch moved", false)
+}
+
+// A re-gate after publishing overwrites the gate record with commits that
+// were never published. Without the recorded head or the plan file, the
+// survey must not take the gate record for the published head.
+func TestSurveyRegateAfterPublishIsMoved(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	pr, id := h.publish("feat-x")
+	testutil.Commit(t, h.shadowGit(), "feat-x", "never published", map[string]string{"unpublished.txt": "u\n"})
+	h.gateFeature("feat-x")
+	h.forge.SetPRMerged(publicName, pr)
+	if r := h.report("feat-x"); r.State != feature.StateMergedMoved || engine.ClosableWithoutConsole(r) {
+		t.Fatalf("with the recorded head: %+v", r)
+	}
+	forgeMeta(t, h, "feat-x", func(m *feature.Meta) { m.Promoted.FeatureHead = "" })
+	if err := os.Remove(filepath.Join(h.eng.WS.PlansDir(), id+".json")); err != nil {
+		t.Fatal(err)
+	}
+	r := h.report("feat-x")
+	if r.State != feature.StateMergedMoved || !r.Moved || engine.ClosableWithoutConsole(r) {
+		t.Fatalf("re-gated after publish, no recorded head, no plan: state %s moved %v closable %v",
+			r.State, r.Moved, engine.ClosableWithoutConsole(r))
 	}
 }
 

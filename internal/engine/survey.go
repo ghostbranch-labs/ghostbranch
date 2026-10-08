@@ -24,7 +24,7 @@ type FeatureReport struct {
 	PublicPR  *int          `json:"public_pr"` // nil when never published
 	PRState   string        `json:"pr_state"`  // "", open, merged, closed, unknown
 	PlanID    string        `json:"plan_id"`
-	Moved     bool          `json:"moved"` // since publish; false when unpublished
+	Moved     bool          `json:"moved"` // since publish; false when unpublished; meaningless when the branch is gone (branch_gone reads only PRState)
 	Abandoned bool          `json:"abandoned"`
 }
 
@@ -170,8 +170,10 @@ func (e *Engine) surveyOne(ctx context.Context, pc *pairCtx, name, pm, O string)
 // from, or "" when nothing records it (which counts as moved). In order:
 // the head apply recorded; the plan file's fingerprint (the plan may have
 // been made on another machine, so a missing or unreadable plan is
-// skipped); the gate record's head, when the gate's candidate is the one
-// the plan published or there's no plan to compare it with.
+// skipped); the gate record's head, but only when the plan file loaded and
+// names the gate's candidate as the one it published. It never guesses
+// safe: a re-gate overwrites the gate record, so without the plan to tie
+// it to the publish, the gate's head may hold commits never published.
 func (e *Engine) publishedHead(m feature.Meta) string {
 	if h := m.Promoted.FeatureHead; h != "" {
 		return h
@@ -186,7 +188,7 @@ func (e *Engine) publishedHead(m feature.Meta) string {
 	if pl != nil && pl.Fingerprint.FeatureHead != "" {
 		return pl.Fingerprint.FeatureHead
 	}
-	if g := m.Gate; g != nil && (pl == nil || g.Candidate == pl.Fingerprint.GateCandidate) {
+	if g := m.Gate; pl != nil && g != nil && g.Candidate == pl.Fingerprint.GateCandidate {
 		return g.FeatureHead
 	}
 	return ""
