@@ -169,6 +169,7 @@ func (a *app) featureStartCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			a.startName = args[0]
 			res, w, err := e.FeatureStart(cmd.Context(), p, args[0])
 			if res != nil && a.env.ShadowRemote != nil {
 				remote, free, in := a.env.ShadowRemote(p.Shadow)

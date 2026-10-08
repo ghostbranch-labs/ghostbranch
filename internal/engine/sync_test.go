@@ -394,8 +394,8 @@ func TestSyncClosesMergedFeatures(t *testing.T) {
 		!reflect.DeepEqual(res.Closed[0].Deleted, wantX) {
 		t.Fatalf("closed = %+v, want feat-x (PR #%d) deleting %v", res.Closed, pr, wantX)
 	}
-	if res.ActiveFeatures != 1 || res.Attention == nil || len(res.Attention) != 0 {
-		t.Fatalf("active = %d, attention = %+v", res.ActiveFeatures, res.Attention)
+	if !res.Surveyed || res.ActiveFeatures != 1 || res.Attention == nil || len(res.Attention) != 0 {
+		t.Fatalf("surveyed = %v, active = %d, attention = %+v", res.Surveyed, res.ActiveFeatures, res.Attention)
 	}
 	after := h.shadowRefs()
 	for ref := range wantX {
@@ -489,7 +489,7 @@ func TestSyncNoClose(t *testing.T) {
 	before := h.shadowRefs()
 	gate := h.gatePR("feat-x")
 	res, warns := h.syncOK(engine.SyncOptions{NoClose: true})
-	if len(warns) != 0 || res.Closed == nil || len(res.Closed) != 0 || len(res.Attention) != 0 || res.ActiveFeatures != 0 {
+	if len(warns) != 0 || res.Surveyed || res.Closed == nil || len(res.Closed) != 0 || len(res.Attention) != 0 || res.ActiveFeatures != 0 {
 		t.Fatalf("--no-close: %+v %+v", res, warns)
 	}
 	if !reflect.DeepEqual(h.shadowRefs(), before) || h.gatePR("feat-x") != gate || len(h.closeEntries()) != 0 {
@@ -685,7 +685,7 @@ func TestSyncSurveyFailureIsAWarning(t *testing.T) {
 	delete(before, "refs/heads/main")
 
 	res, warns := h.syncOK(engine.SyncOptions{})
-	if res.ShadowMainAfter != next || len(res.Closed) != 0 || len(res.Attention) != 0 || res.ActiveFeatures != 0 {
+	if res.ShadowMainAfter != next || res.Surveyed || len(res.Closed) != 0 || len(res.Attention) != 0 || res.ActiveFeatures != 0 {
 		t.Fatalf("sync = %+v", res)
 	}
 	if len(warns) != 1 || warns[0].Code != contract.FeatureNotClosed ||

@@ -85,7 +85,9 @@ func (e *Engine) FeatureAbandon(ctx context.Context, p workspace.Pair, name stri
 	}
 	m.SchemaVersion = feature.SchemaVersion
 	m.Abandoned = !undo
-	if err := e.updateMeta(ctx, pc, m, metaSHA); err != nil {
+	mw, err := e.updateMeta(ctx, pc, m, metaSHA)
+	warns = addWarnings(warns, mw...)
+	if err != nil {
 		return nil, warns, err
 	}
 	return res, warns, nil

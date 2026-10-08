@@ -313,9 +313,17 @@ func (e *Engine) checkAdoptable(ctx context.Context, pc *pairCtx) error {
 // branch. It reads the public repo's branches with ls-remote, before
 // anything is created or pushed.
 func (e *Engine) checkPublicBranches(ctx context.Context, p workspace.Pair, pub forge.Repo) error {
-	// Any directory works for ls-remote; the temp dir has no repo config.
-	g := gitx.New(os.TempDir())
+	// ls-remote needs no repo. Run it in a new empty directory, with repo
+	// discovery stopped at its parent, so no repo's config applies while the
+	// token is sent.
+	dir, err := os.MkdirTemp("", "ghostbranch-ls-remote-")
+	if err != nil {
+		return internalErr(err, "make a scratch directory")
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	g := gitx.New(dir)
 	g.Config = e.gitConfig()
+	g.Env = []string{"GIT_CEILING_DIRECTORIES=" + filepath.Dir(dir)}
 	out, err := g.Run(ctx, "ls-remote", "--heads", pub.CloneURL)
 	if err != nil {
 		return remoteErr(err, "list the public repo's branches")

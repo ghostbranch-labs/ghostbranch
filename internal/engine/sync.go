@@ -26,7 +26,8 @@ type SyncResult struct {
 	Branches         []SyncBranch     `json:"branches"`
 	CancelledRuns    []CancelledRun   `json:"cancelled_runs"`
 	Closed           []ClosedFeature  `json:"closed"`          // merged features sync closed; never null
-	ActiveFeatures   int              `json:"active_features"` // features not abandoned and not closable by sync
+	Surveyed         bool             `json:"surveyed"`        // the features were surveyed: false with --no-close or when the survey failed
+	ActiveFeatures   int              `json:"active_features"` // features not abandoned and not closable by sync; 0 unless Surveyed
 	Attention        []FeatureReport  `json:"attention"`       // features a person must look at; never null
 	Preview          *preview.Preview `json:"preview"`
 }
@@ -210,6 +211,7 @@ func (e *Engine) closeMerged(ctx context.Context, pc *pairCtx, p *workspace.Pair
 			Message: fmt.Sprintf("couldn't survey features, so nothing was closed: %s: %s", ce.Code, ce.Message),
 			Details: map[string]any{"error_code": string(ce.Code)}})
 	}
+	res.Surveyed = true
 	for _, r := range rs {
 		closable := ClosableWithoutConsole(r)
 		if !r.Abandoned && !closable {

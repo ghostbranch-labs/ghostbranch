@@ -950,8 +950,14 @@ func TestFeatureStartBehindNextSyncsThenStartsAgain(t *testing.T) {
 	}
 	n := nextOf(t, env)
 	if len(n) != 2 || !reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "sync", "--repo", "acme/widget"}) ||
-		!reflect.DeepEqual(argv(n[1])[:4], []string{"ghostbranch", "feature", "start", "feat-x"}) {
+		!reflect.DeepEqual(argv(n[1]), []string{"ghostbranch", "feature", "start", "feat-x", "--repo", "acme/widget"}) {
 		t.Fatalf("next = %v", n)
+	}
+	// Without --repo, and with --plan: the retry is scoped and keeps --plan.
+	_, env = te.runJSON("feature", "start", "feat-x", "--plan")
+	if n := nextOf(t, env); len(n) != 2 ||
+		!reflect.DeepEqual(argv(n[1]), []string{"ghostbranch", "feature", "start", "feat-x", "--plan", "--repo", "acme/widget"}) {
+		t.Fatalf("--plan next = %v", n)
 	}
 	te.mustRun("sync")
 	if code, env := te.runJSON("feature", "start", "feat-x"); code != 0 {
@@ -987,11 +993,14 @@ func TestSyncNextOffersFeatureStartWhenIdle(t *testing.T) {
 	if !offers("sync") {
 		t.Fatal("an idle bare sync must offer feature start")
 	}
-	if offers("sync", "--plan") || offers("sync", "--no-close") {
-		t.Fatal("only a bare sync offers feature start")
+	if offers("sync", "--plan") || offers("sync", "--no-close") || offers("sync", "--no-close=true") {
+		t.Fatal("only a sync that surveyed the features offers feature start")
+	}
+	if !offers("sync", "--no-close=false") {
+		t.Fatal("--no-close=false is a bare sync")
 	}
 	te.mustRun("feature", "start", "feat-x")
-	if offers("sync") {
+	if offers("sync") || offers("sync", "--no-close=true") {
 		t.Fatal("a feature is in progress: no feature start")
 	}
 }

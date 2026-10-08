@@ -309,7 +309,9 @@ func (e *Engine) gate(ctx context.Context, pc *pairCtx, name, mode string) (*Gat
 		if !e.DryRun {
 			// The leak is the result that matters: a failure to record it
 			// must not replace LEAK_FOUND with a lesser error.
-			if err := e.recordGate(ctx, pc, m, metaSHA, res, b.commits); err != nil {
+			rw, err := e.recordGate(ctx, pc, m, metaSHA, res, b.commits)
+			warns = addWarnings(warns, rw...)
+			if err != nil {
 				warns = append(warns, contract.Warning{Code: contract.GateNotRecorded,
 					Message: "the gate result could not be recorded in the feature metadata: " + contract.From(err).Message})
 			}
@@ -365,7 +367,9 @@ func (e *Engine) gate(ctx context.Context, pc *pairCtx, name, mode string) (*Gat
 			Message: "the token cannot read check runs, so only GitHub Actions workflows and commit statuses were considered; checks from other CI apps were not seen"})
 	}
 	res.Checks, res.FailedChecks = out.status, out.failed
-	if err := e.recordGate(ctx, pc, m, metaSHA, res, b.commits); err != nil {
+	rw, err := e.recordGate(ctx, pc, m, metaSHA, res, b.commits)
+	warns = addWarnings(warns, rw...)
+	if err != nil {
 		if out.status == feature.ChecksPassed {
 			return res, warns, err // a green gate that isn't recorded can't be promoted
 		}
@@ -399,7 +403,7 @@ func guardNames(pc *pairCtx) workflow.Names {
 	return n
 }
 
-func (e *Engine) recordGate(ctx context.Context, pc *pairCtx, m feature.Meta, metaSHA string, res *GateResult, commits []feature.GateCommit) error {
+func (e *Engine) recordGate(ctx context.Context, pc *pairCtx, m feature.Meta, metaSHA string, res *GateResult, commits []feature.GateCommit) ([]contract.Warning, error) {
 	m.SchemaVersion = feature.SchemaVersion
 	m.Gate = &feature.Gate{FeatureHead: res.FeatureHead, PublicMain: res.PublicMain, Overlay: res.Overlay,
 		Candidate: res.Candidate, PublishedTree: res.PublishedTree, ScannedAs: res.ScannedAs, Commits: commits, Checks: res.Checks, Leak: res.Leak, At: e.now()}

@@ -131,7 +131,7 @@ func (a *app) next(err error) []contract.Next {
 		case contract.ShadowBehindError:
 			return []contract.Next{
 				{Command: a.scoped("sync"), Why: "shadow main is behind public main; sync it (fast-forward only)"},
-				{Command: a.again(false), Why: "then start the feature again, from the synced shadow main"},
+				{Command: a.startAgain(), Why: "then start the feature again, from the synced shadow main"},
 			}
 		case contract.SyncDiverged:
 			// A person sorts out the diverged branch (error.what_to_do), but
@@ -238,7 +238,7 @@ func (a *app) next(err error) []contract.Next {
 	case *engine.SyncResult:
 		// Attention holds only features sync can't close itself.
 		out = a.featureNexts(out, r.Attention)
-		if a.bareSync(r) && r.ActiveFeatures == 0 {
+		if r.Preview == nil && r.Surveyed && r.ActiveFeatures == 0 {
 			out = append(out, contract.Next{Command: a.scoped("feature", "start"), NeedsInput: []string{"<name>"},
 				Why: "no feature is in progress; start one: put its name (the <name> argument) after start"})
 		}
@@ -260,18 +260,14 @@ func (a *app) next(err error) []contract.Next {
 	return append(out, a.upgradeNext()...)
 }
 
-// bareSync is whether this sync ran in full: not a preview, closes not
-// skipped, and its survey of the features worked, so ActiveFeatures counts.
-func (a *app) bareSync(r *engine.SyncResult) bool {
-	if r.Preview != nil || slices.Contains(a.args, "--no-close") {
-		return false
+// startAgain is feature start for the name this run was given, scoped like
+// the sync before it, with --plan when this run had it.
+func (a *app) startAgain() []string {
+	args := []string{"feature", "start", a.startName}
+	if a.dryRun {
+		args = append(args, "--plan")
 	}
-	for _, w := range a.warnings {
-		if w.Code == contract.FeatureNotClosed && w.Details["feature"] == nil {
-			return false // the survey failed
-		}
-	}
-	return true
+	return a.scoped(args...)
 }
 
 // syncNext leads next when shadow main is behind public main. Syncing moves

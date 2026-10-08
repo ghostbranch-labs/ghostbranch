@@ -700,3 +700,23 @@ func TestCloseWarnsWhenTheMirrorCantBeCleanedUp(t *testing.T) {
 		t.Fatal("the shadow repo still has the metadata")
 	}
 }
+
+// abandon's metadata push succeeded but the mirror couldn't follow:
+// MIRROR_NOT_UPDATED, and the abandon still succeeds.
+func TestAbandonWarnsWhenTheMirrorCantBeUpdated(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.startFeature("feat-x", map[string]string{"x.txt": "x"})
+	h.lockMirrorRef("refs/shadow-meta/features/feat-x")
+	res, warns, err := h.eng.FeatureAbandon(h.ctx, h.pair, "feat-x", false)
+	if err != nil || !res.Changed {
+		t.Fatalf("abandon = %+v %v", res, err)
+	}
+	if ws := warningsFor(warns, contract.MirrorNotUpdated); len(ws) != 1 || ws[0].Details["ref"] != "refs/shadow-meta/features/feat-x" {
+		t.Fatalf("warnings = %+v", warns)
+	}
+	if !h.shadowMeta("feat-x").Abandoned {
+		t.Fatal("the shadow repo's metadata isn't abandoned")
+	}
+}

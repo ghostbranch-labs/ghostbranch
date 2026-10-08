@@ -3,7 +3,7 @@
   "title": "sync data",
   "type": "object",
   "additionalProperties": false,
-  "required": ["public", "shadow", "action", "public_main", "shadow_main_before", "shadow_main_after", "branches", "cancelled_runs", "closed", "active_features", "attention", "preview"],
+  "required": ["public", "shadow", "action", "public_main", "shadow_main_before", "shadow_main_after", "branches", "cancelled_runs", "closed", "surveyed", "active_features", "attention", "preview"],
   "properties": {
     "public": { "$ref": "common.schema.json#/$defs/repo" },
     "shadow": { "$ref": "common.schema.json#/$defs/repo" },
@@ -56,6 +56,7 @@
         }
       }
     },
+    "surveyed": { "description": "whether sync surveyed the features: false with --no-close or when the survey failed, and then active_features and attention say nothing", "type": "boolean" },
     "active_features": { "description": "features not abandoned and not closable by sync", "type": "integer", "minimum": 0 },
     "attention": {
       "description": "merged_moved, pr_closed and branch_gone features sync won't close: a person must look at them",

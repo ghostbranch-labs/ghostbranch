@@ -348,7 +348,9 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 	res.PublicPR, res.PRURL = pr.Number, pr.URL
 	m.SchemaVersion = feature.SchemaVersion
 	m.Promoted = &feature.Promoted{PublicPR: pr.Number, PlanID: pl.ID, FeatureHead: pl.Fingerprint.FeatureHead}
-	if err := e.updateMeta(ctx, pc, m, metaSHA); err != nil {
+	mw, err := e.updateMeta(ctx, pc, m, metaSHA)
+	warns = addWarnings(warns, mw...)
+	if err != nil {
 		return res, warns, err
 	}
 	return res, warns, nil

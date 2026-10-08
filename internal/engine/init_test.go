@@ -312,7 +312,13 @@ func TestInitRefusesAPublicGhostbranchBranch(t *testing.T) {
 	for _, branch := range []string{"ghostbranch", "ghostbranch/x"} {
 		h := newHarness(t)
 		testutil.Commit(t, h.pubGit, branch, "clash", map[string]string{"c.txt": "c"})
+		h.eng.DryRun = true
 		_, _, err := h.eng.Init(h.ctx, engine.InitOptions{Public: publicName})
+		h.eng.DryRun = false
+		if ce := wantCode(t, err, contract.NameInvalid); ce.Field != "public" {
+			t.Fatalf("%s: --plan: %+v", branch, ce)
+		}
+		_, _, err = h.eng.Init(h.ctx, engine.InitOptions{Public: publicName})
 		ce := wantCode(t, err, contract.NameInvalid)
 		if ce.Field != "public" || !strings.Contains(ce.Message, branch) || !strings.Contains(ce.Message, "overlay") {
 			t.Fatalf("%s: %+v", branch, ce)
@@ -376,4 +382,35 @@ func TestUnknownConfigKeyNeedsAnUpgrade(t *testing.T) {
 	h.eng.WS.RemovePair(publicName)
 	_, _, err = h.eng.Init(h.ctx, engine.InitOptions{Public: publicName, Adopt: true})
 	check("adopt", err)
+}
+
+// The adopt's fast-forward is leased on the shadow main it saw: if shadow
+// main moves before the push, the push fails with REF_MOVED and changes
+// nothing.
+func TestAdoptFastForwardIsLeased(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	old, _ := h.pubGit.MustResolve(h.ctx, "refs/heads/main")
+	testutil.Commit(t, h.pubGit, "main", "second", map[string]string{"two.txt": "2"})
+	sh := h.adoptable(old)
+	record := h.eng.OnPush
+	moved := ""
+	h.eng.OnPush = func(op, remote string, specs []string) {
+		if moved == "" {
+			moved = testutil.Commit(t, sh, "main", "racing", map[string]string{"race.txt": "r"})
+		}
+		record(op, remote, specs)
+	}
+	_, _, err := h.eng.Init(h.ctx, engine.InitOptions{Public: publicName, Adopt: true})
+	_ = wantCode(t, err, contract.RefMoved)
+	refs, err := sh.Refs(h.ctx, "refs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(refs) != 1 || refs["refs/heads/main"] != moved {
+		t.Fatalf("the shadow repo changed: %v (main should be %s)", refs, moved)
+	}
+	if _, ok := h.eng.WS.Find(publicName); ok {
+		t.Fatal("a failed adopt registered the pair")
+	}
 }

@@ -23,7 +23,8 @@
         "feature",
         "start",
         "feat-x",
-        "--json"
+        "--repo",
+        "acme/widget"
       ],
       "why": "then start the feature again, from the synced shadow main",
       "needs_human": false,

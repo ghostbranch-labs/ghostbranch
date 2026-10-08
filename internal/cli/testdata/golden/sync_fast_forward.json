@@ -20,6 +20,7 @@
     ],
     "cancelled_runs": [],
     "closed": [],
+    "surveyed": true,
     "active_features": 0,
     "attention": [],
     "preview": null
