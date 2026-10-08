@@ -26,7 +26,8 @@ func TestRenderListsEveryCodeFromTheRegistry(t *testing.T) {
 			t.Errorf("exit %d is missing from the exit table", x)
 		}
 	}
-	if n := strings.Count(out, "\n"); n > 250 {
+	// 270: the history-modes section (sub-project 5a) added about 18 lines.
+	if n := strings.Count(out, "\n"); n > 270 {
 		t.Errorf("the guide is %d lines; keep it short (spec: about 150 plus the tables)", n)
 	}
 }
@@ -138,7 +139,7 @@ func TestGuideCoversSetupAndCIParity(t *testing.T) {
 		"Any token can read public repos, so for a public repo you only grant permissions on the shadow repo",
 		"never give it to an agent", "Actions write (optional: lets `sync` cancel the workflow runs its pushes start)",
 		"add `--shadow <owner/name>` to both", "(`--no-cancel` skips that)",
-		"Write the promote `--message` yourself from the change", "show it to the person; use theirs if they give one",
+		"Write the PR `--title` (and, for squash, `-m`;", "use theirs if they give them",
 		"you may rewrite the fixture to build the value at", "Never waive it yourself",
 		"tell the person in your handover which finding you", "Anything that might be real",
 		"applies its permissions to every repo it", "it could write that repo too: scheduled sync isn't supported",
@@ -187,5 +188,17 @@ func TestGuideSaysToSyncBeforeEveryFeature(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("guide is missing %q", want)
 		}
+	}
+}
+
+func TestGuideTeachesHistoryModes(t *testing.T) {
+	out := guide.Render(contract.Registry())
+	for _, want := range []string{"--mode preserve", "--curate", `"commits"`, "author_email", "--title", "--mode squash"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("guide is missing %q", want)
+		}
+	}
+	if strings.Contains(out, `--mode squash -m "<message>" --plan --json`) {
+		t.Error("squash must not be the step-4 command; preserve is the default")
 	}
 }
