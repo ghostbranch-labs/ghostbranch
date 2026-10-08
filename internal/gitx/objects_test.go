@@ -13,6 +13,7 @@ import (
 )
 
 func TestPlumbingRoundTrip(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	g := testutil.BareRepo(t, t.TempDir())
 	c1 := testutil.Commit(t, g, "main", "first", map[string]string{"a.txt": "A\n", "dir/b.txt": "B\n"})
@@ -63,6 +64,7 @@ func TestPlumbingRoundTrip(t *testing.T) {
 }
 
 func TestCommitsAreDeterministic(t *testing.T) {
+	t.Parallel()
 	files := map[string]string{"x": "1\n"}
 	a := testutil.Commit(t, testutil.BareRepo(t, t.TempDir()), "main", "m", files)
 	b := testutil.Commit(t, testutil.BareRepo(t, t.TempDir()), "main", "m", files)
@@ -72,6 +74,7 @@ func TestCommitsAreDeterministic(t *testing.T) {
 }
 
 func TestCommitTreeUsesTheGivenIdentityAndMessage(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	g := testutil.BareRepo(t, t.TempDir())
 	tree, err := g.MakeTree(ctx, nil)
@@ -94,6 +97,7 @@ func TestCommitTreeUsesTheGivenIdentityAndMessage(t *testing.T) {
 }
 
 func TestReadBlobsKeepsBytesExactly(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	g := testutil.BareRepo(t, t.TempDir())
 	content := []byte("crlf\r\nnul\x00end\n")
@@ -137,6 +141,7 @@ func TestCommitMessageIsReadExactlyAsStored(t *testing.T) {
 }
 
 func TestCommitIdentities(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	g := testutil.BareRepo(t, filepath.Join(t.TempDir(), "r.git"))
 	tree, err := g.MakeTree(ctx, nil)

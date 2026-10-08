@@ -16,6 +16,7 @@ import (
 // is usable, the console device is never opened, and --yes alone does not
 // publish.
 func TestPipedStdinNeverApproves(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	gatedFeature(te)
 	r, w, err := os.Pipe()
@@ -40,6 +41,7 @@ func TestPipedStdinNeverApproves(t *testing.T) {
 }
 
 func TestConsoleApprovalThroughTheCLI(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	gatedFeature(te)
 	ty := atConsole(te, typeTheCode)
@@ -56,6 +58,7 @@ func TestConsoleApprovalThroughTheCLI(t *testing.T) {
 }
 
 func TestAgentsAllowThroughTheCLI(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	gatedFeature(te)
 	code, env := te.runJSON("agents", "allow")
@@ -78,6 +81,7 @@ func TestAgentsAllowThroughTheCLI(t *testing.T) {
 // --non-interactive means never ask: even with a usable console, nothing is
 // shown there and the publish needs approval.
 func TestNonInteractiveNeverAsksAtTheConsole(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	gatedFeature(te)
 	ty := atConsole(te, typeTheCode)
@@ -96,6 +100,7 @@ func TestNonInteractiveNeverAsksAtTheConsole(t *testing.T) {
 }
 
 func TestWaiversAddThroughTheCLI(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	leakyWithID(te)
 	ty := atConsole(te, typeTheCode)
@@ -110,6 +115,7 @@ func TestWaiversAddThroughTheCLI(t *testing.T) {
 }
 
 func TestPipedStdinNeverWaives(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	leakyWithID(te)
 	r, w, err := os.Pipe()
@@ -134,6 +140,7 @@ func TestPipedStdinNeverWaives(t *testing.T) {
 }
 
 func TestNonInteractiveNeverWaives(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	leakyWithID(te)
 	ty := atConsole(te, typeTheCode)

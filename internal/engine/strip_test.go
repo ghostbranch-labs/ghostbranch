@@ -19,6 +19,7 @@ const internalSrc = "package app\n\n// BEGIN-INTERNAL\nconst internal = 1\n// EN
 const publicSrc = "package app\n\nconst public = 2\n"
 
 func TestGateStripsInternalSectionsBeforeCI(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.startFeature("feat-x", map[string]string{"app.go": internalSrc})
@@ -43,6 +44,7 @@ func TestGateStripsInternalSectionsBeforeCI(t *testing.T) {
 }
 
 func TestGateStopsOnInvalidMarkersBeforeAnyPush(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.startFeature("feat-x", map[string]string{"app.go": "ok\n// BEGIN-INTERNAL\nx\n"})
@@ -113,6 +115,7 @@ func forgeRecordedTree(t *testing.T, h *harness, name, tree string) {
 // Review Focus 1: a gate recorded by the SP2 binary kept the internal lines
 // in its published tree. Promote must re-gate, never publish that tree.
 func TestPromoteRegatesWhenTheRecordedTreeDiffers(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.startFeature("feat-x", map[string]string{"app.go": internalSrc})
@@ -150,6 +153,7 @@ func withFile(t *testing.T, entries []gitx.TreeEntry, path, sha string) []gitx.T
 // so only re-deriving T from the candidate's parent catches it. Forged here
 // end to end: gate branch, feature metadata, plan ref and plan file.
 func TestApplyRefusesAPlanWhoseTreeWasNotStripped(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.startFeature("feat-x", map[string]string{"app.go": internalSrc})
@@ -226,6 +230,7 @@ func TestApplyRefusesAPlanWhoseTreeWasNotStripped(t *testing.T) {
 
 // Applying rewrites feature.json at the current schema version.
 func TestApplyStampsTheMetaSchemaVersion(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.startFeature("feat-x", map[string]string{"app.go": publicSrc})
@@ -247,6 +252,7 @@ func TestApplyStampsTheMetaSchemaVersion(t *testing.T) {
 }
 
 func TestTheMirrorProtectsItsAttributes(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	got, err := os.ReadFile(filepath.Join(h.eng.WS.MirrorDir(h.pair), "info", "attributes"))

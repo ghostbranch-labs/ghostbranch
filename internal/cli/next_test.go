@@ -34,6 +34,7 @@ func argv(n map[string]any) []string {
 }
 
 func TestNextWalksTheLoop(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	initOnly(te)
 	_, env := te.runJSON("feature", "start", "feat-x")
@@ -70,6 +71,7 @@ func TestNextWalksTheLoop(t *testing.T) {
 // A command a person must run goes to their own terminal: without
 // --non-interactive (which hides the console) and without --json.
 func TestNextForAPersonDropsAgentFlags(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	initOnly(te)
 	for _, args := range [][]string{
@@ -94,6 +96,7 @@ func TestNextForAPersonDropsAgentFlags(t *testing.T) {
 
 // Every suggestion names the workspace this run used, wherever it came from.
 func TestNextCarriesTheWorkspace(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	te.vars["GHOSTBRANCH_WORKSPACE"] = "other"
 	te.env.GuardState = func(public string) (bool, bool) { return public == "acme/widget", false }
@@ -112,6 +115,7 @@ func TestNextCarriesTheWorkspace(t *testing.T) {
 
 // A stale plan for another public branch is re-planned for that branch.
 func TestNextReplansForThePlansBranch(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	gatedFeature(te)
 	te.mustRun("promote", "feat-x", "-m", "Add feature", "--branch", "public-name", "--plan")
@@ -124,6 +128,7 @@ func TestNextReplansForThePlansBranch(t *testing.T) {
 }
 
 func TestNextSuggestsTheGuardInAnUnguardedCheckout(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	te.env.GuardState = func(public string) (bool, bool) { return public == "acme/widget", false }
 	_, env := te.runJSON("init", "acme/widget")
@@ -138,6 +143,7 @@ func TestNextSuggestsTheGuardInAnUnguardedCheckout(t *testing.T) {
 }
 
 func TestNextHandsWaivableLeaksToAPerson(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	leakyWithID(te)
 	_, m := te.runJSON("gate", "feat-x")
@@ -156,6 +162,7 @@ func TestNextHandsWaivableLeaksToAPerson(t *testing.T) {
 }
 
 func TestNextForBadMarkersOnlyFixes(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	initOnly(te)
 	te.mustRun("feature", "start", "feat-x")
@@ -170,6 +177,7 @@ func TestNextForBadMarkersOnlyFixes(t *testing.T) {
 // A leak in text the caller typed is fixed by new text, not by a change on
 // the feature branch: the step drops the old text and asks for a message.
 func TestNextAsksForNewTextWhenTheMessageLeaks(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	gatedFeature(te)
 	leaky := "Add feature\n\nTOKEN=" + testutil.FakeGitHubToken()
@@ -192,6 +200,7 @@ func TestNextAsksForNewTextWhenTheMessageLeaks(t *testing.T) {
 
 // An outdated managed overlay asks for upgrade, on success only.
 func TestNextAsksForUpgradeWhenTheOverlayIsOutdated(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	initOnly(te)
 	cfg := strings.Replace(string(config.Render("acme/widget", "acme/widget-shadow")), `schedule: "off"`, `schedule: "23 */6 * * *"`, 1)
@@ -207,6 +216,7 @@ func TestNextAsksForUpgradeWhenTheOverlayIsOutdated(t *testing.T) {
 // fingerprint include, so a passed gate asks to plan the publish first and
 // to upgrade after.
 func TestNextPutsUpgradeAfterTheCommandsOwnSteps(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	withFeature(te)
 	cfg := strings.Replace(string(config.Render("acme/widget", "acme/widget-shadow")), `schedule: "off"`, `schedule: "23 */6 * * *"`, 1)
@@ -235,6 +245,7 @@ func TestNextPutsUpgradeAfterTheCommandsOwnSteps(t *testing.T) {
 // billed-minutes note every private shadow repo gets. A push-triggered
 // workflow is one: every sync starts it in the shadow repo.
 func TestNextAfterUpgradeAsksForTheAuditOnlyOnFindings(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	initOnly(te)
 	_, env := te.runJSON("upgrade")
@@ -252,6 +263,7 @@ func TestNextAfterUpgradeAsksForTheAuditOnlyOnFindings(t *testing.T) {
 
 // The audit's text names what happens to a rewritable guard in each mode.
 func TestAuditTextFollowsTheGuardMode(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	testutil.Commit(t, te.pubGit, "main", "guarded", map[string]string{".github/workflows/rel.yml": `on: push
 jobs:
@@ -279,6 +291,7 @@ jobs:
 // The push hint names the remote that points at the shadow repo, and does
 // not say "never origin" when that remote is origin.
 func TestFeatureStartPushHintNamesTheRemote(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ remote, free, checkout, why string }{
 		{"shadow", "ghostbranch-shadow", "git fetch shadow && git switch feat-x",
 			"commit on feat-x, push it with `git push shadow feat-x` (the shadow repo, never origin), then gate it"},
@@ -303,6 +316,7 @@ func TestFeatureStartPushHintNamesTheRemote(t *testing.T) {
 // A denied create waits on a person: they create the repo and add it to the
 // token (steps 1 and 2); the adopt runs after that. People see the steps.
 func TestCreateDeniedWaitsForAPersonAndShowsTheSteps(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	te.forge.CreateForbidden = true
 	code, env := te.runJSON("init", "acme/widget")
@@ -331,6 +345,7 @@ func TestCreateDeniedWaitsForAPersonAndShowsTheSteps(t *testing.T) {
 // A hand-edited managed file asks for a preview first: upgrade would
 // replace the edits.
 func TestNextPreviewsAnUpgradeThatReplacesHandEdits(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	initOnly(te)
 	editConfig(te, `schedule: "off"`, `schedule: "23 */6 * * *"`)

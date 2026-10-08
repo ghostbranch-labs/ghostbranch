@@ -3,6 +3,7 @@ package gitx
 import "testing"
 
 func TestPermissionDeniedClassifier(t *testing.T) {
+	t.Parallel()
 	for s, want := range map[string]bool{
 		"remote: Permission to acme/widget.git denied to octo.":              true,
 		"fatal: unable to access 'x': The requested URL returned error: 403": true,
@@ -19,6 +20,7 @@ func TestPermissionDeniedClassifier(t *testing.T) {
 // RejectedError (REF_MOVED: re-run); any other reason is the server's own
 // refusal, a RefusedError.
 func TestPushFailureClassifiesRemoteRejected(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		line    string
 		refused bool

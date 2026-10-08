@@ -38,6 +38,7 @@ func codes(ws []contract.Warning) map[contract.WarningCode]int {
 }
 
 func TestAuditReportsGuardsSecretsAndMinutes(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	testutil.Commit(t, h.pubGit, "main", "guarded ci", map[string]string{".github/workflows/ci.yml": guardedCI})
 	h.init()
@@ -71,6 +72,7 @@ func TestAuditReportsGuardsSecretsAndMinutes(t *testing.T) {
 // ghostbranch sync pushes with the person's token, so push-triggered
 // workflows start in the shadow repo even with scheduled sync off.
 func TestAuditWarnsAboutPushTriggersWithScheduleOff(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	testutil.Commit(t, h.pubGit, "main", "guarded ci", map[string]string{".github/workflows/ci.yml": guardedCI})
 	h.init()
@@ -95,6 +97,7 @@ func TestAuditWarnsAboutPushTriggersWithScheduleOff(t *testing.T) {
 }
 
 func TestAuditWithoutSecretsPermission(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	testutil.Commit(t, h.pubGit, "main", "guarded ci", map[string]string{".github/workflows/ci.yml": guardedCI})
 	h.init()
@@ -109,6 +112,7 @@ func TestAuditWithoutSecretsPermission(t *testing.T) {
 }
 
 func TestAuditWarnModeAndScheduledSync(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	testutil.Commit(t, h.pubGit, "main", "guarded ci", map[string]string{".github/workflows/ci.yml": guardedCI})
 	h.init()
@@ -147,6 +151,7 @@ func (h *harness) setConfig(old, new string) {
 // The advised guard names the public repo as GitHub spells it, not as the
 // pair was typed.
 func TestAuditPushGuardUsesTheCanonicalName(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	testutil.Commit(t, h.pubGit, "main", "guarded ci", map[string]string{".github/workflows/ci.yml": guardedCI})
 	h.init()
@@ -170,6 +175,7 @@ func TestAuditPushGuardUsesTheCanonicalName(t *testing.T) {
 // carries the push guard is no longer a push trigger, and a job that already
 // had an if: keeps it, combined with the guard.
 func TestAuditPushTriggersClearOnceJobsCarryTheGuard(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	const guarded = "on:\n  push:\n    branches: [main]\n  pull_request:\njobs:\n" +
 		"  test:\n    if: github.event_name != 'push' || github.repository == 'acme/widget'\n    runs-on: x\n    steps:\n      - run: echo\n" +
@@ -187,6 +193,7 @@ func TestAuditPushTriggersClearOnceJobsCarryTheGuard(t *testing.T) {
 }
 
 func TestAuditPushGuardAdviceCombinesWithAnExistingIf(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	testutil.Commit(t, h.pubGit, "main", "guarded ci", map[string]string{".github/workflows/ci.yml": guardedCI})
 	h.init()

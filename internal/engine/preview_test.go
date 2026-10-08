@@ -22,6 +22,7 @@ func opNames(p *preview.Preview) []string {
 
 // Every mutating command previews with --dry-run and writes nothing.
 func TestPreviewsWriteNothing(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.eng.DryRun = true
 	res, _, err := h.eng.Init(h.ctx, engine.InitOptions{Public: publicName})
@@ -65,6 +66,7 @@ func TestPreviewsWriteNothing(t *testing.T) {
 }
 
 func TestPromoteAndApplyPreviewsWithAFreshGate(t *testing.T) {
+	t.Parallel()
 	h := gated(t)
 	pushes := len(h.pushes)
 	h.eng.DryRun = true
@@ -99,6 +101,7 @@ func TestPromoteAndApplyPreviewsWithAFreshGate(t *testing.T) {
 // promote --plan --dry-run previews only what promote --plan does: the plan
 // commit in the shadow repo and the plan file. Nothing public.
 func TestPromotePlanOnlyPreviewListsOnlyThePlan(t *testing.T) {
+	t.Parallel()
 	h := gated(t)
 	pushes, entries := len(h.pushes), len(h.ledger())
 	h.eng.DryRun = true
@@ -124,6 +127,7 @@ func TestPromotePlanOnlyPreviewListsOnlyThePlan(t *testing.T) {
 // A promote preview refuses a public branch that is already at another
 // commit, exactly as the real publish would.
 func TestPromotePreviewRefusesAnExistingPublicBranch(t *testing.T) {
+	t.Parallel()
 	h := gated(t)
 	other := testutil.Commit(t, h.pubGit, "feat-x", "someone else's", map[string]string{"x.txt": "x\n"})
 	pushes := len(h.pushes)
@@ -145,6 +149,7 @@ func TestPromotePreviewRefusesAnExistingPublicBranch(t *testing.T) {
 // Once the plan is published, previewing the same promote lists no public
 // push and no new PR: both already exist.
 func TestPromotePreviewAfterPublishOmitsDoneSteps(t *testing.T) {
+	t.Parallel()
 	h := gated(t)
 	saved, err := promote(h, engine.PromoteOptions{Message: "m", PlanOnly: true})
 	if err != nil {

@@ -27,6 +27,7 @@ func planned(t *testing.T) (*harness, string) {
 
 // Review Focus 3b: a plan made against old state is refused with exit 6.
 func TestApplyRefusesAStalePlan(t *testing.T) {
+	t.Parallel()
 	h, id := planned(t)
 	testutil.Commit(t, h.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
 	_, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: id, Yes: true})
@@ -47,6 +48,7 @@ func TestApplyRefusesAStalePlan(t *testing.T) {
 }
 
 func TestApplyResumesAfterTheBranchWasPushed(t *testing.T) {
+	t.Parallel()
 	h, id := planned(t)
 	pl, _, err := plan.Load(h.eng.WS.PlansDir(), id)
 	if err != nil {
@@ -68,6 +70,7 @@ func TestApplyResumesAfterTheBranchWasPushed(t *testing.T) {
 }
 
 func TestApplyRefusesAPublicBranchAtAnotherCommit(t *testing.T) {
+	t.Parallel()
 	h, id := planned(t)
 	testutil.Commit(t, h.pubGit, "feat-x", "someone else", map[string]string{"x": "x\n"})
 	_, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: id, Yes: true})
@@ -75,6 +78,7 @@ func TestApplyRefusesAPublicBranchAtAnotherCommit(t *testing.T) {
 }
 
 func TestApplyUnknownPlan(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	_, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: "nope", Yes: true})
 	_ = wantCode(t, err, contract.BadFlag)
@@ -84,6 +88,7 @@ func TestApplyUnknownPlan(t *testing.T) {
 // for the same candidate says the checks failed, apply refuses and pushes
 // nothing.
 func TestApplyRefusesAPlanWhoseGateIsNotGreen(t *testing.T) {
+	t.Parallel()
 	h, id := planned(t)
 	sg := h.shadowGit()
 	ref := "refs/ghostbranch/features/feat-x"
@@ -177,6 +182,7 @@ func TestApplyScansTheStoredCommitMessage(t *testing.T) {
 
 // DEFERRED (sp2): approval is asked only after the plan is verified.
 func TestApplyAsksOnlyAfterEveryCheck(t *testing.T) {
+	t.Parallel()
 	h, id := planned(t)
 	testutil.Commit(t, h.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
 	_, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: id})
@@ -191,6 +197,7 @@ func TestApplyAsksOnlyAfterEveryCheck(t *testing.T) {
 // Every PLAN_STALE names the feature and the public repo, so the next
 // command can be spelled out; this is the missing-plan-commit one.
 func TestApplyPlanStaleWhenThePlanCommitIsGone(t *testing.T) {
+	t.Parallel()
 	h, id := planned(t)
 	if err := h.shadowGit().DeleteRef(h.ctx, "refs/ghostbranch/plans/"+id); err != nil {
 		t.Fatal(err)
@@ -208,6 +215,7 @@ func TestApplyPlanStaleWhenThePlanCommitIsGone(t *testing.T) {
 
 // DEFERRED (sp2): the local plan file is not trusted about where it publishes.
 func TestApplyRejectsATamperedTargetBranch(t *testing.T) {
+	t.Parallel()
 	h, id := planned(t)
 	path := filepath.Join(h.eng.WS.PlansDir(), id+".json")
 	// "Main" passes ValidateName and is caught as the public default branch.

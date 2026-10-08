@@ -77,6 +77,7 @@ func TestUserGitConfigCannotChangeContentOrRunHooks(t *testing.T) {
 }
 
 func TestWorktreeRemoveFallbackRemovesUnregisteredDir(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	g := testutil.BareRepo(t, filepath.Join(t.TempDir(), "r.git"))
 	dir := filepath.Join(t.TempDir(), "plain")
@@ -101,6 +102,7 @@ func TestWorktreeRemoveFallbackRemovesUnregisteredDir(t *testing.T) {
 // main, which outside contributors write to. No file in a checkout may
 // become git's global config, hooks or attributes, whatever it is named.
 func TestCheckoutContentCannotBecomeGitConfigHooksOrAttributes(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	tmp := t.TempDir()
 	markers := filepath.Join(tmp, "markers")
@@ -266,6 +268,7 @@ func TestOverridesBeatSystemRerereAndFsmonitor(t *testing.T) {
 }
 
 func TestProtectAttributesWritesTheMirrorFile(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "m.git")
 	g := testutil.BareRepo(t, dir)
 	if err := g.ProtectAttributes(context.Background()); err != nil {

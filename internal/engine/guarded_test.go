@@ -15,6 +15,7 @@ import (
 // guardedEntries rewrites a copy: the entries it was given are T, which the
 // leak scan reads and promote publishes (directive 10).
 func TestGuardedEntriesNeverChangesItsInput(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	g := testutil.BareRepo(t, t.TempDir())
 	const wf = ".github/workflows/up.yml"
@@ -45,6 +46,7 @@ func TestGuardedEntriesNeverChangesItsInput(t *testing.T) {
 // The rewrite uses GitHub's canonical names, so a pair typed in another
 // case on another machine makes the same candidate and the same plan.
 func TestGuardNamesAreGitHubsCanonicalNames(t *testing.T) {
+	t.Parallel()
 	pc := &pairCtx{
 		pair:   workspace.Pair{Public: "ACME/Widget", Shadow: "acme/WIDGET-shadow"},
 		public: forge.Repo{FullName: "acme/widget"},

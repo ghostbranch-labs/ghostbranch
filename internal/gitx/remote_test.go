@@ -27,6 +27,7 @@ func setupRemote(t *testing.T) (remote, local *gitx.Git, c1 string) {
 }
 
 func TestFetchAndLsRemote(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	_, local, c1 := setupRemote(t)
 	if err := local.Fetch(ctx, "origin", "+refs/heads/*:refs/remotes/origin/*"); err != nil {
@@ -42,6 +43,7 @@ func TestFetchAndLsRemote(t *testing.T) {
 }
 
 func TestPushLeases(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote, local, c1 := setupRemote(t)
 	_ = local.Fetch(ctx, "origin", "+refs/heads/*:refs/remotes/origin/*")
@@ -70,6 +72,7 @@ func TestPushLeases(t *testing.T) {
 }
 
 func TestAtomicPushAppliesAllOrNothing(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote, local, c1 := setupRemote(t)
 	_ = local.Fetch(ctx, "origin", "+refs/heads/*:refs/remotes/origin/*")
@@ -87,6 +90,7 @@ func TestAtomicPushAppliesAllOrNothing(t *testing.T) {
 }
 
 func TestPushCustomNamespace(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote, local, c1 := setupRemote(t)
 	_ = local.Fetch(ctx, "origin", "+refs/heads/*:refs/remotes/origin/*")

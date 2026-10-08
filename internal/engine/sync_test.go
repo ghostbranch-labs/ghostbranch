@@ -15,6 +15,7 @@ import (
 )
 
 func TestSyncNoopFastForwardAndDiverged(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	res, _, err := h.eng.Sync(h.ctx, h.pair, engine.SyncOptions{})
@@ -54,6 +55,7 @@ func TestSyncNoopFastForwardAndDiverged(t *testing.T) {
 }
 
 func TestSyncFollowsEveryConfiguredBranch(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	testutil.Commit(t, h.pubGit, "release", "rel", map[string]string{"r": "1\n"})
 	h.init() // mirrors release too
@@ -74,6 +76,7 @@ func TestSyncFollowsEveryConfiguredBranch(t *testing.T) {
 }
 
 func TestSyncRefusesABranchPublicLacks(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.setConfig("branches: [main]", "branches: [main, ghost]")
@@ -88,6 +91,7 @@ func TestSyncRefusesABranchPublicLacks(t *testing.T) {
 }
 
 func TestSyncReportsEachDivergedBranchAndPushesTheRest(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	testutil.Commit(t, h.pubGit, "release", "rel", map[string]string{"r": "1\n"})
 	h.init()
@@ -125,6 +129,7 @@ func pushRunsHarness(t *testing.T) (h *harness, next string) {
 // A pushed commit with no workflow a push to that branch starts can't have
 // started runs: sync doesn't ask GitHub and doesn't wait.
 func TestSyncDoesNotWaitWhenThePushStartsNoWorkflow(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.eng.CIAppearWindow, h.eng.CIAppearPoll = 10*time.Second, time.Second
@@ -144,6 +149,7 @@ func TestSyncDoesNotWaitWhenThePushStartsNoWorkflow(t *testing.T) {
 // A workflow whose every job carries the audit's push guard skips push runs
 // in the shadow repo, so its push starts nothing: sync doesn't look.
 func TestSyncDoesNotWaitWhenEveryJobCarriesThePushGuard(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.eng.CIAppearWindow, h.eng.CIAppearPoll = 10*time.Second, time.Second
@@ -174,6 +180,7 @@ func wfRun(id int64, workflow, status string) forge.Run {
 }
 
 func TestSyncCancelsTheWorkflowRunsItsPushStarts(t *testing.T) {
+	t.Parallel()
 	h, next := pushRunsHarness(t)
 	seedRuns(h, next, wfRun(1, "ci", "queued"), wfRun(2, "lint", "in_progress"), wfRun(3, "old", "completed"),
 		wfRun(4, "deploy", "waiting"), wfRun(5, "x", "requested"), wfRun(6, "y", "pending"))
@@ -203,6 +210,7 @@ func TestSyncCancelsTheWorkflowRunsItsPushStarts(t *testing.T) {
 }
 
 func TestSyncLeavesFinishedRunsAlone(t *testing.T) {
+	t.Parallel()
 	h, next := pushRunsHarness(t)
 	seedRuns(h, next, wfRun(1, "ci", "completed"))
 	res, warns, err := h.eng.Sync(h.ctx, h.pair, engine.SyncOptions{})
@@ -212,6 +220,7 @@ func TestSyncLeavesFinishedRunsAlone(t *testing.T) {
 }
 
 func TestSyncWaitsOnlyTheWindowForRunsToAppear(t *testing.T) {
+	t.Parallel()
 	h, _ := pushRunsHarness(t)
 	start := h.clock.Now()
 	res, warns, err := h.eng.Sync(h.ctx, h.pair, engine.SyncOptions{})
@@ -227,6 +236,7 @@ func TestSyncWaitsOnlyTheWindowForRunsToAppear(t *testing.T) {
 }
 
 func TestSyncWarnsWhenTheTokenCannotListRuns(t *testing.T) {
+	t.Parallel()
 	h, next := pushRunsHarness(t)
 	seedRuns(h, next, wfRun(1, "ci", "queued"))
 	h.forge.RunsForbidden = map[string]bool{shadowName: true}
@@ -241,6 +251,7 @@ func TestSyncWarnsWhenTheTokenCannotListRuns(t *testing.T) {
 }
 
 func TestSyncWarnsWhenTheTokenCannotCancelRuns(t *testing.T) {
+	t.Parallel()
 	h, next := pushRunsHarness(t)
 	seedRuns(h, next, wfRun(1, "ci", "queued"), wfRun(2, "lint", "in_progress"), wfRun(3, "old", "completed"))
 	h.forge.CancelForbidden = map[string]bool{shadowName: true}
@@ -257,6 +268,7 @@ func TestSyncWarnsWhenTheTokenCannotCancelRuns(t *testing.T) {
 // Once a cancel is forbidden every other one would be too: sync stops
 // looking, for this commit and the rest, and counts the runs it saw.
 func TestSyncStopsLookingOnceACancelIsForbidden(t *testing.T) {
+	t.Parallel()
 	h, next := pushRunsHarness(t)
 	h.setConfig("branches: [main]", "branches: [main, release]")
 	seedRuns(h, next, wfRun(1, "ci", "queued"), wfRun(2, "lint", "in_progress"))
@@ -279,6 +291,7 @@ func TestSyncStopsLookingOnceACancelIsForbidden(t *testing.T) {
 }
 
 func TestSyncWarnsOnOtherCancelErrors(t *testing.T) {
+	t.Parallel()
 	h, next := pushRunsHarness(t)
 	seedRuns(h, next, wfRun(1, "ci", "queued"), wfRun(2, "lint", "queued"))
 	h.forge.CancelErr = errors.New("actions are down")
@@ -292,6 +305,7 @@ func TestSyncWarnsOnOtherCancelErrors(t *testing.T) {
 }
 
 func TestSyncWarnsWhenListingRunsFails(t *testing.T) {
+	t.Parallel()
 	h, next := pushRunsHarness(t)
 	seedRuns(h, next, wfRun(1, "ci", "queued"))
 	h.forge.RunsErr = errors.New("actions are down")
@@ -305,6 +319,7 @@ func TestSyncWarnsWhenListingRunsFails(t *testing.T) {
 }
 
 func TestSyncNoCancelDryRunAndNoopNeverLookForRuns(t *testing.T) {
+	t.Parallel()
 	h, next := pushRunsHarness(t)
 	seedRuns(h, next, wfRun(1, "ci", "queued"))
 	h.eng.DryRun = true

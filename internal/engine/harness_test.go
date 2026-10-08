@@ -6,6 +6,7 @@ import (
 	"io"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -89,7 +90,7 @@ func newHarness(t *testing.T) *harness {
 	h.eng = &engine.Engine{
 		Forge: f, WS: ws, Actor: "human:octo",
 		Now: h.clock.Now, Sleep: h.clock.Sleep, Rand: &testutil.SeqReader{}, Progress: io.Discard,
-		NewScanner:   func(r leak.Rules) (leak.Scanner, error) { return leak.NewGitleaks(r) },
+		NewScanner:   newGitleaksSerialized,
 		PollInterval: time.Second, SettleWindow: 5 * time.Second,
 		OnPush: func(op, remote string, specs []string) {
 			h.pushes = append(h.pushes, pushEvent{op, remote, specs})
@@ -166,4 +167,15 @@ func (h *harness) setBlockPatterns(patterns ...string) {
 	cfg := strings.Replace(string(config.Render(publicName, shadowName)), "block_patterns: []",
 		"block_patterns: ["+strings.Join(quoted, ", ")+"]", 1)
 	testutil.Commit(h.t, h.shadowGit(), engine.OverlayBranch, "block patterns", map[string]string{".ghostbranch.yml": cfg})
+}
+
+// gitleaks builds its default detector through the global viper instance,
+// which is not safe for concurrent use, so parallel tests build scanners one
+// at a time.
+var gitleaksMu sync.Mutex
+
+func newGitleaksSerialized(r leak.Rules) (leak.Scanner, error) {
+	gitleaksMu.Lock()
+	defer gitleaksMu.Unlock()
+	return leak.NewGitleaks(r)
 }

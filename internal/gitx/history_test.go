@@ -29,6 +29,7 @@ func repoWithFeature(t *testing.T) (g *gitx.Git, base, main string, feat []strin
 }
 
 func TestSourceCommitsOldestFirstSkippingUpstreamPatches(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	g, _, main, feat := repoWithFeature(t)
 	got, err := g.SourceCommits(ctx, main, feat[2])
@@ -48,6 +49,7 @@ func TestSourceCommitsOldestFirstSkippingUpstreamPatches(t *testing.T) {
 }
 
 func TestCherryPickReplaysInOrderAndKeepsAuthors(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	g, _, main, feat := repoWithFeature(t)
 	wtDir := filepath.Join(t.TempDir(), "wt")
@@ -85,6 +87,7 @@ func TestCherryPickReplaysInOrderAndKeepsAuthors(t *testing.T) {
 }
 
 func TestCherryPickKeepsCommitsThatBecomeEmpty(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	g, _, main, feat := repoWithFeature(t)
 	wtDir := filepath.Join(t.TempDir(), "wt")
@@ -103,6 +106,7 @@ func TestCherryPickKeepsCommitsThatBecomeEmpty(t *testing.T) {
 }
 
 func TestCherryPickConflictNamesTheCommitAndAborts(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	g, _, main, feat := repoWithFeature(t)
 	wtDir := filepath.Join(t.TempDir(), "wt")
@@ -120,6 +124,7 @@ func TestCherryPickConflictNamesTheCommitAndAborts(t *testing.T) {
 }
 
 func TestCommitAuthor(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	g, _, _, feat := repoWithFeature(t)
 	got, err := g.CommitAuthor(ctx, feat[0])

@@ -20,6 +20,7 @@ func lastEntry(h *harness) (op, code string) {
 }
 
 func TestAgentsAllowNeedsAPersonAtAConsole(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.eng.Approver = nil
@@ -37,6 +38,7 @@ func TestAgentsAllowNeedsAPersonAtAConsole(t *testing.T) {
 }
 
 func TestAgentsAllowAtAConsole(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	now := h.clock.Now()
@@ -67,6 +69,7 @@ func TestAgentsAllowAtAConsole(t *testing.T) {
 }
 
 func TestAgentsAllowRefusalsAndBadInput(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	_, _, err := h.eng.AgentsAllow(h.ctx, h.pair, engine.AgentsAllowOptions{For: "7h"})
@@ -91,6 +94,7 @@ func TestAgentsAllowRefusalsAndBadInput(t *testing.T) {
 }
 
 func TestAgentsRevokeAndStatus(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.grant(6 * time.Hour)
@@ -128,6 +132,7 @@ func TestAgentsRevokeAndStatus(t *testing.T) {
 // Review Focus 2: an unreadable grants file fails before the person is
 // asked for a code that could never be saved.
 func TestAgentsAllowWithACorruptGrantsFileAsksNoOne(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	if err := os.WriteFile(h.eng.WS.GrantsPath(), []byte("{nope"), 0o600); err != nil {
@@ -144,6 +149,7 @@ func TestAgentsAllowWithACorruptGrantsFileAsksNoOne(t *testing.T) {
 
 // Review Focus 2.
 func TestRevokeAllClearsACorruptGrantsFile(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	if err := os.WriteFile(h.eng.WS.GrantsPath(), []byte("{nope"), 0o600); err != nil {

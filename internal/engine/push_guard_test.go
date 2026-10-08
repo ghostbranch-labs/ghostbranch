@@ -11,6 +11,7 @@ import (
 // The runtime guard: no operation but promote and apply may push to the
 // public remote, whatever a future bug does.
 func TestPushGuardRefusesPublicOutsidePromoteAndApply(t *testing.T) {
+	t.Parallel()
 	e := &Engine{}
 	for _, op := range []string{"init", "sync", "feature start", "gate", ""} {
 		pushed := false

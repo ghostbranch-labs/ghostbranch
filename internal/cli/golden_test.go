@@ -72,6 +72,7 @@ func failing(string, string) []forge.Check {
 }
 
 func TestGoldenContract(t *testing.T) {
+	t.Parallel()
 	scenarios := []struct {
 		name string
 		prep func(*testEnv)
@@ -242,6 +243,7 @@ func editConfig(te *testEnv, old, new string) {
 
 // Plans, feature.json and the ledger are part of the contract too.
 func TestArtifactsMatchTheirSchemas(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	gatedFeature(te)
 	te.mustRun("promote", "feat-x", "-m", "Add feature", "--plan")
@@ -285,6 +287,7 @@ func TestArtifactsMatchTheirSchemas(t *testing.T) {
 }
 
 func TestWaiverArtifactsMatchTheirSchemas(t *testing.T) {
+	t.Parallel()
 	te := newTestEnv(t)
 	waiveLeak(te)
 	raw, err := os.ReadFile(te.waiversFile())

@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -56,7 +57,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		NewForge:     func(string) (forge.Forge, error) { return f, nil },
 		GHToken:      func() (string, error) { return "", errors.New("gh is not logged in") },
 		CwdRemotes:   func() []string { return nil },
-		NewScanner:   func(r leak.Rules) (leak.Scanner, error) { return leak.NewGitleaks(r) },
+		NewScanner:   newGitleaksSerialized,
 		PollInterval: time.Second, SettleWindow: 5 * time.Second,
 		Executable:   func() (string, error) { return filepath.Join(root, "bin", "ghostbranch"), nil },
 		Getwd:        func() (string, error) { return root, nil },
@@ -209,4 +210,15 @@ func waiveLeak(te *testEnv) {
 
 func (te *testEnv) waiversFile() string {
 	return filepath.Join(te.vars["GHOSTBRANCH_HOME"], "workspaces", "default", "waivers.json")
+}
+
+// gitleaks builds its default detector through the global viper instance,
+// which is not safe for concurrent use, so parallel tests build scanners one
+// at a time.
+var gitleaksMu sync.Mutex
+
+func newGitleaksSerialized(r leak.Rules) (leak.Scanner, error) {
+	gitleaksMu.Lock()
+	defer gitleaksMu.Unlock()
+	return leak.NewGitleaks(r)
 }

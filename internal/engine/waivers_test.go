@@ -27,6 +27,7 @@ func add(h *harness, reason string, ids ...string) (*engine.WaiversAddResult, er
 }
 
 func TestWaiversAddNeedsAPersonAtAConsole(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	id := leakyID(t, h)
@@ -41,6 +42,7 @@ func TestWaiversAddNeedsAPersonAtAConsole(t *testing.T) {
 }
 
 func TestWaiversAddAtAConsole(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	id := leakyID(t, h)
@@ -79,6 +81,7 @@ func TestWaiversAddAtAConsole(t *testing.T) {
 }
 
 func TestWaiversAddRefusals(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	id := leakyID(t, h)
@@ -116,6 +119,7 @@ func TestWaiversAddRefusals(t *testing.T) {
 }
 
 func TestWaiversListAndRevoke(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	id := leakyID(t, h)
@@ -181,6 +185,7 @@ func TestWaiversListAndRevoke(t *testing.T) {
 }
 
 func TestWaiverCommandsNeverPush(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	id := leakyID(t, h)

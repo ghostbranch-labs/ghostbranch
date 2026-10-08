@@ -38,6 +38,7 @@ func promote(h *harness, o engine.PromoteOptions) (*engine.PromoteResult, error)
 }
 
 func TestPromotePlanOnlyWritesAPlanAndTouchesNothingPublic(t *testing.T) {
+	t.Parallel()
 	h := gated(t)
 	before := h.publicRefs()
 	res, err := promote(h, engine.PromoteOptions{Message: "Add feature\n\nIt does things.", PlanOnly: true})
@@ -64,6 +65,7 @@ func TestPromotePlanOnlyWritesAPlanAndTouchesNothingPublic(t *testing.T) {
 }
 
 func TestPromoteYesPublishesExactlyTheGatedTree(t *testing.T) {
+	t.Parallel()
 	h := gated(t)
 	res, err := promote(h, engine.PromoteOptions{Message: "Add feature", Yes: true})
 	if err != nil || res.Applied == nil || res.Applied.PublicPR != 1 {
@@ -99,6 +101,7 @@ func TestPromoteYesPublishesExactlyTheGatedTree(t *testing.T) {
 
 // Review Focus 3a: a stale gate is re-run, never trusted.
 func TestPromoteReGatesWhenPublicMainMoved(t *testing.T) {
+	t.Parallel()
 	h := gated(t)
 	newMain := testutil.Commit(t, h.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
 	res, err := promote(h, engine.PromoteOptions{Message: "Add feature", PlanOnly: true})
@@ -108,6 +111,7 @@ func TestPromoteReGatesWhenPublicMainMoved(t *testing.T) {
 }
 
 func TestPromoteReusesAFreshGate(t *testing.T) {
+	t.Parallel()
 	h := gated(t)
 	var calls atomic.Int32
 	h.forge.Checks = func(string, string) []forge.Check { calls.Add(1); return nil }
@@ -118,6 +122,7 @@ func TestPromoteReusesAFreshGate(t *testing.T) {
 }
 
 func TestPromoteApprovalRules(t *testing.T) {
+	t.Parallel()
 	published := func(h *harness) bool { _, ok, _ := h.pubGit.Resolve(h.ctx, "refs/heads/feat-x"); return ok }
 	reasonOf := func(t *testing.T, err error) string {
 		t.Helper()
@@ -238,6 +243,7 @@ func TestPromoteApprovalRules(t *testing.T) {
 
 // DEFERRED (sp2): input problems are reported before the gate can run.
 func TestPromoteChecksInputBeforeAnyCI(t *testing.T) {
+	t.Parallel()
 	h := gated(t)
 	testutil.Commit(t, h.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"}) // the gate is now stale
 	var calls atomic.Int32
@@ -261,6 +267,7 @@ func TestPromoteChecksInputBeforeAnyCI(t *testing.T) {
 
 // DEFERRED (sp2): --title alone keeps the body; both are trimmed.
 func TestPromoteTitleAndBody(t *testing.T) {
+	t.Parallel()
 	h := gated(t)
 	res, err := promote(h, engine.PromoteOptions{Message: "Subject\n\nBody text", Title: "  Custom title  ", PlanOnly: true})
 	if err != nil || res.Plan.Publish.PR.Title != "Custom title" || res.Plan.Publish.PR.Body != "Body text" {
@@ -273,6 +280,7 @@ func TestPromoteTitleAndBody(t *testing.T) {
 }
 
 func TestPromoteInputErrors(t *testing.T) {
+	t.Parallel()
 	h := gated(t)
 	_, err := promote(h, engine.PromoteOptions{PlanOnly: true})
 	if ce := wantCode(t, err, contract.MissingInput); ce.Field != "message" {
@@ -295,6 +303,7 @@ func TestPromoteInputErrors(t *testing.T) {
 }
 
 func TestPromoteScansTheMessageAndPRText(t *testing.T) {
+	t.Parallel()
 	h := gated(t)
 	res, err := promote(h, engine.PromoteOptions{Message: "Add feature with " + testutil.FakeGitHubToken(), PlanOnly: true})
 	_ = wantCode(t, err, contract.LeakFound)
@@ -304,6 +313,7 @@ func TestPromoteScansTheMessageAndPRText(t *testing.T) {
 }
 
 func TestPromoteUnderAnotherBranchName(t *testing.T) {
+	t.Parallel()
 	h := gated(t)
 	res, err := promote(h, engine.PromoteOptions{Message: "m", Branch: "public-name", Yes: true})
 	if err != nil || res.Applied.PublicBranch != "public-name" {
@@ -318,6 +328,7 @@ func TestPromoteUnderAnotherBranchName(t *testing.T) {
 }
 
 func TestPromoteReGatesWhenTheGateBranchIsGone(t *testing.T) {
+	t.Parallel()
 	h := gated(t)
 	if err := h.shadowGit().DeleteRef(h.ctx, "refs/heads/ghostbranch-gate/feat-x"); err != nil {
 		t.Fatal(err)
@@ -332,6 +343,7 @@ func TestPromoteReGatesWhenTheGateBranchIsGone(t *testing.T) {
 }
 
 func TestPromoteReportsAFileWarningOnceWhenItRunsTheGate(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.startFeature("feat-x", map[string]string{".github/workflows/release.yml": "on: push\n"})
@@ -352,6 +364,7 @@ func TestPromoteReportsAFileWarningOnceWhenItRunsTheGate(t *testing.T) {
 
 // A gate recorded without the commit mapping (an older binary) is stale.
 func TestPromoteReGatesAGateWithoutCommitMapping(t *testing.T) {
+	t.Parallel()
 	h := gated(t)
 	forgeMeta(t, h, "feat-x", func(m *feature.Meta) { m.Gate.Commits = nil })
 	res, err := promote(h, engine.PromoteOptions{Message: "m", PlanOnly: true})
@@ -362,6 +375,7 @@ func TestPromoteReGatesAGateWithoutCommitMapping(t *testing.T) {
 
 // DEFERRED: a reused gate result has no shadow PR, not PR 0.
 func TestPromoteReusedGateHasNoShadowPR(t *testing.T) {
+	t.Parallel()
 	h := gated(t)
 	res, err := promote(h, engine.PromoteOptions{Message: "m", PlanOnly: true})
 	if err != nil || !res.Gate.Reused || res.Gate.ShadowPR != nil {

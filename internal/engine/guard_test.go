@@ -24,6 +24,7 @@ func showAt(h *harness, rev, path string) string {
 }
 
 func TestGateRewritesGuardsInTheCandidateOnly(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	testutil.Commit(t, h.pubGit, "main", "guarded", map[string]string{".github/workflows/up.yml": guardedJob})
 	h.init()
@@ -59,6 +60,7 @@ func TestGateRewritesGuardsInTheCandidateOnly(t *testing.T) {
 }
 
 func TestGateGuardModes(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		mode  string
 		warns int
@@ -85,6 +87,7 @@ func TestGateGuardModes(t *testing.T) {
 }
 
 func TestGateReportsUnrewritableGuardsAndShowsThemBeforePublishing(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	const unrewritable = "on: [pull_request]\njobs:\n  up:\n    if: contains(fromJSON('[\"acme/widget\"]'), github.repository)\n    runs-on: x\n"
 	testutil.Commit(t, h.pubGit, "main", "guarded", map[string]string{".github/workflows/up.yml": unrewritable})
@@ -147,6 +150,7 @@ func forgeCandidate(t *testing.T, h *harness, name, C, path, content string) str
 // forged end to end (gate branch, metadata and plan), so that apply reaches
 // assertPublish. TestRewriteOnly pins the rule itself.
 func TestAssertPublishRefusesAForgedWorkflowDifference(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	testutil.Commit(t, h.pubGit, "main", "guarded", map[string]string{".github/workflows/up.yml": guardedJob})
 	h.init()
@@ -176,6 +180,7 @@ func TestAssertPublishRefusesAForgedWorkflowDifference(t *testing.T) {
 
 // Review Focus 5.
 func TestGateWithBrokenOrDeletedWorkflow(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	testutil.Commit(t, h.pubGit, "main", "guarded", map[string]string{".github/workflows/up.yml": guardedJob})
 	h.init()
@@ -203,6 +208,7 @@ func TestGateWithBrokenOrDeletedWorkflow(t *testing.T) {
 // Planning refinement 5: a gate recorded without the guard rewrite (the
 // sub-project 3 binary) is not reused.
 func TestPromoteRegatesACandidateBuiltWithoutTheRewrite(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	testutil.Commit(t, h.pubGit, "main", "guarded", map[string]string{".github/workflows/up.yml": guardedJob})
 	h.init()
@@ -225,6 +231,7 @@ func TestPromoteRegatesACandidateBuiltWithoutTheRewrite(t *testing.T) {
 // what the sub-project 3 binary built (its guarded job skipped), so its tree
 // is not the one this binary builds, and promote gates again.
 func TestPromoteRegatesWhenTheCandidateLacksTheRewrite(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	testutil.Commit(t, h.pubGit, "main", "guarded", map[string]string{".github/workflows/up.yml": guardedJob})
 	h.init()

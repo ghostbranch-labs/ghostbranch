@@ -41,6 +41,7 @@ func pathsIn(t *testing.T, h *harness, g *gitx.Git, rev string) []string {
 }
 
 func TestGatePassesAndRecordsTheResult(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	head := h.startFeature("feat-x", map[string]string{"feature.txt": "new\n", ".ghostbranch/notes.md": "private\n"})
@@ -95,6 +96,7 @@ func TestGatePassesAndRecordsTheResult(t *testing.T) {
 }
 
 func TestGateRebasesOntoTheLatestPublicMain(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.startFeature("feat-x", map[string]string{"feature.txt": "new\n"})
@@ -109,6 +111,7 @@ func TestGateRebasesOntoTheLatestPublicMain(t *testing.T) {
 }
 
 func TestGateRebaseConflict(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.startFeature("feat-x", map[string]string{"README.md": "feature version\n"})
@@ -124,6 +127,7 @@ func TestGateRebaseConflict(t *testing.T) {
 }
 
 func TestGateLeakFailsBeforeCI(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	var calls atomic.Int32
@@ -143,6 +147,7 @@ func TestGateLeakFailsBeforeCI(t *testing.T) {
 }
 
 func TestGateCheckOutcomes(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name   string
 		checks func(h *harness) func(string, string) []forge.Check
@@ -187,6 +192,7 @@ func TestGateCheckOutcomes(t *testing.T) {
 // Checks that appear late must be waited for: the gate may not pass on the
 // first green check.
 func TestGateWaitsForLateChecksToSettle(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.startFeature("feat-x", map[string]string{"feature.txt": "x\n"})
@@ -211,6 +217,7 @@ func TestGateWaitsForLateChecksToSettle(t *testing.T) {
 
 // Review Focus 4.
 func TestGateFeatureBranchDeletedButMetadataRemains(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.startFeature("feat-x", map[string]string{"feature.txt": "x\n"})
@@ -224,6 +231,7 @@ func TestGateFeatureBranchDeletedButMetadataRemains(t *testing.T) {
 }
 
 func TestGateOverlayCollision(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.startFeature("feat-x", map[string]string{".ghostbranch.yml": "mine\n"})
@@ -243,6 +251,7 @@ func contains(xs []string, x string) bool {
 // When the gate finds a leak but cannot record that result, the leak still
 // wins: the error is LEAK_FOUND, with a warning that nothing was recorded.
 func TestGateLeakWinsOverAFailureToRecordIt(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.startFeature("feat-x", map[string]string{"config.env": "TOKEN=" + testutil.FakeGitHubToken() + "\n"})
@@ -264,6 +273,7 @@ func TestGateLeakWinsOverAFailureToRecordIt(t *testing.T) {
 // Checks that all complete just before ci_timeout, but too recently to have
 // settled, report their outcome rather than CI_TIMEOUT.
 func TestGateCompletedChecksBeatTheTimeout(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		conclusion string
 		want       contract.Code
@@ -296,6 +306,7 @@ func TestGateCompletedChecksBeatTheTimeout(t *testing.T) {
 }
 
 func TestGateWarnsWhenCheckVisibilityIsLimited(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.startFeature("feat-x", map[string]string{"feature.txt": "new\n"})
@@ -348,6 +359,7 @@ func (h *harness) moveMetaOnPush(name string) {
 }
 
 func TestGateRecordsTheRebasedToSourceMapping(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	first := h.startFeature("feat-x", map[string]string{"a.txt": "a\n"})
@@ -372,6 +384,7 @@ func TestGateRecordsTheRebasedToSourceMapping(t *testing.T) {
 }
 
 func TestGateConflictNamesTheCommitAndLeakIsNotRun(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	src := h.startFeature("feat-x", map[string]string{"README.md": "feature version\n"})
@@ -387,6 +400,7 @@ func TestGateConflictNamesTheCommitAndLeakIsNotRun(t *testing.T) {
 }
 
 func TestGateCheckFailureWinsOverAFailureToRecordIt(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.startFeature("feat-x", map[string]string{"feature.txt": "x\n"})

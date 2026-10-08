@@ -16,6 +16,7 @@ import (
 // Every command and failure path runs; the public repo may change only
 // through promote/apply, and only once here.
 func TestOnlyPromoteAndApplyReachThePublicRepo(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	baseline := h.publicRefs()
@@ -142,6 +143,7 @@ func TestOnlyPromoteAndApplyReachThePublicRepo(t *testing.T) {
 
 // Review Focus 5.
 func TestAShadowRepoTurnedPublicStopsEverything(t *testing.T) {
+	t.Parallel()
 	for _, mutate := range []func(*harness){
 		func(h *harness) { h.forge.SetPrivate(shadowName, false) },
 		func(h *harness) { h.forge.SetFork(shadowName, true) },

@@ -9,6 +9,7 @@ import (
 )
 
 func TestRewriteOnly(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	g := testutil.BareRepo(t, t.TempDir())
 	names := workflow.Names{Public: "acme/widget", Shadow: "acme/widget-shadow"}

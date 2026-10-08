@@ -21,6 +21,7 @@ func fixture() map[string]string {
 }
 
 func TestAWaivedFindingNoLongerBlocks(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.startFeature("feat-x", fixture())
@@ -70,6 +71,7 @@ func TestAWaivedFindingNoLongerBlocks(t *testing.T) {
 }
 
 func TestTypedTextIsNeverWaivable(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.startFeature("feat-x", map[string]string{"feature.txt": "new\n"})
@@ -89,6 +91,7 @@ func TestTypedTextIsNeverWaivable(t *testing.T) {
 
 // Review Focus 4.
 func TestAWaiverCoversOneFileOnly(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	body := "token: " + testutil.FakeGitHubToken() + "\n"
@@ -108,6 +111,7 @@ func TestAWaiverCoversOneFileOnly(t *testing.T) {
 
 // Review Focus 5.
 func TestACorruptWaiversFileBlocksWithAWarning(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.startFeature("feat-x", fixture())
@@ -128,6 +132,7 @@ func TestACorruptWaiversFileBlocksWithAWarning(t *testing.T) {
 }
 
 func TestApplyScansThePublishedCommitsRealAuthor(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.setBlockPatterns(`corp\.internal`)
@@ -171,6 +176,7 @@ func TestApplyScansThePublishedCommitsRealAuthor(t *testing.T) {
 }
 
 func TestFileWarningsReachThePlanAndTheApprover(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.startFeature("feat-x", map[string]string{".github/workflows/release.yml": "on: push\n"})
@@ -205,6 +211,7 @@ func hasWarning(ws []contract.Warning, code contract.WarningCode) bool {
 }
 
 func TestPromoteReportsAFileWarningOnce(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.startFeature("feat-x", map[string]string{".github/workflows/release.yml": "on: push\n"})
@@ -229,6 +236,7 @@ func TestPromoteReportsAFileWarningOnce(t *testing.T) {
 // A waiver covers exactly the finding it was made for: every field of the
 // match must agree.
 func TestAWaiverThatDiffersInOneFieldDoesNotApply(t *testing.T) {
+	t.Parallel()
 	cases := map[string]func(w *waiver.Waiver){
 		"match hash": func(w *waiver.Waiver) { w.MatchSHA256 = strings.Repeat("0", 64) },
 		"rule":       func(w *waiver.Waiver) { w.Rule = "other-rule" },

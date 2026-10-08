@@ -6,6 +6,7 @@ import (
 )
 
 func TestCheckoutHint(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		remote, free string
 		inCheckout   bool
@@ -24,6 +25,7 @@ func TestCheckoutHint(t *testing.T) {
 }
 
 func TestFreeRemoteName(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		have []string
 		want string
