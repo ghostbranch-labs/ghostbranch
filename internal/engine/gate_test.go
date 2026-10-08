@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
+	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
@@ -364,9 +365,9 @@ func TestGateRecordsTheRebasedToSourceMapping(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	h.init()
-	first := h.startFeature("feat-x", map[string]string{"a.txt": "a\n"})
-	second := testutil.Commit(t, h.shadowGit(), "feat-x", "add b", map[string]string{"b.txt": "b\n"})
-	testutil.Commit(t, h.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
+	first := h.startFeature("feat-x", map[string]string{"a.txt": "a\n"})
+	second := testutil.Commit(t, h.shadowGit(), "feat-x", "add b", map[string]string{"b.txt": "b\n"})
+	testutil.Commit(t, h.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
 	res, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
 	if err != nil {
 		t.Fatal(err)
@@ -389,8 +390,8 @@ func TestGateConflictNamesTheCommitAndLeakIsNotRun(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	h.init()
-	src := h.startFeature("feat-x", map[string]string{"README.md": "feature version\n"})
-	testutil.Commit(t, h.pubGit, "main", "upstream", map[string]string{"README.md": "upstream version\n"})
+	src := h.startFeature("feat-x", map[string]string{"README.md": "feature version\n"})
+	testutil.Commit(t, h.pubGit, "main", "upstream", map[string]string{"README.md": "upstream version\n"})
 	res, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
 	ce := wantCode(t, err, contract.RebaseConflict)
 	if ce.Details["commit"] != src || !reflect.DeepEqual(ce.Details["files"], []string{"README.md"}) {
@@ -405,7 +406,7 @@ func TestGateCheckFailureWinsOverAFailureToRecordIt(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	h.init()
-	h.startFeature("feat-x", map[string]string{"feature.txt": "x\n"})
+	h.startFeature("feat-x", map[string]string{"feature.txt": "x\n"})
 	h.forge.Checks = func(string, string) []forge.Check {
 		return []forge.Check{{Name: "lint", Status: "completed", Conclusion: "failure"}}
 	}
@@ -414,5 +415,65 @@ func TestGateCheckFailureWinsOverAFailureToRecordIt(t *testing.T) {
 	_ = wantCode(t, err, contract.ChecksFailed)
 	if !hasWarning(warns, contract.GateNotRecorded) {
 		t.Fatalf("want %s, got %+v", contract.GateNotRecorded, warns)
+	}
+}
+
+// Review Focus 1, at the gate.
+func TestGateScansHistoryForPreserve(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	first := h.startFeature("feat-x", map[string]string{"config.env": "TOKEN=" + testutil.FakeGitHubToken() + "\n"})
+	testutil.Commit(t, h.shadowGit(), "feat-x", "remove it", map[string]string{"config.env": testutil.Delete, "a.txt": "a\n"})
+	res, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
+	ce := wantCode(t, err, contract.LeakFound)
+	if res.ScannedAs != "preserve" || len(res.Findings) != 1 || !reflect.DeepEqual(res.Findings[0].Commits, []string{first}) || ce.Details["mode"] != "preserve" {
+		t.Fatalf("gate = %+v", res)
+	}
+	// Under squash the deleted secret never goes public, so the gate passes.
+	h.setConfig("default_mode: preserve", "default_mode: squash")
+	res, _, err = h.eng.Gate(h.ctx, h.pair, "feat-x")
+	if err != nil || res.ScannedAs != "squash" || len(res.Findings) != 0 {
+		t.Fatalf("squash gate = %+v %v", res, err)
+	}
+}
+
+func TestGateScansMessagesAndMappedAuthors(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.setBlockPatterns("JIRA-[0-9]+")
+	h.startFeature("feat-x", map[string]string{"a.txt": "a\n"})
+	testutil.Commit(t, h.shadowGit(), "feat-x", "fix JIRA-9", map[string]string{"a.txt": "b\n"})
+	_, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
+	_ = wantCode(t, err, contract.LeakFound)
+
+	h2 := newHarness(t)
+	h2.init()
+	h2.setConfig("author_email: noreply", "author_email: map\n  author_map:\n    \"x@y.example\": \"X <x@y.example>\"")
+	h2.startFeature("feat-x", map[string]string{"a.txt": "a\n"})
+	res, _, err := h2.eng.Gate(h2.ctx, h2.pair, "feat-x")
+	_ = wantCode(t, err, contract.AuthorUnmapped)
+	if res == nil || res.Leak != feature.LeakNotRun || res.ShadowPR != nil {
+		t.Fatalf("an unmapped author stops the gate before CI: %+v", res)
+	}
+}
+
+func TestGateListsTheCommitsForCurating(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	s1 := h.startFeature("feat-x", map[string]string{"a.txt": "a\n", ".ghostbranch/n.md": "n\n"})
+	s2 := testutil.Commit(t, h.shadowGit(), "feat-x", "add b\n\nmore", map[string]string{"b.txt": "b\n"})
+	res, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
+	if err != nil || len(res.Commits) != 2 {
+		t.Fatalf("gate = %+v %v", res, err)
+	}
+	want := []engine.CommitInfo{
+		{Source: s1, Subject: "work on feat-x", Author: "Test Author <author@example.com>", Files: []string{"a.txt"}},
+		{Source: s2, Subject: "add b", Author: "Test Author <author@example.com>", Files: []string{"b.txt"}},
+	}
+	if !reflect.DeepEqual(res.Commits, want) {
+		t.Fatalf("commits = %+v", res.Commits)
 	}
 }

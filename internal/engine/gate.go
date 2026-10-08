@@ -13,6 +13,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
 	"github.com/ghostbranch-labs/ghostbranch/internal/ledger"
+	"github.com/ghostbranch-labs/ghostbranch/internal/overlay"
 	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workflow"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
@@ -25,6 +26,8 @@ type GateResult struct {
 	Overlay       string          `json:"overlay"`
 	Candidate     string          `json:"candidate"`
 	PublishedTree string          `json:"published_tree"`
+	ScannedAs     string          `json:"scanned_as"` // promote.default_mode: the history scanned as it would publish
+	Commits       []CommitInfo    `json:"commits"`    // the replayed commits, oldest first; empty when the replay didn't finish
 	Checks        string          `json:"checks"`
 	FailedChecks  []string        `json:"failed_checks"`
 	Leak          string          `json:"leak"`
@@ -42,6 +45,47 @@ type GateResult struct {
 
 	// mapping is the gate's rebased chain, for promote to publish from.
 	mapping []feature.GateCommit `json:"-"`
+}
+
+// CommitInfo is one feature commit as the gate replayed it, for an agent
+// drafting a --curate file.
+type CommitInfo struct {
+	Source  string   `json:"source"`
+	Subject string   `json:"subject"`
+	Author  string   `json:"author"` // "Name <email>" as committed
+	Files   []string `json:"files"`  // paths it changes, overlay paths left out
+}
+
+// gateCommitInfos describes each rebased commit, oldest first: its subject,
+// its author as committed, and the paths it changes from the commit before
+// it (public main for the first), overlay paths left out.
+func gateCommitInfos(ctx context.Context, g *gitx.Git, cfg config.Config, pm string, commits []feature.GateCommit) ([]CommitInfo, error) {
+	infos := make([]CommitInfo, len(commits))
+	set := overlay.NewSet(cfg.LeakScan.Strip...)
+	prev := pm
+	for i, c := range commits {
+		msg, err := g.CommitMessage(ctx, c.Rebased)
+		if err != nil {
+			return nil, internalErr(err, "read a commit message")
+		}
+		author, _, err := g.CommitIdentities(ctx, c.Rebased)
+		if err != nil {
+			return nil, internalErr(err, "read a commit author")
+		}
+		names, err := g.DiffNames(ctx, prev, c.Rebased)
+		if err != nil {
+			return nil, internalErr(err, "list a commit's files")
+		}
+		files := []string{}
+		for _, n := range names {
+			if !set.Match(n) {
+				files = append(files, n)
+			}
+		}
+		infos[i] = CommitInfo{Source: c.Source, Subject: subject(msg), Author: author, Files: files}
+		prev = c.Rebased
+	}
+	return infos, nil
 }
 
 const gatePRBody = "Automated Ghostbranch gate candidate: the feature rebased onto public main, plus the overlay. " +
@@ -85,6 +129,10 @@ type built struct {
 	entries []gitx.TreeEntry
 	report  leak.Report
 	commits []feature.GateCommit
+	// scannedAs is promote.default_mode, the history the scan covered.
+	scannedAs string
+	// infos describe commits; nil until the replay succeeds.
+	infos []CommitInfo
 }
 
 // build resolves the feature and public main, rebases, strips and scans.
@@ -112,7 +160,7 @@ func (e *Engine) build(ctx context.Context, pc *pairCtx, name string) (*built, [
 	if err != nil {
 		return nil, warns, internalErr(err, "read public main")
 	}
-	b := &built{cfg: cfg, meta: m, metaSHA: metaSHA, head: head, pm: pm, O: O}
+	b := &built{cfg: cfg, meta: m, metaSHA: metaSHA, head: head, pm: pm, O: O, scannedAs: cfg.Promote.DefaultMode}
 	e.progressf("replaying %s onto public main %s", name, short(pm))
 	sources, err := g.SourceCommits(ctx, pm, head)
 	if err != nil {
@@ -134,17 +182,57 @@ func (e *Engine) build(ctx context.Context, pc *pairCtx, name string) (*built, [
 		b.commits[i] = feature.GateCommit{Source: sources[i], Rebased: rebased[i]}
 		b.R = rebased[i]
 	}
+	infos, err := gateCommitInfos(ctx, g, cfg, pm, b.commits)
+	if err != nil {
+		return b, warns, err
+	}
+	b.infos = infos
 	if b.T, b.entries, err = publishedTree(ctx, g, b.R, cfg); err != nil {
 		if ce := contract.From(err); ce.Code == contract.MarkerInvalid {
 			ce.Details["feature"] = name
 		}
 		return b, warns, err
 	}
-	e.progressf("scanning the published tree for leaks")
-	if b.report, _, err = e.scan(ctx, g, cfg, b.entries, pm, nil); err != nil {
+	e.progressf("scanning what %s would publish for leaks", b.scannedAs)
+	if b.scannedAs == config.ModeSquash {
+		b.report, _, err = e.scan(ctx, g, cfg, b.entries, pm, nil)
+	} else {
+		b.report, err = e.scanHistory(ctx, g, cfg, b)
+	}
+	if err != nil {
 		return b, warns, err
 	}
 	return b, addWarnings(warns, b.report.Warnings...), nil
+}
+
+// scanHistory scans every rebased commit as preserve would publish it: each
+// one's stripped tree, its message, and, under keep or map, its author.
+// Curated publishes new messages, which promote scans; the gate covers the
+// trees and the original messages.
+func (e *Engine) scanHistory(ctx context.Context, g *gitx.Git, cfg config.Config, b *built) (leak.Report, error) {
+	links, _, err := deriveChain(ctx, g, cfg, chainInput{mode: config.ModePreserve, pm: b.pm, T: b.T, tEntries: b.entries, commits: b.commits}, nil)
+	if err != nil && contract.From(err).Code == contract.NothingToPublish {
+		return leak.Report{Findings: []leak.Finding{}, Warnings: []contract.Warning{}}, nil
+	}
+	if err != nil {
+		return leak.Report{}, err
+	}
+	var authors []gitx.Identity
+	if cfg.Promote.AuthorEmail != config.AuthorNoreply {
+		if authors, err = chainAuthors(cfg.Promote, config.ModePreserve, links, gitx.Identity{}); err != nil {
+			return leak.Report{}, err
+		}
+	}
+	steps := make([]scanStep, len(links))
+	for i, l := range links {
+		texts := []leak.Text{{Where: "commit_message", Content: l.message}}
+		if authors != nil {
+			texts = append(texts, leak.Text{Where: "author", Content: identityText(authors[i])})
+		}
+		steps[i] = scanStep{sources: l.sources, entries: l.entries, texts: texts}
+	}
+	rep, _, err := e.scanChain(ctx, g, cfg, b.pm, steps, nil)
+	return rep, err
 }
 
 func (e *Engine) gate(ctx context.Context, pc *pairCtx, name string) (*GateResult, []contract.Warning, error) {
@@ -154,7 +242,11 @@ func (e *Engine) gate(ctx context.Context, pc *pairCtx, name string) (*GateResul
 		return nil, warns, err
 	}
 	cfg, m, metaSHA, head, pm, O := b.cfg, b.meta, b.metaSHA, b.head, b.pm, b.O
-	res := &GateResult{Feature: name, FeatureHead: head, PublicMain: pm, Overlay: O,
+	infos := b.infos
+	if infos == nil {
+		infos = []CommitInfo{}
+	}
+	res := &GateResult{Feature: name, FeatureHead: head, PublicMain: pm, Overlay: O, ScannedAs: b.scannedAs, Commits: infos,
 		Checks: feature.ChecksNotRun, FailedChecks: []string{}, Leak: feature.LeakNotRun, Findings: []leak.Finding{}, Waived: []WaivedFinding{}}
 	if err != nil {
 		return res, warns, err
@@ -184,7 +276,9 @@ func (e *Engine) gate(ctx context.Context, pc *pairCtx, name string) (*GateResul
 					Message: "the gate result could not be recorded in the feature metadata: " + contract.From(err).Message})
 			}
 		}
-		return res, warns, leakErr(name, blocking)
+		ce := contract.From(leakErr(name, blocking))
+		ce.Details["mode"] = b.scannedAs
+		return res, warns, ce
 	}
 	if e.DryRun {
 		old, _, _ := g.Resolve(ctx, shadowRef(gateBranch(name)))

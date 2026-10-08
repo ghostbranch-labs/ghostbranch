@@ -1,7 +1,10 @@
 package engine_test
 
 import (
+	"bytes"
+	"encoding/json"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -10,6 +13,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
+	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 // leakyID gates a feature holding the fake token and returns its finding id.
@@ -197,5 +201,56 @@ func TestWaiverCommandsNeverPush(t *testing.T) {
 	_, _, _ = h.eng.WaiversRevoke(h.ctx, &h.pair, []string{id}, false)
 	if len(h.pushes) != n || !reflect.DeepEqual(h.publicRefs(), before) {
 		t.Fatal("a waivers command pushed")
+	}
+}
+
+// A waiver covers a finding in a commit the tip no longer holds, and the
+// gate result that lists it waived, with its commits, matches the schema.
+func TestWaiversAddCoversAFindingInAnOldCommit(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.setBlockPatterns("project-falcon")
+	first := h.startFeature("feat-x", map[string]string{"docs/codename.txt": "project-falcon\n"})
+	testutil.Commit(t, h.shadowGit(), "feat-x", "drop it", map[string]string{"docs/codename.txt": testutil.Delete, "a.txt": "a\n"})
+	res, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
+	_ = wantCode(t, err, contract.LeakFound)
+	ar, _, err := h.eng.WaiversAdd(h.ctx, h.pair, engine.WaiversAddOptions{Feature: "feat-x", IDs: []string{res.Findings[0].ID}, Reason: "public name"})
+	if err != nil || len(ar.Waivers) != 1 {
+		t.Fatalf("waivers add = %+v %v", ar, err)
+	}
+	res, _, err = h.eng.Gate(h.ctx, h.pair, "feat-x")
+	if err != nil {
+		t.Fatalf("gate after the waiver: %v", err)
+	}
+	if len(res.Waived) != 1 || !reflect.DeepEqual(res.Waived[0].Commits, []string{first}) {
+		t.Fatalf("waived = %+v", res.Waived)
+	}
+	raw, err := json.Marshal(res)
+	if err != nil {
+		t.Fatal(err)
+	}
+	validateSchema(t, "gate.schema.json", raw)
+}
+
+// validateSchema checks raw against schemas/v0/<name>.
+func validateSchema(t *testing.T, name string, raw []byte) {
+	t.Helper()
+	path, err := filepath.Abs(filepath.Join("..", "..", "schemas", "v0", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := jsonschema.NewCompiler()
+	c.AssertFormat()
+	s, err := c.Compile(path)
+	if err != nil {
+		t.Fatalf("compile %s: %v", name, err)
+	}
+	inst, err := jsonschema.UnmarshalJSON(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Validate(inst); err != nil {
+		t.Fatalf("the result does not match %s:\n%v\n%s", name, err, raw)
 	}
 }

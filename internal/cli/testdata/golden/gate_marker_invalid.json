@@ -10,6 +10,17 @@
     "overlay": "a1ef151295bf2b53d15b18523ab0184d02178bbd",
     "candidate": "",
     "published_tree": "",
+    "scanned_as": "preserve",
+    "commits": [
+      {
+        "source": "88139fd7713142e8d37f9460193493611415f2cb",
+        "subject": "work",
+        "author": "Test Author <author@example.com>",
+        "files": [
+          "app.go"
+        ]
+      }
+    ],
     "checks": "not_run",
     "failed_checks": [],
     "leak": "not_run",

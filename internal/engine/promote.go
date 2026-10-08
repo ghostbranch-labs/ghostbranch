@@ -179,8 +179,12 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	}
 	switch {
 	case fresh:
+		infos, err := gateCommitInfos(ctx, g, cfg, pm, m.Gate.Commits)
+		if err != nil {
+			return res, warns, err
+		}
 		res.Gate = &GateResult{Feature: opt.Feature, FeatureHead: head, PublicMain: pm, Overlay: O,
-			Candidate: m.Gate.Candidate, PublishedTree: m.Gate.PublishedTree, Checks: m.Gate.Checks,
+			Candidate: m.Gate.Candidate, PublishedTree: m.Gate.PublishedTree, ScannedAs: cfg.Promote.DefaultMode, Commits: infos, Checks: m.Gate.Checks,
 			FailedChecks: []string{}, Leak: m.Gate.Leak, Findings: []leak.Finding{}, Waived: []WaivedFinding{},
 			RepoGuards: &guardRep, Reused: true}
 		commits = m.Gate.Commits
