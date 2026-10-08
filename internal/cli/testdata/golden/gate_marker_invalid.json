@@ -12,7 +12,7 @@
     "published_tree": "",
     "checks": "not_run",
     "failed_checks": [],
-    "leak": "clean",
+    "leak": "not_run",
     "findings": [],
     "waived": [],
     "repo_guards": null,

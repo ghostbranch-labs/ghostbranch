@@ -246,31 +246,7 @@ func TestGateLeakWinsOverAFailureToRecordIt(t *testing.T) {
 	h := newHarness(t)
 	h.init()
 	h.startFeature("feat-x", map[string]string{"config.env": "TOKEN=" + testutil.FakeGitHubToken() + "\n"})
-	sg := h.shadowGit()
-	metaRef := "refs/ghostbranch/features/feat-x"
-	h.eng.OnPush = func(_, _ string, specs []string) {
-		for _, s := range specs {
-			if !strings.HasSuffix(s, ":"+metaRef) {
-				continue
-			}
-			// Someone else moves the metadata ref first, so the leased push fails.
-			old, err := sg.MustResolve(h.ctx, metaRef)
-			if err != nil {
-				t.Fatal(err)
-			}
-			tree, err := sg.TreeOf(h.ctx, old)
-			if err != nil {
-				t.Fatal(err)
-			}
-			moved, err := sg.CommitTree(h.ctx, tree, []string{old}, "concurrent", testutil.Author(2), testutil.Author(2))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := sg.UpdateRef(h.ctx, metaRef, moved); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
+	h.moveMetaOnPush("feat-x")
 	res, warns, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
 	_ = wantCode(t, err, contract.LeakFound)
 	if res == nil || len(res.Findings) == 0 {
@@ -337,5 +313,90 @@ func TestGateWarnsWhenCheckVisibilityIsLimited(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("no CHECKS_LIMITED warning in %+v", warns)
+	}
+}
+
+// moveMetaOnPush makes someone else move the feature's metadata ref just as
+// the gate pushes it, so the leased push fails.
+func (h *harness) moveMetaOnPush(name string) {
+	t := h.t
+	sg := h.shadowGit()
+	metaRef := "refs/ghostbranch/features/" + name
+	h.eng.OnPush = func(_, _ string, specs []string) {
+		for _, s := range specs {
+			if !strings.HasSuffix(s, ":"+metaRef) {
+				continue
+			}
+			// Someone else moves the metadata ref first, so the leased push fails.
+			old, err := sg.MustResolve(h.ctx, metaRef)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tree, err := sg.TreeOf(h.ctx, old)
+			if err != nil {
+				t.Fatal(err)
+			}
+			moved, err := sg.CommitTree(h.ctx, tree, []string{old}, "concurrent", testutil.Author(2), testutil.Author(2))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := sg.UpdateRef(h.ctx, metaRef, moved); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+}
+
+func TestGateRecordsTheRebasedToSourceMapping(t *testing.T) {
+	h := newHarness(t)
+	h.init()
+	first := h.startFeature("feat-x", map[string]string{"a.txt": "a\n"})
+	second := testutil.Commit(t, h.shadowGit(), "feat-x", "add b", map[string]string{"b.txt": "b\n"})
+	testutil.Commit(t, h.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
+	res, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _, _ := h.shadowGit().ShowFile(h.ctx, "refs/ghostbranch/features/feat-x", feature.MetaFile)
+	m, _ := feature.Decode(raw)
+	if len(m.Gate.Commits) != 2 || m.Gate.Commits[0].Source != first || m.Gate.Commits[1].Source != second {
+		t.Fatalf("gate.commits = %+v", m.Gate.Commits)
+	}
+	R, _ := h.shadowGit().MustResolve(h.ctx, res.Candidate+"^")
+	if m.Gate.Commits[1].Rebased != R {
+		t.Fatalf("last rebased %s != R %s", m.Gate.Commits[1].Rebased, R)
+	}
+	if p, _ := h.shadowGit().MustResolve(h.ctx, m.Gate.Commits[1].Rebased+"^"); p != m.Gate.Commits[0].Rebased {
+		t.Fatal("rebased commits must chain")
+	}
+}
+
+func TestGateConflictNamesTheCommitAndLeakIsNotRun(t *testing.T) {
+	h := newHarness(t)
+	h.init()
+	src := h.startFeature("feat-x", map[string]string{"README.md": "feature version\n"})
+	testutil.Commit(t, h.pubGit, "main", "upstream", map[string]string{"README.md": "upstream version\n"})
+	res, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
+	ce := wantCode(t, err, contract.RebaseConflict)
+	if ce.Details["commit"] != src || !reflect.DeepEqual(ce.Details["files"], []string{"README.md"}) {
+		t.Fatalf("details = %v", ce.Details)
+	}
+	if res == nil || res.Leak != feature.LeakNotRun {
+		t.Fatalf("leak must be not_run when the scan never ran: %+v", res)
+	}
+}
+
+func TestGateCheckFailureWinsOverAFailureToRecordIt(t *testing.T) {
+	h := newHarness(t)
+	h.init()
+	h.startFeature("feat-x", map[string]string{"feature.txt": "x\n"})
+	h.forge.Checks = func(string, string) []forge.Check {
+		return []forge.Check{{Name: "lint", Status: "completed", Conclusion: "failure"}}
+	}
+	h.moveMetaOnPush("feat-x")
+	_, warns, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
+	_ = wantCode(t, err, contract.ChecksFailed)
+	if !hasWarning(warns, contract.GateNotRecorded) {
+		t.Fatalf("want %s, got %+v", contract.GateNotRecorded, warns)
 	}
 }

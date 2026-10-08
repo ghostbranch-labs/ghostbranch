@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -43,6 +44,8 @@ type PromoteResult struct {
 const editorTemplate = "\n# Write the commit message for the public squash commit of feature %q.\n" +
 	"# The first line becomes the PR title and the rest the PR body.\n" +
 	"# Lines starting with '#' are ignored. An empty message aborts the promote.\n"
+
+var errStaleGate = errors.New("the recorded gate's commit mapping does not end at its candidate")
 
 // Promote gates the feature (reusing a fresh green gate), builds the one
 // public commit P, scans everything that would go public, saves a plan,
@@ -108,7 +111,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	// one would make every plan stale.
 	tip, tipOK, _ := g.Resolve(ctx, shadowRef(gateBranch(opt.Feature)))
 	candidateLive := m.Gate != nil && m.Gate.Candidate != "" && tipOK && tip == m.Gate.Candidate
-	fresh := m.Gate.Passed() && m.Gate.FreshFor(head, pm, O) && candidateLive
+	fresh := m.Gate.Passed() && m.Gate.FreshFor(head, pm, O) && candidateLive && m.Gate.Commits != nil
 	names := guardNames(pc)
 	var R, T2 string
 	var entries []gitx.TreeEntry
@@ -122,6 +125,11 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 		fresh = false
 		var rerr error
 		if R, rerr = g.MustResolve(ctx, m.Gate.Candidate+"^"); rerr == nil {
+			if n := len(m.Gate.Commits); (n == 0 && R != pm) || (n > 0 && m.Gate.Commits[n-1].Rebased != R) {
+				rerr = errStaleGate
+			}
+		}
+		if rerr == nil {
 			if T2, entries, rerr = publishedTree(ctx, g, R, cfg); rerr == nil && T2 == m.Gate.PublishedTree {
 				want, rep, _, werr := e.candidateTree(ctx, g, R, entries, O, names, cfg.CI.RewriteRepoGuards)
 				have, herr := g.TreeOf(ctx, m.Gate.Candidate)

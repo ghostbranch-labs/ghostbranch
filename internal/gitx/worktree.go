@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 )
 
@@ -59,25 +58,4 @@ func (e *ConflictError) Error() string {
 		s += " applying " + e.Commit
 	}
 	return s
-}
-
-// Rebase rebases this worktree's detached HEAD onto onto, committing as
-// committer. On conflict it aborts and returns *ConflictError.
-func (g *Git) Rebase(ctx context.Context, onto string, committer Identity) error {
-	rg := g.With(g.Dir)
-	rg.Env = append(rg.Env, committer.env("GIT_COMMITTER")...)
-	_, err := rg.Run(ctx, "rebase", "--quiet", onto)
-	if err == nil {
-		return nil
-	}
-	out, derr := rg.runRaw(ctx, nil, "diff", "--name-only", "--diff-filter=U", "-z")
-	if _, aerr := rg.Run(ctx, "rebase", "--abort"); aerr != nil {
-		return fmt.Errorf("rebase failed and abort failed, worktree may be mid-rebase: %w", errors.Join(err, aerr))
-	}
-	files := splitNUL(out)
-	if derr == nil && len(files) > 0 {
-		sort.Strings(files)
-		return &ConflictError{Files: files}
-	}
-	return err
 }

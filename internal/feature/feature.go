@@ -26,18 +26,27 @@ const (
 	ChecksNotRun  = "not_run"
 	LeakClean     = "clean"
 	LeakFound     = "found"
+	LeakNotRun    = "not_run"
 )
+
+// GateCommit maps one commit of the gate's rebased chain to the feature
+// branch commit it replays.
+type GateCommit struct {
+	Source  string `json:"source"`
+	Rebased string `json:"rebased"`
+}
 
 // Gate is the last gate result, pinned to the inputs it was computed from.
 type Gate struct {
-	FeatureHead   string    `json:"feature_head"`
-	PublicMain    string    `json:"public_main"`
-	Overlay       string    `json:"overlay"`
-	Candidate     string    `json:"candidate"`
-	PublishedTree string    `json:"published_tree"`
-	Checks        string    `json:"checks"`
-	Leak          string    `json:"leak"`
-	At            time.Time `json:"at"`
+	FeatureHead   string       `json:"feature_head"`
+	PublicMain    string       `json:"public_main"`
+	Overlay       string       `json:"overlay"`
+	Candidate     string       `json:"candidate"`
+	PublishedTree string       `json:"published_tree"`
+	Commits       []GateCommit `json:"commits"`
+	Checks        string       `json:"checks"`
+	Leak          string       `json:"leak"`
+	At            time.Time    `json:"at"`
 }
 
 // Passed reports a green gate: checks passed and no leak findings.

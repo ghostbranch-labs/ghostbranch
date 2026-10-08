@@ -81,6 +81,7 @@ type built struct {
 	T       string
 	entries []gitx.TreeEntry
 	report  leak.Report
+	commits []feature.GateCommit
 }
 
 // build resolves the feature and public main, rebases, strips and scans.
@@ -109,9 +110,26 @@ func (e *Engine) build(ctx context.Context, pc *pairCtx, name string) (*built, [
 		return nil, warns, internalErr(err, "read public main")
 	}
 	b := &built{cfg: cfg, meta: m, metaSHA: metaSHA, head: head, pm: pm, O: O}
-	e.progressf("rebasing %s onto public main %s", name, short(pm))
-	if b.R, err = e.rebase(ctx, pc, head, pm); err != nil {
-		return b, warns, err
+	e.progressf("replaying %s onto public main %s", name, short(pm))
+	sources, err := g.SourceCommits(ctx, pm, head)
+	if err != nil {
+		return b, warns, internalErr(err, "list the feature's commits")
+	}
+	rebased, err := e.replay(ctx, pc, sources, pm)
+	if err != nil {
+		var ce *gitx.ConflictError
+		if errors.As(err, &ce) {
+			return b, warns, contract.New(contract.RebaseConflict,
+				"the feature does not rebase cleanly onto public main; commit %s stopped on conflicts in: %s", short(ce.Commit), strings.Join(ce.Files, ", ")).
+				WithDetails(map[string]any{"files": ce.Files, "commit": ce.Commit})
+		}
+		return b, warns, contract.From(err)
+	}
+	b.commits = make([]feature.GateCommit, len(sources))
+	b.R = pm
+	for i := range sources {
+		b.commits[i] = feature.GateCommit{Source: sources[i], Rebased: rebased[i]}
+		b.R = rebased[i]
 	}
 	if b.T, b.entries, err = publishedTree(ctx, g, b.R, cfg); err != nil {
 		if ce := contract.From(err); ce.Code == contract.MarkerInvalid {
@@ -134,10 +152,11 @@ func (e *Engine) gate(ctx context.Context, pc *pairCtx, name string) (*GateResul
 	}
 	cfg, m, metaSHA, head, pm, O := b.cfg, b.meta, b.metaSHA, b.head, b.pm, b.O
 	res := &GateResult{Feature: name, FeatureHead: head, PublicMain: pm, Overlay: O,
-		Checks: feature.ChecksNotRun, FailedChecks: []string{}, Leak: feature.LeakClean, Findings: []leak.Finding{}, Waived: []WaivedFinding{}}
+		Checks: feature.ChecksNotRun, FailedChecks: []string{}, Leak: feature.LeakNotRun, Findings: []leak.Finding{}, Waived: []WaivedFinding{}}
 	if err != nil {
 		return res, warns, err
 	}
+	res.Leak = feature.LeakClean
 	C, guardRep, guards, err := e.candidate(ctx, g, b.R, b.entries, O, name, guardNames(pc), cfg.CI.RewriteRepoGuards)
 	if err != nil {
 		return res, warns, err
@@ -156,7 +175,7 @@ func (e *Engine) gate(ctx context.Context, pc *pairCtx, name string) (*GateResul
 		if !e.DryRun {
 			// The leak is the result that matters: a failure to record it
 			// must not replace LEAK_FOUND with a lesser error.
-			if err := e.recordGate(ctx, pc, m, metaSHA, res); err != nil {
+			if err := e.recordGate(ctx, pc, m, metaSHA, res, b.commits); err != nil {
 				warns = append(warns, contract.Warning{Code: contract.GateNotRecorded,
 					Message: "the gate result could not be recorded in the feature metadata: " + contract.From(err).Message})
 			}
@@ -210,8 +229,13 @@ func (e *Engine) gate(ctx context.Context, pc *pairCtx, name string) (*GateResul
 			Message: "the token cannot read check runs, so only GitHub Actions workflows and commit statuses were considered; checks from other CI apps were not seen"})
 	}
 	res.Checks, res.FailedChecks = out.status, out.failed
-	if err := e.recordGate(ctx, pc, m, metaSHA, res); err != nil {
-		return res, warns, err
+	if err := e.recordGate(ctx, pc, m, metaSHA, res, b.commits); err != nil {
+		if out.status == feature.ChecksPassed {
+			return res, warns, err // a green gate that isn't recorded can't be promoted
+		}
+		// The check outcome is what matters; don't replace it with a lesser error.
+		warns = append(warns, contract.Warning{Code: contract.GateNotRecorded,
+			Message: "the gate result could not be recorded in the feature metadata: " + contract.From(err).Message})
 	}
 	switch out.status {
 	case feature.ChecksFailed:
@@ -239,39 +263,27 @@ func guardNames(pc *pairCtx) workflow.Names {
 	return n
 }
 
-func (e *Engine) recordGate(ctx context.Context, pc *pairCtx, m feature.Meta, metaSHA string, res *GateResult) error {
+func (e *Engine) recordGate(ctx context.Context, pc *pairCtx, m feature.Meta, metaSHA string, res *GateResult, commits []feature.GateCommit) error {
 	m.SchemaVersion = feature.SchemaVersion
 	m.Gate = &feature.Gate{FeatureHead: res.FeatureHead, PublicMain: res.PublicMain, Overlay: res.Overlay,
-		Candidate: res.Candidate, PublishedTree: res.PublishedTree, Checks: res.Checks, Leak: res.Leak, At: e.now()}
+		Candidate: res.Candidate, PublishedTree: res.PublishedTree, Commits: commits, Checks: res.Checks, Leak: res.Leak, At: e.now()}
 	return e.updateMeta(ctx, pc, m, metaSHA)
 }
 
-// rebase replays head onto onto in a throwaway worktree and returns R. The
-// worktree is always removed; a failure to remove it is reported unless
-// the rebase itself already failed.
-func (e *Engine) rebase(ctx context.Context, pc *pairCtx, head, onto string) (R string, err error) {
+// replay cherry-picks commits onto onto in a throwaway worktree and returns
+// the new SHAs, one per commit. The worktree is always removed; a failure
+// to remove it is reported unless the replay itself already failed. A
+// conflict comes back as *gitx.ConflictError for the caller to name.
+func (e *Engine) replay(ctx context.Context, pc *pairCtx, commits []string, onto string) (out []string, err error) {
 	dir := e.WS.WorkDir(pc.pair, pc.opID)
-	wt, err := pc.git.WorktreeAdd(ctx, dir, head)
+	wt, err := pc.git.WorktreeAdd(ctx, dir, onto)
 	if err != nil {
-		return "", internalErr(err, "create a worktree")
+		return nil, internalErr(err, "create a worktree")
 	}
 	defer func() {
 		if rerr := pc.git.WorktreeRemove(ctx, dir); rerr != nil && err == nil {
-			R, err = "", internalErr(rerr, "remove the rebase worktree")
+			out, err = nil, internalErr(rerr, "remove the replay worktree")
 		}
 	}()
-	if err := wt.Rebase(ctx, onto, e.bot()); err != nil {
-		var ce *gitx.ConflictError
-		if errors.As(err, &ce) {
-			return "", contract.New(contract.RebaseConflict,
-				"the feature does not rebase cleanly onto public main; resolve conflicts in: %s", strings.Join(ce.Files, ", ")).
-				WithDetails(map[string]any{"files": ce.Files})
-		}
-		return "", internalErr(err, "rebase")
-	}
-	R, err = wt.MustResolve(ctx, "HEAD")
-	if err != nil {
-		return "", internalErr(err, "read the rebased head")
-	}
-	return R, nil
+	return wt.CherryPick(ctx, commits, e.bot())
 }

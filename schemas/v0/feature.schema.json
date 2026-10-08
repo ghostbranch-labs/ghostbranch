@@ -25,7 +25,18 @@
             "candidate": { "$ref": "common.schema.json#/$defs/sha" },
             "published_tree": { "$ref": "common.schema.json#/$defs/sha" },
             "checks": { "enum": ["passed", "failed", "no_ci", "timeout", "not_run"] },
-            "leak": { "enum": ["clean", "found"] },
+            "leak": { "enum": ["clean", "found", "not_run"] },
+            "commits": {
+              "type": "array",
+              "items": {
+                "type": "object", "additionalProperties": false,
+                "required": ["source", "rebased"],
+                "properties": {
+                  "source": { "$ref": "common.schema.json#/$defs/sha" },
+                  "rebased": { "$ref": "common.schema.json#/$defs/sha" }
+                }
+              }
+            },
             "at": { "$ref": "common.schema.json#/$defs/time" }
           }
         }

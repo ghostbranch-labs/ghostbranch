@@ -9,7 +9,7 @@
       "feature_head": "d7407485ce685c126afcfc258f0a9eeb0092d776",
       "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
       "overlay": "a1ef151295bf2b53d15b18523ab0184d02178bbd",
-      "candidate": "bcceac4205f84a8dda3cbdd70e55b31f8a8d74b0",
+      "candidate": "ad7c1d9752519d03b74752a472ecf072aacd2fb7",
       "published_tree": "ef9061717144a4bf03a0230d8f8926d019f2adeb",
       "checks": "passed",
       "failed_checks": [],
@@ -41,7 +41,7 @@
         "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
         "feature_head": "d7407485ce685c126afcfc258f0a9eeb0092d776",
         "overlay": "a1ef151295bf2b53d15b18523ab0184d02178bbd",
-        "gate_candidate": "bcceac4205f84a8dda3cbdd70e55b31f8a8d74b0"
+        "gate_candidate": "ad7c1d9752519d03b74752a472ecf072aacd2fb7"
       },
       "publish": {
         "commit": "15dd9c9bcb7655bdb426fb4a24f440fc9c31fb65",

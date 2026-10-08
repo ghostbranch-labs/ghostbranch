@@ -349,3 +349,22 @@ func TestPromoteReportsAFileWarningOnceWhenItRunsTheGate(t *testing.T) {
 		t.Fatalf("want exactly one WORKFLOW_CHANGED warning, got %d in %+v", n, warns)
 	}
 }
+
+// A gate recorded without the commit mapping (an older binary) is stale.
+func TestPromoteReGatesAGateWithoutCommitMapping(t *testing.T) {
+	h := gated(t)
+	forgeMeta(t, h, "feat-x", func(m *feature.Meta) { m.Gate.Commits = nil })
+	res, err := promote(h, engine.PromoteOptions{Message: "m", PlanOnly: true})
+	if err != nil || res.Gate.Reused {
+		t.Fatalf("promote must re-gate: %+v %v", res, err)
+	}
+}
+
+// DEFERRED: a reused gate result has no shadow PR, not PR 0.
+func TestPromoteReusedGateHasNoShadowPR(t *testing.T) {
+	h := gated(t)
+	res, err := promote(h, engine.PromoteOptions{Message: "m", PlanOnly: true})
+	if err != nil || !res.Gate.Reused || res.Gate.ShadowPR != nil {
+		t.Fatalf("reused gate = %+v %v", res.Gate, err)
+	}
+}

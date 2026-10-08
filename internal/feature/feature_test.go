@@ -68,3 +68,12 @@ func TestStateOf(t *testing.T) {
 		}
 	}
 }
+
+func TestDecodeOfAnOlderMetadataFileHasNoCommits(t *testing.T) {
+	old := `{"schema_version":"0.4","name":"x","branch":"x","created_by":"human:octo","created_at":"2026-10-05T12:00:00Z","base":"b",` +
+		`"gate":{"feature_head":"h","public_main":"p","overlay":"o","candidate":"c","published_tree":"t","checks":"passed","leak":"clean","at":"2026-10-05T12:00:00Z"}}`
+	m, err := feature.Decode([]byte(old))
+	if err != nil || m.Gate == nil || m.Gate.Commits != nil {
+		t.Fatalf("decode 0.4: %+v %v", m, err)
+	}
+}
