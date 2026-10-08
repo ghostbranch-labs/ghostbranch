@@ -312,15 +312,21 @@ func TestSandboxLoop(t *testing.T) {
 			t.Errorf("preserve: public commit email %q does not end in @users.noreply.github.com", email)
 		}
 	}
-	histTree, err := g.ListTree(ctx, "refs/heads/published-hist")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, e := range histTree {
-		if set.Match(e.Path) {
-			t.Fatalf("preserve: overlay path %s reached the public repo", e.Path)
+	// Every published commit, not only the tip: a path any of them adds
+	// shows in its --name-only list.
+	noOverlayInAnyCommit := func(what, local string) {
+		t.Helper()
+		names, err := g.Run(ctx, "log", "--name-only", "--format=", "main.."+local)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range strings.Split(names, "\n") {
+			if p = strings.TrimSpace(p); p != "" && set.Match(p) {
+				t.Fatalf("%s: overlay path %s is in a published commit", what, p)
+			}
 		}
 	}
+	noOverlayInAnyCommit("preserve", "published-hist")
 
 	// Curated: two independent commits, published in reversed order under new
 	// messages from a curate file written from the gate's commit list.
@@ -333,7 +339,14 @@ func TestSandboxLoop(t *testing.T) {
 	if len(srcs) != 2 {
 		t.Fatalf("curated: gate lists %d commits, want 2: %v", len(srcs), curGate["commits"])
 	}
-	srcSHA := func(i int) string { return srcs[i].(map[string]any)["source"].(string) }
+	srcSHA := func(i int) string {
+		c, _ := srcs[i].(map[string]any)
+		sha, ok := c["source"].(string)
+		if !ok {
+			t.Fatalf("curated: gate commit %d has no source: %v", i, curGate)
+		}
+		return sha
+	}
 	curateJSON, err := json.Marshal(map[string]any{"commits": []map[string]any{
 		{"from": []string{srcSHA(1)}, "message": "Add c2 for " + runID},
 		{"from": []string{srcSHA(0)}, "message": "Add c1 for " + runID},
@@ -357,6 +370,7 @@ func TestSandboxLoop(t *testing.T) {
 	if strings.TrimSpace(subjects) != wantSubjects {
 		t.Fatalf("curated: public subjects (oldest first) = %q, want %q", subjects, wantSubjects)
 	}
+	noOverlayInAnyCommit("curated", "published-cur")
 
 	// History leak: the secret is added in commit 1 and deleted in commit 2, so
 	// the tip is clean but the history is not. Preserve must refuse it.
@@ -385,8 +399,10 @@ func TestSandboxLoop(t *testing.T) {
 		t.Fatalf("history leak: no finding names commit %s: %v", leakSHA, ldet["findings"])
 	}
 	m = run(3, "promote", hleak, "--title", "t", "--yes")
-	if m["error"].(map[string]any)["code"] != "LEAK_FOUND" {
-		t.Fatalf("promote of a history leak: want LEAK_FOUND: %v", m)
+	perr, _ := m["error"].(map[string]any)
+	pdet, _ := perr["details"].(map[string]any)
+	if perr["code"] != "LEAK_FOUND" || pdet["mode"] != "preserve" {
+		t.Fatalf("promote of a history leak: want LEAK_FOUND with details.mode preserve: %v", m)
 	}
 	refs, err := g.LsRemote(ctx, "public")
 	if err != nil {

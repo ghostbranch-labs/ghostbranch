@@ -48,6 +48,62 @@ func TestSourceCommitsOldestFirstSkippingUpstreamPatches(t *testing.T) {
 	}
 }
 
+// A side branch merged back into the feature: like rebase, the replay
+// linearizes it to the non-merge commits, oldest first, each after the
+// commits it builds on, and the result holds every side.
+func TestSourceCommitsAndCherryPickLinearizeAMerge(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	g, base, main, _ := repoWithFeature(t)
+	_ = g.UpdateRef(ctx, "refs/heads/feat2", base)
+	a := testutil.Commit(t, g, "feat2", "add x", map[string]string{"x.txt": "x\n"})
+	_ = g.UpdateRef(ctx, "refs/heads/side", a)
+	s := testutil.Commit(t, g, "side", "side s", map[string]string{"s.txt": "s\n"})
+	b := testutil.Commit(t, g, "feat2", "add y", map[string]string{"y.txt": "y\n"})
+	// The merge's tree: y on top of the side (the files don't overlap).
+	_ = g.UpdateRef(ctx, "refs/heads/tmp", s)
+	merged, _ := g.TreeOf(ctx, testutil.Commit(t, g, "tmp", "tmp", map[string]string{"y.txt": "y\n"}))
+	m, err := g.CommitTree(ctx, merged, []string{b, s}, "merge side", testutil.Author(5), testutil.Author(5))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = g.UpdateRef(ctx, "refs/heads/feat2", m)
+	c := testutil.Commit(t, g, "feat2", "add z", map[string]string{"z.txt": "z\n"})
+
+	got, err := g.SourceCommits(ctx, main, c)
+	if err != nil || len(got) != 4 || got[0] != a || got[3] != c {
+		t.Fatalf("SourceCommits = %v %v; want %s, then %s and %s in some order, then %s", got, err, a, b, s, c)
+	}
+	if mid := []string{got[1], got[2]}; !reflect.DeepEqual(mid, []string{b, s}) && !reflect.DeepEqual(mid, []string{s, b}) {
+		t.Fatalf("SourceCommits = %v: the merge %s must be left out", got, m)
+	}
+	wtDir := filepath.Join(t.TempDir(), "wt")
+	wt, err := g.WorktreeAdd(ctx, wtDir, main)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = g.WorktreeRemove(ctx, wtDir) }()
+	out, err := wt.CherryPick(ctx, got, bot())
+	if err != nil || len(out) != 4 {
+		t.Fatalf("CherryPick = %v %v", out, err)
+	}
+	parent := main
+	for i, r := range out {
+		if p, _ := g.MustResolve(ctx, r+"^"); p != parent {
+			t.Fatalf("replayed commit %d's parent is %s, want %s", i, p, parent)
+		}
+		if _, two, _ := g.Resolve(ctx, r+"^2"); two {
+			t.Fatalf("replayed commit %d is a merge", i)
+		}
+		parent = r
+	}
+	for _, f := range []string{"x.txt", "s.txt", "y.txt", "z.txt"} {
+		if _, ok, _ := g.ShowFile(ctx, out[3], f); !ok {
+			t.Fatalf("the linear replay lost %s", f)
+		}
+	}
+}
+
 func TestCherryPickReplaysInOrderAndKeepsAuthors(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

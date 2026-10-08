@@ -24,8 +24,12 @@ func TestUserGitConfigCannotChangeContentOrRunHooks(t *testing.T) {
 	if err := os.MkdirAll(hooks, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, h := range []string{"pre-rebase", "post-checkout", "post-rewrite"} {
-		if err := os.WriteFile(filepath.Join(hooks, h), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+	// cherry-pick runs prepare-commit-msg and post-commit; post-commit's
+	// exit status is ignored, so each hook also leaves a marker.
+	ran := filepath.Join(tmp, "ran")
+	for _, h := range []string{"pre-rebase", "post-checkout", "post-rewrite", "prepare-commit-msg", "post-commit"} {
+		body := "#!/bin/sh\necho " + h + " >> '" + filepath.ToSlash(ran) + "'\nexit 1\n"
+		if err := os.WriteFile(filepath.Join(hooks, h), []byte(body), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -55,8 +59,11 @@ func TestUserGitConfigCannotChangeContentOrRunHooks(t *testing.T) {
 	if _, err := wt.CherryPick(ctx, []string{feat}, bot()); err != nil {
 		t.Fatalf("replay under hostile user config: %v", err)
 	}
+	if b, err := os.ReadFile(ran); err == nil {
+		t.Fatalf("a hook ran during the replay: %s", b)
+	}
 	r, _ := wt.MustResolve(ctx, "HEAD")
-	// Both sides edited lf.txt, so the rebase had to merge through the
+	// Both sides edited lf.txt, so the replay had to merge through the
 	// worktree. autocrlf=true would leak CRs into the result.
 	got, _, err := g.ShowFile(ctx, r, "lf.txt")
 	if err != nil {
@@ -120,8 +127,11 @@ func TestCheckoutContentCannotBecomeGitConfigHooksOrAttributes(t *testing.T) {
 		"ghostbranch-no-global-config":       {"100644", "[core]\n\tfsmonitor = " + mark("fsmonitor") + "\n"},
 		"ghostbranch-no-hooks/post-checkout": {"100755", hook("post-checkout")},
 		"ghostbranch-no-hooks/post-rewrite":  {"100755", hook("post-rewrite")},
-		"ghostbranch-no-attributes":          {"100644", "*.txt text eol=crlf\n"},
-		"lf.txt":                             {"100644", "a\nb\nc\n"},
+		// cherry-pick runs these two on every replayed commit.
+		"ghostbranch-no-hooks/prepare-commit-msg": {"100755", hook("prepare-commit-msg")},
+		"ghostbranch-no-hooks/post-commit":        {"100755", hook("post-commit")},
+		"ghostbranch-no-attributes":               {"100644", "*.txt text eol=crlf\n"},
+		"lf.txt":                                  {"100644", "a\nb\nc\n"},
 	}
 	g := testutil.BareRepo(t, filepath.Join(tmp, "r.git"))
 	var entries []gitx.TreeEntry
@@ -202,9 +212,9 @@ func hostileSystemConfig(t *testing.T) string {
 	return sentinel
 }
 
-// rebaseThroughAttributes builds a feature whose .gitattributes names the
-// evil drivers, needing a real 3-way merge of a.txt, and rebases it.
-func rebaseThroughAttributes(t *testing.T, protect bool) (*gitx.Git, string) {
+// replayThroughAttributes builds a feature whose .gitattributes names the
+// evil drivers, needing a real 3-way merge of a.txt, and replays it.
+func replayThroughAttributes(t *testing.T, protect bool) (*gitx.Git, string) {
 	t.Helper()
 	ctx := context.Background()
 	root := t.TempDir()
@@ -238,14 +248,14 @@ func rebaseThroughAttributes(t *testing.T, protect bool) (*gitx.Git, string) {
 func TestProtectedAttributesStopFiltersAndMergeDrivers(t *testing.T) {
 	t.Run("control: the drivers really run without the override", func(t *testing.T) {
 		sentinel := hostileSystemConfig(t)
-		rebaseThroughAttributes(t, false)
+		replayThroughAttributes(t, false)
 		if _, err := os.Stat(sentinel); err != nil {
 			t.Fatalf("the hostile drivers never ran, so this test proves nothing: %v", err)
 		}
 	})
 	t.Run("protected", func(t *testing.T) {
 		sentinel := hostileSystemConfig(t)
-		g, head := rebaseThroughAttributes(t, true)
+		g, head := replayThroughAttributes(t, true)
 		if _, err := os.Stat(sentinel); !os.IsNotExist(err) {
 			t.Fatalf("a driver ran despite the attribute override (%v)", err)
 		}

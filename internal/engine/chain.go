@@ -412,8 +412,9 @@ func assertChain(ctx context.Context, g *gitx.Git, commits []plan.Commit, T, C, 
 		if got, err := g.MustResolve(ctx, c.Commit+"^"); err != nil || got != parent {
 			return contract.Wrap(contract.Internal, err, "public commit %s's parent is %s, expected %s", short(c.Commit), short(got), short(parent))
 		}
-		if _, ok, _ := g.Resolve(ctx, c.Commit+"^2"); ok {
-			return contract.New(contract.Internal, "public commit %s must have exactly one parent", short(c.Commit))
+		// Fail closed: a parent count that can't be read is not one.
+		if _, ok, err := g.Resolve(ctx, c.Commit+"^2"); err != nil || ok {
+			return contract.Wrap(contract.Internal, err, "public commit %s must have exactly one parent", short(c.Commit))
 		}
 		if tree, err := g.TreeOf(ctx, c.Commit); err != nil || tree != c.Tree {
 			return contract.Wrap(contract.Internal, err, "public commit %s's tree %s is not the planned %s", short(c.Commit), short(tree), short(c.Tree))

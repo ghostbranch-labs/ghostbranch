@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -197,5 +198,126 @@ func TestApplyRefusesCurateGroupsThatDoNotFit(t *testing.T) {
 	}
 	if h.publicRefs()["refs/heads/feat-x"] != "" {
 		t.Fatal("nothing may be published")
+	}
+}
+
+// publicChain is the public commits from main to the published branch,
+// oldest first, with each one's message and paths.
+func publicChain(t *testing.T, h *harness, branch string) (msgs []string, paths [][]string) {
+	t.Helper()
+	pm, _ := h.pubGit.MustResolve(h.ctx, "refs/heads/main")
+	c, err := h.pubGit.MustResolve(h.ctx, "refs/heads/"+branch)
+	if err != nil {
+		t.Fatalf("public branch %s: %v", branch, err)
+	}
+	for c != pm {
+		msg, _ := h.pubGit.CommitMessage(h.ctx, c)
+		es, _ := h.pubGit.ListTree(h.ctx, c)
+		var ps []string
+		for _, e := range es {
+			ps = append(ps, e.Path)
+		}
+		msgs, paths = append([]string{msg}, msgs...), append([][]string{ps}, paths...)
+		if c, err = h.pubGit.MustResolve(h.ctx, c+"^"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return msgs, paths
+}
+
+// A reorder whose intermediate group holds a secret the final tree no
+// longer has: the curated gate passes on the final tree, but promote scans
+// every curated commit and publishes nothing.
+func TestCuratedScansEveryGroupTree(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.setConfig("default_mode: preserve", "default_mode: curated")
+	s1 := h.startFeature("feat-x", map[string]string{"a.txt": "a\n"})
+	s2 := testutil.Commit(t, h.shadowGit(), "feat-x", "add config", map[string]string{"config.env": "TOKEN=" + testutil.FakeGitHubToken() + "\n"})
+	s3 := testutil.Commit(t, h.shadowGit(), "feat-x", "drop config", map[string]string{"config.env": testutil.Delete})
+	file := writeCurate(t, `{"commits": [{"from": ["`+s2+`"], "message": "config"}, {"from": ["`+s1+`", "`+s3+`"], "message": "a"}]}`)
+	before := h.publicRefs()
+	res, err := promote(h, engine.PromoteOptions{Curate: file, Title: "t", Yes: true})
+	ce := wantCode(t, err, contract.LeakFound)
+	if ce.Details["mode"] != "curated" || res.Gate == nil || res.Gate.ScannedAs != "curated" || res.Gate.Leak != "clean" ||
+		len(res.Findings) != 1 || res.Findings[0].Path != "config.env" || res.Plan != nil {
+		t.Fatalf("promote = %+v details = %v", res, ce.Details)
+	}
+	if !reflect.DeepEqual(h.publicRefs(), before) {
+		t.Fatal("nothing may be published")
+	}
+}
+
+// An overlay path a middle group adds is stripped from that public commit
+// too, and the chain still passes assertChain (promote and apply).
+func TestCuratedStripsOverlayPathsFromEveryCommit(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.setConfig("default_mode: preserve", "default_mode: curated")
+	s1 := h.startFeature("feat-x", map[string]string{"a.txt": "a\n"})
+	s2 := testutil.Commit(t, h.shadowGit(), "feat-x", "notes", map[string]string{"b.txt": "b\n", ".ghostbranch/notes.md": "private\n"})
+	s3 := testutil.Commit(t, h.shadowGit(), "feat-x", "c", map[string]string{"c.txt": "c\n", ".ghostbranch/notes.md": testutil.Delete})
+	file := writeCurate(t, `{"commits": [{"from": ["`+s1+`"], "message": "a"}, {"from": ["`+s2+`"], "message": "b"}, {"from": ["`+s3+`"], "message": "c"}]}`)
+	res, err := promote(h, engine.PromoteOptions{Curate: file, Title: "t", Yes: true})
+	if err != nil || res.Applied == nil || len(res.Plan.Publish.Commits) != 3 {
+		t.Fatalf("promote = %+v %v", res, err)
+	}
+	_, paths := publicChain(t, h, "feat-x")
+	if len(paths) != 3 || !slices.Contains(paths[1], "b.txt") {
+		t.Fatalf("public paths = %v", paths)
+	}
+	for i, ps := range paths {
+		for _, p := range ps {
+			if strings.HasPrefix(p, ".ghostbranch/") {
+				t.Fatalf("public commit %d holds overlay path %s", i, p)
+			}
+		}
+	}
+}
+
+// The whole curated flow from disk: plan, load the plan by id, apply it at
+// a console; the public branch has the curated commits in order.
+func TestCuratedPlanFromDiskApplies(t *testing.T) {
+	t.Parallel()
+	h, s := curatedFeature(t)
+	file := writeCurate(t, `{"commits": [{"from": ["`+s[1]+`"], "message": "feat: b\n\nwhy b"}, {"from": ["`+s[0]+`", "`+s[2]+`"], "message": "feat: a"}]}`)
+	res, err := promote(h, engine.PromoteOptions{Curate: file, Title: "a and b", PlanOnly: true})
+	if err != nil || res.PlanPath == "" {
+		t.Fatalf("promote --plan = %+v %v", res, err)
+	}
+	pl, _, err := plan.Load(h.eng.WS.PlansDir(), res.Plan.ID)
+	if err != nil || pl.Mode != "curated" || len(pl.Curate) != 2 {
+		t.Fatalf("plan.Load = %+v %v", pl, err)
+	}
+	ar, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: pl.ID})
+	if err != nil || ar.PublicPR != 1 || len(h.approver.asked) != 1 {
+		t.Fatalf("apply = %+v %v (asked %d)", ar, err, len(h.approver.asked))
+	}
+	msgs, paths := publicChain(t, h, "feat-x")
+	if !reflect.DeepEqual(msgs, []string{"feat: b\n\nwhy b\n", "feat: a\n"}) || !reflect.DeepEqual(paths[0], []string{".github/workflows/ci.yml", "README.md", "b.txt"}) {
+		t.Fatalf("public chain = %q %v", msgs, paths)
+	}
+	tip, _ := h.pubGit.MustResolve(h.ctx, "refs/heads/feat-x")
+	if a, _, _ := h.pubGit.ShowFile(h.ctx, tip, "a.txt"); tip != pl.Publish.Commit || string(a) != "2\n" {
+		t.Fatalf("tip %s (plan %s) a.txt %q", tip, pl.Publish.Commit, a)
+	}
+}
+
+// A conflict in a later group names that group and its source commit.
+func TestCuratedConflictInALaterGroup(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.setConfig("default_mode: preserve", "default_mode: curated")
+	s1 := h.startFeature("feat-x", map[string]string{"a.txt": "a1\n"})
+	s2 := testutil.Commit(t, h.shadowGit(), "feat-x", "b", map[string]string{"b.txt": "b\n"})
+	s3 := testutil.Commit(t, h.shadowGit(), "feat-x", "edit a", map[string]string{"a.txt": "a2\n"})
+	file := writeCurate(t, `{"commits": [{"from": ["`+s2+`"], "message": "b"}, {"from": ["`+s3+`"], "message": "x"}, {"from": ["`+s1+`"], "message": "y"}]}`)
+	_, err := promote(h, engine.PromoteOptions{Curate: file, Title: "t", PlanOnly: true})
+	ce := wantCode(t, err, contract.CurateConflict)
+	if ce.Details["commit"] != s3 || ce.Details["group"] != 1 {
+		t.Fatalf("details = %v", ce.Details)
 	}
 }
