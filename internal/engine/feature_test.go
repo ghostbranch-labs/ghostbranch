@@ -3,10 +3,12 @@ package engine_test
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
+	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
 )
@@ -26,7 +28,8 @@ func TestFeatureStartCreatesBranchAndMetadata(t *testing.T) {
 	h := newHarness(t)
 	h.init()
 	res, _, err := h.eng.FeatureStart(h.ctx, h.pair, "feat-x")
-	if err != nil || res.Branch != "feat-x" || res.Checkout != "git fetch && git switch feat-x" {
+	if err != nil || res.Branch != "feat-x" || !reflect.DeepEqual(res.Checkout, [][]string{{"git", "fetch"}, {"git", "switch", "feat-x"}}) ||
+		res.CheckoutHint != "git fetch && git switch feat-x" {
 		t.Fatalf("start: %+v %v", res, err)
 	}
 	sh := h.shadowGit()
@@ -145,5 +148,78 @@ func TestPushRefusedForRequiredWorkflowsGivesNoPermissionHint(t *testing.T) {
 	ce := wantCode(t, err, contract.PushRefused)
 	if !strings.Contains(ce.Message, "Required workflows") || strings.Contains(ce.Message, "Workflows write") {
 		t.Fatalf("message = %q", ce.Message)
+	}
+}
+
+// Shadow main behind public main: feature start refuses with SHADOW_BEHIND
+// (exit 4) before it creates anything, and --plan refuses the same way.
+func TestFeatureStartRefusesWhenShadowMainIsBehind(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	sm, _ := h.shadowGit().MustResolve(h.ctx, "refs/heads/main")
+	pm := testutil.Commit(t, h.pubGit, "main", "upstream", map[string]string{"up.txt": "1\n"})
+	pushes, refs := len(h.pushes), h.shadowRefs()
+	for _, dry := range []bool{true, false} {
+		h.eng.DryRun = dry
+		res, _, err := h.eng.FeatureStart(h.ctx, h.pair, "feat-x")
+		h.eng.DryRun = false
+		ce := wantCode(t, err, contract.ShadowBehindError)
+		if res != nil || ce.Code.Exit() != contract.ExitConflict || ce.Details["public_main"] != pm || ce.Details["shadow_main"] != sm ||
+			!strings.Contains(ce.Message, "ghostbranch sync") {
+			t.Fatalf("dry=%v: %+v %+v", dry, res, ce)
+		}
+	}
+	if len(h.pushes) != pushes || !reflect.DeepEqual(h.shadowRefs(), refs) {
+		t.Fatal("a refused feature start created something")
+	}
+	h.syncOK(engine.SyncOptions{})
+	if res, _, err := h.eng.FeatureStart(h.ctx, h.pair, "feat-x"); err != nil || res.Base != pm {
+		t.Fatalf("start after sync: %+v %v", res, err)
+	}
+}
+
+// lockMirrorRef makes git refuse to change ref in the mirror, as a stale
+// lock file does.
+func (h *harness) lockMirrorRef(ref string) {
+	h.t.Helper()
+	path := filepath.Join(h.eng.WS.MirrorDir(h.pair), filepath.FromSlash(ref)+".lock")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		h.t.Fatal(err)
+	}
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		h.t.Fatal(err)
+	}
+}
+
+// warningsFor is the warnings with code.
+func warningsFor(warns []contract.Warning, code contract.WarningCode) []contract.Warning {
+	var out []contract.Warning
+	for _, w := range warns {
+		if w.Code == code {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// The push succeeded but the mirror couldn't follow: MIRROR_NOT_UPDATED,
+// and feature start still succeeds.
+func TestFeatureStartWarnsWhenTheMirrorCantBeUpdated(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	meta := "refs/shadow-meta/features/feat-x"
+	h.lockMirrorRef(meta)
+	res, warns, err := h.eng.FeatureStart(h.ctx, h.pair, "feat-x")
+	if err != nil || res == nil {
+		t.Fatalf("start = %+v %v", res, err)
+	}
+	ws := warningsFor(warns, contract.MirrorNotUpdated)
+	if len(ws) != 1 || ws[0].Details["ref"] != meta || !strings.Contains(ws[0].Message, meta) {
+		t.Fatalf("warnings = %+v", warns)
+	}
+	if _, ok := h.shadowRefs()["refs/ghostbranch/features/feat-x"]; !ok {
+		t.Fatal("the shadow repo lacks the metadata")
 	}
 }

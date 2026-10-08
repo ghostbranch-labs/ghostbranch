@@ -2,7 +2,10 @@ package engine_test
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -218,4 +221,159 @@ func TestInitOnACompletePairWarnsWhenTheOverlayIsOutdated(t *testing.T) {
 	if codes(warns)[contract.OverlayOutdated] != 1 {
 		t.Fatalf("warnings = %+v", warns)
 	}
+}
+
+// adoptable makes the shadow repo hold commit sha as main, the way a
+// partial mirror does, and returns the shadow repo's git.
+func (h *harness) adoptable(sha string) *gitx.Git {
+	h.t.Helper()
+	repo, err := h.forge.CreatePrivateRepo(h.ctx, shadowName)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	if err := h.pubGit.Push(h.ctx, repo.CloneURL, gitx.PushOptions{}, sha+":refs/heads/main"); err != nil {
+		h.t.Fatal(err)
+	}
+	return gitx.New(repo.CloneURL)
+}
+
+// A tag the public repo lacks is unrelated content.
+func TestAdoptRefusesAShadowTagNotInPublic(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	pubMain, _ := h.pubGit.MustResolve(h.ctx, "refs/heads/main")
+	sh := h.adoptable(pubMain)
+	if _, err := sh.Run(h.ctx, "update-ref", "refs/tags/v9", pubMain); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := h.eng.Init(h.ctx, engine.InitOptions{Public: publicName, Adopt: true})
+	ce := wantCode(t, err, contract.ShadowNotEmpty)
+	if !strings.Contains(ce.Message, "v9") || len(h.pushes) != 0 {
+		t.Fatalf("%+v (pushes %d)", ce, len(h.pushes))
+	}
+	// The same tag in public is a mirror, so it adopts.
+	if _, err := h.pubGit.Run(h.ctx, "update-ref", "refs/tags/v9", pubMain); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := h.eng.Init(h.ctx, engine.InitOptions{Public: publicName, Adopt: true}); err != nil {
+		t.Fatalf("adopting a mirrored tag: %v", err)
+	}
+}
+
+// A git failure while comparing a shadow branch with public is INTERNAL,
+// not a verdict on the repo's content.
+func TestAdoptAncestryFailureIsInternal(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	old, _ := h.pubGit.MustResolve(h.ctx, "refs/heads/main")
+	pubMain := testutil.Commit(t, h.pubGit, "main", "second", map[string]string{"two.txt": "2"})
+	h.adoptable(old)
+	err := h.eng.AdoptCheckForTest(h.ctx, h.pair, func(mirror string) {
+		// A graft to a missing parent makes git fail walking public main.
+		graft := pubMain + " " + strings.Repeat("1", 40) + string(rune(10))
+		if err := os.WriteFile(filepath.Join(mirror, "info", "grafts"), []byte(graft), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	})
+	_ = wantCode(t, err, contract.Internal)
+}
+
+// Adopting a partial mirror whose main is behind public fast-forwards it,
+// leased on the old head.
+func TestAdoptFastForwardsAStaleShadowMain(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	old, _ := h.pubGit.MustResolve(h.ctx, "refs/heads/main")
+	pubMain := testutil.Commit(t, h.pubGit, "main", "second", map[string]string{"two.txt": "2"})
+	sh := h.adoptable(old)
+	res, _, err := h.eng.Init(h.ctx, engine.InitOptions{Public: publicName, Adopt: true})
+	if err != nil || !res.Adopted {
+		t.Fatalf("adopt = %+v %v", res, err)
+	}
+	if got, _ := sh.MustResolve(h.ctx, "refs/heads/main"); got != pubMain {
+		t.Fatalf("shadow main = %s, want %s", got, pubMain)
+	}
+	if !slices.Contains(res.MirroredBranches, "main") {
+		t.Fatalf("mirrored = %v", res.MirroredBranches)
+	}
+	found := false
+	for _, p := range h.pushes {
+		found = found || slices.Contains(p.refspecs, pubMain+":refs/heads/main")
+	}
+	if !found {
+		t.Fatalf("pushes = %+v", h.pushes)
+	}
+}
+
+// A public branch named ghostbranch would collide with the overlay branch:
+// refused up front, before any write, creating or adopting.
+func TestInitRefusesAPublicGhostbranchBranch(t *testing.T) {
+	t.Parallel()
+	for _, branch := range []string{"ghostbranch", "ghostbranch/x"} {
+		h := newHarness(t)
+		testutil.Commit(t, h.pubGit, branch, "clash", map[string]string{"c.txt": "c"})
+		_, _, err := h.eng.Init(h.ctx, engine.InitOptions{Public: publicName})
+		ce := wantCode(t, err, contract.NameInvalid)
+		if ce.Field != "public" || !strings.Contains(ce.Message, branch) || !strings.Contains(ce.Message, "overlay") {
+			t.Fatalf("%s: %+v", branch, ce)
+		}
+		if _, err := h.forge.GetRepo(h.ctx, shadowName); !errors.Is(err, forge.ErrNotFound) || len(h.pushes) != 0 {
+			t.Fatalf("%s: init wrote something before refusing", branch)
+		}
+		pubMain, _ := h.pubGit.MustResolve(h.ctx, "refs/heads/main")
+		h.adoptable(pubMain)
+		_, _, err = h.eng.Init(h.ctx, engine.InitOptions{Public: publicName, Adopt: true})
+		if ce := wantCode(t, err, contract.NameInvalid); ce.Field != "public" || len(h.pushes) != 0 {
+			t.Fatalf("%s: adopt: %+v", branch, ce)
+		}
+	}
+}
+
+// A registered pair keeps its shadow repo: a different --shadow is refused
+// with the way to switch.
+func TestInitRefusesAnotherShadowForARegisteredPair(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	n := len(h.pushes)
+	_, _, err := h.eng.Init(h.ctx, engine.InitOptions{Public: publicName, Shadow: "other/name"})
+	ce := wantCode(t, err, contract.BadFlag)
+	if ce.Field != "shadow" || !strings.Contains(ce.Message, "ghostbranch remove --repo "+publicName) ||
+		!strings.Contains(ce.Message, shadowName) || len(h.pushes) != n {
+		t.Fatalf("%+v", ce)
+	}
+	if _, err := h.forge.GetRepo(h.ctx, "other/name"); !errors.Is(err, forge.ErrNotFound) {
+		t.Fatal("init created the other shadow repo")
+	}
+	// Naming the registered shadow, in any case, still resumes.
+	if _, _, err := h.eng.Init(h.ctx, engine.InitOptions{Public: publicName, Shadow: "ACME/widget-shadow"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// An overlay config key this binary doesn't know means a newer Ghostbranch
+// set the pair up: UPGRADE_NEEDED from every command that reads the config,
+// and from an adopt.
+func TestUnknownConfigKeyNeedsAnUpgrade(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.setConfig("promote:", "promote:"+string(rune(10))+"  future_key: x")
+	check := func(what string, err error) {
+		t.Helper()
+		ce := wantCode(t, err, contract.UpgradeNeeded)
+		if !strings.Contains(ce.Message, "promote.future_key") || !strings.Contains(ce.Message, "or fix it if it's a typo") ||
+			ce.Details["unknown_key"] != "promote.future_key" {
+			t.Fatalf("%s: %+v", what, ce)
+		}
+	}
+	_, _, err := h.eng.Audit(h.ctx, h.pair)
+	check("audit", err)
+	_, _, err = h.eng.FeatureStart(h.ctx, h.pair, "feat-x")
+	check("feature start", err)
+	_, _, err = h.eng.Sync(h.ctx, h.pair, engine.SyncOptions{})
+	check("sync", err)
+	h.eng.WS.RemovePair(publicName)
+	_, _, err = h.eng.Init(h.ctx, engine.InitOptions{Public: publicName, Adopt: true})
+	check("adopt", err)
 }

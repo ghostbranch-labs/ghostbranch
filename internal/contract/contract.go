@@ -98,6 +98,11 @@ const (
 	// FeatureMoved means a feature's branch or refs moved while it was
 	// being closed; nothing more was deleted.
 	FeatureMoved Code = "FEATURE_MOVED"
+
+	// ShadowBehindError means feature start refused because shadow main is
+	// behind public main. It shares its string with the ShadowBehind
+	// warning: one is an error.code, the other a warnings[].code.
+	ShadowBehindError Code = "SHADOW_BEHIND"
 )
 
 var exitCodes = map[Code]int{
@@ -113,10 +118,11 @@ var exitCodes = map[Code]int{
 	RebaseConflict: ExitConflict, SyncDiverged: ExitConflict, BranchExists: ExitConflict,
 	OverlayCollision: ExitConflict, ShadowNotEmpty: ExitConflict, RefMoved: ExitConflict,
 	CurateConflict: ExitConflict, CurateTreeMismatch: ExitConflict,
-	ApprovalRequired: ExitNeedsApproval,
-	PlanStale:        ExitPlanStale,
-	UpgradeNeeded:    ExitFailure,
-	FeatureMoved:     ExitConflict,
+	ApprovalRequired:  ExitNeedsApproval,
+	PlanStale:         ExitPlanStale,
+	UpgradeNeeded:     ExitFailure,
+	FeatureMoved:      ExitConflict,
+	ShadowBehindError: ExitConflict,
 }
 
 // Exit is the process exit code for c.
@@ -238,12 +244,17 @@ const (
 	// FeatureNotClosed means sync's auto-close of a merged feature failed;
 	// the sync itself still succeeded.
 	FeatureNotClosed WarningCode = "FEATURE_NOT_CLOSED"
+	// MirrorNotUpdated means a push to the shadow repo succeeded, but the
+	// local mirror's copy of a ref (or a local plan file) couldn't be
+	// updated; the next fetch corrects the mirror.
+	MirrorNotUpdated WarningCode = "MIRROR_NOT_UPDATED"
 )
 
 var warningCodes = []WarningCode{ConfigKeyIgnored, PublicNotPublic, GateNotRecorded, ChecksLimited, ActorUnknown,
 	WorkflowChanged, LargeFile, BinaryFile, WaiversUnreadable,
 	OverlayOutdated, RepoGuard, RepoGuardUnrewritable, SecretsUnlisted, SecretsMissing, PushTriggersOnSync,
-	ActionsMinutesBilled, ShadowBehind, AuditIncomplete, CINotCancelled, PRStateUnknown, DriftUnknown, FeatureNotClosed}
+	ActionsMinutesBilled, ShadowBehind, AuditIncomplete, CINotCancelled, PRStateUnknown, DriftUnknown, FeatureNotClosed,
+	MirrorNotUpdated}
 
 // AllWarnings lists every warning code, sorted.
 func AllWarnings() []WarningCode {

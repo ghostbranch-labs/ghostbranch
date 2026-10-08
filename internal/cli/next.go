@@ -128,6 +128,11 @@ func (a *app) next(err error) []contract.Next {
 				}
 				return []contract.Next{{Command: a.gb(args...), Why: "the repos moved since the plan was made; make a new plan", NeedsInput: modeInputs(mode)}}
 			}
+		case contract.ShadowBehindError:
+			return []contract.Next{
+				{Command: a.scoped("sync"), Why: "shadow main is behind public main; sync it (fast-forward only)"},
+				{Command: a.again(false), Why: "then start the feature again, from the synced shadow main"},
+			}
 		case contract.SyncDiverged:
 			// A person sorts out the diverged branch (error.what_to_do), but
 			// the features sync surveyed still need what they need.
@@ -197,12 +202,14 @@ func (a *app) next(err error) []contract.Next {
 	switch r := a.result.(type) {
 	case *engine.FeatureStartResult:
 		if r.Preview == nil {
-			why := "commit on " + r.Name + ", push it with `git push " + a.shadowRemote + " " + r.Name + "` (the shadow repo, never origin), then gate it"
+			why := "check out with `" + r.CheckoutHint + "`, commit on " + r.Name + ", "
 			switch a.shadowRemote {
 			case "":
-				why = "commit on " + r.Name + ", push it to the shadow repo with the remote in data.checkout (never origin), then gate it"
+				why += "push it to the shadow repo (never origin), then gate it"
 			case "origin":
-				why = "commit on " + r.Name + ", push it with `git push origin " + r.Name + "` (origin is the shadow repo here), then gate it"
+				why += "push it with `git push origin " + r.Name + "` (origin is the shadow repo here), then gate it"
+			default:
+				why += "push it with `git push " + a.shadowRemote + " " + r.Name + "` (the shadow repo, never origin), then gate it"
 			}
 			out = append(out, contract.Next{Command: a.scoped("gate", r.Name), Why: why})
 		}
@@ -231,6 +238,10 @@ func (a *app) next(err error) []contract.Next {
 	case *engine.SyncResult:
 		// Attention holds only features sync can't close itself.
 		out = a.featureNexts(out, r.Attention)
+		if a.bareSync(r) && r.ActiveFeatures == 0 {
+			out = append(out, contract.Next{Command: a.scoped("feature", "start"), NeedsInput: []string{"<name>"},
+				Why: "no feature is in progress; start one: put its name (the <name> argument) after start"})
+		}
 	}
 	switch r := a.result.(type) {
 	case *engine.InitResult:
@@ -247,6 +258,20 @@ func (a *app) next(err error) []contract.Next {
 		}
 	}
 	return append(out, a.upgradeNext()...)
+}
+
+// bareSync is whether this sync ran in full: not a preview, closes not
+// skipped, and its survey of the features worked, so ActiveFeatures counts.
+func (a *app) bareSync(r *engine.SyncResult) bool {
+	if r.Preview != nil || slices.Contains(a.args, "--no-close") {
+		return false
+	}
+	for _, w := range a.warnings {
+		if w.Code == contract.FeatureNotClosed && w.Details["feature"] == nil {
+			return false // the survey failed
+		}
+	}
+	return true
 }
 
 // syncNext leads next when shadow main is behind public main. Syncing moves
@@ -466,18 +491,30 @@ func freeRemoteName(remotes map[string]string) string {
 	}
 }
 
-// checkoutHint is the exact git command that gets feature name into the
-// caller's checkout: through the remote that points at the shadow repo, one
-// added for it under the name free, or a fresh clone.
-func checkoutHint(name, shadow, remote, free string, inCheckout bool) string {
+// checkoutArgv is the exact git commands, in order, that get feature name
+// into the caller's checkout: through the remote that points at the shadow
+// repo, one added for it under the name free, or a fresh clone.
+func checkoutArgv(name, shadow, remote, free string, inCheckout bool) [][]string {
 	url := "https://github.com/" + shadow + ".git"
 	switch {
 	case remote != "":
-		return "git fetch " + remote + " && git switch " + name
+		return [][]string{{"git", "fetch", remote}, {"git", "switch", name}}
 	case inCheckout:
-		return "git remote add " + free + " " + url + " && git fetch " + free + " && git switch " + name
+		return [][]string{{"git", "remote", "add", free, url}, {"git", "fetch", free}, {"git", "switch", name}}
 	}
-	return "git clone --origin shadow --branch " + name + " " + url
+	return [][]string{{"git", "clone", "--origin", "shadow", "--branch", name, url}}
+}
+
+// pushRemote is the remote that reaches the shadow repo once checkoutArgv
+// has run.
+func pushRemote(remote, free string, inCheckout bool) string {
+	switch {
+	case remote != "":
+		return remote
+	case inCheckout:
+		return free
+	}
+	return "shadow"
 }
 
 // leakWheres is the set of the findings' Where values.

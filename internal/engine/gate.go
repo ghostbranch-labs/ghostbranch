@@ -340,7 +340,7 @@ func (e *Engine) gate(ctx context.Context, pc *pairCtx, name, mode string) (*Gat
 	if err := e.push(ctx, pc, remoteShadow, gitx.PushOptions{Leases: []gitx.Lease{{Ref: gateRef, Expect: old}}}, C+":"+gateRef); err != nil {
 		return res, warns, err
 	}
-	_ = g.UpdateRef(ctx, shadowRef(gateBranch(name)), C)
+	warns = addWarnings(warns, e.updateMirror(ctx, g, shadowRef(gateBranch(name)), C)...)
 	pr, err := e.Forge.FindOpenPR(ctx, pc.pair.Shadow, gateBranch(name), "main")
 	if err != nil {
 		return res, warns, forgeErr(err, "find the gate PR")

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 
@@ -22,6 +21,7 @@ import (
 type FeatureAbandonResult struct {
 	Feature   string           `json:"feature"`
 	Abandoned bool             `json:"abandoned"` // the new value
+	Changed   bool             `json:"changed"`   // false when it already had that value
 	Preview   *preview.Preview `json:"preview"`
 }
 
@@ -71,8 +71,8 @@ func (e *Engine) FeatureAbandon(ctx context.Context, p workspace.Pair, name stri
 	if err != nil {
 		return nil, warns, err
 	}
-	res = &FeatureAbandonResult{Feature: name, Abandoned: !undo}
 	changed = m.Abandoned != !undo
+	res = &FeatureAbandonResult{Feature: name, Abandoned: !undo, Changed: changed}
 	if e.DryRun {
 		res.Preview = preview.New(nil)
 		if changed {
@@ -154,7 +154,8 @@ func (e *Engine) FeatureClose(ctx context.Context, p workspace.Pair, name string
 		}
 		appr = &ledger.Approval{Kind: "console"}
 	}
-	res, err = e.closeWith(ctx, pc, r, t)
+	res, cw, err := e.closeWith(ctx, pc, r, t)
+	warns = addWarnings(warns, cw...)
 	if res != nil {
 		res.Approval = appr
 	}
@@ -165,10 +166,11 @@ func (e *Engine) FeatureClose(ctx context.Context, p workspace.Pair, name string
 // auto-close calls it only for ClosableWithoutConsole reports. The caller
 // records the ledger entry, with Refs = res.Deleted. A non-nil res with an
 // error means the refs were deleted but the gate PR couldn't be closed.
-func (e *Engine) closeFeature(ctx context.Context, pc *pairCtx, r FeatureReport) (*FeatureCloseResult, error) {
+// The warnings are MIRROR_NOT_UPDATED from the local cleanup.
+func (e *Engine) closeFeature(ctx context.Context, pc *pairCtx, r FeatureReport) (*FeatureCloseResult, []contract.Warning, error) {
 	t, err := e.closeTargets(ctx, pc, r)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	return e.closeWith(ctx, pc, r, t)
 }
@@ -250,13 +252,14 @@ func (e *Engine) closeTargets(ctx context.Context, pc *pairCtx, r FeatureReport)
 
 // closeWith deletes t. The deletes go first, in one atomic push: if any ref
 // moved, nothing is deleted and the gate PR stays open. Only then is the
-// gate PR closed and this machine cleaned up.
-func (e *Engine) closeWith(ctx context.Context, pc *pairCtx, r FeatureReport, t closeTargets) (*FeatureCloseResult, error) {
+// gate PR closed and this machine cleaned up; a local cleanup that fails is
+// a MIRROR_NOT_UPDATED warning.
+func (e *Engine) closeWith(ctx context.Context, pc *pairCtx, r FeatureReport, t closeTargets) (*FeatureCloseResult, []contract.Warning, error) {
 	sh := pc.pair.Shadow
 	res := &FeatureCloseResult{Feature: r.Name, State: r.State, Deleted: map[string]string{}}
 	pr, err := e.Forge.FindOpenPR(ctx, sh, gateBranch(r.Name), "main")
 	if err != nil {
-		return nil, forgeErr(err, "find the gate PR of feature %s", r.Name)
+		return nil, nil, forgeErr(err, "find the gate PR of feature %s", r.Name)
 	}
 	refs := t.sorted()
 	if e.DryRun {
@@ -274,7 +277,7 @@ func (e *Engine) closeWith(ctx context.Context, pc *pairCtx, r FeatureReport, t 
 		for _, path := range t.plans {
 			res.Preview.Add(preview.RemoveFile(path))
 		}
-		return res, nil
+		return res, nil, nil
 	}
 
 	opt := gitx.PushOptions{Atomic: true}
@@ -286,7 +289,7 @@ func (e *Engine) closeWith(ctx context.Context, pc *pairCtx, r FeatureReport, t 
 	if len(specs) > 0 {
 		e.progressf("deleting %d ref(s) of feature %s from %s", len(specs), r.Name, sh)
 		if err := e.push(ctx, pc, remoteShadow, opt, specs...); err != nil {
-			return nil, movedErr(r.Name, sh, err)
+			return nil, nil, movedErr(r.Name, sh, err)
 		}
 	}
 	for _, ref := range refs {
@@ -294,12 +297,13 @@ func (e *Engine) closeWith(ctx context.Context, pc *pairCtx, r FeatureReport, t 
 	}
 	// The remote is the truth: a mirror ref left behind goes on the next
 	// fetch (it prunes), and a plan file left behind names a plan ref that
-	// no longer exists, so apply refuses it.
+	// no longer exists, so apply refuses it. Either is a warning.
+	var warns []contract.Warning
 	for _, local := range t.local {
-		_ = pc.git.DeleteRef(ctx, local)
+		warns = addWarnings(warns, e.deleteMirror(ctx, pc.git, local)...)
 	}
 	for _, path := range t.plans {
-		_ = os.Remove(path)
+		warns = addWarnings(warns, removeLocal(path)...)
 	}
 	if pr != nil {
 		// GitHub may already have closed it with its head branch; closing a
@@ -311,14 +315,22 @@ func (e *Engine) closeWith(ctx context.Context, pc *pairCtx, r FeatureReport, t 
 			res.GatePR = &n
 		case errors.Is(err, forge.ErrNotFound):
 		case errors.Is(err, forge.ErrForbidden):
-			return res, forgeErr(err, "deleted %d ref(s) of feature %s, but the token may not close its gate PR #%d in %s; close it by hand",
-				len(res.Deleted), r.Name, pr.Number, sh)
+			return res, warns, afterDeletes(forgeErr(err, "deleted %d ref(s) of feature %s, but the token may not close its gate PR #%d in %s; close it by hand",
+				len(res.Deleted), r.Name, pr.Number, sh))
 		default:
-			return res, forgeErr(err, "deleted %d ref(s) of feature %s, but couldn't close its gate PR #%d in %s; close it by hand",
-				len(res.Deleted), r.Name, pr.Number, sh)
+			return res, warns, afterDeletes(forgeErr(err, "deleted %d ref(s) of feature %s, but couldn't close its gate PR #%d in %s; close it by hand",
+				len(res.Deleted), r.Name, pr.Number, sh))
 		}
 	}
-	return res, nil
+	return res, warns, nil
+}
+
+// afterDeletes makes an error that follows the deletes never retryable:
+// the feature is gone, so a retry only finds FEATURE_NOT_FOUND.
+func afterDeletes(err error) error {
+	ce := contract.From(err)
+	ce.Retryable = false
+	return ce
 }
 
 // movedErr turns a lost lease on the delete push into FEATURE_MOVED. Other

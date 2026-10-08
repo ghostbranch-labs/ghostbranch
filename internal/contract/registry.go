@@ -42,8 +42,8 @@ var exitDocs = map[int]Doc{
 		WhatToDo: "Fix the feature (code, tests or leaked content) and gate again. Never try to work around the leak scan."},
 	ExitConflict: {Summary: "The repos are in a state the command will not change on its own: a rebase conflict, a diverged branch, or a name already taken.",
 		WhatToDo: "Resolve the conflict named in the error, then run the command again."},
-	ExitNeedsApproval: {Summary: "A person has to approve this before anything is published.",
-		WhatToDo: "Stop. Give the human the command in next; it needs a person at a console, or an agent grant they make with ghostbranch agents allow.", NeedsHuman: true},
+	ExitNeedsApproval: {Summary: "A person has to approve this before it runs: a publish, or a delete or unregister that can't be undone.",
+		WhatToDo: "Stop. Give the human the command in next; it needs a person at a console. For promote and apply, an agent grant they make with ghostbranch agents allow also works.", NeedsHuman: true},
 	ExitPlanStale: {Summary: "The repos changed since the plan was made, so the plan was not applied.",
 		WhatToDo: "Make a new plan (the command in next) and apply that one."},
 }
@@ -116,13 +116,15 @@ var errorDocs = map[Code]Doc{
 			"the token lacks Administration write in the owner account or org"},
 		WhatToDo:   "A person creates the empty private repo in error.details.shadow (no README, license or .gitignore), on GitHub's new-repository page or with `gh repo create <shadow> --private`, and adds it to the token's repository access (see the token table in ghostbranch guide). Then run the init --adopt command in next. Never ask for a token with wider access.",
 		NeedsHuman: true},
-	ApprovalRequired: {Summary: "Publishing needs a person: a code typed at a console, or an agent grant.", Causes: []string{"no_console: no terminal a person can type into", "not_confirmed, timeout, too_many_attempts: the person did not confirm", "grant_needs_yes: a grant exists, but --yes was not passed"},
-		WhatToDo: "Stop and give the human the command in next. Never fake a terminal, answer the code, edit grants.json or run ghostbranch agents allow yourself.", NeedsHuman: true},
+	ApprovalRequired: {Summary: "This needs a person: a code typed at a console. For promote and apply, an agent grant also works.", Causes: []string{"no_console: no terminal a person can type into", "not_confirmed, timeout, too_many_attempts: the person did not confirm", "grant_needs_yes: a grant exists, but --yes was not passed"},
+		WhatToDo: "Stop and give the human the command in next. It needs a person at a console; for promote and apply, an agent grant made with ghostbranch agents allow also works (feature close and remove ignore grants). Never fake a terminal, answer the code, edit grants.json or run ghostbranch agents allow yourself.", NeedsHuman: true},
 	PlanStale: {Summary: "The repos changed since the plan was made.", WhatToDo: "Make a new plan with ghostbranch promote <feature> --plan and apply that."},
 	UpgradeNeeded: {Summary: "This pair was set up by a newer Ghostbranch: its overlay config has keys this binary doesn't know.",
-		WhatToDo: "Upgrade the ghostbranch binary to the version the pair was set up with, or newer. Don't edit the overlay config to make an older binary accept it."},
+		WhatToDo: "Upgrade the ghostbranch binary to the version the pair was set up with, or newer. If the key in error.details.unknown_key is a typo, a person fixes it in .ghostbranch.yml on the overlay branch; otherwise don't edit the overlay config to make an older binary accept it."},
 	FeatureMoved: {Summary: "A feature's branch or refs moved while it was being closed, so the close stopped; nothing more was deleted.",
 		WhatToDo: "Run ghostbranch feature show <name> to see the new state, then close it again if that's still wanted."},
+	ShadowBehindError: {Summary: "Shadow main is behind public main, so feature start refused to start a feature from it; nothing was created.",
+		WhatToDo: "Run ghostbranch sync, then start the feature again."},
 }
 
 var warningDocs = map[WarningCode]Doc{
@@ -163,6 +165,9 @@ var warningDocs = map[WarningCode]Doc{
 		WhatToDo: "Run ghostbranch gate <feature>; the gate is the authority on rebasing."},
 	FeatureNotClosed: {Summary: "Sync couldn't close a merged feature.",
 		WhatToDo: "If details.deleted is set, the feature is gone: close its gate draft PR in the shadow repo by hand. Otherwise run ghostbranch feature show <name>, then feature close <name>. With no details.feature, sync couldn't survey the features and closed none: run ghostbranch status to see why."},
+	MirrorNotUpdated: {Summary: "The shadow repo has the change, but this machine's mirror of it (a ref, or a plan file) couldn't be updated.",
+		Causes:   []string{"the mirror directory is not writable, or the disk is full", "a stale lock file in the mirror"},
+		WhatToDo: "Nothing is required: the shadow repo is the truth, and the next command's fetch corrects the mirror. If it repeats, check the path in details and the disk."},
 }
 
 func intp(n int) *int { return &n }
@@ -193,6 +198,8 @@ func Registry() []Entry {
 
 // Explain returns the entries for one code (any case) or one exit number.
 // An exit number returns its own entry, then every error code mapped to it.
+// A string that names both an error and a warning (SHADOW_BEHIND) returns
+// both entries, the error first.
 func Explain(key string) ([]Entry, error) {
 	key = strings.TrimSpace(key)
 	if n, err := strconv.Atoi(key); err == nil {
@@ -209,11 +216,15 @@ func Explain(key string) ([]Entry, error) {
 		return out, nil
 	}
 	up := strings.ToUpper(key)
+	var out []Entry
 	if d, ok := errorDocs[Code(up)]; ok {
-		return []Entry{entry(up, KindError, intp(Code(up).Exit()), d)}, nil
+		out = append(out, entry(up, KindError, intp(Code(up).Exit()), d))
 	}
 	if d, ok := warningDocs[WarningCode(up)]; ok {
-		return []Entry{entry(up, KindWarning, nil, d)}, nil
+		out = append(out, entry(up, KindWarning, nil, d))
+	}
+	if len(out) > 0 {
+		return out, nil
 	}
 	return nil, New(BadFlag, "unknown code %q; run ghostbranch explain --all", key).WithField("code")
 }

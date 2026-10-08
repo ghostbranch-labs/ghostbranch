@@ -12,11 +12,22 @@ import (
 )
 
 type FeatureStartResult struct {
-	Name     string           `json:"name"`
-	Branch   string           `json:"branch"`
-	Base     string           `json:"base"`
-	Checkout string           `json:"checkout"`
-	Preview  *preview.Preview `json:"preview"`
+	Name         string           `json:"name"`
+	Branch       string           `json:"branch"`
+	Base         string           `json:"base"`
+	Checkout     [][]string       `json:"checkout"`      // argvs that get the branch into a checkout, in order
+	CheckoutHint string           `json:"checkout_hint"` // Checkout as one shell line
+	Preview      *preview.Preview `json:"preview"`
+}
+
+// SetCheckout sets Checkout and CheckoutHint, its one-line form.
+func (r *FeatureStartResult) SetCheckout(argvs [][]string) {
+	r.Checkout = argvs
+	lines := make([]string, len(argvs))
+	for i, a := range argvs {
+		lines[i] = strings.Join(a, " ")
+	}
+	r.CheckoutHint = strings.Join(lines, " && ")
 }
 
 // FeatureStart creates a feature branch from shadow main and its metadata
@@ -34,7 +45,17 @@ func (e *Engine) FeatureStart(ctx context.Context, p workspace.Pair, name string
 	if _, _, warns, err = e.readConfig(ctx, pc); err != nil {
 		return nil, warns, err
 	}
-	warns = addWarnings(warns, e.behind(ctx, pc)...)
+	// A feature started from a stale shadow main would be based on old
+	// code: refuse, before anything is created (--plan too).
+	mn, err := compareMains(ctx, pc.git)
+	if err != nil {
+		return nil, warns, internalErr(err, "compare shadow main with public main")
+	}
+	if mn.Behind > 0 {
+		return nil, warns, contract.New(contract.ShadowBehindError,
+			"shadow main is %d commit(s) behind public main, so a feature started now would be based on old code; run ghostbranch sync, then start the feature again", mn.Behind).
+			WithDetails(map[string]any{"public_main": mn.Public, "shadow_main": mn.Shadow})
+	}
 	if err := e.checkNameFree(ctx, pc, name); err != nil {
 		return nil, warns, err
 	}
@@ -42,7 +63,8 @@ func (e *Engine) FeatureStart(ctx context.Context, p workspace.Pair, name string
 	if err != nil {
 		return nil, warns, internalErr(err, "read shadow main")
 	}
-	res = &FeatureStartResult{Name: name, Branch: name, Base: base, Checkout: "git fetch && git switch " + name}
+	res = &FeatureStartResult{Name: name, Branch: name, Base: base}
+	res.SetCheckout([][]string{{"git", "fetch"}, {"git", "switch", name}})
 	if e.DryRun {
 		res.Preview = preview.New(map[string]string{"shadow_main": base})
 		res.Preview.Add(preview.PushRef(p.Shadow, "refs/heads/"+name, "", base), preview.PushRef(p.Shadow, remoteMetaRef(name), "", ""))
@@ -60,8 +82,8 @@ func (e *Engine) FeatureStart(ctx context.Context, p workspace.Pair, name string
 		}
 		return nil, warns, err
 	}
-	_ = pc.git.UpdateRef(ctx, shadowRef(name), base)
-	_ = pc.git.UpdateRef(ctx, metaRef(name), metaSHA)
+	warns = addWarnings(warns, e.updateMirror(ctx, pc.git, shadowRef(name), base)...)
+	warns = addWarnings(warns, e.updateMirror(ctx, pc.git, metaRef(name), metaSHA)...)
 	return res, warns, nil
 }
 

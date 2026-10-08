@@ -10,10 +10,12 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/config"
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
+	"github.com/ghostbranch-labs/ghostbranch/internal/grant"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
 )
 
@@ -305,26 +307,44 @@ jobs:
 	}
 }
 
-// The push hint names the remote that points at the shadow repo, and does
-// not say "never origin" when that remote is origin.
+// data.checkout is the argvs that get the branch, checkout_hint the same as
+// one line; next's why leads with checking it out, names the remote that
+// reaches the shadow repo, and doesn't say "never origin" when that remote
+// is origin. The command is still gate.
 func TestFeatureStartPushHintNamesTheRemote(t *testing.T) {
 	t.Parallel()
-	for _, tc := range []struct{ remote, free, checkout, why string }{
-		{"shadow", "ghostbranch-shadow", "git fetch shadow && git switch feat-x",
-			"commit on feat-x, push it with `git push shadow feat-x` (the shadow repo, never origin), then gate it"},
-		{"origin", "shadow", "git fetch origin && git switch feat-x",
-			"commit on feat-x, push it with `git push origin feat-x` (origin is the shadow repo here), then gate it"},
-		{"", "shadow", "git remote add shadow https://github.com/acme/widget-shadow.git && git fetch shadow && git switch feat-x",
-			"commit on feat-x, push it to the shadow repo with the remote in data.checkout (never origin), then gate it"},
+	const url = "https://github.com/acme/widget-shadow.git"
+	for _, tc := range []struct {
+		remote, free string
+		in           bool
+		checkout     [][]string
+		hint, why    string
+	}{
+		{"shadow", "ghostbranch-shadow", true, [][]string{{"git", "fetch", "shadow"}, {"git", "switch", "feat-x"}},
+			"git fetch shadow && git switch feat-x",
+			"check out with `git fetch shadow && git switch feat-x`, commit on feat-x, push it with `git push shadow feat-x` (the shadow repo, never origin), then gate it"},
+		{"origin", "shadow", true, [][]string{{"git", "fetch", "origin"}, {"git", "switch", "feat-x"}},
+			"git fetch origin && git switch feat-x",
+			"check out with `git fetch origin && git switch feat-x`, commit on feat-x, push it with `git push origin feat-x` (origin is the shadow repo here), then gate it"},
+		{"", "shadow", true, [][]string{{"git", "remote", "add", "shadow", url}, {"git", "fetch", "shadow"}, {"git", "switch", "feat-x"}},
+			"git remote add shadow " + url + " && git fetch shadow && git switch feat-x",
+			"check out with `git remote add shadow " + url + " && git fetch shadow && git switch feat-x`, commit on feat-x, push it with `git push shadow feat-x` (the shadow repo, never origin), then gate it"},
+		{"", "shadow", false, [][]string{{"git", "clone", "--origin", "shadow", "--branch", "feat-x", url}},
+			"git clone --origin shadow --branch feat-x " + url,
+			"check out with `git clone --origin shadow --branch feat-x " + url + "`, commit on feat-x, push it with `git push shadow feat-x` (the shadow repo, never origin), then gate it"},
 	} {
 		te := newTestEnv(t)
-		te.env.ShadowRemote = func(string) (string, string, bool) { return tc.remote, tc.free, true }
+		te.env.ShadowRemote = func(string) (string, string, bool) { return tc.remote, tc.free, tc.in }
 		initOnly(te)
 		_, env := te.runJSON("feature", "start", "feat-x")
-		if got := env["data"].(map[string]any)["checkout"]; got != tc.checkout {
-			t.Errorf("%q: checkout = %q", tc.remote, got)
+		data := env["data"].(map[string]any)
+		raw, _ := json.Marshal(data["checkout"])
+		want, _ := json.Marshal(tc.checkout)
+		if string(raw) != string(want) || data["checkout_hint"] != tc.hint {
+			t.Errorf("%q: checkout = %s, hint = %q", tc.remote, raw, data["checkout_hint"])
 		}
-		if n := nextOf(t, env); len(n) != 1 || n[0]["why"] != tc.why {
+		if n := nextOf(t, env); len(n) != 1 || n[0]["why"] != tc.why ||
+			!reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "gate", "feat-x", "--repo", "acme/widget"}) {
 			t.Errorf("%q: next = %v", tc.remote, n)
 		}
 	}
@@ -913,5 +933,113 @@ func TestNextForFeatureClose(t *testing.T) {
 	if code != 1 || len(deleted) != 4 || len(n) != 1 || n[0]["needs_human"] != true ||
 		!reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "log", "--feature", "feat-c", "--op", "feature close"}) {
 		t.Fatalf("gate PR left open: exit %d, deleted %v, next = %v", code, deleted, n)
+	}
+}
+
+// feature start on a stale shadow main fails with exit 4; next syncs, then
+// starts the feature again.
+func TestFeatureStartBehindNextSyncsThenStartsAgain(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	testutil.Commit(t, te.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
+	code, env := te.runJSON("feature", "start", "feat-x", "--repo", "acme/widget")
+	e, _ := env["error"].(map[string]any)
+	if code != 4 || e["code"] != "SHADOW_BEHIND" {
+		t.Fatalf("exit %d %v", code, env)
+	}
+	n := nextOf(t, env)
+	if len(n) != 2 || !reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "sync", "--repo", "acme/widget"}) ||
+		!reflect.DeepEqual(argv(n[1])[:4], []string{"ghostbranch", "feature", "start", "feat-x"}) {
+		t.Fatalf("next = %v", n)
+	}
+	te.mustRun("sync")
+	if code, env := te.runJSON("feature", "start", "feat-x"); code != 0 {
+		t.Fatalf("start after sync: exit %d %v", code, env)
+	}
+}
+
+// A bare sync with no feature in progress offers feature start, with the
+// name as needs_input; otherwise it doesn't.
+func TestSyncNextOffersFeatureStartWhenIdle(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	start := []string{"ghostbranch", "feature", "start", "--repo", "acme/widget"}
+	offers := func(args ...string) bool {
+		t.Helper()
+		code, env := te.runJSON(args...)
+		if code != 0 {
+			t.Fatalf("%v: exit %d %v", args, code, env)
+		}
+		for _, n := range nextOf(t, env) {
+			if reflect.DeepEqual(argv(n), start) {
+				need, _ := n["needs_input"].([]any)
+				why, _ := n["why"].(string)
+				if len(need) != 1 || need[0] != "<name>" || !strings.Contains(why, "<name>") || n["needs_human"] != false {
+					t.Fatalf("feature start next = %v", n)
+				}
+				return true
+			}
+		}
+		return false
+	}
+	if !offers("sync") {
+		t.Fatal("an idle bare sync must offer feature start")
+	}
+	if offers("sync", "--plan") || offers("sync", "--no-close") {
+		t.Fatal("only a bare sync offers feature start")
+	}
+	te.mustRun("feature", "start", "feat-x")
+	if offers("sync") {
+		t.Fatal("a feature is in progress: no feature start")
+	}
+}
+
+// --all with --repo revokes only that repo's grants.
+func TestAgentsRevokeAllWithRepoKeepsOtherPairs(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	grantAgents(te)
+	ws := filepath.Join(te.vars["GHOSTBRANCH_HOME"], "workspaces", "default")
+	s := grant.NewStore(filepath.Join(ws, "grants.json"), filepath.Join(ws, "grants.lock"))
+	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	exp := now.Add(6 * time.Hour)
+	if _, err := s.Put(grant.Grant{ID: "g-0d0e0f", Public: "acme/other", Shadow: "acme/other-shadow",
+		CreatedAt: now, ExpiresAt: &exp, CreatedBy: "human:octo"}, now); err != nil {
+		t.Fatal(err)
+	}
+	code, env := te.runJSON("agents", "revoke", "--all", "--repo", "acme/widget")
+	data, _ := env["data"].(map[string]any)
+	revoked, _ := data["revoked"].([]any)
+	if code != 0 || len(revoked) != 1 || revoked[0].(map[string]any)["public"] != "acme/widget" {
+		t.Fatalf("exit %d %v", code, env)
+	}
+	gs, err := s.Load()
+	if err != nil || len(gs) != 1 || gs[0].Public != "acme/other" {
+		t.Fatalf("grants left = %+v %v", gs, err)
+	}
+}
+
+// abandon (or --undo) that changes nothing says so, in JSON and to people.
+func TestAbandonThatChangesNothingSaysSo(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	withFeature(te)
+	code, env := te.runJSON("feature", "abandon", "feat-x", "--undo")
+	if data, _ := env["data"].(map[string]any); code != 0 || data["changed"] != false || data["abandoned"] != false {
+		t.Fatalf("exit %d %v", code, env)
+	}
+	if code, out, _ := te.run("feature", "abandon", "feat-x", "--undo"); code != 0 || out != "feat-x was not abandoned; nothing changed.\n" {
+		t.Fatalf("exit %d %q", code, out)
+	}
+	te.mustRun("feature", "abandon", "feat-x")
+	code, env = te.runJSON("feature", "abandon", "feat-x")
+	if data, _ := env["data"].(map[string]any); code != 0 || data["changed"] != false || data["abandoned"] != true {
+		t.Fatalf("exit %d %v", code, env)
+	}
+	if code, out, _ := te.run("feature", "abandon", "feat-x"); code != 0 || out != "feat-x was already abandoned; nothing changed.\n" {
+		t.Fatalf("exit %d %q", code, out)
 	}
 }

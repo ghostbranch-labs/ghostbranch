@@ -6,6 +6,7 @@
   "data": {
     "feature": "feat-x",
     "abandoned": true,
+    "changed": true,
     "preview": null
   },
   "warnings": [],

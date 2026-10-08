@@ -156,7 +156,7 @@ func (e *Engine) Sync(ctx context.Context, p workspace.Pair, o SyncOptions) (res
 				if err := e.push(ctx, pc, remoteShadow, opt, pb+":refs/heads/"+b); err != nil {
 					return res, warns, err
 				}
-				_ = g.UpdateRef(ctx, shadowRef(b), pb)
+				warns = addWarnings(warns, e.updateMirror(ctx, g, shadowRef(b), pb)...)
 				br.To = pb
 				pushed = addPushed(pushed, pb, b)
 			}
@@ -226,7 +226,8 @@ func (e *Engine) closeMerged(ctx context.Context, pc *pairCtx, p *workspace.Pair
 		if !ClosableWithoutConsole(r) {
 			continue
 		}
-		cr, err := e.closeFeature(ctx, pc, r)
+		cr, cw, err := e.closeFeature(ctx, pc, r)
+		warns = addWarnings(warns, cw...)
 		if e.DryRun {
 			if err == nil {
 				res.Preview.Add(cr.Preview.Ops...)

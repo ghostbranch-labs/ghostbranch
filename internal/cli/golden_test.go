@@ -99,7 +99,7 @@ func TestGoldenContract(t *testing.T) {
 		{"feature_start_behind", func(te *testEnv) {
 			initOnly(te)
 			testutil.Commit(te.t, te.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
-		}, []string{"feature", "start", "feat-x"}, 0},
+		}, []string{"feature", "start", "feat-x"}, 4},
 		{"feature_start_exists", withFeature, []string{"feature", "start", "feat-x"}, 4},
 		{"gate", withFeature, []string{"gate", "feat-x"}, 0},
 		{"gate_checks_failed", func(te *testEnv) { withFeature(te); te.forge.Checks = failing }, []string{"gate", "feat-x"}, 3},

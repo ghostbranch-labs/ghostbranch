@@ -30,7 +30,8 @@ func TestRenderListsEveryCodeFromTheRegistry(t *testing.T) {
 	// 272: the adopt sentence in *Set up a repo*, with the SHADOW_CREATE_DENIED hand-off kept whole.
 	// 274: two sub-project 5b error codes (UPGRADE_NEEDED, FEATURE_MOVED).
 	// 293: the lifecycle section (with --repo on each example and the grant note), --repo in the loop, and the stdout/stderr note (sub-project 5b).
-	if n := strings.Count(out, "\n"); n > 293 {
+	// 296: the SHADOW_BEHIND error row, data.checkout as argvs, and feature start refusing a stale shadow main (sub-project 5b).
+	if n := strings.Count(out, "\n"); n > 296 {
 		t.Errorf("the guide is %d lines; keep it short (spec: about 150 plus the tables)", n)
 	}
 }

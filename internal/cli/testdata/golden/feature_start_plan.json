@@ -7,7 +7,19 @@
     "name": "feat-x",
     "branch": "feat-x",
     "base": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
-    "checkout": "git fetch shadow && git switch feat-x",
+    "checkout": [
+      [
+        "git",
+        "fetch",
+        "shadow"
+      ],
+      [
+        "git",
+        "switch",
+        "feat-x"
+      ]
+    ],
+    "checkout_hint": "git fetch shadow && git switch feat-x",
     "preview": {
       "fingerprint": {
         "shadow_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7"

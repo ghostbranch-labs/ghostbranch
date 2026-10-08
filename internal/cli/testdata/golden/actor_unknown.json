@@ -30,6 +30,21 @@
       "message": "GHOSTBRANCH_ACTOR is unset and the GitHub login could not be read, so the ledger records human:unknown; set GHOSTBRANCH_ACTOR, for example agent:claude-code"
     }
   ],
-  "next": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "feature",
+        "start",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "no feature is in progress; start one: put its name (the <name> argument) after start",
+      "needs_human": false,
+      "needs_input": [
+        "<name>"
+      ]
+    }
+  ],
   "error": null
 }

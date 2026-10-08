@@ -26,7 +26,7 @@ func TestEveryCodeHasItsExitCode(t *testing.T) {
 		contract.MarkerInvalid: 3, contract.WaiverUnknown: 2,
 		contract.CurateInvalid: 2, contract.CurateConflict: 4, contract.CurateTreeMismatch: 4,
 		contract.AuthorUnmapped: 1, contract.NothingToPublish: 1,
-		contract.UpgradeNeeded: 1, contract.FeatureMoved: 4,
+		contract.UpgradeNeeded: 1, contract.FeatureMoved: 4, contract.ShadowBehindError: 4,
 	}
 	all := contract.AllCodes()
 	if len(all) != len(want) {
@@ -122,7 +122,10 @@ func TestSubProject4CodesAreRegistered(t *testing.T) {
 		contract.SecretsUnlisted, contract.SecretsMissing, contract.PushTriggersOnSync, contract.ActionsMinutesBilled,
 		contract.ShadowBehind, contract.AuditIncomplete} {
 		es, err := contract.Explain(string(w))
-		if err != nil || len(es) != 1 || es[0].Summary == "" || es[0].WhatToDo == "" {
+		if len(es) == 2 && w == contract.ShadowBehind { // also feature start's error, listed first
+			es = es[1:]
+		}
+		if err != nil || len(es) != 1 || es[0].Kind != contract.KindWarning || es[0].Summary == "" || es[0].WhatToDo == "" {
 			t.Fatalf("%s is not documented: %+v %v", w, es, err)
 		}
 	}
@@ -201,5 +204,64 @@ func TestFeatureNotClosedIsRegistered(t *testing.T) {
 		!strings.HasPrefix(es[0].WhatToDo, "If details.deleted is set, the feature is gone: close its gate draft PR in the shadow repo by hand. Otherwise run ghostbranch feature show <name>, then feature close <name>.") ||
 		!strings.Contains(es[0].WhatToDo, "With no details.feature") {
 		t.Fatalf("FEATURE_NOT_CLOSED is not documented: %+v %v", es, err)
+	}
+}
+
+// SHADOW_BEHIND is both feature start's error (exit 4) and the warning
+// other commands give; explain shows both, the error first.
+func TestShadowBehindIsAnErrorAndAWarning(t *testing.T) {
+	t.Parallel()
+	if string(contract.ShadowBehindError) != string(contract.ShadowBehind) || contract.ShadowBehindError.Exit() != contract.ExitConflict {
+		t.Fatal("SHADOW_BEHIND error must share the warning's string and exit 4")
+	}
+	es, err := contract.Explain("shadow_behind")
+	if err != nil || len(es) != 2 || es[0].Kind != contract.KindError || *es[0].ExitCode != 4 ||
+		es[0].WhatToDo != "Run ghostbranch sync, then start the feature again." ||
+		es[1].Kind != contract.KindWarning || es[1].ExitCode != nil {
+		t.Fatalf("explain SHADOW_BEHIND = %+v %v", es, err)
+	}
+	es, _ = contract.Explain("4")
+	found := false
+	for _, e := range es {
+		found = found || e.Code == "SHADOW_BEHIND"
+	}
+	if !found {
+		t.Fatalf("explain 4 lacks SHADOW_BEHIND: %+v", es)
+	}
+}
+
+func TestMirrorNotUpdatedIsRegistered(t *testing.T) {
+	t.Parallel()
+	es, err := contract.Explain("MIRROR_NOT_UPDATED")
+	if err != nil || len(es) != 1 || es[0].Kind != contract.KindWarning || !strings.Contains(es[0].WhatToDo, "next command's fetch") ||
+		!slices.Contains(contract.AllWarnings(), contract.MirrorNotUpdated) {
+		t.Fatalf("MIRROR_NOT_UPDATED = %+v %v", es, err)
+	}
+}
+
+// feature close and remove need a console and ignore grants, so exit 5 and
+// APPROVAL_REQUIRED never promise that a grant helps every command.
+func TestApprovalDocsDontPromiseAGrantForEverything(t *testing.T) {
+	t.Parallel()
+	for _, key := range []string{"5", "APPROVAL_REQUIRED"} {
+		es, err := contract.Explain(key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, e := range es {
+			if e.Code != "5" && e.Code != "APPROVAL_REQUIRED" {
+				continue
+			}
+			text := e.Summary + " " + e.WhatToDo
+			if !strings.Contains(text, "person at a console") && !strings.Contains(text, "typed at a console") {
+				t.Errorf("%s: no console: %q", e.Code, text)
+			}
+			if !strings.Contains(e.WhatToDo, "for promote and apply, an agent grant") && !strings.Contains(e.WhatToDo, "For promote and apply, an agent grant") {
+				t.Errorf("%s: the grant must be scoped to promote and apply: %q", e.Code, e.WhatToDo)
+			}
+			if strings.Contains(text, "or an agent grant they make") || strings.Contains(text, "Publishing needs a person") {
+				t.Errorf("%s: still promises a grant for every command: %q", e.Code, text)
+			}
+		}
 	}
 }

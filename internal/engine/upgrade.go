@@ -150,7 +150,7 @@ func (e *Engine) Upgrade(ctx context.Context, p workspace.Pair) (res *UpgradeRes
 	if err := e.push(ctx, pc, remoteShadow, lease, c+":refs/heads/"+OverlayBranch); err != nil {
 		return res, warns, err
 	}
-	_ = g.UpdateRef(ctx, shadowRef(OverlayBranch), c)
+	warns = addWarnings(warns, e.updateMirror(ctx, g, shadowRef(OverlayBranch), c)...)
 	res.Commit = c
 	res.Audit, warns = e.auditInto(ctx, pc, cfg, c, warns)
 	return res, warns, nil

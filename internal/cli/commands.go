@@ -172,8 +172,8 @@ func (a *app) featureStartCmd() *cobra.Command {
 			res, w, err := e.FeatureStart(cmd.Context(), p, args[0])
 			if res != nil && a.env.ShadowRemote != nil {
 				remote, free, in := a.env.ShadowRemote(p.Shadow)
-				res.Checkout = checkoutHint(res.Name, p.Shadow, remote, free, in)
-				a.shadowRemote = remote
+				res.SetCheckout(checkoutArgv(res.Name, p.Shadow, remote, free, in))
+				a.shadowRemote = pushRemote(remote, free, in)
 			}
 			return done(a, res, w, err)
 		},

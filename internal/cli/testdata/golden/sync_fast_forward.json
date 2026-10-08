@@ -25,6 +25,21 @@
     "preview": null
   },
   "warnings": [],
-  "next": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "feature",
+        "start",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "no feature is in progress; start one: put its name (the <name> argument) after start",
+      "needs_human": false,
+      "needs_input": [
+        "<name>"
+      ]
+    }
+  ],
   "error": null
 }

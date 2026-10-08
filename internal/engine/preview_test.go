@@ -38,17 +38,23 @@ func TestPreviewsWriteNothing(t *testing.T) {
 	h.eng.DryRun = false
 	h.init()
 	h.startFeature("feat-x", map[string]string{"feature.txt": "new\n"})
-	testutil.Commit(t, h.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
 	before, pushes, entries := h.publicRefs(), len(h.pushes), len(h.ledger())
+
+	// feature start before public main moves: on a stale shadow main it
+	// refuses, preview or not.
+	h.eng.DryRun = true
+	fres, _, err := h.eng.FeatureStart(h.ctx, h.pair, "other")
+	if err != nil || !reflect.DeepEqual(opNames(fres.Preview), []string{"push_ref", "push_ref"}) {
+		t.Fatalf("feature start preview: %+v %v", fres, err)
+	}
+	h.eng.DryRun = false
+	testutil.Commit(t, h.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
+	before = h.publicRefs()
 
 	h.eng.DryRun = true
 	sres, _, err := h.eng.Sync(h.ctx, h.pair, engine.SyncOptions{})
 	if err != nil || !reflect.DeepEqual(opNames(sres.Preview), []string{"push_ref"}) || sres.Preview.Fingerprint["public_main"] == "" {
 		t.Fatalf("sync preview: %+v %v", sres, err)
-	}
-	fres, _, err := h.eng.FeatureStart(h.ctx, h.pair, "other")
-	if err != nil || !reflect.DeepEqual(opNames(fres.Preview), []string{"push_ref", "push_ref"}) {
-		t.Fatalf("feature start preview: %+v %v", fres, err)
 	}
 	gres, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
 	if err != nil || !reflect.DeepEqual(opNames(gres.Preview), []string{"push_ref", "open_pr", "wait_checks", "push_ref"}) {

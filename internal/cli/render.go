@@ -173,7 +173,7 @@ func human(r any) string {
 			previewText(&b, v.Preview)
 			break
 		}
-		fmt.Fprintf(&b, "Started feature %s from shadow main %s.\nCheck it out with: %s\n", v.Name, short(v.Base), v.Checkout)
+		fmt.Fprintf(&b, "Started feature %s from shadow main %s.\nCheck it out with: %s\n", v.Name, short(v.Base), v.CheckoutHint)
 	case *engine.GateResult:
 		fmt.Fprintf(&b, "Gate for %s: checks %s, leak scan %s.\n", v.Feature, v.Checks, v.Leak)
 		if v.Preview != nil {
@@ -293,6 +293,10 @@ func human(r any) string {
 		switch {
 		case v.Preview != nil:
 			previewText(&b, v.Preview)
+		case !v.Changed && v.Abandoned:
+			fmt.Fprintf(&b, "%s was already abandoned; nothing changed.\n", oneLine(v.Feature))
+		case !v.Changed:
+			fmt.Fprintf(&b, "%s was not abandoned; nothing changed.\n", oneLine(v.Feature))
 		case v.Abandoned:
 			fmt.Fprintf(&b, "Abandoned %s (its branch is kept; undo with --undo).\n", oneLine(v.Feature))
 		default:

@@ -143,7 +143,10 @@ func Parse(data []byte) (Config, []contract.Warning, error) {
 			warns = append(warns, contract.Warning{Code: contract.ConfigKeyIgnored,
 				Message: fmt.Sprintf("%s is not supported in this version and is ignored", k)})
 		default:
-			return Config{}, nil, contract.New(contract.ConfigInvalid, "unknown key %q in .ghostbranch.yml", k).WithField(k)
+			// details.unknown_key lets callers tell a key from a newer
+			// Ghostbranch (UPGRADE_NEEDED) from a bad value.
+			return Config{}, nil, contract.New(contract.ConfigInvalid, "unknown key %q in .ghostbranch.yml", k).WithField(k).
+				WithDetails(map[string]any{"unknown_key": k})
 		}
 	}
 	return cfg, warns, validate(cfg)

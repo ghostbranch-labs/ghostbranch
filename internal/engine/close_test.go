@@ -124,7 +124,7 @@ func TestAbandonAndUndo(t *testing.T) {
 	}
 
 	res, _, err = h.eng.FeatureAbandon(h.ctx, h.pair, "feat-x", false)
-	if err != nil || !res.Abandoned || res.Preview != nil {
+	if err != nil || !res.Abandoned || !res.Changed || res.Preview != nil {
 		t.Fatalf("abandon = %+v %v", res, err)
 	}
 	validateResult(t, "feature-abandon.schema.json", res)
@@ -140,7 +140,7 @@ func TestAbandonAndUndo(t *testing.T) {
 	}
 
 	res, _, err = h.eng.FeatureAbandon(h.ctx, h.pair, "feat-x", true)
-	if err != nil || res.Abandoned {
+	if err != nil || res.Abandoned || !res.Changed {
 		t.Fatalf("abandon --undo = %+v %v", res, err)
 	}
 	if h.shadowMeta("feat-x").Abandoned || h.report("feat-x").State == feature.StateAbandoned {
@@ -151,9 +151,10 @@ func TestAbandonAndUndo(t *testing.T) {
 		t.Fatalf("ledger = %+v", last)
 	}
 	same := h.shadowRefs()
-	if _, _, err := h.eng.FeatureAbandon(h.ctx, h.pair, "feat-x", true); err != nil {
-		t.Fatal(err)
+	if res, _, err := h.eng.FeatureAbandon(h.ctx, h.pair, "feat-x", true); err != nil || res.Changed || res.Abandoned {
+		t.Fatalf("a second --undo = %+v %v", res, err)
 	}
+	validateResult(t, "feature-abandon.schema.json", res)
 	es = h.ledger()
 	if last := es[len(es)-1]; last.Summary != "already active; nothing changed" || !reflect.DeepEqual(h.shadowRefs(), same) {
 		t.Fatalf("a second --undo: ledger %+v", last)
@@ -583,6 +584,8 @@ func TestCloseReportsAGatePRItCouldNotClose(t *testing.T) {
 	}{
 		{"forbidden", fmt.Errorf("%w: close PR", forge.ErrForbidden), "the token may not close its gate PR"},
 		{"other", errors.New("boom"), "couldn't close its gate PR"},
+		// Transient, but the refs are gone: a retry finds no feature.
+		{"transient", fmt.Errorf("%w: 502", forge.ErrTransient), "couldn't close its gate PR"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -595,6 +598,9 @@ func TestCloseReportsAGatePRItCouldNotClose(t *testing.T) {
 			h.forge.ClosePRErr = tc.err
 			res, _, err := h.eng.FeatureClose(h.ctx, h.pair, "feat-x")
 			ce := wantCode(t, err, contract.ForgeError)
+			if ce.Retryable {
+				t.Fatal("a close that deleted the refs is never retryable")
+			}
 			if !strings.Contains(ce.Message, tc.want) || !strings.Contains(ce.Message, fmt.Sprintf("#%d", gate)) {
 				t.Fatalf("message = %q", ce.Message)
 			}
@@ -668,5 +674,29 @@ func TestClosePlanChangesNothing(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(h.eng.WS.PlansDir(), id+".json")); err != nil {
 		t.Fatalf("close --plan removed the plan file: %v", err)
+	}
+}
+
+// The refs were deleted, but the mirror's copy couldn't be: the close
+// succeeds with MIRROR_NOT_UPDATED.
+func TestCloseWarnsWhenTheMirrorCantBeCleanedUp(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	pr, id := h.publish("feat-x")
+	h.forge.SetPRMerged(publicName, pr)
+	want := h.featureRefs("feat-x", id)
+	meta := "refs/shadow-meta/features/feat-x"
+	h.lockMirrorRef(meta)
+	res, warns, err := h.eng.FeatureClose(h.ctx, h.pair, "feat-x")
+	if err != nil || !reflect.DeepEqual(res.Deleted, want) {
+		t.Fatalf("close = %+v %v", res, err)
+	}
+	ws := warningsFor(warns, contract.MirrorNotUpdated)
+	if len(ws) != 1 || ws[0].Details["ref"] != meta {
+		t.Fatalf("warnings = %+v", warns)
+	}
+	if _, ok := h.shadowRefs()["refs/ghostbranch/features/feat-x"]; ok {
+		t.Fatal("the shadow repo still has the metadata")
 	}
 }
