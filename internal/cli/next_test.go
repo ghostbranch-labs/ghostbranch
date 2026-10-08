@@ -581,3 +581,33 @@ func TestNextForCurateProblems(t *testing.T) {
 		t.Fatalf("curate invalid: %v", n)
 	}
 }
+
+// A pair that isn't registered here (fresh GHOSTBRANCH_HOME) offers adopt
+// first, for a shadow repo that already exists, then a fresh init.
+func TestNextOffersAdoptWhenThePairIsNotRegistered(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	code, env := te.runJSON("gate", "feat-x", "--repo", "acme/widget")
+	n := nextOf(t, env)
+	if e, _ := env["error"].(map[string]any); code != 2 || e["code"] != "PAIR_AMBIGUOUS" {
+		t.Fatalf("exit %d, env = %v", code, env)
+	}
+	if len(n) != 2 ||
+		!reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "init", "acme/widget", "--adopt", "--plan", "--json"}) ||
+		!reflect.DeepEqual(argv(n[1]), []string{"ghostbranch", "init", "acme/widget", "--plan", "--json"}) ||
+		n[0]["needs_human"] != false || n[1]["needs_human"] != false {
+		t.Fatalf("next = %v", n)
+	}
+}
+
+func TestNextAdoptStepsKeepTheWorkspace(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	code, env := te.runJSON("gate", "feat-x", "--repo", "acme/widget", "--workspace", "other")
+	n := nextOf(t, env)
+	if code != 2 || len(n) != 2 ||
+		!reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "init", "acme/widget", "--adopt", "--plan", "--json", "--workspace", "other"}) ||
+		!reflect.DeepEqual(argv(n[1]), []string{"ghostbranch", "init", "acme/widget", "--plan", "--json", "--workspace", "other"}) {
+		t.Fatalf("exit %d, next = %v", code, n)
+	}
+}

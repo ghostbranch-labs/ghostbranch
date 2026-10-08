@@ -26,8 +26,9 @@ func TestRenderListsEveryCodeFromTheRegistry(t *testing.T) {
 			t.Errorf("exit %d is missing from the exit table", x)
 		}
 	}
-	// 270: the history-modes section (sub-project 5a) added about 18 lines.
-	if n := strings.Count(out, "\n"); n > 270 {
+	// 270: the history-modes section (sub-project 5a) added about 18 lines;
+	// 272: the adopt sentence in *Set up a repo*, with the SHADOW_CREATE_DENIED hand-off kept whole.
+	if n := strings.Count(out, "\n"); n > 272 {
 		t.Errorf("the guide is %d lines; keep it short (spec: about 150 plus the tables)", n)
 	}
 }
@@ -203,5 +204,21 @@ func TestGuideTeachesHistoryModes(t *testing.T) {
 	}
 	if strings.Contains(out, `--mode squash -m "<message>" --plan --json`) {
 		t.Error("squash must not be the step-4 command; preserve is the default")
+	}
+}
+
+func TestGuideTellsAgentsToAdoptAnExistingShadowRepo(t *testing.T) {
+	out := strings.Join(strings.Fields(guide.Render(contract.Registry())), " ")
+	for _, want := range []string{
+		"Shadow repo already exists (another machine, or a fresh `GHOSTBRANCH_HOME`)?",
+		"`ghostbranch init <public> --adopt --plan --json`",
+		"it only registers the pair here and checks the shadow repo",
+		// The SHADOW_CREATE_DENIED hand-off (whitespace-normalised here, as the guide wraps lines).
+		"show the person `error.details.steps`",
+		"(the command in `next`; its `needs_human` stands for their steps 1 and 2)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the guide lacks %q", want)
+		}
 	}
 }

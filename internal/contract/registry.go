@@ -68,7 +68,7 @@ var errorDocs = map[Code]Doc{
 		WhatToDo: "Publish features only with ghostbranch promote. Never bypass the hook with --no-verify."},
 	BadFlag:          {Summary: "A flag, argument or option value is invalid.", WhatToDo: "Fix the value named in error.field."},
 	MissingInput:     {Summary: "Required input is missing.", WhatToDo: "Pass the input named in error.field, for example --title or -m for promote."},
-	PairAmbiguous:    {Summary: "Ghostbranch cannot tell which repo pair to use.", WhatToDo: "Pass --repo owner/name, or run init first."},
+	PairAmbiguous:    {Summary: "Ghostbranch cannot tell which repo pair to use.", WhatToDo: "Pass --repo owner/name, or --repo . inside a checkout of the public repo. If the pair isn't registered on this machine: ghostbranch init <public> --adopt when its shadow repo already exists, otherwise ghostbranch init <public>."},
 	NameInvalid:      {Summary: "A feature or branch name is invalid or reserved.", WhatToDo: "Choose another name; main, HEAD and names starting with ghostbranch are reserved."},
 	FeatureNotFound:  {Summary: "No such feature in the shadow repo.", WhatToDo: "Check the name, or start it with ghostbranch feature start."},
 	NotAPairCheckout: {Summary: "This directory is not a checkout of a registered public repo.", WhatToDo: "Run the command inside a clone of the public repo, after ghostbranch init."},

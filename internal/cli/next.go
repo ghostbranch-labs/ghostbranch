@@ -92,6 +92,15 @@ func (a *app) next(err error) []contract.Next {
 			}
 		case contract.LeakFound, contract.MarkerInvalid:
 			return a.leakNext(ce)
+		case contract.PairAmbiguous:
+			if pub, _ := ce.Details["public"].(string); pub != "" {
+				return []contract.Next{
+					{Command: a.gb("init", pub, "--adopt", "--plan", "--json"),
+						Why: "its shadow repo already exists (set up on another machine, or in another GHOSTBRANCH_HOME): adopt it — this only registers the pair here and checks the shadow repo. If the shadow repo has a non-default name, adopt it with --shadow <owner/name> instead"},
+					{Command: a.gb("init", pub, "--plan", "--json"),
+						Why: "no shadow repo yet: create one"},
+				}
+			}
 		case contract.ShadowCreateDenied:
 			pub, _ := ce.Details["public"].(string)
 			sh, _ := ce.Details["shadow"].(string)

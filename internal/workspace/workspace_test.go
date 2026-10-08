@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -126,14 +127,90 @@ func TestResolve(t *testing.T) {
 	if _, err := ws.Resolve("", nil); contract.From(err).Code != contract.PairAmbiguous {
 		t.Fatalf("two pairs, no hint: %v", err)
 	}
-	if got, _ := ws.Resolve("", []string{"git@github.com:acme/b-shadow.git"}); got != b {
+	if got, _ := ws.Resolve("", []workspace.Remote{{Name: "origin", URL: "git@github.com:acme/b-shadow.git"}}); got != b {
 		t.Fatalf("by cwd remote: %+v", got)
 	}
-	if got, _ := ws.Resolve("acme/a", []string{"git@github.com:acme/b.git"}); got != a {
+	if got, _ := ws.Resolve("acme/a", []workspace.Remote{{Name: "origin", URL: "git@github.com:acme/b.git"}}); got != a {
 		t.Fatalf("--repo wins: %+v", got)
 	}
 	var ce *contract.Error
 	if _, err := ws.Resolve("acme/zzz", nil); !errors.As(err, &ce) || ce.Field != "repo" {
 		t.Fatalf("unknown --repo: %v", err)
+	}
+}
+
+func TestResolveDotMeansThisCheckout(t *testing.T) {
+	t.Parallel()
+	ws, _ := workspace.Open(t.TempDir(), "default")
+	a := workspace.Pair{Public: "acme/a", Shadow: "acme/a-shadow"}
+	b := workspace.Pair{Public: "acme/b", Shadow: "acme/b-shadow"}
+	ws.AddPair(a)
+	ws.AddPair(b)
+	if got, err := ws.Resolve(".", []workspace.Remote{{Name: "origin", URL: "git@github.com:acme/b.git"}}); err != nil || got != b {
+		t.Fatalf("--repo . by remote: %+v %v", got, err)
+	}
+
+	// One pair, but the checkout's remotes name another repo: say so rather
+	// than falling back to the workspace's only pair.
+	one, _ := workspace.Open(t.TempDir(), "default")
+	one.AddPair(a)
+	_, err := one.Resolve(".", []workspace.Remote{{Name: "origin", URL: "https://github.com/acme/widget.git"}})
+	var ce *contract.Error
+	if !errors.As(err, &ce) || ce.Code != contract.PairAmbiguous || ce.Field != "repo" ||
+		!strings.Contains(ce.Message, `the remotes of this checkout name no repo in workspace "default"`) ||
+		ce.Details["public"] != "acme/widget" {
+		t.Fatalf("--repo . with other remotes: %+v", err)
+	}
+}
+
+func TestResolveNotRegisteredNamesThePublicRepo(t *testing.T) {
+	t.Parallel()
+	ws, _ := workspace.Open(t.TempDir(), "default")
+	var ce *contract.Error
+	if _, err := ws.Resolve("acme/x", nil); !errors.As(err, &ce) || ce.Details["public"] != "acme/x" {
+		t.Fatalf("unknown --repo: %+v", err)
+	}
+	// Empty workspace inside a checkout: the remote that parses names the repo.
+	_, err := ws.Resolve("", []workspace.Remote{{Name: "upstream", URL: "https://example.com/nope.git"}, {Name: "origin", URL: "git@github.com:acme/widget.git"}})
+	if !errors.As(err, &ce) || ce.Code != contract.PairAmbiguous || ce.Details["public"] != "acme/widget" {
+		t.Fatalf("empty workspace: %+v", err)
+	}
+	// Several pairs stay a candidates error.
+	ws.AddPair(workspace.Pair{Public: "acme/a", Shadow: "acme/a-shadow"})
+	ws.AddPair(workspace.Pair{Public: "acme/b", Shadow: "acme/b-shadow"})
+	if _, err := ws.Resolve("", nil); !errors.As(err, &ce) || ce.Details["candidates"] == nil || ce.Details["public"] != nil {
+		t.Fatalf("several: %+v", err)
+	}
+}
+
+func TestResolveNeverGuessesTheShadowRepoAsPublic(t *testing.T) {
+	t.Parallel()
+	ws, _ := workspace.Open(t.TempDir(), "default")
+	var ce *contract.Error
+	both := []workspace.Remote{
+		{Name: "ghostbranch-shadow", URL: "git@github.com:acme/widget-shadow.git"},
+		{Name: "origin", URL: "git@github.com:acme/widget.git"},
+	}
+	if _, err := ws.Resolve("", both); !errors.As(err, &ce) || ce.Details["public"] != "acme/widget" {
+		t.Fatalf("shadow remote listed first: %+v", err)
+	}
+	onlyShadow := []workspace.Remote{{Name: "shadow", URL: "git@github.com:acme/widget-shadow.git"}}
+	if _, err := ws.Resolve("", onlyShadow); !errors.As(err, &ce) || ce.Details["public"] != nil {
+		t.Fatalf("only a shadow remote: %+v", err)
+	}
+	if _, err := ws.Resolve("acme/widget-shadow", nil); !errors.As(err, &ce) || ce.Details["public"] != nil {
+		t.Fatalf("--repo naming a shadow: %+v", err)
+	}
+	shadowOrigin := []workspace.Remote{{Name: "origin", URL: "https://github.com/acme/widget-shadow"}}
+	if _, err := ws.Resolve("", shadowOrigin); !errors.As(err, &ce) || ce.Details["public"] != nil {
+		t.Fatalf("origin is the shadow repo: %+v", err)
+	}
+	two := []workspace.Remote{{Name: "a", URL: "git@github.com:acme/one.git"}, {Name: "b", URL: "git@github.com:acme/two.git"}}
+	if _, err := ws.Resolve("", two); !errors.As(err, &ce) || ce.Details["public"] != nil {
+		t.Fatalf("two different repos, no origin: %+v", err)
+	}
+	if _, err := ws.Resolve(".", nil); !errors.As(err, &ce) || ce.Field != "repo" ||
+		!strings.Contains(ce.Message, "this directory is not a checkout with a GitHub remote") {
+		t.Fatalf("--repo . outside a checkout: %+v", err)
 	}
 }

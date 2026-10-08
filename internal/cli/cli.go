@@ -50,7 +50,7 @@ type Env struct {
 	Rand         io.Reader
 	NewForge     func(token string) (forge.Forge, error)
 	GHToken      func() (string, error)
-	CwdRemotes   func() []string
+	CwdRemotes   func() []workspace.Remote
 	NewScanner   func(leak.Rules) (leak.Scanner, error)
 	PollInterval time.Duration
 	SettleWindow time.Duration

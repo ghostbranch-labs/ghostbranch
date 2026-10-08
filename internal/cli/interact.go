@@ -4,9 +4,12 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"slices"
+	"sort"
 	"strings"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
+	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
 func (a *app) editor(initial string) (string, error) {
@@ -83,16 +86,19 @@ func splitCommand(s string, exists func(string) bool) []string {
 	return out
 }
 
-func cwdRemotes() []string {
+// cwdRemotes lists the checkout's remotes with origin first (git lists them
+// alphabetically).
+func cwdRemotes() []workspace.Remote {
 	out, err := exec.Command("git", "remote", "-v").Output()
 	if err != nil {
 		return nil
 	}
-	var urls []string
+	var rs []workspace.Remote
 	for _, line := range strings.Split(string(out), "\n") {
-		if f := strings.Fields(line); len(f) >= 2 {
-			urls = append(urls, f[1])
+		if f := strings.Fields(line); len(f) >= 2 && !slices.ContainsFunc(rs, func(r workspace.Remote) bool { return r.Name == f[0] && r.URL == f[1] }) {
+			rs = append(rs, workspace.Remote{Name: f[0], URL: f[1]})
 		}
 	}
-	return urls
+	sort.SliceStable(rs, func(i, j int) bool { return rs[i].Name == "origin" && rs[j].Name != "origin" })
+	return rs
 }
