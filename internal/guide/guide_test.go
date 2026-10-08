@@ -183,7 +183,7 @@ func TestTokenTableGrantsPublicWriteOnlyToPromote(t *testing.T) {
 // which feature start reports only once the branch already exists.
 func TestGuideSaysToSyncBeforeEveryFeature(t *testing.T) {
 	out := guide.Render(contract.Registry())
-	for _, want := range []string{"**Always run `ghostbranch sync --repo <public> --json` first**", "before\n   `feature start`"} {
+	for _, want := range []string{"**Always run `ghostbranch sync --repo <public> --json` first**", "before `feature start` or resuming"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("guide is missing %q", want)
 		}
