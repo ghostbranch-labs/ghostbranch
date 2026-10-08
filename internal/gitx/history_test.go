@@ -195,7 +195,9 @@ func TestMergeTreeCheck(t *testing.T) {
 	ctx := context.Background()
 	g := testutil.BareRepo(t, filepath.Join(t.TempDir(), "r.git"))
 	base := testutil.Commit(t, g, "main", "base", map[string]string{"f.txt": "f\n", "o.txt": "o\n"})
-	_ = g.UpdateRef(ctx, "refs/heads/feat", base)
+	if err := g.UpdateRef(ctx, "refs/heads/feat", base); err != nil {
+		t.Fatal(err)
+	}
 	feat := testutil.Commit(t, g, "feat", "feature", map[string]string{"f.txt": "feature\n"})
 	main := testutil.Commit(t, g, "main", "upstream", map[string]string{"o.txt": "upstream\n"})
 	if clean, files, err := g.MergeTreeCheck(ctx, main, feat); err != nil || !clean || len(files) != 0 {

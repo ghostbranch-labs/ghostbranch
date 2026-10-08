@@ -67,8 +67,8 @@ type Promoted struct {
 	PublicPR int    `json:"public_pr"`
 	PlanID   string `json:"plan_id"`
 	// FeatureHead is the head the publish was planned from; empty in a
-	// record written before 0.6. A feature "moved" when its branch is no
-	// longer there.
+	// record written before 0.6. A feature has moved when its branch head
+	// is no longer FeatureHead.
 	FeatureHead string `json:"feature_head,omitempty"`
 }
 
