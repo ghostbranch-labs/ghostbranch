@@ -189,3 +189,16 @@ func TestSurveyWarningsAreRegistered(t *testing.T) {
 		t.Fatalf("PR_STATE_UNKNOWN must say the feature is never closed automatically: %+v", es[0])
 	}
 }
+
+func TestFeatureNotClosedIsRegistered(t *testing.T) {
+	t.Parallel()
+	if string(contract.FeatureNotClosed) != "FEATURE_NOT_CLOSED" || !slices.Contains(contract.AllWarnings(), contract.FeatureNotClosed) {
+		t.Fatal("FEATURE_NOT_CLOSED is not a registered warning")
+	}
+	es, err := contract.Explain("FEATURE_NOT_CLOSED")
+	if err != nil || len(es) != 1 || es[0].Kind != contract.KindWarning ||
+		es[0].Summary != "Sync couldn't close a merged feature." ||
+		es[0].WhatToDo != "Run ghostbranch feature show <name>, then feature close <name>." {
+		t.Fatalf("FEATURE_NOT_CLOSED is not documented: %+v %v", es, err)
+	}
+}

@@ -222,6 +222,9 @@ func (a *app) next(err error) []contract.Next {
 		out = a.featureNexts(out, r.Features)
 	case *engine.FeatureListResult:
 		out = a.featureNexts(out, r.Features)
+	case *engine.SyncResult:
+		// Attention holds only features sync can't close itself.
+		out = a.featureNexts(out, r.Attention)
 	}
 	switch r := a.result.(type) {
 	case *engine.InitResult:
@@ -259,15 +262,13 @@ func (a *app) featureNexts(out []contract.Next, rs []engine.FeatureReport) []con
 	var merged []string
 	var rest []contract.Next
 	for _, r := range rs {
+		if engine.ClosableWithoutConsole(r) {
+			merged = append(merged, r.Name)
+			continue
+		}
 		closeCmd := a.scoped("feature", "close", r.Name)
 		switch r.State {
-		case feature.StateMerged:
-			merged = append(merged, r.Name)
 		case feature.StateBranchGone:
-			if r.PRState == "merged" {
-				merged = append(merged, r.Name)
-				break
-			}
 			rest = append(rest, contract.Next{Command: closeCmd, NeedsHuman: true,
 				Why: "its branch was deleted; a person closes it at the console"})
 		case feature.StateMergedMoved:

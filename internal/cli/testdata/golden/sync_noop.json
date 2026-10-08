@@ -19,6 +19,9 @@
       }
     ],
     "cancelled_runs": [],
+    "closed": [],
+    "active_features": 0,
+    "attention": [],
     "preview": null
   },
   "warnings": [],

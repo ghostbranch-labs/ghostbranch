@@ -144,7 +144,7 @@ func (e *Engine) FeatureClose(ctx context.Context, p workspace.Pair, name string
 		return nil, warns, err
 	}
 	// The console comes before anything changes.
-	if !e.DryRun && !closableWithoutConsole(r) {
+	if !e.DryRun && !ClosableWithoutConsole(r) {
 		if e.Approver == nil {
 			return nil, warns, noConsole("closing feature " + name + " (" + string(r.State) +
 				"; only a merged feature with no newer commits closes unattended)")
@@ -162,7 +162,7 @@ func (e *Engine) FeatureClose(ctx context.Context, p workspace.Pair, name string
 }
 
 // closeFeature deletes one surveyed feature. It asks no console: sync's
-// auto-close calls it only for closableWithoutConsole reports. The caller
+// auto-close calls it only for ClosableWithoutConsole reports. The caller
 // records the ledger entry, with Refs = res.Deleted. A non-nil res with an
 // error means the refs were deleted but the gate PR couldn't be closed.
 func (e *Engine) closeFeature(ctx context.Context, pc *pairCtx, r FeatureReport) (*FeatureCloseResult, error) {

@@ -194,10 +194,10 @@ func (e *Engine) publishedHead(m feature.Meta) string {
 	return ""
 }
 
-// closableWithoutConsole is the one rule for unattended deletion: published,
+// ClosableWithoutConsole is the one rule for unattended deletion: published,
 // merged and unmoved, or merged with its branch already gone (nothing left
 // on it to lose).
-func closableWithoutConsole(r FeatureReport) bool {
+func ClosableWithoutConsole(r FeatureReport) bool {
 	return r.State == feature.StateMerged ||
 		(r.State == feature.StateBranchGone && r.PRState == "merged")
 }

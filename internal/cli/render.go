@@ -165,6 +165,9 @@ func human(r any) string {
 		if n := len(v.CancelledRuns); n > 0 {
 			fmt.Fprintf(&b, "  cancelled %d push-triggered workflow run(s) in the shadow repo\n", n)
 		}
+		for _, c := range v.Closed {
+			fmt.Fprintf(&b, "  closed merged feature %s (PR #%d)\n", c.Name, c.PublicPR)
+		}
 	case *engine.FeatureStartResult:
 		if v.Preview != nil {
 			previewText(&b, v.Preview)

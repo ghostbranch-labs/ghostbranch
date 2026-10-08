@@ -161,6 +161,8 @@ var warningDocs = map[WarningCode]Doc{
 		WhatToDo: "Run the command again; a feature whose PR state is unknown is never closed automatically."},
 	DriftUnknown: {Summary: "Ghostbranch couldn't check whether a feature still merges cleanly onto public main.",
 		WhatToDo: "Run ghostbranch gate <feature>; the gate is the authority on rebasing."},
+	FeatureNotClosed: {Summary: "Sync couldn't close a merged feature.",
+		WhatToDo: "Run ghostbranch feature show <name>, then feature close <name>."},
 }
 
 func intp(n int) *int { return &n }

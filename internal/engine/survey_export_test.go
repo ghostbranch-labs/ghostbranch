@@ -17,6 +17,3 @@ func (e *Engine) SurveyForTest(ctx context.Context, p workspace.Pair, names ...s
 	defer pc.unlock()
 	return e.survey(ctx, pc, names...)
 }
-
-// ClosableWithoutConsole exposes closableWithoutConsole to engine_test.
-var ClosableWithoutConsole = closableWithoutConsole

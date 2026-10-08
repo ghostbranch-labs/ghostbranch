@@ -3,6 +3,7 @@ package cli_test
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -685,6 +686,71 @@ func TestNextForLifecycleStates(t *testing.T) {
 	if len(n) != 3 || !reflect.DeepEqual(argv(n[0]), want[0].cmd) ||
 		n[0]["why"] != "shadow main is behind public main; sync it (fast-forward only); "+want[0].why || argv(n[1])[2] != "close" {
 		t.Fatalf("behind: next = %v", n)
+	}
+}
+
+// sync closes the merged feature itself and says so; its next names only
+// the features a person must close. --no-close closes nothing.
+func TestNextForSyncAttention(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	grantAgents(te)
+	prA := publishFeature(te, "feat-a")
+	te.forge.SetPRMerged("acme/widget", prA)
+	te.forge.SetPRMerged("acme/widget", publishFeature(te, "feat-b"))
+	te.shadowCommit("feat-b", map[string]string{"later.txt": "later\n"})
+	te.forge.ClosePR("acme/widget", publishFeature(te, "feat-c"))
+	want := []struct {
+		cmd []string
+		why string
+	}{
+		{[]string{"ghostbranch", "feature", "close", "feat-b", "--repo", "acme/widget"}, "its PR merged but there are newer commits; promote them or a person closes it"},
+		{[]string{"ghostbranch", "feature", "close", "feat-c", "--repo", "acme/widget"}, "its PR was closed without merging"},
+	}
+	check := func(env map[string]any, closed []string) {
+		t.Helper()
+		data, _ := env["data"].(map[string]any)
+		var names []string
+		cl, ok := data["closed"].([]any)
+		if !ok {
+			t.Fatalf("data.closed = %v", data["closed"])
+		}
+		for _, c := range cl {
+			names = append(names, c.(map[string]any)["name"].(string))
+		}
+		if !slices.Equal(names, closed) || data["active_features"] != float64(2) {
+			t.Fatalf("closed = %v, active = %v; want %v, 2", names, data["active_features"], closed)
+		}
+		n := nextOf(t, env)
+		if len(n) != len(want) {
+			t.Fatalf("next = %v", n)
+		}
+		for i, w := range want {
+			if !reflect.DeepEqual(argv(n[i]), w.cmd) || n[i]["needs_human"] != true || n[i]["why"] != w.why {
+				t.Errorf("next[%d] = %v, want %+v", i, n[i], w)
+			}
+		}
+	}
+	code, env := te.runJSON("sync", "--no-close")
+	if code != 0 {
+		t.Fatalf("sync --no-close: exit %d %v", code, env)
+	}
+	check(env, nil)
+	code, env = te.runJSON("sync")
+	if code != 0 {
+		t.Fatalf("sync: exit %d %v", code, env)
+	}
+	check(env, []string{"feat-a"})
+	if _, env := te.runJSON("feature", "show", "feat-a"); env["ok"] != false {
+		t.Fatalf("feat-a is still there: %v", env)
+	}
+	// The person sees what sync closed.
+	prD := publishFeature(te, "feat-d")
+	te.forge.SetPRMerged("acme/widget", prD)
+	code, out, _ := te.run("sync")
+	if line := fmt.Sprintf("closed merged feature feat-d (PR #%d)", prD); code != 0 || !strings.Contains(out, line) {
+		t.Fatalf("exit %d, output lacks %q:\n%s", code, line, out)
 	}
 }
 

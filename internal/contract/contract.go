@@ -235,12 +235,15 @@ const (
 	// DriftUnknown means the survey couldn't check whether a feature still
 	// merges cleanly onto public main.
 	DriftUnknown WarningCode = "DRIFT_UNKNOWN"
+	// FeatureNotClosed means sync's auto-close of a merged feature failed;
+	// the sync itself still succeeded.
+	FeatureNotClosed WarningCode = "FEATURE_NOT_CLOSED"
 )
 
 var warningCodes = []WarningCode{ConfigKeyIgnored, PublicNotPublic, GateNotRecorded, ChecksLimited, ActorUnknown,
 	WorkflowChanged, LargeFile, BinaryFile, WaiversUnreadable,
 	OverlayOutdated, RepoGuard, RepoGuardUnrewritable, SecretsUnlisted, SecretsMissing, PushTriggersOnSync,
-	ActionsMinutesBilled, ShadowBehind, AuditIncomplete, CINotCancelled, PRStateUnknown, DriftUnknown}
+	ActionsMinutesBilled, ShadowBehind, AuditIncomplete, CINotCancelled, PRStateUnknown, DriftUnknown, FeatureNotClosed}
 
 // AllWarnings lists every warning code, sorted.
 func AllWarnings() []WarningCode {

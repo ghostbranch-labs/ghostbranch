@@ -19,6 +19,9 @@
       }
     ],
     "cancelled_runs": [],
+    "closed": [],
+    "active_features": 0,
+    "attention": [],
     "preview": {
       "fingerprint": {
         "public_main": "178f8a91fcb0e6a374393202f9c61275c78d3dbb",

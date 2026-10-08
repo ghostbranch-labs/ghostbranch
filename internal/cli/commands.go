@@ -77,7 +77,9 @@ func (a *app) syncCmd() *cobra.Command {
 		Short: "Fast-forward shadow main to public main",
 		Long: `sync fast-forwards the shadow repo's main to public main. It never force-pushes: if shadow main has diverged it stops with exit 4.
 Its pushes start the shadow repo's push-triggered workflows, which re-test what public CI already tested,
-so it then cancels those runs (the token needs Actions write on the shadow repo); --no-cancel leaves them running.`,
+so it then cancels those runs (the token needs Actions write on the shadow repo); --no-cancel leaves them running.
+Last, it closes each feature whose public PR merged and whose branch hasn't moved since it was published,
+as feature close does; --no-close leaves them. It never closes a feature that needs a person.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			e, err := a.engine(cmd.Context())
@@ -93,6 +95,7 @@ so it then cancels those runs (the token needs Actions write on the shadow repo)
 		},
 	}
 	c.Flags().BoolVar(&o.NoCancel, "no-cancel", false, "don't cancel the workflow runs the sync's pushes start in the shadow repo")
+	c.Flags().BoolVar(&o.NoClose, "no-close", false, "don't close features whose public PR merged")
 	c.Flags().BoolVar(&yes, "yes", false, "accepted for consistency; sync never asks")
 	c.Flags().BoolVar(&a.dryRun, "plan", false, "preview exactly what would change, and change nothing (same as --dry-run)")
 	return c
