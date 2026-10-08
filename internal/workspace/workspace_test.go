@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -135,5 +136,49 @@ func TestResolve(t *testing.T) {
 	var ce *contract.Error
 	if _, err := ws.Resolve("acme/zzz", nil); !errors.As(err, &ce) || ce.Field != "repo" {
 		t.Fatalf("unknown --repo: %v", err)
+	}
+}
+
+func TestResolveDotMeansThisCheckout(t *testing.T) {
+	t.Parallel()
+	ws, _ := workspace.Open(t.TempDir(), "default")
+	a := workspace.Pair{Public: "acme/a", Shadow: "acme/a-shadow"}
+	b := workspace.Pair{Public: "acme/b", Shadow: "acme/b-shadow"}
+	ws.AddPair(a)
+	ws.AddPair(b)
+	if got, err := ws.Resolve(".", []string{"git@github.com:acme/b.git"}); err != nil || got != b {
+		t.Fatalf("--repo . by remote: %+v %v", got, err)
+	}
+
+	// One pair, but the checkout's remotes name another repo: say so rather
+	// than falling back to the workspace's only pair.
+	one, _ := workspace.Open(t.TempDir(), "default")
+	one.AddPair(a)
+	_, err := one.Resolve(".", []string{"https://github.com/acme/widget.git"})
+	var ce *contract.Error
+	if !errors.As(err, &ce) || ce.Code != contract.PairAmbiguous || ce.Field != "repo" ||
+		!strings.Contains(ce.Message, `the remotes of this checkout name no repo in workspace "default"`) ||
+		ce.Details["public"] != "acme/widget" {
+		t.Fatalf("--repo . with other remotes: %+v", err)
+	}
+}
+
+func TestResolveNotRegisteredNamesThePublicRepo(t *testing.T) {
+	t.Parallel()
+	ws, _ := workspace.Open(t.TempDir(), "default")
+	var ce *contract.Error
+	if _, err := ws.Resolve("acme/x", nil); !errors.As(err, &ce) || ce.Details["public"] != "acme/x" {
+		t.Fatalf("unknown --repo: %+v", err)
+	}
+	// Empty workspace inside a checkout: the first remote that parses names the repo.
+	_, err := ws.Resolve("", []string{"https://example.com/nope.git", "git@github.com:acme/widget.git"})
+	if !errors.As(err, &ce) || ce.Code != contract.PairAmbiguous || ce.Details["public"] != "acme/widget" {
+		t.Fatalf("empty workspace: %+v", err)
+	}
+	// Several pairs stay a candidates error.
+	ws.AddPair(workspace.Pair{Public: "acme/a", Shadow: "acme/a-shadow"})
+	ws.AddPair(workspace.Pair{Public: "acme/b", Shadow: "acme/b-shadow"})
+	if _, err := ws.Resolve("", nil); !errors.As(err, &ce) || ce.Details["candidates"] == nil || ce.Details["public"] != nil {
+		t.Fatalf("several: %+v", err)
 	}
 }

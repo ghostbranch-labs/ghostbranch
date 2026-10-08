@@ -26,8 +26,9 @@ func TestRenderListsEveryCodeFromTheRegistry(t *testing.T) {
 			t.Errorf("exit %d is missing from the exit table", x)
 		}
 	}
-	// 270: the history-modes section (sub-project 5a) added about 18 lines.
-	if n := strings.Count(out, "\n"); n > 270 {
+	// 270: the history-modes section (sub-project 5a) added about 18 lines;
+	// 271: the adopt sentence in *Set up a repo* (the setup steps were tightened to fit).
+	if n := strings.Count(out, "\n"); n > 271 {
 		t.Errorf("the guide is %d lines; keep it short (spec: about 150 plus the tables)", n)
 	}
 }
@@ -203,5 +204,18 @@ func TestGuideTeachesHistoryModes(t *testing.T) {
 	}
 	if strings.Contains(out, `--mode squash -m "<message>" --plan --json`) {
 		t.Error("squash must not be the step-4 command; preserve is the default")
+	}
+}
+
+func TestGuideTellsAgentsToAdoptAnExistingShadowRepo(t *testing.T) {
+	out := strings.Join(strings.Fields(guide.Render(contract.Registry())), " ")
+	for _, want := range []string{
+		"The shadow repo already exists (set up on another machine, or with a fresh `GHOSTBRANCH_HOME`)?",
+		"`ghostbranch init <public> --adopt --plan --json`",
+		"it only registers the pair on this machine and checks the shadow repo",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the guide lacks %q", want)
+		}
 	}
 }

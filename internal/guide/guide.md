@@ -48,14 +48,15 @@ main, green CI, and a leak scan of exactly what will be published.
 
 ## Set up a repo
 
-1. `ghostbranch init <public> --plan --json`, then `ghostbranch init <public> --json`. If the person
-   named a shadow repo, add `--shadow <owner/name>` to both.
-2. Exit 1 with `SHADOW_CREATE_DENIED` means the token may not create repos. **Stop**: show the person
-   `error.details.steps` and **ask them to do steps 1 and 2 of `error.details.steps`**: create the empty
-   private repo, and add it to the token. Never ask the person for a token with wider access.
-3. Wait. Once the person confirms both are done, run `ghostbranch init <public> --adopt --json` (the
-   command in `next`; its `needs_human` stands for their steps 1 and 2).
-4. `ghostbranch audit --json` and report to the person: repo guards the gate can't rewrite
+1. The shadow repo already exists (set up on another machine, or with a fresh `GHOSTBRANCH_HOME`)?
+   Run `ghostbranch init <public> --adopt --plan --json`, then without `--plan`: it only registers the
+   pair on this machine and checks the shadow repo. Otherwise `ghostbranch init <public> --plan --json`,
+   then without `--plan`. If the person named a shadow repo, add `--shadow <owner/name>` to both.
+2. Exit 1 with `SHADOW_CREATE_DENIED` means the token may not create repos. **Stop**: **ask the person
+   to do steps 1 and 2 of `error.details.steps`** (create the empty private repo, add it to the token).
+   Never ask the person for a token with wider access. Once the person confirms both are done, run
+   `ghostbranch init <public> --adopt --json` (in `next`).
+3. `ghostbranch audit --json` and report to the person: repo guards the gate can't rewrite
    (`REPO_GUARD_UNREWRITABLE`), secrets the tests need (`SECRETS_MISSING`, or the to-check list when
    `SECRETS_UNLISTED`), that the shadow repo's Actions minutes are billed, and, if they opt in to
    scheduled sync, whether they need a `GHOSTBRANCH_SYNC_TOKEN` secret (see *Keeping up with public*).
