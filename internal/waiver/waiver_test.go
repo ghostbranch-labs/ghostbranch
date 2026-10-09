@@ -153,3 +153,25 @@ func TestMatches(t *testing.T) {
 		}
 	}
 }
+
+// A waivers file from a newer Ghostbranch is refused, and Add leaves it be.
+func TestNewerWaiversFile(t *testing.T) {
+	t.Parallel()
+	s, dir := newStore(t)
+	path := filepath.Join(dir, "waivers.json")
+	raw := []byte(`{"schema_version":"0.99","waivers":[]}`)
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := s.Load()
+	if ce := contract.From(err); ce == nil || ce.Code != contract.UpgradeNeeded || ce.Details["record"] != "waivers" ||
+		ce.Details["record_version"] != "0.99" || ce.Details["supported"] != contract.SchemaVersion {
+		t.Fatalf("want UPGRADE_NEEDED for waivers, got %v", err)
+	}
+	if err := s.Add([]waiver.Waiver{mk("acme/widget", "f-000000000001", "fixture")}, now); contract.From(err).Code != contract.UpgradeNeeded {
+		t.Fatalf("add = %v", err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != string(raw) {
+		t.Fatalf("the newer file was changed: %s", got)
+	}
+}

@@ -105,6 +105,9 @@ func (s *Store) Load() ([]Grant, error) {
 	if err := json.Unmarshal(b, &f); err != nil {
 		return nil, fmt.Errorf("%s is not valid JSON; fix it or run `ghostbranch agents revoke --all`: %w", s.path, err)
 	}
+	if contract.Newer(f.SchemaVersion) {
+		return nil, contract.NewerRecord("grants", f.SchemaVersion)
+	}
 	return f.Grants, nil
 }
 

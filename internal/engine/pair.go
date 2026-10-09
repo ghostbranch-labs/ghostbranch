@@ -274,25 +274,54 @@ func (e *Engine) readConfig(ctx context.Context, pc *pairCtx) (config.Config, st
 	return cfg, O, warns, nil
 }
 
-// readMeta returns a feature's metadata and the metadata commit's SHA.
-func (e *Engine) readMeta(ctx context.Context, pc *pairCtx, name string) (feature.Meta, string, error) {
+// unreadableRecord marks a feature record that couldn't be parsed, so a
+// console close can still delete the feature.
+type unreadableRecord struct {
+	feature string
+	err     error
+}
+
+func (u *unreadableRecord) Error() string { return "feature " + u.feature + ": " + u.err.Error() }
+func (u *unreadableRecord) Unwrap() error { return u.err }
+
+// readMetaAny reads a feature's record and the metadata commit's SHA.
+// newer reports a record written by a newer Ghostbranch: what this binary
+// can read of it is returned, and callers that would write it must refuse
+// (readMeta does). A record that doesn't parse, or a metadata commit with
+// no record, is an error wrapping *unreadableRecord.
+func (e *Engine) readMetaAny(ctx context.Context, pc *pairCtx, name string) (feature.Meta, string, bool, error) {
 	sha, ok, err := pc.git.Resolve(ctx, metaRef(name))
 	if err != nil {
-		return feature.Meta{}, "", internalErr(err, "read feature metadata")
+		return feature.Meta{}, "", false, internalErr(err, "read feature metadata")
 	}
 	if !ok {
-		return feature.Meta{}, "", contract.New(contract.FeatureNotFound,
+		return feature.Meta{}, "", false, contract.New(contract.FeatureNotFound,
 			"no feature %q in %s; start one with ghostbranch feature start", name, pc.pair.Shadow).WithField("feature")
 	}
 	b, ok, err := pc.git.ShowFile(ctx, sha, feature.MetaFile)
-	if err != nil || !ok {
-		return feature.Meta{}, "", contract.Wrap(contract.Internal, err, "feature %q has no %s", name, feature.MetaFile)
+	if err != nil {
+		return feature.Meta{}, "", false, contract.Wrap(contract.Internal, err, "read feature %q's %s", name, feature.MetaFile)
+	}
+	if !ok {
+		return feature.Meta{}, "", false, internalErr(&unreadableRecord{feature: name, err: errors.New("the metadata commit has no " + feature.MetaFile)},
+			"read "+feature.MetaFile)
 	}
 	m, err := feature.Decode(b)
 	if err != nil {
-		return feature.Meta{}, "", internalErr(err, "parse "+feature.MetaFile)
+		return feature.Meta{}, "", false, internalErr(&unreadableRecord{feature: name, err: err}, "parse "+feature.MetaFile)
 	}
-	return m, sha, nil
+	return m, sha, contract.Newer(m.SchemaVersion), nil
+}
+
+// readMeta is readMetaAny for a caller that may write the record: a record
+// from a newer Ghostbranch is UPGRADE_NEEDED, as this binary would drop
+// what it doesn't know.
+func (e *Engine) readMeta(ctx context.Context, pc *pairCtx, name string) (feature.Meta, string, error) {
+	m, sha, newer, err := e.readMetaAny(ctx, pc, name)
+	if err == nil && newer {
+		err = contract.NewerRecord("feature", m.SchemaVersion).WithField("feature")
+	}
+	return m, sha, err
 }
 
 // saveMeta writes a metadata commit (parent "" for a new feature) without pushing it.

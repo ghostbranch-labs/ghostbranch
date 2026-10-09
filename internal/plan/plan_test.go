@@ -103,3 +103,18 @@ func TestLoadRejectsAPlanWithABadID(t *testing.T) {
 		t.Fatalf("want BAD_FLAG on field plan, got %v", err)
 	}
 }
+
+// A plan file from a newer Ghostbranch is refused, not half-read.
+func TestLoadRefusesAPlanFromANewerGhostbranch(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	const id = "20261008T120000Z-abcdef"
+	if err := os.WriteFile(filepath.Join(dir, id+".json"), []byte(`{"schema_version":"0.99","id":"`+id+`"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := plan.Load(dir, id)
+	if ce := contract.From(err); ce == nil || ce.Code != contract.UpgradeNeeded || ce.Details["record"] != "plan" ||
+		ce.Details["record_version"] != "0.99" || ce.Details["supported"] != contract.SchemaVersion {
+		t.Fatalf("want UPGRADE_NEEDED for the plan, got %v", err)
+	}
+}

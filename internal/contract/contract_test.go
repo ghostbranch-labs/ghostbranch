@@ -306,9 +306,20 @@ func TestSubProject5d1CodesAreRegistered(t *testing.T) {
 func TestNewer(t *testing.T) {
 	t.Parallel()
 	for v, want := range map[string]bool{"0.8": false, "0.7": false, "0.10": true, "0.9": true, "1.0": true,
-		"": false, "x": false, "0.8.1": false, "0.4": false} {
+		"": false, "x": false, "0.8.1": false, "0.4": false,
+		// A malformed version is never newer: it would lock users out.
+		"+1.0": false, "1.-5": false, "0.+9": false, " 0.9": false, "0.9 ": false, "1.": false, ".9": false} {
 		if got := contract.Newer(v); got != want {
 			t.Errorf("Newer(%q) = %v, want %v", v, got, want)
 		}
+	}
+}
+
+func TestNewerRecord(t *testing.T) {
+	t.Parallel()
+	ce := contract.NewerRecord("plan", "0.99")
+	if ce.Code != contract.UpgradeNeeded || ce.Details["record"] != "plan" || ce.Details["record_version"] != "0.99" ||
+		ce.Details["supported"] != contract.SchemaVersion || !strings.Contains(ce.Message, "plan record") {
+		t.Fatalf("NewerRecord = %+v", ce)
 	}
 }

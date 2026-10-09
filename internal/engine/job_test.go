@@ -185,6 +185,35 @@ func TestFinishIsStaleWhenTheRecordWasReplaced(t *testing.T) {
 	}
 }
 
+// An older binary that rewrote the pending record dropped its shadow_pr:
+// that record is no job, so the finish records nothing over it and says
+// to gate again.
+func TestFinishIsJobNotFoundWhenAnOlderBinaryDroppedTheShadowPR(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.startFeature("feat-x", map[string]string{"feature.txt": "x\n"})
+	var edited string
+	h.forge.Checks = func(r, s string) []forge.Check {
+		if g := h.meta("feat-x").Gate; g.Pending() {
+			h.editRemoteMeta("feat-x", func(m *feature.Meta) { m.Gate.ShadowPR = 0 })
+			edited = h.shadowRefs()["refs/ghostbranch/features/feat-x"]
+		}
+		return passing(r, s)
+	}
+	_, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
+	ce := wantCode(t, err, contract.JobNotFound)
+	if ce.Details["feature"] != "feat-x" {
+		t.Fatalf("details = %+v", ce.Details)
+	}
+	if edited == "" || h.shadowRefs()["refs/ghostbranch/features/feat-x"] != edited {
+		t.Fatal("the finish wrote over the record")
+	}
+	if g := h.meta("feat-x").Gate; g.Checks != feature.ChecksPending || g.ShadowPR != 0 {
+		t.Fatalf("record = %+v", g)
+	}
+}
+
 // Review Focus 5, the second half.
 func TestFinishGivesUpOnABusyLock(t *testing.T) {
 	t.Parallel()

@@ -293,9 +293,14 @@ type Warning struct {
 // than the one this binary writes. A malformed or empty v is not newer:
 // records from before versions existed stay readable.
 func Newer(v string) bool {
+	// Only ASCII digits: Atoi alone takes a sign, so "+1.0" would be newer
+	// and lock users out.
+	digits := func(s string) bool {
+		return s != "" && strings.Trim(s, "0123456789") == ""
+	}
 	parse := func(s string) (int, int, bool) {
 		a, b, ok := strings.Cut(s, ".")
-		if !ok || strings.Contains(b, ".") {
+		if !ok || !digits(a) || !digits(b) {
 			return 0, 0, false
 		}
 		x, err1 := strconv.Atoi(a)
@@ -305,4 +310,13 @@ func Newer(v string) bool {
 	x, y, ok := parse(v)
 	cx, cy, _ := parse(SchemaVersion)
 	return ok && (x > cx || (x == cx && y > cy))
+}
+
+// NewerRecord refuses to change a record written by a newer Ghostbranch.
+// kind names the record: feature, plan, grants or waivers.
+func NewerRecord(kind, version string) *Error {
+	return New(UpgradeNeeded,
+		"this %s record was written by a newer Ghostbranch (schema %s; this binary knows %s); upgrade ghostbranch before changing it",
+		kind, version, SchemaVersion).
+		WithDetails(map[string]any{"record": kind, "record_version": version, "supported": SchemaVersion})
 }

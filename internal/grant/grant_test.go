@@ -170,3 +170,28 @@ func TestNewID(t *testing.T) {
 		t.Fatalf("%q %v", id, err)
 	}
 }
+
+// A grants file from a newer Ghostbranch is refused: never "no grant", and
+// never overwritten by Put.
+func TestNewerGrantsFile(t *testing.T) {
+	t.Parallel()
+	s, path := store(t)
+	raw := []byte(`{"schema_version":"0.99","grants":[]}`)
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := s.Load()
+	if ce := contract.From(err); ce == nil || ce.Code != contract.UpgradeNeeded || ce.Details["record"] != "grants" ||
+		ce.Details["record_version"] != "0.99" || ce.Details["supported"] != contract.SchemaVersion {
+		t.Fatalf("want UPGRADE_NEEDED for grants, got %v", err)
+	}
+	if _, ok, err := s.Valid("acme/widget", "acme/widget-shadow", t0); contract.From(err).Code != contract.UpgradeNeeded || ok {
+		t.Fatalf("valid = %v %v", ok, err)
+	}
+	if _, err := s.Put(mk("g-1", "acme/widget", "acme/widget-shadow", time.Hour), t0); contract.From(err).Code != contract.UpgradeNeeded {
+		t.Fatalf("put = %v", err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != string(raw) {
+		t.Fatalf("the newer file was changed: %s", got)
+	}
+}

@@ -26,6 +26,10 @@ type FeatureReport struct {
 	PlanID    string        `json:"plan_id"`
 	Moved     bool          `json:"moved"` // since publish; false when unpublished; meaningless when the branch is gone (branch_gone reads only PRState)
 	Abandoned bool          `json:"abandoned"`
+	// unreadable is why the record couldn't be read as a whole: "" when
+	// it could, "newer" (from a newer Ghostbranch) or "corrupt". Such a
+	// feature never closes unattended.
+	unreadable string
 }
 
 // Drift is whether a feature still merges cleanly onto public main.
@@ -111,9 +115,15 @@ func (e *Engine) survey(ctx context.Context, pc *pairCtx, names ...string) ([]Fe
 
 func (e *Engine) surveyOne(ctx context.Context, pc *pairCtx, name, pm, O string) (FeatureReport, []contract.Warning, error) {
 	var warns []contract.Warning
-	m, _, err := e.readMeta(ctx, pc, name)
+	m, _, newer, err := e.readMetaAny(ctx, pc, name)
 	if err != nil {
 		return FeatureReport{}, nil, err
+	}
+	if newer {
+		warns = append(warns, contract.Warning{Code: contract.RecordNewer,
+			Message: fmt.Sprintf("feature %s's record was written by a newer Ghostbranch (schema %s); it is shown as far as this binary can read it, and won't be changed",
+				name, m.SchemaVersion),
+			Details: map[string]any{"feature": name, "record_version": m.SchemaVersion}})
 	}
 	head, exists, err := pc.git.Resolve(ctx, shadowRef(m.Branch))
 	if err != nil {
@@ -124,6 +134,9 @@ func (e *Engine) surveyOne(ctx context.Context, pc *pairCtx, name, pm, O string)
 	}
 	r := FeatureReport{Name: name, Branch: m.Branch, Head: head, Base: m.Base, Abandoned: m.Abandoned,
 		Drift: Drift{Status: driftNA, Files: []string{}}}
+	if newer {
+		r.unreadable = unreadableNewer
+	}
 	if g := m.Gate; g != nil {
 		r.Gate = &GateSummary{Checks: g.Checks, Leak: g.Leak, ScannedAs: g.ScannedAs, At: g.At,
 			Fresh: exists && g.FreshFor(head, pm, O)}
@@ -200,10 +213,16 @@ func (e *Engine) publishedHead(m feature.Meta) string {
 	return ""
 }
 
+// Why a FeatureReport's record couldn't be read as a whole.
+const (
+	unreadableNewer   = "newer"
+	unreadableCorrupt = "corrupt"
+)
+
 // ClosableWithoutConsole is the one rule for unattended deletion: published,
 // merged and unmoved, or merged with its branch already gone (nothing left
-// on it to lose).
+// on it to lose). A record this binary can't read as a whole never is.
 func ClosableWithoutConsole(r FeatureReport) bool {
-	return r.State == feature.StateMerged ||
-		(r.State == feature.StateBranchGone && r.PRState == "merged")
+	return r.unreadable == "" && (r.State == feature.StateMerged ||
+		(r.State == feature.StateBranchGone && r.PRState == "merged"))
 }

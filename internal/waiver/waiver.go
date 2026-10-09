@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
@@ -68,6 +69,9 @@ func (s *Store) Load() ([]Waiver, error) {
 	var f file
 	if err := json.Unmarshal(b, &f); err != nil {
 		return nil, fmt.Errorf("%s is not valid JSON; fix it or run `ghostbranch waivers revoke --all`: %w", s.path, err)
+	}
+	if contract.Newer(f.SchemaVersion) {
+		return nil, contract.NewerRecord("waivers", f.SchemaVersion)
 	}
 	return f.Waivers, nil
 }
