@@ -135,15 +135,7 @@ func (e *Engine) FeatureClose(ctx context.Context, p workspace.Pair, name string
 	}
 	rs, sw, err := e.survey(ctx, pc, name)
 	warns = addWarnings(warns, sw...)
-	var bad *unreadableRecord
-	if errors.As(err, &bad) && bad.feature == name {
-		// The record can't be read: close what the refs say, at the console.
-		r, err := e.unreadableReport(ctx, pc, name)
-		if err != nil {
-			return nil, warns, err
-		}
-		rs = []FeatureReport{r}
-	} else if err != nil {
+	if err != nil {
 		return nil, warns, err
 	}
 	if len(rs) != 1 {
@@ -151,6 +143,17 @@ func (e *Engine) FeatureClose(ctx context.Context, p workspace.Pair, name string
 			"no feature %q in %s; list them with ghostbranch feature list --all", name, pc.pair.Shadow).WithField("feature")
 	}
 	r := rs[0]
+	if r.err != nil {
+		var bad *unreadableRecord
+		if !errors.As(r.err, &bad) {
+			return nil, warns, r.err
+		}
+		// The record doesn't parse: close what the refs say, at the console.
+		// The branch is read again, so the delete is leased on a head that was read.
+		if r, err = e.unreadableReport(ctx, pc, name); err != nil {
+			return nil, warns, err
+		}
+	}
 	t, err := e.closeTargets(ctx, pc, r)
 	if err != nil {
 		return nil, warns, err
@@ -197,6 +200,20 @@ func (e *Engine) unreadableReport(ctx context.Context, pc *pairCtx, name string)
 		r.Head = head
 	}
 	return r, nil
+}
+
+// failedReport stands in for a feature the survey couldn't read: its record
+// is corrupt, or reading it or its refs failed. It is unreadable, so it never
+// closes unattended, and it carries the error. Its head is the mirror's
+// branch named for the feature, "" when that can't be read either.
+func (e *Engine) failedReport(ctx context.Context, pc *pairCtx, name string, cause error) FeatureReport {
+	r, _ := e.unreadableReport(ctx, pc, name)
+	var bad *unreadableRecord
+	if !errors.As(cause, &bad) {
+		r.unreadable = unreadableError
+	}
+	r.Error, r.err = contract.From(cause).Message, cause
+	return r
 }
 
 // unreadableWhy says why r's record couldn't be read as a whole.

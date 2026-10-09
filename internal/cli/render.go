@@ -437,6 +437,11 @@ func featureTable(b *strings.Builder, rs []engine.FeatureReport) {
 		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", oneLine(r.Name), r.State, oneLine(r.Drift.Status), gateCell(r.Gate), prCell(r))
 	}
 	_ = tw.Flush()
+	for _, r := range rs {
+		if r.Error != "" {
+			fmt.Fprintf(b, "%s couldn't be read: %s\n", oneLine(r.Name), oneLine(r.Error))
+		}
+	}
 }
 
 // gateCell is a feature's last gate in a word: passed, a failed check

@@ -241,7 +241,9 @@ func (e *Engine) closeMerged(ctx context.Context, pc *pairCtx, p *workspace.Pair
 			res.ActiveFeatures++
 		}
 		switch r.State {
-		case feature.StateMergedMoved, feature.StatePRClosed, feature.StateBranchGone:
+		// A merged feature that isn't closable has a record from a newer
+		// Ghostbranch: RECORD_NEWER says why it waits for a person.
+		case feature.StateMergedMoved, feature.StatePRClosed, feature.StateBranchGone, feature.StateUnreadable, feature.StateMerged:
 			if !closable {
 				res.Attention = append(res.Attention, r)
 			}

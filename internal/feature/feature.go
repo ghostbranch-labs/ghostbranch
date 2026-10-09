@@ -125,8 +125,8 @@ const (
 	StatePRClosed    State = "pr_closed"
 	StateBranchGone  State = "branch_gone"
 	StateAbandoned   State = "abandoned"
-	// StateUnreadable is a feature whose record couldn't be read; only close
-	// results use it.
+	// StateUnreadable is a feature whose record couldn't be read: the survey
+	// reports it with an error, and only a console close removes it.
 	StateUnreadable State = "unreadable"
 )
 

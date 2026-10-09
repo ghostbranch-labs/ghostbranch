@@ -60,7 +60,7 @@
     "surveyed": { "description": "whether sync surveyed the features: false with --no-close or when the survey failed, and then active_features and attention say nothing", "type": "boolean" },
     "active_features": { "description": "features not abandoned and not closable by sync; 0 unless surveyed", "type": "integer", "minimum": 0 },
     "attention": {
-      "description": "merged_moved, pr_closed and branch_gone features sync won't close: a person must look at them",
+      "description": "merged_moved, pr_closed, branch_gone and unreadable features, and merged features whose record is newer, which sync won't close: a person must look at them",
       "type": "array",
       "items": { "$ref": "feature-report.schema.json" }
     },

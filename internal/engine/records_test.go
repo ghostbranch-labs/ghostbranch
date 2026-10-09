@@ -156,6 +156,38 @@ func TestConsoleClosesACorruptRecord(t *testing.T) {
 	}
 }
 
+// One feature whose record can't be read is listed as unreadable, with the
+// error, and the others are still surveyed.
+func TestAnUnreadableRecordDoesNotHideTheRest(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.startFeature("feat-x", map[string]string{"x.txt": "x\n"})
+	head := h.startFeature("feat-bad", map[string]string{"bad.txt": "b\n"})
+	h.corruptMeta("feat-bad")
+	res, _ := h.status() // no warnings; checks status.schema.json
+	if len(res.Features) != 2 || res.Features[1].Name != "feat-x" || res.Features[1].State != feature.StateDraft || res.Features[1].Error != "" {
+		t.Fatalf("features = %+v", res.Features)
+	}
+	bad := res.Features[0]
+	if bad.Name != "feat-bad" || bad.State != feature.StateUnreadable || bad.Head != head ||
+		!strings.Contains(bad.Error, "feat-bad") || engine.ClosableWithoutConsole(bad) {
+		t.Fatalf("feat-bad = %+v", bad)
+	}
+	list, _, err := h.eng.FeatureList(h.ctx, h.pair, false)
+	if err != nil || len(list.Features) != 2 {
+		t.Fatalf("feature list = %+v %v", list, err)
+	}
+	validateResult(t, "feature-list.schema.json", list)
+	_, _, err = h.eng.FeatureShow(h.ctx, h.pair, "feat-bad")
+	if ce := wantCode(t, err, contract.Internal); !strings.Contains(ce.Message, "feat-bad") {
+		t.Fatalf("feature show feat-bad = %v", err)
+	}
+	if _, _, err := h.eng.FeatureShow(h.ctx, h.pair, "feat-x"); err != nil {
+		t.Fatalf("feature show feat-x: %v", err)
+	}
+}
+
 // A merged, unmoved feature closes unattended, but not when its record is
 // newer than this binary: what it can't read may matter.
 func TestConsoleClosesANewerRecord(t *testing.T) {

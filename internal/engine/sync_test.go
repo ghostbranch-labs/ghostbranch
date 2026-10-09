@@ -1128,7 +1128,7 @@ func TestSyncRecordsTheDeletesWhenTheGatePRWontClose(t *testing.T) {
 }
 
 // corruptMeta points name's metadata ref in the shadow repo at a commit
-// whose feature.json doesn't parse, so every survey of the pair fails.
+// whose feature.json doesn't parse: the survey reports it unreadable.
 func (h *harness) corruptMeta(name string) {
 	h.t.Helper()
 	sh := h.shadowGit()
@@ -1141,42 +1141,40 @@ func (h *harness) corruptMeta(name string) {
 	}
 }
 
-// A survey that fails never fails the sync: it closes nothing and says so
-// in a FEATURE_NOT_CLOSED warning with no feature. --no-close never surveys.
-func TestSyncSurveyFailureIsAWarning(t *testing.T) {
+// A corrupt record doesn't stop sync's closes: the merged feature closes,
+// and the unreadable one waits for a person. --no-close never surveys.
+func TestSyncClosesBesideAnUnreadableRecord(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	h.init()
-	pr, _ := h.publish("feat-x")
+	pr, id := h.publish("feat-x")
 	h.forge.SetPRMerged(publicName, pr)
+	want := h.featureRefs("feat-x", id)
 	h.corruptMeta("feat-bad")
-	next := testutil.Commit(t, h.pubGit, "main", "upstream", map[string]string{"up.txt": "1\n"})
-	before := h.shadowRefs()
-	delete(before, "refs/heads/main")
-
 	res, warns := h.syncOK(engine.SyncOptions{})
-	if res.ShadowMainAfter != next || res.Surveyed || len(res.Closed) != 0 || len(res.Attention) != 0 || res.ActiveFeatures != 0 {
+	if !res.Surveyed || res.ActiveFeatures != 1 || len(res.Closed) != 1 || res.Closed[0].Name != "feat-x" ||
+		!reflect.DeepEqual(res.Closed[0].Deleted, want) {
 		t.Fatalf("sync = %+v", res)
 	}
-	if len(warns) != 1 || warns[0].Code != contract.FeatureNotClosed ||
-		!strings.HasPrefix(warns[0].Message, "couldn't survey features, so nothing was closed: INTERNAL: ") ||
-		warns[0].Details["error_code"] != string(contract.Internal) || warns[0].Details["feature"] != nil {
+	if len(res.Attention) != 1 || res.Attention[0].Name != "feat-bad" || res.Attention[0].State != feature.StateUnreadable ||
+		res.Attention[0].Error == "" {
+		t.Fatalf("attention = %+v", res.Attention)
+	}
+	if len(warns) != 0 {
 		t.Fatalf("warnings = %+v", warns)
 	}
-	after := h.shadowRefs()
-	delete(after, "refs/heads/main")
-	if !reflect.DeepEqual(after, before) || len(h.closeEntries()) != 0 {
-		t.Fatal("sync deleted something without a survey")
+	if _, ok := h.shadowRefs()["refs/ghostbranch/features/feat-bad"]; !ok {
+		t.Fatal("sync deleted the unreadable record")
 	}
-
-	_, warns = h.syncOK(engine.SyncOptions{NoClose: true})
-	if len(warns) != 0 {
-		t.Fatalf("--no-close surveyed: %+v", warns)
+	res, warns = h.syncOK(engine.SyncOptions{NoClose: true})
+	if res.Surveyed || len(warns) != 0 {
+		t.Fatalf("--no-close surveyed: %+v %+v", res, warns)
 	}
 }
 
-// A failed survey doesn't mask a diverged branch: still SYNC_DIVERGED.
-func TestSyncSurveyFailureKeepsSyncDiverged(t *testing.T) {
+// An unreadable record doesn't mask a diverged branch: still SYNC_DIVERGED,
+// and the record is in attention.
+func TestAnUnreadableRecordKeepsSyncDiverged(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	h.init()
@@ -1185,8 +1183,11 @@ func TestSyncSurveyFailureKeepsSyncDiverged(t *testing.T) {
 	testutil.Commit(t, h.shadowGit(), "main", "rogue", map[string]string{"rogue.txt": "x\n"})
 	res, warns, err := h.eng.Sync(h.ctx, h.pair, engine.SyncOptions{})
 	_ = wantCode(t, err, contract.SyncDiverged)
-	if res == nil || res.Action != "diverged" || len(warns) != 1 || warns[0].Code != contract.FeatureNotClosed {
+	if res == nil || res.Action != "diverged" || len(warns) != 0 {
 		t.Fatalf("sync = %+v %+v", res, warns)
+	}
+	if len(res.Attention) != 1 || res.Attention[0].Name != "feat-bad" || res.Attention[0].State != feature.StateUnreadable {
+		t.Fatalf("attention = %+v", res.Attention)
 	}
 }
 
@@ -1327,6 +1328,10 @@ func TestSyncNeverClosesANewerRecord(t *testing.T) {
 	res, warns := h.syncOK(engine.SyncOptions{})
 	if len(res.Closed) != 0 || warning(warns, contract.RecordNewer) == nil {
 		t.Fatalf("closed = %+v, warnings = %+v", res.Closed, warns)
+	}
+	// Sync's output points at it: attention lists it, and RECORD_NEWER says why.
+	if len(res.Attention) != 1 || res.Attention[0].Name != "feat-x" || res.Attention[0].State != feature.StateMerged {
+		t.Fatalf("attention = %+v", res.Attention)
 	}
 	if !reflect.DeepEqual(h.shadowRefs(), before) || len(h.closeEntries()) != 0 {
 		t.Fatal("sync deleted something of a newer record")
