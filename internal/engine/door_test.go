@@ -97,6 +97,13 @@ func TestOnlyPromoteAndApplyReachThePublicRepo(t *testing.T) {
 
 	_, _, err = h.eng.Gate(h.ctx, h.pair, "good")
 	run("gate", err, "")
+	jres, _, err := h.eng.GateDetached(h.ctx, h.pair, "good")
+	run("gate --detach", err, "")
+	if jres.Job == nil {
+		t.Fatalf("gate --detach recorded no job: %+v", jres)
+	}
+	_, _, err = h.eng.Wait(h.ctx, h.pair, *jres.Job, engine.WaitOptions{})
+	run("wait", err, "")
 	_, _, err = h.eng.Gate(h.ctx, h.pair, "leaky")
 	run("gate leaky", err, contract.LeakFound)
 	_, _, err = h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "leaky", Mode: "squash", Message: "m", Yes: true})
@@ -277,6 +284,8 @@ func TestAShadowRepoTurnedPublicStopsEverything(t *testing.T) {
 		_, _, steps["sync"] = h.eng.Sync(h.ctx, h.pair, engine.SyncOptions{})
 		_, _, steps["feature start"] = h.eng.FeatureStart(h.ctx, h.pair, "other")
 		_, _, steps["gate"] = h.eng.Gate(h.ctx, h.pair, "good")
+		_, _, steps["gate --detach"] = h.eng.GateDetached(h.ctx, h.pair, "good")
+		_, _, steps["wait"] = h.eng.Wait(h.ctx, h.pair, "gate/good/0123456789ab", engine.WaitOptions{})
 		_, _, steps["promote"] = h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "good", Mode: "squash", Message: "m", Yes: true})
 		_, _, steps["apply"] = h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: res.Plan.ID, Yes: true})
 		_, _, steps["status"] = h.eng.Status(h.ctx, h.pair)

@@ -133,13 +133,33 @@ func (e *Engine) runGate(ctx context.Context, p workspace.Pair, name string, det
 			}
 		})
 	}()
+	defer func() { err = interrupted(ctx, res, name, err) }()
 	pc, err := e.open(ctx, "gate", p, true)
 	if err != nil {
 		return nil, nil, err
 	}
 	defer pc.unlock()
-	// A standalone gate scans for the repo's promote.default_mode.
-	res, w, err := e.gate(ctx, pc, name, "", gateHow{detach: detach, release: !detach})
+	// A pending job for exactly these inputs is reused, not gated again. A
+	// dry run never reuses one: finishing it would wait on CI and write.
+	var pending *feature.Gate
+	if !e.DryRun {
+		if pending, err = e.pendingFor(ctx, pc, name, ""); err != nil {
+			return nil, nil, err
+		}
+	}
+	var w []contract.Warning
+	if pending != nil {
+		if res, err = e.resultFromRecord(ctx, pc, name, *pending); err != nil {
+			return nil, nil, err
+		}
+		if !detach {
+			pc.release()
+			res, w, err = e.finish(ctx, pc, name, res, *pending, waitOpts{})
+		}
+	} else {
+		// A standalone gate scans for the repo's promote.default_mode.
+		res, w, err = e.gate(ctx, pc, name, "", gateHow{detach: detach, release: !detach})
+	}
 	return res, addWarnings(e.behind(ctx, pc), w...), err
 }
 

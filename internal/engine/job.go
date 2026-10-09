@@ -21,6 +21,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
+	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
@@ -171,12 +172,7 @@ func (e *Engine) recordFinish(ctx context.Context, pc *pairCtx, name string, res
 			return nil, contract.New(contract.JobNotFound, "feature %q has no gate record, so the job %s is gone; gate again", name, job).
 				WithDetails(map[string]any{"job": job})
 		case !ref.matches(m.Gate):
-			current := ""
-			if m.Gate.Pending() {
-				current = jobID(name, m.Gate.Candidate)
-			}
-			return nil, contract.New(contract.JobStale, "a newer gate replaced the job %s; its result was not recorded", job).
-				WithDetails(map[string]any{"job": job, "current_job": current})
+			return nil, staleErr(name, job, m.Gate, "; its result was not recorded")
 		case !m.Gate.Pending():
 			// Another waiter recorded this job first: its record stands.
 			res.Checks, res.FailedChecks = m.Gate.Checks, m.Gate.FailedChecks
@@ -197,4 +193,155 @@ func (e *Engine) recordFinish(ctx context.Context, pc *pairCtx, name string, res
 			return nil, err
 		}
 	}
+}
+
+// staleErr is JOB_STALE for job, which the record g replaced; current_job
+// names g when it is still pending, so the agent can wait on that instead.
+func staleErr(name, job string, g *feature.Gate, what string) error {
+	current := ""
+	if g.Pending() {
+		current = jobID(name, g.Candidate)
+	}
+	return contract.New(contract.JobStale, "a newer gate replaced the job %s%s", job, what).
+		WithDetails(map[string]any{"job": job, "current_job": current})
+}
+
+// interrupted turns an error a cancel caused into INTERRUPTED. A pending
+// job in res is named, so wait can finish it; otherwise the feature is.
+func interrupted(ctx context.Context, res *GateResult, name string, err error) error {
+	if err == nil || ctx.Err() == nil || contract.From(err).Code == contract.Interrupted {
+		return err
+	}
+	job := ""
+	if res != nil && res.Job != nil && res.Checks == feature.ChecksPending {
+		job = *res.Job
+	}
+	return interruptedErr(job, name)
+}
+
+// resultFromRecord is the GateResult a gate record stands for, as wait and
+// a reused job report it. RepoGuards stays nil: the record doesn't keep it.
+func (e *Engine) resultFromRecord(ctx context.Context, pc *pairCtx, name string, g feature.Gate) (*GateResult, error) {
+	cfg, _, _, err := e.readConfig(ctx, pc)
+	if err != nil {
+		return nil, err
+	}
+	infos, err := gateCommitInfos(ctx, pc.git, cfg, g.PublicMain, g.Commits)
+	if err != nil {
+		return nil, err
+	}
+	failed := g.FailedChecks
+	if failed == nil {
+		failed = []string{}
+	}
+	res := &GateResult{Feature: name, FeatureHead: g.FeatureHead, PublicMain: g.PublicMain, Overlay: g.Overlay,
+		Candidate: g.Candidate, PublishedTree: g.PublishedTree, ScannedAs: g.ScannedAs, Commits: infos,
+		Checks: g.Checks, FailedChecks: failed, Leak: g.Leak, Findings: []leak.Finding{}, Waived: []WaivedFinding{},
+		mapping: g.Commits}
+	if g.ShadowPR != 0 {
+		pr, job := g.ShadowPR, jobID(name, g.Candidate)
+		res.ShadowPR, res.Job = &pr, &job
+	}
+	return res, nil
+}
+
+// pendingFor returns the feature's gate record when it is a pending job
+// for exactly the inputs a gate in mode would run on now: the feature
+// head, public main, the overlay, the scanned mode, and the candidate
+// still on the gate branch. Otherwise it returns nil, and the gate runs.
+func (e *Engine) pendingFor(ctx context.Context, pc *pairCtx, name, mode string) (*feature.Gate, error) {
+	g := pc.git
+	cfg, O, _, err := e.readConfig(ctx, pc)
+	if err != nil {
+		return nil, err
+	}
+	m, _, err := e.readMeta(ctx, pc, name)
+	if err != nil {
+		return nil, err
+	}
+	if !m.Gate.Pending() {
+		return nil, nil
+	}
+	head, ok, err := g.Resolve(ctx, shadowRef(m.Branch))
+	if err != nil {
+		return nil, internalErr(err, "read the feature branch")
+	}
+	if !ok {
+		return nil, nil // the gate reports the missing branch
+	}
+	pm, err := g.MustResolve(ctx, publicRef("main"))
+	if err != nil {
+		return nil, internalErr(err, "read public main")
+	}
+	tip, _, err := g.Resolve(ctx, shadowRef(gateBranch(name)))
+	if err != nil {
+		return nil, internalErr(err, "read the gate branch")
+	}
+	if mode == "" {
+		mode = cfg.Promote.DefaultMode
+	}
+	if m.Gate.FreshFor(head, pm, O) && m.Gate.ScannedAs == mode && tip == m.Gate.Candidate {
+		return m.Gate, nil
+	}
+	return nil, nil
+}
+
+// WaitOptions are wait's flags.
+type WaitOptions struct {
+	// Timeout returns the job still pending after this long; zero waits
+	// until CI settles or the gate's own CI budget runs out.
+	Timeout time.Duration
+	// Events receives the job's events as they happen; nil for none.
+	Events func(JobEvent)
+}
+
+// Wait finishes a gate job: it waits on CI for the pending gate the job
+// names and records the outcome over it. A job already finished returns
+// its recorded result at once, writing nothing. It never touches the
+// public repo.
+func (e *Engine) Wait(ctx context.Context, p workspace.Pair, job string, opt WaitOptions) (res *GateResult, warns []contract.Warning, err error) {
+	var ref JobRef
+	defer func() {
+		summary := ""
+		if res != nil {
+			summary = "checks " + res.Checks
+		}
+		e.record("wait", &p, ref.Feature, "", summary, err)
+	}()
+	defer func() { err = interrupted(ctx, res, ref.Feature, err) }()
+	if ref, err = ParseJob(job); err != nil {
+		return nil, nil, err
+	}
+	pc, err := e.open(ctx, "wait", p, false)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer pc.unlock()
+	m, _, err := e.readMeta(ctx, pc, ref.Feature)
+	if err != nil {
+		return nil, nil, err
+	}
+	switch {
+	case m.Gate == nil || (!m.Gate.Pending() && m.Gate.ShadowPR == 0):
+		return nil, nil, contract.New(contract.JobNotFound,
+			"feature %q has no gate job to wait on: it was never gated, or its last gate stopped before CI; gate it", ref.Feature).
+			WithField("job").WithDetails(map[string]any{"feature": ref.Feature})
+	case !ref.matches(m.Gate):
+		return nil, nil, staleErr(ref.Feature, job, m.Gate, "")
+	}
+	if res, err = e.resultFromRecord(ctx, pc, ref.Feature, *m.Gate); err != nil {
+		return nil, nil, err
+	}
+	if !m.Gate.Pending() {
+		var cfg config.Config
+		if cfg, _, warns, err = e.readConfig(ctx, pc); err != nil {
+			return res, warns, err
+		}
+		return res, warns, outcomeErr(checkOutcome{status: res.Checks, failed: res.FailedChecks}, m.Gate.ShadowPR, cfg.Gate, pc.pair.Shadow)
+	}
+	var deadline time.Time
+	if opt.Timeout > 0 {
+		deadline = e.Now().Add(opt.Timeout)
+	}
+	return e.finish(ctx, pc, ref.Feature, res, *m.Gate, waitOpts{deadline: deadline, emit: opt.Events})
 }
