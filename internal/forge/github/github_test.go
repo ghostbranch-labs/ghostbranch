@@ -541,3 +541,49 @@ func TestClosePullRequest(t *testing.T) {
 		t.Fatalf("403: %v", err)
 	}
 }
+
+// Every call maps a plain 403 to forge.ErrForbidden; a rate-limit 403 is
+// transient, never forbidden.
+func TestA403IsForbiddenOnEveryCall(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	deny := func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"message":"Resource not accessible by personal access token"}`, http.StatusForbidden)
+	}
+	for _, p := range []string{"GET /repos/acme/s", "PATCH /repos/acme/s", "GET /repos/acme/s/pulls", "POST /repos/acme/s/pulls",
+		"GET /repos/acme/s/pulls/1", "GET /user", "GET /repos/acme/s/commits/abc/status"} {
+		mux.HandleFunc(p, deny)
+	}
+	// Check runs are readable, so ListChecks reaches the status listing.
+	mux.HandleFunc("GET /repos/acme/s/commits/abc/check-runs", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{"total_count": 0, "check_runs": []any{}})
+	})
+	c := newClient(t, mux)
+	ctx := context.Background()
+	for name, call := range map[string]func() error{
+		"GetRepo":          func() error { _, err := c.GetRepo(ctx, "acme/s"); return err },
+		"SetDefaultBranch": func() error { return c.SetDefaultBranch(ctx, "acme/s", "main") },
+		"FindOpenPR":       func() error { _, err := c.FindOpenPR(ctx, "acme/s", "feat", "main"); return err },
+		"CreatePR": func() error {
+			_, err := c.CreatePR(ctx, "acme/s", forge.NewPR{Title: "t", Head: "feat", Base: "main"})
+			return err
+		},
+		"GetPR":       func() error { _, err := c.GetPR(ctx, "acme/s", 1); return err },
+		"CurrentUser": func() error { _, err := c.CurrentUser(ctx); return err },
+		"ListChecks":  func() error { _, err := c.ListChecks(ctx, "acme/s", "abc"); return err },
+	} {
+		if err := call(); !errors.Is(err, forge.ErrForbidden) {
+			t.Errorf("%s: %v, want ErrForbidden", name, err)
+		}
+	}
+	limited := http.NewServeMux()
+	limited.HandleFunc("GET /repos/acme/s", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-RateLimit-Limit", "60")
+		w.Header().Set("X-RateLimit-Remaining", "0")
+		w.Header().Set("X-RateLimit-Reset", "4102444800")
+		http.Error(w, `{"message":"API rate limit exceeded"}`, http.StatusForbidden)
+	})
+	if _, err := newClient(t, limited).GetRepo(ctx, "acme/s"); errors.Is(err, forge.ErrForbidden) || !errors.Is(err, forge.ErrTransient) {
+		t.Fatalf("rate limit: %v, want transient and not forbidden", err)
+	}
+}

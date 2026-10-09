@@ -192,3 +192,30 @@ func TestFakeCancelAndForceCancel(t *testing.T) {
 		t.Fatalf("forbidden: %v", err)
 	}
 }
+
+// GitHub answers 409 to a force-cancel of a finished run; so does the fake.
+// A per-run ForceCancelErr fails only that run's force-cancel.
+func TestFakeForceCancelOfAFinishedRunAndPerRunErrors(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	const repo = "acme/s"
+	f := fake.New(filepath.Join(t.TempDir(), "forge"))
+	boom := errors.New("boom")
+	f.Runs = map[string][]fake.Run{repo: {
+		{SHA: "a", Run: forge.Run{ID: 1, Status: "completed", Conclusion: "success"}},
+		{SHA: "a", Run: forge.Run{ID: 2, Status: "in_progress"}, ForceCancelErr: boom},
+		{SHA: "a", Run: forge.Run{ID: 3, Status: "in_progress"}},
+	}}
+	if err := f.ForceCancelRun(ctx, repo, 1); !errors.Is(err, forge.ErrConflict) {
+		t.Fatalf("finished run: %v, want ErrConflict", err)
+	}
+	if err := f.ForceCancelRun(ctx, repo, 2); !errors.Is(err, boom) {
+		t.Fatalf("run 2: %v", err)
+	}
+	if err := f.ForceCancelRun(ctx, repo, 3); err != nil {
+		t.Fatalf("run 3: %v", err)
+	}
+	if got := f.ForceCancelled[repo]; len(got) != 1 || got[0] != 3 {
+		t.Fatalf("ForceCancelled = %v", f.ForceCancelled)
+	}
+}

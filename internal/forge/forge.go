@@ -16,7 +16,8 @@ var ErrNotFound = errors.New("not found")
 var ErrTransient = errors.New("transient forge error")
 
 // ErrForbidden wraps a plain permission refusal (a 403 that is not a rate
-// limit): the token may not do this.
+// limit): the token may not do this. Every Forge method wraps a plain 403
+// with it.
 var ErrForbidden = errors.New("forbidden")
 
 // ErrConflict wraps a 409: the host refused the change in the resource's

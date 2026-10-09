@@ -68,7 +68,8 @@ type Forge struct {
 // Run is a seeded workflow run that a push of SHA started. The flags script
 // GitHub's behaviours: IgnoreCancel accepts CancelRun but leaves the run
 // going, IgnoreForceCancel does the same for ForceCancelRun, and Conflict
-// makes CancelRun answer ErrConflict (a 409). FinishAfterPolls, when
+// makes CancelRun answer ErrConflict (a 409). A force-cancel of a
+// completed run answers ErrConflict, as GitHub does. FinishAfterPolls, when
 // greater than 0, has the run turn completed/success on its own once
 // PushRuns has listed it that many times.
 type Run struct {
@@ -77,7 +78,9 @@ type Run struct {
 	IgnoreCancel      bool
 	IgnoreForceCancel bool
 	Conflict          bool
-	FinishAfterPolls  int
+	// ForceCancelErr fails ForceCancelRun for this run only.
+	ForceCancelErr   error
+	FinishAfterPolls int
 
 	polls int
 }
@@ -394,7 +397,14 @@ func (f *Forge) ForceCancelRun(_ context.Context, full string, id int64) error {
 		if r.ID != id {
 			continue
 		}
-		if !r.IgnoreForceCancel && r.Status != "completed" {
+		if r.ForceCancelErr != nil {
+			return r.ForceCancelErr
+		}
+		if r.Status == "completed" {
+			// GitHub refuses to force-cancel a finished run with a 409.
+			return fmt.Errorf("force-cancel workflow run %d of %s: %w", id, full, forge.ErrConflict)
+		}
+		if !r.IgnoreForceCancel {
 			r.Status, r.Conclusion = "completed", "cancelled"
 			if f.ForceCancelled == nil {
 				f.ForceCancelled = map[string][]int64{}
