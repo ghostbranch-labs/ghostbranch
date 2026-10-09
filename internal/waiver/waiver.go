@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
+	"github.com/ghostbranch-labs/ghostbranch/internal/ledger"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
@@ -33,6 +34,9 @@ type Waiver struct {
 	Reason      string    `json:"reason"`
 	CreatedAt   time.Time `json:"created_at"`
 	CreatedBy   string    `json:"created_by"`
+	// Approval is how a person approved it: always {kind: console}, since
+	// only the console can waive; absent on waivers made before 0.9.
+	Approval *ledger.Approval `json:"approval,omitempty"`
 }
 
 // Matches reports whether a revoke of ids for public, or of all, selects w.
@@ -66,18 +70,32 @@ func (s *Store) Load() ([]Waiver, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", s.path, err)
 	}
+	// The version first: a newer Ghostbranch may have changed how values
+	// look, and such a file must be refused as newer, not cleared as corrupt.
+	var head struct {
+		SchemaVersion string `json:"schema_version"`
+	}
+	if err := json.Unmarshal(b, &head); err != nil {
+		return nil, s.corrupt(b, err)
+	}
+	if contract.Newer(head.SchemaVersion) {
+		return nil, contract.NewerRecord("waivers", head.SchemaVersion)
+	}
 	var f file
 	if err := json.Unmarshal(b, &f); err != nil {
-		what := "is not valid JSON"
-		if json.Valid(b) {
-			what = "has a value Ghostbranch can't read"
-		}
-		return nil, corruptFile{fmt.Errorf("%s %s; fix it or run `ghostbranch waivers revoke --all`: %w", s.path, what, err)}
-	}
-	if contract.Newer(f.SchemaVersion) {
-		return nil, contract.NewerRecord("waivers", f.SchemaVersion)
+		return nil, s.corrupt(b, err)
 	}
 	return f.Waivers, nil
+}
+
+// corrupt wraps a decode error of b, marking it as one revoke --all may
+// replace the file over.
+func (s *Store) corrupt(b []byte, err error) error {
+	what := "is not valid JSON"
+	if json.Valid(b) {
+		what = "has a value Ghostbranch can't read"
+	}
+	return corruptFile{fmt.Errorf("%s %s; fix it or run `ghostbranch waivers revoke --all`: %w", s.path, what, err)}
 }
 
 // For returns the waivers for one public repo, keyed by finding id.
@@ -97,24 +115,43 @@ func (s *Store) For(public string) (map[string]Waiver, error) {
 
 // Add stores ws, replacing any waiver with the same pair and id.
 func (s *Store) Add(ws []Waiver, now time.Time) error {
-	return s.update(now, false, func(old []Waiver) []Waiver {
+	return s.update(now, false, func(old []Waiver) ([]Waiver, error) {
 		out := make([]Waiver, 0, len(old)+len(ws))
 		for _, o := range old {
 			if !slices.ContainsFunc(ws, func(w Waiver) bool { return w.ID == o.ID && strings.EqualFold(w.Public, o.Public) }) {
 				out = append(out, o)
 			}
 		}
-		return append(out, ws...)
+		return append(out, ws...), nil
 	})
 }
 
-// Revoke removes the waivers Matches selects and returns them. With all, a
-// file that isn't valid JSON or doesn't decode is replaced too, so a corrupt
-// waivers.json can be cleared; one it couldn't read, or from a newer
-// Ghostbranch, is kept.
+// Unknown returns the ids, in order, that name no stored waiver for public.
+func Unknown(ws []Waiver, public string, ids []string) []string {
+	var out []string
+	for _, id := range ids {
+		if !slices.ContainsFunc(ws, func(w Waiver) bool { return Matches(w, public, []string{id}, false) }) {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// UnknownError is WAIVER_UNKNOWN for a revoke that names ids with no waiver
+// for public.
+func UnknownError(public string, ids []string) *contract.Error {
+	return contract.New(contract.WaiverUnknown,
+		"%s: no such waiver for %s; ghostbranch waivers list --repo %s shows the stored ones",
+		strings.Join(ids, ", "), public, public).WithField("id").WithDetails(map[string]any{"ids": ids})
+}
+
+// Revoke removes the waivers Matches selects and returns them; an id with no
+// waiver is skipped, which is what remove wants. With all, a file that isn't
+// valid JSON or doesn't decode is replaced too, so a corrupt waivers.json can
+// be cleared; one it couldn't read, or from a newer Ghostbranch, is kept.
 func (s *Store) Revoke(public string, ids []string, all bool, now time.Time) ([]Waiver, error) {
 	removed := []Waiver{}
-	err := s.update(now, all, func(old []Waiver) []Waiver {
+	err := s.update(now, all, func(old []Waiver) ([]Waiver, error) {
 		out := make([]Waiver, 0, len(old))
 		for _, w := range old {
 			if Matches(w, public, ids, all) {
@@ -123,22 +160,52 @@ func (s *Store) Revoke(public string, ids []string, all bool, now time.Time) ([]
 			}
 			out = append(out, w)
 		}
-		return out
+		return out, nil
 	})
 	return removed, err
 }
 
-func (s *Store) update(now time.Time, replaceCorrupt bool, fn func([]Waiver) []Waiver) error {
+// RevokeKnown removes public's waivers named by ids and returns them. Every
+// id must name a stored waiver: if one doesn't, it changes nothing and
+// returns UnknownError naming those ids. (Revoke stays lenient for remove,
+// which revokes whatever is there.)
+func (s *Store) RevokeKnown(public string, ids []string, now time.Time) ([]Waiver, error) {
+	removed := []Waiver{}
+	err := s.update(now, false, func(old []Waiver) ([]Waiver, error) {
+		if unknown := Unknown(old, public, ids); len(unknown) > 0 {
+			return nil, UnknownError(public, unknown)
+		}
+		out := make([]Waiver, 0, len(old))
+		for _, w := range old {
+			if Matches(w, public, ids, false) {
+				removed = append(removed, w)
+				continue
+			}
+			out = append(out, w)
+		}
+		return out, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return removed, nil
+}
+
+func (s *Store) update(now time.Time, replaceCorrupt bool, fn func([]Waiver) ([]Waiver, error)) error {
 	unlock, err := workspace.Lock(s.lock, now, "waivers")
 	if err != nil {
 		return err
 	}
 	defer unlock()
 	ws, err := s.Load()
-	if err != nil && (!replaceCorrupt || !unparsable(err)) {
+	if err != nil && (!replaceCorrupt || !Corrupt(err)) {
 		return err
 	}
-	return s.save(fn(ws))
+	out, err := fn(ws)
+	if err != nil {
+		return err
+	}
+	return s.save(out)
 }
 
 func (s *Store) save(ws []Waiver) error {
@@ -166,10 +233,9 @@ type corruptFile struct{ err error }
 func (c corruptFile) Error() string { return c.err.Error() }
 func (c corruptFile) Unwrap() error { return c.err }
 
-// unparsable reports a Load error from a file that was read but didn't decode,
-// the only error revoke --all may replace the file over: a file it couldn't
-// read, or one from a newer Ghostbranch, stays as it is.
-func unparsable(err error) bool {
+// Corrupt reports a Load error from a file that was read but didn't decode:
+// the only kind revoke --all replaces.
+func Corrupt(err error) bool {
 	var c corruptFile
 	return errors.As(err, &c)
 }

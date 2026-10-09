@@ -15,7 +15,10 @@
         "match_sha256": "76375e21aaeadbb33067f84087af1bb4f81a039c0f0e3ab2b684e20858af07ad",
         "reason": "test fixture",
         "created_at": "2026-10-05T12:00:00Z",
-        "created_by": "human:octo"
+        "created_by": "human:octo",
+        "approval": {
+          "kind": "console"
+        }
       }
     ]
   },
