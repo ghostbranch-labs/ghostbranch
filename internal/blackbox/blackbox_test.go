@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
 )
 
@@ -42,6 +43,7 @@ func TestMain(m *testing.M) {
 	}
 	code := m.Run()
 	_ = os.RemoveAll(dir)
+	_ = gitx.Cleanup()
 	os.Exit(code)
 }
 

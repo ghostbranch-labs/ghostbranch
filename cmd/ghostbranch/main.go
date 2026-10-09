@@ -5,6 +5,11 @@ import (
 	"os"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/cli"
+	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 )
 
-func main() { os.Exit(cli.Run(os.Args[1:], cli.DefaultEnv())) }
+func main() {
+	code := cli.Run(os.Args[1:], cli.DefaultEnv())
+	_ = gitx.Cleanup() // the git isolation directory; best effort, the command is done
+	os.Exit(code)
+}

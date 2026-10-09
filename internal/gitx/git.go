@@ -59,25 +59,56 @@ func (e *Error) Error() string {
 // runs commands), hooks or attributes. /dev/null is not used for the hooks
 // directory because Git for Windows resolves "/dev/null/<hook>" against the
 // current drive (<drive>:/dev/null/<hook>) rather than as the null device.
+// Cleanup removes it.
 type isolation struct {
 	hooks, globalConfig, attributes string
 }
 
-var isolated = sync.OnceValues(func() (isolation, error) {
+// iso is the process's isolation directory, made on the first git call and
+// removed by Cleanup.
+var iso struct {
+	mu  sync.Mutex
+	dir string
+	val isolation
+}
+
+func isolated() (isolation, error) {
+	iso.mu.Lock()
+	defer iso.mu.Unlock()
+	if iso.dir != "" {
+		return iso.val, nil
+	}
 	dir, err := os.MkdirTemp("", "ghostbranch-git-") // created 0700
 	if err != nil {
 		return isolation{}, fmt.Errorf("make git isolation directory: %w", err)
 	}
-	iso := isolation{
+	v := isolation{
 		hooks:        filepath.Join(dir, "hooks"),
 		globalConfig: filepath.Join(dir, "no-global-config"),
 		attributes:   filepath.Join(dir, "no-attributes"),
 	}
-	if err := os.Mkdir(iso.hooks, 0o700); err != nil {
+	if err := os.Mkdir(v.hooks, 0o700); err != nil {
+		_ = os.RemoveAll(dir)
 		return isolation{}, fmt.Errorf("make git isolation directory: %w", err)
 	}
-	return iso, nil
-})
+	iso.dir, iso.val = dir, v
+	return v, nil
+}
+
+// Cleanup removes the isolation directory, if this process made one. Call it
+// once no git command is running: main calls it after the command returns,
+// and test binaries call it from TestMain (testutil.Main). A git call after
+// Cleanup makes a new directory.
+func Cleanup() error {
+	iso.mu.Lock()
+	defer iso.mu.Unlock()
+	if iso.dir == "" {
+		return nil
+	}
+	err := os.RemoveAll(iso.dir)
+	iso.dir, iso.val = "", isolation{}
+	return err
+}
 
 // overrides neutralize user and system config that would change content
 // (autocrlf, attributes), block non-interactive runs (signing, credential
