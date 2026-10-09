@@ -170,6 +170,7 @@ jobs:
 		{"feature_show", gatedFeature, []string{"feature", "show", "feat-x"}, 0},
 		{"feature_show_unknown", initOnly, []string{"feature", "show", "nope"}, 2},
 		{"feature_abandon", withFeature, []string{"feature", "abandon", "feat-x"}, 0},
+		{"feature_abandon_plan", withFeature, []string{"feature", "abandon", "feat-x", "--plan"}, 0},
 		{"feature_close_merged", func(te *testEnv) {
 			initOnly(te)
 			grantAgents(te)

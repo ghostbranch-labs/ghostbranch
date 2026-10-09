@@ -138,3 +138,31 @@ func TestALedgerFailureIsAWarningInTheEnvelope(t *testing.T) {
 		t.Fatalf("stderr:\n%s", errOut)
 	}
 }
+
+// abandon --plan shows the metadata push it would make and changes nothing.
+func TestAbandonPlanChangesNothing(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	withFeature(te)
+	sg, meta := gitx.New(te.forge.RepoDir("acme/widget-shadow")), "refs/ghostbranch/features/feat-x"
+	before, err := sg.MustResolve(te.t.Context(), meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, env := te.runJSON("feature", "abandon", "feat-x", "--plan")
+	data, _ := env["data"].(map[string]any)
+	pv, _ := data["preview"].(map[string]any)
+	ops, _ := pv["ops"].([]any)
+	if code != 0 || len(ops) != 1 {
+		t.Fatalf("%d %v", code, env)
+	}
+	if after, _ := sg.MustResolve(te.t.Context(), meta); after != before {
+		t.Fatal("--plan moved the metadata")
+	}
+	if code, out, _ := te.run("feature", "abandon", "feat-x", "--plan"); code != 0 || !strings.HasPrefix(out, "Dry run; nothing was changed. This would:\n") {
+		t.Fatalf("human: %d %q", code, out)
+	}
+	if code, out, _ := te.run("feature", "abandon", "feat-x", "--undo"); code != 0 || out != "feat-x was not abandoned; nothing changed.\n" {
+		t.Fatalf("the plan abandoned it: %d %q", code, out)
+	}
+}

@@ -369,3 +369,36 @@ func TestHumanInitSaysReadyOnlyWhenItIs(t *testing.T) {
 		t.Fatalf("init: %d\nstdout: %q\nstderr: %q", code, out, errOut)
 	}
 }
+
+// promote --detach returns the gate job, wait finishes it, and the same
+// promote then reuses the green gate: the job's candidate, no second gate.
+func TestPromoteDetachWaitPromote(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	withFeature(te)
+	args := []string{"promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--plan"}
+	code, env := te.runJSON(append(args, "--detach")...)
+	data, _ := env["data"].(map[string]any)
+	gate, _ := data["gate"].(map[string]any)
+	job := te.job("feat-x")
+	if code != 0 || gate["checks"] != "pending" || gate["job"] != job || data["plan"] != nil {
+		t.Fatalf("promote --detach: %d %v", code, env)
+	}
+	if next := nextOf(t, env); !slices.Equal(argv(next[0]), []string{"ghostbranch", "wait", job, "--repo", "acme/widget"}) {
+		t.Fatalf("next[0] = %v", argv(next[0]))
+	}
+	code, out, errOut := te.run("wait", job, "--json")
+	var w map[string]any
+	if err := json.Unmarshal(waitStream(t, out), &w); err != nil || code != 0 {
+		t.Fatalf("wait: %d %v\n%s\n%s", code, err, out, errOut)
+	}
+	if wd, _ := w["data"].(map[string]any); wd["checks"] != "passed" {
+		t.Fatalf("wait result = %v", w)
+	}
+	code, env = te.runJSON(args...)
+	data, _ = env["data"].(map[string]any)
+	gate, _ = data["gate"].(map[string]any)
+	if code != 0 || gate["reused"] != true || data["plan"] == nil || te.job("feat-x") != job {
+		t.Fatalf("promote after wait: %d %v", code, env)
+	}
+}
