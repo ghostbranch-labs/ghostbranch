@@ -2,6 +2,7 @@ package engine_test
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -204,5 +205,118 @@ func TestFinishGivesUpOnABusyLock(t *testing.T) {
 	ce := wantCode(t, err, contract.Locked)
 	if res.Job == nil || ce.Details["job"] != *res.Job || !h.meta("feat-x").Gate.Pending() {
 		t.Fatalf("want LOCKED with the job and a pending record: %+v %+v", ce.Details, h.meta("feat-x").Gate)
+	}
+}
+
+// The final write is leased on the commit just read: when another machine
+// moved the metadata, the finish re-reads once and records over a record
+// still pending, or keeps one another waiter already finished.
+func TestFinishRetriesOnceWhenTheMetadataMoved(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name   string
+		edit   func(*feature.Meta)
+		pushes int
+	}{
+		{"unchanged", func(*feature.Meta) {}, 3},
+		{"finished elsewhere", func(m *feature.Meta) { m.Gate.Checks, m.Gate.FailedChecks = feature.ChecksFailed, []string{"other"} }, 2},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			h := newHarness(t)
+			h.init()
+			h.startFeature("feat-x", map[string]string{"feature.txt": "x\n"})
+			h.forge.Checks = passing
+			metaPushes := 0
+			var edited *feature.Gate
+			h.eng.OnPush = func(_, _ string, specs []string) {
+				for _, s := range specs {
+					if strings.HasSuffix(s, ":refs/ghostbranch/features/feat-x") {
+						if metaPushes++; metaPushes == 2 { // the final record: move the metadata under it
+							h.editRemoteMeta("feat-x", c.edit)
+							edited = h.meta("feat-x").Gate
+						}
+					}
+				}
+			}
+			res, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
+			if metaPushes != c.pushes {
+				t.Fatalf("want %d metadata pushes, got %d", c.pushes, metaPushes)
+			}
+			g := h.meta("feat-x").Gate
+			if c.pushes == 3 {
+				if err != nil || res.Checks != feature.ChecksPassed || !g.Passed() {
+					t.Fatalf("want passed recorded: %+v %v %+v", res, err, g)
+				}
+				return
+			}
+			ce := wantCode(t, err, contract.ChecksFailed)
+			if !reflect.DeepEqual(ce.Details["failed"], []string{"other"}) || !reflect.DeepEqual(g, edited) {
+				t.Fatalf("want the other waiter's record kept: %+v, record %+v (was %+v)", ce.Details, g, edited)
+			}
+		})
+	}
+}
+
+// Promote holds the pair lock from its gate to the publish, so nothing
+// moves under it while CI runs: both when it runs the gate itself and when
+// it waits on a matching detached job.
+func TestPromoteKeepsTheLockThroughItsGate(t *testing.T) {
+	t.Parallel()
+	for _, detachFirst := range []bool{false, true} {
+		t.Run(map[bool]string{false: "its own gate", true: "a matching job"}[detachFirst], func(t *testing.T) {
+			t.Parallel()
+			h := newHarness(t)
+			h.init()
+			h.startFeature("feat-x", map[string]string{"feature.txt": "x\n"})
+			opt := engine.PromoteOptions{Feature: "feat-x", Mode: "squash", Message: "Add x", PlanOnly: true}
+			if detachFirst {
+				d := opt
+				d.Detach = true
+				if _, _, err := h.eng.Promote(h.ctx, h.pair, d); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var lockErr error = errors.New("checks were never listed")
+			h.forge.Checks = func(r, s string) []forge.Check {
+				unlock, err := workspace.Lock(h.eng.WS.LockPath(h.pair), h.clock.Now())
+				if lockErr = err; err == nil {
+					unlock()
+				}
+				return passing(r, s)
+			}
+			res, _, err := h.eng.Promote(h.ctx, h.pair, opt)
+			if err != nil || res.Plan == nil {
+				t.Fatalf("promote = %+v %v", res, err)
+			}
+			if codeOf(lockErr) != contract.Locked {
+				t.Fatalf("the pair lock was free during promote's CI wait: %v", lockErr)
+			}
+		})
+	}
+}
+
+// A feature closed while its gate waited on CI has no record to finish:
+// FEATURE_NOT_FOUND, and the metadata ref is not re-created.
+func TestFinishOnAClosedFeatureIsFeatureNotFound(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.startFeature("feat-x", map[string]string{"feature.txt": "x\n"})
+	const ref = "refs/ghostbranch/features/feat-x"
+	deleted := false
+	h.forge.Checks = func(r, s string) []forge.Check {
+		if !deleted { // feature close, from another machine
+			deleted = true
+			if err := h.shadowGit().DeleteRef(h.ctx, ref); err != nil {
+				t.Errorf("delete the metadata: %v", err)
+			}
+		}
+		return passing(r, s)
+	}
+	_, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
+	wantCode(t, err, contract.FeatureNotFound)
+	if _, ok, err := h.shadowGit().Resolve(h.ctx, ref); ok || err != nil {
+		t.Fatalf("the metadata ref came back (%v)", err)
 	}
 }
