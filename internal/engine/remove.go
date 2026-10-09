@@ -14,6 +14,7 @@ import (
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
+	"github.com/ghostbranch-labs/ghostbranch/internal/grant"
 	"github.com/ghostbranch-labs/ghostbranch/internal/ledger"
 	"github.com/ghostbranch-labs/ghostbranch/internal/plan"
 	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
@@ -40,11 +41,19 @@ type RemoveResult struct {
 // console; --plan does not.
 func (e *Engine) Remove(ctx context.Context, p workspace.Pair) (res *RemoveResult, warns []contract.Warning, err error) {
 	var waived []string
+	var revoked []grant.Grant
 	defer func() {
 		summary := ""
 		if err == nil && res != nil && res.Preview == nil {
 			summary = fmt.Sprintf("removed %s from this machine: %d grant(s), %d waiver(s), %d plan file(s); the shadow repo %s is untouched",
 				p.Public, res.Grants, res.Waivers, len(res.Plans), p.Shadow)
+		}
+		// Each revoked grant gets its own entry, as agents revoke writes, even
+		// when remove then failed: the grants are gone.
+		for _, g := range revoked {
+			pair := workspace.Pair{Public: g.Public, Shadow: g.Shadow}
+			ref := grantRef(g)
+			e.recordWith("grant_revoked", &pair, "", "", "agents may no longer publish to "+g.Public, nil, func(ent *ledger.Entry) { ent.Grant = ref })
 		}
 		e.recordWith("remove", &p, "", "", summary, err, func(ent *ledger.Entry) { ent.Waivers = waived })
 	}()
@@ -128,15 +137,15 @@ func (e *Engine) Remove(ctx context.Context, p workspace.Pair) (res *RemoveResul
 	// Revoke even when none was in force at the look above: agents allow
 	// does not take the pair lock, and a grant left behind would come back
 	// with the pair.
-	revoked, err := gstore.Revoke(p.Public, false, now)
+	rg, err := gstore.Revoke(p.Public, false, now)
 	if err != nil {
 		return nil, nil, grantErr(err, "revoke agent grants")
 	}
-	res.Grants = len(revoked)
+	revoked, res.Grants = rg, len(rg)
 	if len(ids) > 0 {
 		gone, err := wstore.Revoke(p.Public, ids, false, now)
 		if err != nil {
-			return nil, nil, grantErr(err, "revoke waivers")
+			return nil, nil, partway(grantErr(err, "revoke waivers"), p.Public)
 		}
 		res.Waivers = len(gone)
 		for _, w := range gone {
@@ -145,27 +154,38 @@ func (e *Engine) Remove(ctx context.Context, p workspace.Pair) (res *RemoveResul
 	}
 	for _, path := range plans {
 		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return nil, nil, internalErr(err, "remove plan file "+path)
+			return nil, nil, partway(internalErr(err, "remove plan file "+path), p.Public)
 		}
 	}
 	if err := os.RemoveAll(res.Dir); err != nil {
-		return nil, nil, internalErr(err, "remove "+res.Dir)
+		return nil, nil, partway(internalErr(err, "remove "+res.Dir), p.Public)
 	}
 	// Last, so a remove that failed above can simply be run again.
 	if err := e.WS.Update(e.Now(), func(w *workspace.Workspace) bool { return w.RemovePair(p.Public) }); err != nil {
-		return nil, nil, updateErr(err, "save workspace.json")
+		return nil, nil, partway(updateErr(err, "save workspace.json"), p.Public)
 	}
 	return res, warns, nil
+}
+
+// partway marks an error after remove began revoking: each step is safe to
+// repeat, and the pair stays registered until the last one, so running
+// remove again finishes it.
+func partway(err error, public string) error {
+	ce := contract.From(err)
+	ce.Message += "; remove stopped partway (the pair's agent grants are already revoked): run ghostbranch remove --repo " + public + " again to finish"
+	return ce
 }
 
 // checkPairDir refuses a pair whose folder would not be a direct child of
 // the workspace's pairs folder. workspace.json is local and unchecked, and
 // an entry such as ".." would otherwise send RemoveAll at the workspace
-// itself, or further.
+// itself, or further. A key ending in a dot or a space is refused too:
+// Windows drops those from a path, so the folder would be another one
+// (owner/repo. would be owner/repo's).
 func (e *Engine) checkPairDir(p workspace.Pair) error {
 	dir, key := e.WS.PairDir(p), p.Key()
 	_, _, nameErr := forge.SplitName(p.Public)
-	if nameErr != nil || strings.Contains(key, "..") || strings.ContainsAny(key, `/\`) ||
+	if nameErr != nil || strings.HasSuffix(key, ".") || strings.HasSuffix(key, " ") || strings.ContainsAny(key, `/\`) ||
 		filepath.Dir(dir) != filepath.Join(e.WS.Dir, "pairs") || filepath.Base(dir) != key {
 		return contract.New(contract.Internal,
 			"refusing to remove %q: workspace.json names a repo whose folder %q is not inside %q; fix workspace.json by hand",

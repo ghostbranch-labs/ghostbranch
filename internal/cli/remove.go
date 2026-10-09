@@ -3,9 +3,12 @@ package cli
 import (
 	"github.com/spf13/cobra"
 
+	"github.com/ghostbranch-labs/ghostbranch/internal/console"
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
+	"github.com/ghostbranch-labs/ghostbranch/internal/grant"
+	"github.com/ghostbranch-labs/ghostbranch/internal/waiver"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
@@ -16,10 +19,11 @@ func (a *app) removeCmd() *cobra.Command {
 		Long: `remove takes the pair off this machine: it revokes the pair's agent grants and waivers, deletes
 its plan files and its local mirror, and drops it from the workspace. Nothing on GitHub changes: the
 shadow repo, its branches and features stay, and the ledger keeps its history. Because it drops grants
-and waivers, a person confirms by typing a code at the console; --plan shows what would go.`,
+and waivers, a person confirms by typing a code at the console; --plan shows what would go. It needs
+no GitHub token.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			e, err := a.engine(cmd.Context())
+			e, err := a.localEngine()
 			if err != nil {
 				return err
 			}
@@ -33,6 +37,38 @@ and waivers, a person confirms by typing a code at the console; --plan shows wha
 	}
 	c.Flags().BoolVar(&a.dryRun, "plan", false, "preview exactly what would change, and change nothing (same as --dry-run)")
 	return c
+}
+
+// localEngine builds the engine for remove, which touches nothing on GitHub:
+// no token, no GitHub client, and so no GitHub login for the ledger's actor.
+// Without GHOSTBRANCH_ACTOR the actor is human:unknown, with ACTOR_UNKNOWN
+// unless nothing is recorded (--plan).
+func (a *app) localEngine() (*engine.Engine, error) {
+	a.ran = true
+	actor, err := a.actor()
+	if err != nil {
+		return nil, err
+	}
+	ws, err := a.openWorkspace()
+	if err != nil {
+		return nil, err
+	}
+	if actor == "" {
+		actor = "human:unknown"
+		if !a.dryRun {
+			a.warnings = append(a.warnings, contract.Warning{Code: contract.ActorUnknown,
+				Message: "GHOSTBRANCH_ACTOR is unset, and remove asks GitHub nothing, so the ledger records human:unknown; set GHOSTBRANCH_ACTOR, for example human:<your login>"})
+		}
+	}
+	e := &engine.Engine{WS: ws, Actor: actor, Now: a.env.Now, Sleep: a.env.Sleep, Rand: a.env.Rand, Progress: a.env.Stderr,
+		DryRun: a.dryRun, OnPush: a.env.OnPush,
+		Grants:  grant.NewStore(ws.GrantsPath(), ws.GrantsLockPath()),
+		Waivers: waiver.NewStore(ws.WaiversPath(), ws.WaiversLockPath())}
+	if a.env.ConsoleUsable && !a.nonInteractive && a.env.OpenConsole != nil {
+		e.Approver = &console.Challenger{Open: a.env.OpenConsole, Rand: a.env.Rand}
+	}
+	a.eng = e
+	return e, nil
 }
 
 func (a *app) logCmd() *cobra.Command {

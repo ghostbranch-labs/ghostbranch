@@ -1,6 +1,7 @@
 package engine_test
 
 import (
+	"context"
 	"errors"
 	"io/fs"
 	"os"
@@ -204,7 +205,7 @@ func TestRemoveLeavesAnotherRunsLockAlone(t *testing.T) {
 // reach the workspace itself or beyond.
 func TestRemoveRefusesAPairFolderOutsidePairs(t *testing.T) {
 	t.Parallel()
-	for _, public := range []string{"..", `a\..\..`, `a/..\..`, "a/..", "../.."} {
+	for _, public := range []string{"..", `a\..\..`, `a/..\..`, "a/..", "../..", "owner/repo."} {
 		t.Run(public, func(t *testing.T) {
 			t.Parallel()
 			h := removeFixture(t)
@@ -250,6 +251,91 @@ func TestRemoveSkipsAnUnreadablePlanFile(t *testing.T) {
 	}
 	if _, ok := h.eng.WS.Find(publicName); ok {
 		t.Fatal("the pair is still registered")
+	}
+}
+
+// A legal name with two dots in a row is removed like any other.
+func TestRemoveTakesANameWithTwoDots(t *testing.T) {
+	t.Parallel()
+	h := removeFixture(t)
+	p := workspace.Pair{Public: "acme/a..b", Shadow: "acme/a..b-shadow"}
+	h.eng.WS.AddPair(p)
+	if err := h.eng.WS.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(h.eng.WS.PairDir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	h.eng.Forge = nil // remove is local
+	if _, _, err := h.eng.Remove(h.ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(h.eng.WS.PairDir(p)); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("the pair folder is still there: %v", err)
+	}
+	if _, ok := h.eng.WS.Find(p.Public); ok {
+		t.Fatal("the pair is still registered")
+	}
+}
+
+// confirmFunc is a console whose person says yes, after f runs.
+type confirmFunc func() error
+
+func (f confirmFunc) Confirm(context.Context, string) error { return f() }
+
+// A remove that stops after the revokes says to run it again, and running it
+// again finishes.
+func TestARemoveThatStopsPartwaySaysRunItAgain(t *testing.T) {
+	t.Parallel()
+	h := removeFixture(t)
+	planPath := filepath.Join(h.eng.WS.PlansDir(), "20261005T120000Z-00000a.json")
+	h.eng.Approver = confirmFunc(func() error {
+		// After the console, the plan file becomes a folder remove can't delete.
+		if err := os.Remove(planPath); err != nil {
+			return err
+		}
+		return os.MkdirAll(filepath.Join(planPath, "keep"), 0o755)
+	})
+	_, _, err := h.eng.Remove(h.ctx, h.pair)
+	ce := wantCode(t, err, contract.Internal)
+	if !strings.Contains(ce.Message, "run ghostbranch remove --repo "+publicName+" again") {
+		t.Fatalf("message = %q", ce.Message)
+	}
+	if _, ok := h.eng.WS.Find(publicName); !ok {
+		t.Fatal("the pair must stay registered until remove finishes")
+	}
+	if err := os.RemoveAll(planPath); err != nil {
+		t.Fatal(err)
+	}
+	h.eng.Approver = h.approver
+	if _, _, err := h.eng.Remove(h.ctx, h.pair); err != nil {
+		t.Fatalf("running remove again: %v", err)
+	}
+	if _, ok := h.eng.WS.Find(publicName); ok {
+		t.Fatal("the pair is still registered")
+	}
+}
+
+// remove writes a grant_revoked entry for each grant it revoked, as agents
+// revoke does, then its own entry.
+func TestRemoveRecordsEachRevokedGrant(t *testing.T) {
+	t.Parallel()
+	h := removeFixture(t)
+	if _, _, err := h.eng.Remove(h.ctx, h.pair); err != nil {
+		t.Fatal(err)
+	}
+	es := h.ledger()
+	g := es[len(es)-2]
+	if g.Op != "grant_revoked" || g.Pair != publicName || g.Grant == nil || g.Grant.ID != "g-000001" {
+		t.Fatalf("the entry before remove's = %+v", g)
+	}
+	if es[len(es)-1].Op != "remove" {
+		t.Fatalf("last entry = %+v", es[len(es)-1])
+	}
+	for _, ent := range es {
+		if ent.Op == "grant_revoked" && ent.Pair == otherPublic {
+			t.Fatalf("remove revoked another pair's grant: %+v", ent)
+		}
 	}
 }
 

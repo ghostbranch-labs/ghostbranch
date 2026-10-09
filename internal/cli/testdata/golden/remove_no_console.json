@@ -4,7 +4,12 @@
   "ok": false,
   "exit_code": 5,
   "data": {},
-  "warnings": [],
+  "warnings": [
+    {
+      "code": "ACTOR_UNKNOWN",
+      "message": "GHOSTBRANCH_ACTOR is unset, and remove asks GitHub nothing, so the ledger records human:unknown; set GHOSTBRANCH_ACTOR, for example human:<your login>"
+    }
+  ],
   "next": [
     {
       "command": [
