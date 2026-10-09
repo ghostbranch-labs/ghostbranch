@@ -91,9 +91,10 @@ main, green CI, and a leak scan of exactly what will be published.
 
 - `ghostbranch status --repo <public> --json` shows the pair's health and every feature's state:
   `draft`, `in_review`, `gate_passed`, `published`, `merged`, `merged_moved`, `pr_closed`,
-  `branch_gone`, `abandoned`, and `unreadable` (a record that can't be read; only a person at the
-  console closes it, and the other features still show). `feature list --repo <public>` and `feature show <name> --repo <public>`
-  give the same by feature.
+  `branch_gone`, `abandoned`, and `unreadable` (a record that can't be read: `feature show <name>`
+  gives the error; run the command again if it was a passing failure, as a corrupt one only a person
+  at the console closes; the other features still show). `feature list --repo <public>` and
+  `feature show <name> --repo <public>` give the same by feature.
 - `ghostbranch sync --repo <public>` closes features whose public PR merged and whose branch hasn't
   moved: it deletes their shadow branches and says so in `data.closed`. `--no-close` skips that.
 - `merged_moved`, `pr_closed` and any `branch_gone` that `sync` leaves (unmerged; or merged, but gated
@@ -111,8 +112,9 @@ main, green CI, and a leak scan of exactly what will be published.
 - `UPGRADE_NEEDED` with `error.details.record` (feature, plan, grants, waivers) means another machine
   runs a newer Ghostbranch: upgrade before changing anything. `RECORD_NEWER` on `status`, `feature list`
   or `feature show` means the same; reads still work, and such a feature is never closed unattended. A
-  merged feature whose record is newer still counts as active and shows only through `RECORD_NEWER`:
-  once this machine is upgraded, `sync` closes it.
+  merged feature whose record is newer still counts as active: it is in `sync`'s `data.attention`, and
+  `status` and `next` give `feature close` with `needs_human`; once this machine is upgraded, `sync`
+  closes it.
 - Never close or abandon a feature a person is still working on.
 
 ## Keeping up with public

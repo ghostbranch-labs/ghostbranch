@@ -36,7 +36,8 @@ func TestRenderListsEveryCodeFromTheRegistry(t *testing.T) {
 	// 332: 5d-1 (locks, guard, records, interrupted publish, config keys, cancels).
 	// 333: the guard bullet says a branch named after a known feature is refused whatever it carries (5d-1 final review).
 	// 341: 5d-2 (newer merged features, every branch_gone a person closes, the ledger's name filter, file modes, the new warnings and the unreadable state).
-	if n := strings.Count(out, "\n"); n > 341 {
+	// 343: the final review's fixes (an unreadable record may be a passing read error; where a newer merged feature shows).
+	if n := strings.Count(out, "\n"); n > 343 {
 		t.Errorf("the guide is %d lines; keep it short (spec: about 150 plus the tables)", n)
 	}
 }
@@ -324,14 +325,14 @@ func TestGuideTeachesPolish(t *testing.T) {
 	t.Parallel()
 	out := strings.Join(strings.Fields(guide.Render(contract.Registry())), " ")
 	for _, want := range []string{
-		"A merged feature whose record is newer still counts as active and shows only through `RECORD_NEWER`",
+		"A merged feature whose record is newer still counts as active: it is in `sync`'s `data.attention`, and `status` and `next` give `feature close` with `needs_human`",
 		"once this machine is upgraded, `sync` closes it",
 		"gated again after the publish, with its gate branch moved, or with a record too old to say what was published",
 		"`--feature <name>` also lists the entries of an earlier feature with the same name",
 		"Plan files, grants, waivers and the ledger are mode 0600",
 		"`LEDGER_NOT_WRITTEN`: keep `details.refs`",
 		"`PLAN_FILE_UNREADABLE`: fix or delete the file at `details.path`",
-		"and `unreadable` (a record that can't be read; only a person at the console closes it",
+		"and `unreadable` (a record that can't be read: `feature show <name>` gives the error; run the command again if it was a passing failure, as a corrupt one only a person at the console closes",
 		"`remove` needs no GitHub token",
 	} {
 		if !strings.Contains(out, want) {
