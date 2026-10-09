@@ -159,6 +159,8 @@ func Save(dir string, p Plan) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// CreateTemp makes the file 0600, and the rename keeps that: plans name
+	// repos, branches and commits, so they are private (the guide says so).
 	f, err := os.CreateTemp(dir, p.ID+".*.tmp")
 	if err != nil {
 		return "", err

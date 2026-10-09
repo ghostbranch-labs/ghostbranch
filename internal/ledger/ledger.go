@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 )
 
@@ -54,9 +55,17 @@ func Append(path string, e Entry) error {
 	if err != nil {
 		return err
 	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
+	}
+	// A ledger made before 0.9 was 0644. It names repos, features and
+	// actors, so it is private like plans, grants and waivers. Windows has
+	// no such bits.
+	if runtime.GOOS != "windows" {
+		if fi, err := f.Stat(); err == nil && fi.Mode().Perm() != 0o600 {
+			_ = f.Chmod(0o600) // best effort: a failed chmod must not lose the entry
+		}
 	}
 	if _, err := f.Write(append(b, '\n')); err != nil {
 		_ = f.Close()
