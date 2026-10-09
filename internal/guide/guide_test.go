@@ -271,7 +271,7 @@ func TestGuideTeachesJobsAndWait(t *testing.T) {
 		// The interrupt rule.
 		"After Ctrl-C you get `INTERRUPTED`.",
 		"With `error.details.job`, CI is still running: run `ghostbranch wait <job> --repo <public> --json`, not `gate`.",
-		"Without it nothing is pending: run the command again.",
+		"Without `job` or `plan_id` nothing is pending: run the command again.",
 		"If the session dropped, `ghostbranch status --repo <public> --json` names a pending job (`gate.job`): wait on it.",
 		"`JOB_STALE`", "`error.details.current_job`", "if `current_job` is empty, gate again",
 		"`promote --detach` returns the job in `data.gate.job` and no plan; once `wait` passes, run the same promote without `--detach` (it reuses the green gate).",
@@ -292,7 +292,7 @@ func TestGuideTeachesHardening(t *testing.T) {
 		"`LOCKED`: another ghostbranch command is running on this machine (`error.details.held_by`",
 		"never delete lock files",
 		// The pre-push guard.
-		"refuses any push that carries an unpublished feature commit, under any branch name",
+		"refuses any push that carries an unpublished feature commit the mirror knows of, under any branch name",
 		"Commits rewritten out of the shadow repo can't be recognized",
 		// Config keys.
 		"An unknown key in `.ghostbranch.yml`, including under `sync:` or `ci:`",
@@ -303,11 +303,11 @@ func TestGuideTeachesHardening(t *testing.T) {
 		"such a feature is never closed unattended",
 		// An interrupted publish.
 		"`INTERRUPTED` with `error.details.plan_id` after `promote`",
-		"`ghostbranch apply <plan_id> --repo <public>`, never `promote` again",
+		"Resume with `ghostbranch apply <plan_id> --repo <public>` (as `next` says; with `needs_human` the person runs it), never `promote` again",
 		"`BRANCH_EXISTS` with `error.details.plan_id`",
 		// Verified cancels.
 		"`cancelled_runs` lists only runs confirmed cancelled",
-		"`CI_NOT_CANCELLED` names runs that kept going",
+		"`CI_NOT_CANCELLED` means runs may still be going: the token couldn't cancel them (it needs Actions write), they kept going, or sync couldn't check; it names the runs it knows of",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the guide lacks %q", want)
