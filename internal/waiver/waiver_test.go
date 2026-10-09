@@ -122,7 +122,7 @@ func TestFileIsPrivateAtomicAndHoldsNoSecret(t *testing.T) {
 
 func TestLockedStore(t *testing.T) {
 	s, dir := newStore(t)
-	unlock, err := workspace.Lock(filepath.Join(dir, "waivers.lock"), now)
+	unlock, err := workspace.Lock(filepath.Join(dir, "waivers.lock"), now, "test")
 	if err != nil {
 		t.Fatal(err)
 	}

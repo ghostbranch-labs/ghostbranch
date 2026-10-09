@@ -161,7 +161,7 @@ func (s *Store) Revoke(public string, all bool, now time.Time) ([]Grant, error) 
 }
 
 func (s *Store) update(now time.Time, replaceCorrupt bool, fn func([]Grant) []Grant) error {
-	unlock, err := workspace.Lock(s.lock, now)
+	unlock, err := workspace.Lock(s.lock, now, "agents")
 	if err != nil {
 		return err
 	}

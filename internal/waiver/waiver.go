@@ -119,7 +119,7 @@ func (s *Store) Revoke(public string, ids []string, all bool, now time.Time) ([]
 }
 
 func (s *Store) update(now time.Time, replaceCorrupt bool, fn func([]Waiver) []Waiver) error {
-	unlock, err := workspace.Lock(s.lock, now)
+	unlock, err := workspace.Lock(s.lock, now, "waivers")
 	if err != nil {
 		return err
 	}

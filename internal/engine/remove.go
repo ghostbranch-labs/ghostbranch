@@ -71,8 +71,10 @@ func (e *Engine) Remove(ctx context.Context, p workspace.Pair) (res *RemoveResul
 	}
 	if !e.DryRun {
 		// No other operation on the pair while its files go; waivers add
-		// takes this lock too.
-		unlock, err := workspace.Lock(e.WS.LockPath(p), e.Now())
+		// takes this lock too. The lock file sits in the workspace's locks
+		// folder, outside the pair folder removed below, so it stays, and
+		// the deferred unlock releases only this run's own hold.
+		unlock, err := workspace.Lock(e.WS.LockPath(p), e.Now(), "remove")
 		if err != nil {
 			return nil, nil, err
 		}
@@ -147,8 +149,7 @@ func (e *Engine) Remove(ctx context.Context, p workspace.Pair) (res *RemoveResul
 		return nil, nil, internalErr(err, "remove "+res.Dir)
 	}
 	// Last, so a remove that failed above can simply be run again.
-	e.WS.RemovePair(p.Public)
-	if err := e.WS.Save(); err != nil {
+	if err := e.WS.Update(e.Now(), func(w *workspace.Workspace) bool { return w.RemovePair(p.Public) }); err != nil {
 		return nil, nil, internalErr(err, "save workspace.json")
 	}
 	return res, nil, nil

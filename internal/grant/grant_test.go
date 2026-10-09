@@ -9,6 +9,7 @@ import (
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/grant"
+	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
 var t0 = time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
@@ -148,11 +149,13 @@ func TestFileIsPrivateAndAtomic(t *testing.T) {
 func TestLockedStore(t *testing.T) {
 	dir := t.TempDir()
 	lock := filepath.Join(dir, "grants.lock")
-	if err := os.WriteFile(lock, []byte("1 x\n"), 0o644); err != nil {
+	unlock, err := workspace.Lock(lock, time.Now(), "test")
+	if err != nil {
 		t.Fatal(err)
 	}
+	defer unlock()
 	s := grant.NewStore(filepath.Join(dir, "grants.json"), lock)
-	_, err := s.Put(mk("g-1", "acme/widget", "acme/widget-shadow", time.Hour), time.Now())
+	_, err = s.Put(mk("g-1", "acme/widget", "acme/widget-shadow", time.Hour), time.Now())
 	if ce := contract.From(err); ce == nil || ce.Code != contract.Locked {
 		t.Fatalf("want LOCKED, got %v", err)
 	}

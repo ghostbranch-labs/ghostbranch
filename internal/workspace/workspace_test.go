@@ -2,7 +2,6 @@ package workspace_test
 
 import (
 	"errors"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -69,29 +68,19 @@ func TestOpenSaveAddFind(t *testing.T) {
 func TestLock(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "p", "lock")
 	now := time.Now()
-	unlock, err := workspace.Lock(path, now)
+	unlock, err := workspace.Lock(path, now, "test")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := workspace.Lock(path, now); contract.From(err).Code != contract.Locked {
+	if _, err := workspace.Lock(path, now, "test"); contract.From(err).Code != contract.Locked {
 		t.Fatalf("second lock: %v", err)
 	}
 	unlock()
-	unlock2, err := workspace.Lock(path, now)
+	unlock2, err := workspace.Lock(path, now, "test")
 	if err != nil {
 		t.Fatalf("after unlock: %v", err)
 	}
 	unlock2()
-
-	// A lock older than StaleAfter is taken over.
-	_ = os.WriteFile(path, []byte("1 old\n"), 0o644)
-	old := now.Add(-workspace.StaleAfter - time.Minute)
-	_ = os.Chtimes(path, old, old)
-	unlock3, err := workspace.Lock(path, now)
-	if err != nil {
-		t.Fatalf("stale lock not taken over: %v", err)
-	}
-	unlock3()
 }
 
 func TestParseRemoteURL(t *testing.T) {

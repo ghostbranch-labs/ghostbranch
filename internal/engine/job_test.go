@@ -100,7 +100,7 @@ func TestGateDetachedRecordsAPendingJob(t *testing.T) {
 		t.Fatal(err)
 	}
 	validateSchema(t, "feature.schema.json", raw)
-	unlock, err := workspace.Lock(h.eng.WS.LockPath(h.pair), h.clock.Now())
+	unlock, err := workspace.Lock(h.eng.WS.LockPath(h.pair), h.clock.Now(), "test")
 	if err != nil {
 		t.Fatalf("the pair lock is still held: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestTheLockIsFreeWhileTheGateWaitsOnCI(t *testing.T) {
 	h.startFeature("feat-x", map[string]string{"feature.txt": "x\n"})
 	lockErr := errors.New("checks were never listed")
 	h.forge.Checks = func(r, s string) []forge.Check {
-		unlock, err := workspace.Lock(h.eng.WS.LockPath(h.pair), h.clock.Now())
+		unlock, err := workspace.Lock(h.eng.WS.LockPath(h.pair), h.clock.Now(), "test")
 		if lockErr = err; err == nil {
 			unlock()
 		}
@@ -195,9 +195,12 @@ func TestFinishGivesUpOnABusyLock(t *testing.T) {
 	h.forge.Checks = func(r, s string) []forge.Check {
 		if !taken {
 			taken = true
-			if _, err := workspace.Lock(h.eng.WS.LockPath(h.pair), h.clock.Now()); err != nil {
+			drop, err := workspace.Lock(h.eng.WS.LockPath(h.pair), h.clock.Now(), "test")
+			if err != nil {
 				t.Errorf("take the lock: %v", err)
-			} // and never release it
+			} else {
+				t.Cleanup(drop) // held past the gate; the handle must close before TempDir's cleanup
+			}
 		}
 		return passing(r, s)
 	}
@@ -279,7 +282,7 @@ func TestPromoteKeepsTheLockThroughItsGate(t *testing.T) {
 			}
 			lockErr := errors.New("checks were never listed")
 			h.forge.Checks = func(r, s string) []forge.Check {
-				unlock, err := workspace.Lock(h.eng.WS.LockPath(h.pair), h.clock.Now())
+				unlock, err := workspace.Lock(h.eng.WS.LockPath(h.pair), h.clock.Now(), "test")
 				if lockErr = err; err == nil {
 					unlock()
 				}

@@ -82,7 +82,7 @@ func (e *Engine) open(ctx context.Context, op string, p workspace.Pair, mutating
 		pc.lockPath = e.WS.LockPath(p)
 	}
 	if mutating && !e.DryRun {
-		if pc.drop, err = workspace.Lock(pc.lockPath, e.Now()); err != nil {
+		if pc.drop, err = workspace.Lock(pc.lockPath, e.Now(), op); err != nil {
 			return nil, err
 		}
 		pc.held = true

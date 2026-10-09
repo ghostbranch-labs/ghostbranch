@@ -75,7 +75,7 @@ func (e *Engine) fetchMeta(ctx context.Context, g *gitx.Git) error {
 // still holds the lock only re-reads.
 func (e *Engine) relock(ctx context.Context, pc *pairCtx, job string) error {
 	for waited := time.Duration(0); !pc.held && pc.lockPath != ""; waited += finishLockPoll {
-		drop, err := workspace.Lock(pc.lockPath, e.Now())
+		drop, err := workspace.Lock(pc.lockPath, e.Now(), pc.op)
 		if err == nil {
 			pc.drop, pc.held = drop, true
 			break
