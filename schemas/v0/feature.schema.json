@@ -5,7 +5,7 @@
   "additionalProperties": false,
   "required": ["schema_version", "name", "branch", "created_by", "created_at", "base", "abandoned", "gate", "promoted"],
   "properties": {
-    "schema_version": { "const": "0.8" },
+    "schema_version": { "const": "0.9" },
     "name": { "type": "string" },
     "branch": { "type": "string" },
     "created_by": { "$ref": "common.schema.json#/$defs/actor" },
@@ -34,7 +34,8 @@
             "started_at": { "$ref": "common.schema.json#/$defs/time" },
             "leak": { "enum": ["clean", "found", "not_run"] },
             "commits": {
-              "type": "array",
+              "description": "null in a gate recorded by an older binary, which promote treats as an older gate",
+              "type": ["array", "null"],
               "items": {
                 "type": "object", "additionalProperties": false,
                 "required": ["source", "rebased"],

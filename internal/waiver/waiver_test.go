@@ -2,6 +2,8 @@ package waiver_test
 
 import (
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -12,6 +14,7 @@ import (
 	"time"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
+	"github.com/ghostbranch-labs/ghostbranch/internal/ledger"
 	"github.com/ghostbranch-labs/ghostbranch/internal/waiver"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
@@ -106,7 +109,7 @@ func TestFileIsPrivateAtomicAndHoldsNoSecret(t *testing.T) {
 		Waivers       []map[string]any `json:"waivers"`
 	}
 	b, _ := os.ReadFile(s.Path())
-	if err := json.Unmarshal(b, &raw); err != nil || raw.SchemaVersion != "0.8" || len(raw.Waivers) != 1 {
+	if err := json.Unmarshal(b, &raw); err != nil || raw.SchemaVersion != "0.9" || len(raw.Waivers) != 1 {
 		t.Fatalf("%s %v", b, err)
 	}
 	var keys []string
@@ -191,8 +194,8 @@ func TestRevokeAllClearsAFileWithABadValue(t *testing.T) {
 	if err := os.WriteFile(s.Path(), []byte(raw), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Load(); err == nil {
-		t.Fatal("a bad value must be a Load error")
+	if _, err := s.Load(); err == nil || strings.Contains(err.Error(), "not valid JSON") || !strings.Contains(err.Error(), "can't read") {
+		t.Fatalf("a valid file with a bad value: %v", err)
 	}
 	if _, err := s.Revoke("", nil, true, now); err != nil {
 		t.Fatalf("revoke --all must clear it: %v", err)
@@ -213,5 +216,76 @@ func TestRevokeAllKeepsAnUnreadableWaiversFile(t *testing.T) {
 	}
 	if fi, err := os.Stat(s.Path()); err != nil || !fi.IsDir() {
 		t.Fatalf("the unreadable path was replaced: %v %v", fi, err)
+	}
+	if _, err := os.Stat(s.Path() + ".tmp"); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("revoke --all wrote a replacement it couldn't move into place: %v", err)
+	}
+}
+
+func TestLoadSaysWhenAFileIsNotJSON(t *testing.T) {
+	t.Parallel()
+	s, _ := newStore(t)
+	if err := os.WriteFile(s.Path(), []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Load(); err == nil || !strings.Contains(err.Error(), "not valid JSON") {
+		t.Fatalf("Load = %v", err)
+	}
+}
+
+// A waiver keeps the console approval it was given.
+func TestWaiverKeepsItsApproval(t *testing.T) {
+	t.Parallel()
+	s, _ := newStore(t)
+	w := mk("acme/widget", "f-000000000001", "fixture")
+	w.Approval = &ledger.Approval{Kind: "console"}
+	if err := s.Add([]waiver.Waiver{w}, now); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Load()
+	if err != nil || len(got) != 1 || got[0].Approval == nil || got[0].Approval.Kind != "console" || got[0].CreatedBy != "human:octo" {
+		t.Fatalf("Load = %+v %v", got, err)
+	}
+}
+
+// RevokeKnown refuses a revoke that names an id with no waiver for the
+// repo, and changes nothing.
+func TestRevokeKnownRefusesAnUnknownID(t *testing.T) {
+	t.Parallel()
+	s, _ := newStore(t)
+	if err := s.Add([]waiver.Waiver{mk("acme/widget", "f-000000000001", "x"), mk("other/repo", "f-000000000002", "y")}, now); err != nil {
+		t.Fatal(err)
+	}
+	_, err := s.RevokeKnown("acme/widget", []string{"f-000000000001", "f-000000000002"}, now)
+	ce := contract.From(err)
+	if ce == nil || ce.Code != contract.WaiverUnknown || ce.Field != "id" || !reflect.DeepEqual(ce.Details["ids"], []string{"f-000000000002"}) {
+		t.Fatalf("want WAIVER_UNKNOWN naming f-000000000002 (another repo's), got %v", err)
+	}
+	if all, _ := s.Load(); len(all) != 2 {
+		t.Fatalf("a refused revoke changed the file: %+v", all)
+	}
+	removed, err := s.RevokeKnown("ACME/widget", []string{"f-000000000001"}, now)
+	if err != nil || len(removed) != 1 {
+		t.Fatalf("RevokeKnown = %+v %v", removed, err)
+	}
+}
+
+// The version is read before anything else: a newer file whose values
+// changed shape is refused as newer, never treated as corrupt and replaced.
+func TestANewerWaiversFileWithReshapedValuesIsNeverReplaced(t *testing.T) {
+	t.Parallel()
+	s, _ := newStore(t)
+	raw := []byte(`{"schema_version":"0.99","waivers":[{"id":5,"created_at":{"at":"x"}}]}`)
+	if err := os.WriteFile(s.Path(), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Load(); contract.From(err).Code != contract.UpgradeNeeded {
+		t.Fatalf("Load = %v, want UPGRADE_NEEDED", err)
+	}
+	if _, err := s.Revoke("", nil, true, now); contract.From(err).Code != contract.UpgradeNeeded {
+		t.Fatalf("revoke --all = %v, want UPGRADE_NEEDED", err)
+	}
+	if got, _ := os.ReadFile(s.Path()); string(got) != string(raw) {
+		t.Fatalf("the newer file was replaced: %s", got)
 	}
 }

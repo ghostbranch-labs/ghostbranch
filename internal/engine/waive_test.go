@@ -266,3 +266,25 @@ func TestAWaiverThatDiffersInOneFieldDoesNotApply(t *testing.T) {
 		})
 	}
 }
+
+// A waivers file from a newer Ghostbranch says to upgrade, never to revoke.
+func TestWaiversUnreadableFromANewerFileSaysUpgrade(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.startFeature("feat-x", fixture())
+	if err := os.WriteFile(h.eng.WS.WaiversPath(), []byte(`{"schema_version":"9.0","waivers":[]}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, warns, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
+	_ = wantCode(t, err, contract.LeakFound)
+	for _, w := range warns {
+		if w.Code == contract.WaiversUnreadable {
+			if !strings.Contains(w.Message, "upgrade") || strings.Contains(w.Message, "revoke --all") {
+				t.Fatalf("message = %q", w.Message)
+			}
+			return
+		}
+	}
+	t.Fatalf("no %s in %+v", contract.WaiversUnreadable, warns)
+}

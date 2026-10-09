@@ -13,6 +13,11 @@
     "match_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
     "reason": { "type": "string", "minLength": 1 },
     "created_at": { "type": "string", "format": "date-time" },
-    "created_by": { "type": "string" }
+    "created_by": { "type": "string" },
+    "approval": {
+      "description": "how a person approved the waiver: always at the console (absent on waivers made before 0.9)",
+      "type": "object", "additionalProperties": false, "required": ["kind"],
+      "properties": { "kind": { "const": "console" } }
+    }
   }
 }

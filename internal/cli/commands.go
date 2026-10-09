@@ -19,7 +19,8 @@ func (a *app) root() *cobra.Command {
 and publishes a feature only through a gated promote: rebase on public main, green CI, and a leak
 scan of exactly what will go public.
 
-Every command takes --json for one machine-readable object on stdout. Exit codes:
+Every command takes --json for machine-readable output on stdout: one JSON object, except wait --json,
+which streams NDJSON (one event per line, the result envelope last). Exit codes:
 0 ok, 1 failure, 2 usage, 3 gate failed, 4 conflict, 5 needs human approval, 6 state changed since plan.
 
 Coding agents: run "ghostbranch guide" first.`,
@@ -233,6 +234,10 @@ func (a *app) waitCmd() *cobra.Command {
 				a.ran = true
 				return contract.New(contract.BadFlag, "wait has no dry run: it only waits on CI and records the result; drop --dry-run").WithField("dry-run")
 			}
+			if timeout < 0 {
+				a.ran = true
+				return contract.New(contract.BadFlag, "--timeout must be 0 (wait until CI settles) or more, not %s", timeout).WithField("timeout")
+			}
 			e, err := a.engine(cmd.Context())
 			if err != nil {
 				return err
@@ -251,7 +256,7 @@ func (a *app) waitCmd() *cobra.Command {
 			return done(a, res, w, err)
 		},
 	}
-	c.Flags().DurationVar(&timeout, "timeout", 0, "stop waiting after this long and report pending; the job keeps running")
+	c.Flags().DurationVar(&timeout, "timeout", 0, "stop waiting after this long and report pending; the job keeps running (0, the default, waits until CI settles)")
 	return c
 }
 

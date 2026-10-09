@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.8",
+  "schema_version": "0.9",
   "command": "status",
   "ok": true,
   "exit_code": 0,
@@ -17,7 +17,7 @@
   "warnings": [
     {
       "code": "SHADOW_BEHIND",
-      "message": "shadow main is 1 commit(s) behind public main; run ghostbranch sync",
+      "message": "shadow main is 1 commit(s) behind public main; run ghostbranch sync --repo acme/widget",
       "details": {
         "behind": 1,
         "public_main": "178f8a91fcb0e6a374393202f9c61275c78d3dbb",

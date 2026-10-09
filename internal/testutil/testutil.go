@@ -4,6 +4,7 @@ package testutil
 
 import (
 	"context"
+	"os"
 	"sort"
 	"strconv"
 	"sync"
@@ -139,4 +140,17 @@ func (c *Clock) SleepCtx(ctx context.Context, d time.Duration) error {
 	}
 	c.Sleep(d)
 	return nil
+}
+
+// Main runs a package's tests, then each after func, then removes the git
+// isolation directory the test binary made, so test runs leave nothing in the
+// temp directory, and exits with the tests' code. Every package whose tests
+// run git calls it from TestMain; after is for a package's own teardown.
+func Main(m *testing.M, after ...func()) {
+	code := m.Run()
+	for _, f := range after {
+		f()
+	}
+	_ = gitx.Cleanup()
+	os.Exit(code)
 }

@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.8",
+  "schema_version": "0.9",
   "command": "promote",
   "ok": true,
   "exit_code": 0,
@@ -30,7 +30,8 @@
       "repo_guards": {
         "mode": "rewrite",
         "rewritten": [],
-        "unrewritable": []
+        "unrewritable": [],
+        "skipped": []
       },
       "shadow_pr": null,
       "job": null,
@@ -38,7 +39,7 @@
       "preview": null
     },
     "plan": {
-      "schema_version": "0.8",
+      "schema_version": "0.9",
       "id": "20261005T120005Z-0c0d0e",
       "kind": "promote",
       "actor": "human:octo",
@@ -83,6 +84,10 @@
         ],
         "dropped_empty": []
       },
+      "typed": {
+        "title": false,
+        "body": false
+      },
       "leak": {
         "findings": [],
         "waived": [],
@@ -93,7 +98,8 @@
         "repo_guards": {
           "mode": "rewrite",
           "rewritten": [],
-          "unrewritable": []
+          "unrewritable": [],
+          "skipped": []
         }
       }
     },

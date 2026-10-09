@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ghostbranch-labs/ghostbranch/internal/config"
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
@@ -54,7 +55,7 @@ func TestWaitFinishesADetachedGate(t *testing.T) {
 		t.Fatalf("ledger = %+v", last)
 	}
 	raw, _ := json.Marshal(last)
-	validateSchema(t, "ledger-entry.schema.json", raw)
+	testutil.ValidateSchema(t, "ledger-entry.schema.json", raw)
 }
 
 func TestWaitReplaysAFailedOutcome(t *testing.T) {
@@ -283,5 +284,68 @@ func TestWaitErrors(t *testing.T) {
 	}
 	if _, _, err := h.eng.Wait(h.ctx, h.pair, "gate/gone/0123456789ab", engine.WaitOptions{}); codeOf(err) != contract.FeatureNotFound {
 		t.Errorf("no such feature: %v", err)
+	}
+}
+
+// M7: a passed outcome whose final write fails names the job, and wait then
+// records it.
+func TestAPassedGateThatCantBeRecordedNamesItsJob(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.startFeature("feat-x", map[string]string{"feature.txt": "x\n"})
+	job := detached(t, h, "feat-x")
+	h.moveMetaOnPush("feat-x", 1) // the final write and its one retry both lose their lease
+	res, _, err := h.eng.Wait(h.ctx, h.pair, job, engine.WaitOptions{})
+	ce := wantCode(t, err, contract.RefMoved)
+	if ce.Details["job"] != job || res == nil || res.Checks != feature.ChecksPassed {
+		t.Fatalf("err %v details %v res %+v", err, ce.Details, res)
+	}
+	if !h.meta("feat-x").Gate.Pending() {
+		t.Fatal("the job must still be pending, for wait to record")
+	}
+	h.eng.OnPush = nil
+	if res, _, err := h.eng.Wait(h.ctx, h.pair, job, engine.WaitOptions{}); err != nil || res.Checks != feature.ChecksPassed {
+		t.Fatalf("wait again = %+v %v", res, err)
+	}
+}
+
+// wait --timeout returns at its deadline, not a poll interval later.
+func TestWaitTimeoutStopsAtTheDeadline(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.startFeature("feat-x", map[string]string{"feature.txt": "x\n"})
+	h.forge.Checks = func(string, string) []forge.Check { return []forge.Check{{Name: "ci", Status: "in_progress"}} }
+	job := detached(t, h, "feat-x")
+	h.eng.PollInterval = 10 * time.Second
+	start := h.clock.Now()
+	res, _, err := h.eng.Wait(h.ctx, h.pair, job, engine.WaitOptions{Timeout: 3 * time.Second})
+	if err != nil || res.Checks != feature.ChecksPending {
+		t.Fatalf("want pending, got %+v %v", res, err)
+	}
+	if took := h.clock.Now().Sub(start); took != 3*time.Second {
+		t.Fatalf("wait took %s of the clock, want 3s", took)
+	}
+}
+
+func TestAReusedDetachedGateKeepsItsConfigWarnings(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	cfg := strings.Replace(string(config.Render(publicName, shadowName)), "  target: pr\n", "  target: pr\n  require_human: false\n", 1)
+	testutil.Commit(t, h.shadowGit(), engine.OverlayBranch, "an ignored key", map[string]string{".ghostbranch.yml": cfg})
+	h.startFeature("feat-x", map[string]string{"feature.txt": "x\n"})
+	first, w1, err := h.eng.GateDetached(h.ctx, h.pair, "feat-x")
+	if err != nil || !hasWarning(w1, contract.ConfigKeyIgnored) {
+		t.Fatalf("first detached gate = %+v %+v %v", first, w1, err)
+	}
+	pushes := len(h.pushes)
+	again, w2, err := h.eng.GateDetached(h.ctx, h.pair, "feat-x")
+	if err != nil || *again.Job != *first.Job || len(h.pushes) != pushes {
+		t.Fatalf("the second detached gate didn't reuse the job: %+v %v", again, err)
+	}
+	if !hasWarning(w2, contract.ConfigKeyIgnored) {
+		t.Fatalf("the reused gate dropped the config warnings: %+v", w2)
 	}
 }

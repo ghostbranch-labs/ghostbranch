@@ -1,11 +1,25 @@
 {
-  "schema_version": "0.8",
+  "schema_version": "0.9",
   "command": "feature show",
   "ok": false,
   "exit_code": 2,
   "data": {},
   "warnings": [],
-  "next": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "feature",
+        "list",
+        "--all",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "no feature by that name here; list every feature, abandoned ones included, to find it",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
   "error": {
     "code": "FEATURE_NOT_FOUND",
     "message": "no feature \"nope\" in acme/widget-shadow; list them with ghostbranch feature list --all",

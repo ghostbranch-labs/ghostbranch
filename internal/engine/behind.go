@@ -18,7 +18,7 @@ func (e *Engine) behind(ctx context.Context, pc *pairCtx) []contract.Warning {
 	if err != nil {
 		return nil
 	}
-	return m.warnings()
+	return m.warnings(pc.pair.Public)
 }
 
 // mains is shadow main against public main. Shadow or Public is "" when that
@@ -60,11 +60,11 @@ func compareMains(ctx context.Context, g *gitx.Git) (mains, error) {
 }
 
 // warnings is SHADOW_BEHIND when shadow main is behind.
-func (m mains) warnings() []contract.Warning {
+func (m mains) warnings(public string) []contract.Warning {
 	if m.Behind == 0 {
 		return nil
 	}
 	return []contract.Warning{{Code: contract.ShadowBehind,
-		Message: fmt.Sprintf("shadow main is %d commit(s) behind public main; run ghostbranch sync", m.Behind),
+		Message: fmt.Sprintf("shadow main is %d commit(s) behind public main; run ghostbranch sync --repo %s", m.Behind, public),
 		Details: map[string]any{"behind": m.Behind, "shadow_main": m.Shadow, "public_main": m.Public}}}
 }

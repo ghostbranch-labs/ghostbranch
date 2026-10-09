@@ -7,10 +7,9 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
-	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -43,10 +42,13 @@ func TestSyncNoopFastForwardAndDiverged(t *testing.T) {
 	}
 
 	h.eng.DryRun = true
-	testutil.Commit(t, h.pubGit, "main", "upstream 2", map[string]string{"up.txt": "2\n"})
+	up2 := testutil.Commit(t, h.pubGit, "main", "upstream 2", map[string]string{"up.txt": "2\n"})
 	res, _, err = h.eng.Sync(h.ctx, h.pair, engine.SyncOptions{})
 	if err != nil || res.Action != "fast_forward" || res.Preview == nil {
 		t.Fatalf("dry ff: %+v %v", res, err)
+	}
+	if res.Branches[0].From != newMain || res.Branches[0].To != up2 || res.ShadowMainAfter != up2 {
+		t.Fatalf("a dry run reports the target: %+v, shadow_main_after %s", res.Branches[0], res.ShadowMainAfter)
 	}
 	if got, _ := h.shadowGit().MustResolve(h.ctx, "refs/heads/main"); got != newMain {
 		t.Fatal("dry run moved shadow main")
@@ -256,7 +258,7 @@ func TestSyncWarnsWhenTheTokenCannotListRuns(t *testing.T) {
 		t.Fatalf("sync must still succeed: %+v %v", res, err)
 	}
 	if len(warns) != 1 || warns[0].Code != contract.CINotCancelled || !strings.Contains(warns[0].Message, "may have started workflow runs") ||
-		!strings.Contains(warns[0].Message, "Actions write") {
+		!strings.Contains(warns[0].Message, "Actions write") || !reflect.DeepEqual(warns[0].Details["runs"], []map[string]any{}) {
 		t.Fatalf("warnings = %+v", warns)
 	}
 }
@@ -273,6 +275,10 @@ func TestSyncWarnsWhenTheTokenCannotCancelRuns(t *testing.T) {
 	if len(warns) != 1 || warns[0].Code != contract.CINotCancelled ||
 		!strings.Contains(warns[0].Message, "the push started 2 workflow run(s) in the shadow repo, and the token can't cancel them") {
 		t.Fatalf("warnings = %+v", warns)
+	}
+	want := []map[string]any{{"id": int64(1), "url": "https://github.example/runs/ci"}, {"id": int64(2), "url": "https://github.example/runs/lint"}}
+	if !reflect.DeepEqual(warns[0].Details["runs"], want) {
+		t.Fatalf("details.runs = %+v", warns[0].Details["runs"])
 	}
 }
 
@@ -343,7 +349,10 @@ func TestSyncInterruptedWhileLookingForRunsWarns(t *testing.T) {
 		}
 		return sleep(c, d)
 	}
-	_, warns, _ := h.eng.Sync(ctx, h.pair, engine.SyncOptions{})
+	_, warns, err := h.eng.Sync(ctx, h.pair, engine.SyncOptions{})
+	if err != nil {
+		t.Fatalf("an interrupt while looking for runs is a warning, not an error: %v", err)
+	}
 	if h.forge.PushRunsCalls != 1 {
 		t.Fatalf("PushRuns calls = %d, want 1", h.forge.PushRunsCalls)
 	}
@@ -409,7 +418,8 @@ func TestSyncCancelIgnoredTwice(t *testing.T) {
 		t.Fatalf("%+v %v", res, err)
 	}
 	if len(warns) != 1 || warns[0].Code != contract.CINotCancelled || !strings.Contains(warns[0].Message, "7 (https://github.example/runs/ci)") ||
-		!strings.Contains(warns[0].Message, "kept running after sync cancelled and force-cancelled them") {
+		!strings.Contains(warns[0].Message, "kept running after sync cancelled and force-cancelled them") ||
+		!reflect.DeepEqual(warns[0].Details["runs"], []map[string]any{{"id": int64(7), "url": "https://github.example/runs/ci"}}) {
 		t.Fatalf("warnings = %+v", warns)
 	}
 }
@@ -508,39 +518,6 @@ func TestSyncForceCancelFailure(t *testing.T) {
 	}
 }
 
-// An interrupt while checking one commit's cancels leaves the later
-// commits unchecked: a warning covers them too.
-func TestSyncInterruptedWhileVerifyingWarnsForTheLaterCommits(t *testing.T) {
-	t.Parallel()
-	h, next := pushRunsHarness(t)
-	h.setConfig("branches: [main]", "branches: [main, release]")
-	other := testutil.Commit(t, h.pubGit, "release", "rel", map[string]string{
-		".github/workflows/push.yml": strings.Replace(pushWorkflow, "[main]", "[main, release]", 1)})
-	seedRun(h, fake.Run{SHA: next, Run: wfRun(1, "ci", "in_progress"), IgnoreCancel: true})
-	seedRun(h, fake.Run{SHA: other, Run: wfRun(2, "ci", "in_progress"), IgnoreCancel: true})
-	ctx, cancel := context.WithCancel(h.ctx)
-	defer cancel()
-	sleep := h.eng.Sleep
-	h.eng.Sleep = func(c context.Context, d time.Duration) error {
-		if h.forge.PushRunsCalls >= 3 { // the first commit's first check
-			cancel()
-		}
-		return sleep(c, d)
-	}
-	_, warns, _ := h.eng.Sync(ctx, h.pair, engine.SyncOptions{})
-	if h.forge.PushRunsCalls != 3 || len(h.forge.CancelRunRepos) != 1 {
-		t.Fatalf("PushRuns calls = %d, CancelRun calls %v", h.forge.PushRunsCalls, h.forge.CancelRunRepos)
-	}
-	var interrupted, unchecked bool
-	for _, w := range warns {
-		interrupted = interrupted || w.Code == contract.CINotCancelled && strings.Contains(w.Message, "interrupted while checking")
-		unchecked = unchecked || w.Code == contract.CINotCancelled && strings.Contains(w.Message, "may have started workflow runs")
-	}
-	if !interrupted || !unchecked {
-		t.Fatalf("want both CI_NOT_CANCELLED warnings, got %+v", warns)
-	}
-}
-
 // Ctrl-C while sync checks its cancels: a warning, and the result.
 func TestSyncInterruptedWhileVerifying(t *testing.T) {
 	t.Parallel()
@@ -555,7 +532,10 @@ func TestSyncInterruptedWhileVerifying(t *testing.T) {
 		}
 		return sleep(c, d)
 	}
-	res, warns, _ := h.eng.Sync(ctx, h.pair, engine.SyncOptions{})
+	res, warns, err := h.eng.Sync(ctx, h.pair, engine.SyncOptions{})
+	if err != nil {
+		t.Fatalf("an interrupt while checking cancels is a warning, not an error: %v", err)
+	}
 	if res == nil || res.ShadowMainAfter != next || len(res.CancelledRuns) != 0 {
 		t.Fatalf("result = %+v", res)
 	}
@@ -563,12 +543,246 @@ func TestSyncInterruptedWhileVerifying(t *testing.T) {
 		t.Fatalf("PushRuns calls = %d, force-cancel calls %v", h.forge.PushRunsCalls, h.forge.ForceCancelRepos)
 	}
 	for _, w := range warns {
-		if w.Code == contract.CINotCancelled && strings.Contains(w.Message, "interrupted while checking") &&
+		if w.Code == contract.CINotCancelled && strings.Contains(w.Message, "interrupted before it could confirm") &&
 			strings.Contains(w.Message, "1 (https://github.example/runs/ci)") {
 			return
 		}
 	}
 	t.Fatalf("want CI_NOT_CANCELLED, got %+v", warns)
+}
+
+// releasePush adds release to sync.branches and a public release commit
+// whose push starts the push workflow, so a sync pushes two commits that
+// each start runs. It returns the release commit.
+func releasePush(t *testing.T, h *harness) string {
+	t.Helper()
+	h.setConfig("branches: [main]", "branches: [main, release]")
+	return testutil.Commit(t, h.pubGit, "release", "rel", map[string]string{
+		".github/workflows/push.yml": strings.Replace(pushWorkflow, "[main]", "[main, release]", 1)})
+}
+
+// Sync cancels the runs of every pushed commit before it checks any of
+// them, then checks them all in one window: one 30s window and one
+// force-cancel round, not one per commit.
+func TestSyncCancelsEveryCommitsRunsBeforeCheckingAny(t *testing.T) {
+	t.Parallel()
+	h, next := pushRunsHarness(t)
+	other := releasePush(t, h)
+	seedRun(h, fake.Run{SHA: next, Run: wfRun(1, "ci", "in_progress"), IgnoreCancel: true})
+	seedRun(h, fake.Run{SHA: other, Run: wfRun(2, "lint", "in_progress"), IgnoreCancel: true})
+	cancelsAtFirstCheck := -1
+	sleep := h.eng.Sleep
+	h.eng.Sleep = func(c context.Context, d time.Duration) error {
+		// Two looks per commit; the sleep after the fourth is the first check's.
+		if h.forge.PushRunsCalls == 4 && cancelsAtFirstCheck < 0 {
+			cancelsAtFirstCheck = len(h.forge.CancelRunRepos)
+		}
+		return sleep(c, d)
+	}
+	start := h.clock.Now()
+	res, warns, err := h.eng.Sync(h.ctx, h.pair, engine.SyncOptions{})
+	if err != nil || len(warns) != 0 || !reflect.DeepEqual(cancelledIDs(res), []int64{1, 2}) {
+		t.Fatalf("%+v %+v %v", res, warns, err)
+	}
+	if cancelsAtFirstCheck != 2 {
+		t.Fatalf("%d cancel(s) sent before the first check, want both commits' (2)", cancelsAtFirstCheck)
+	}
+	if !reflect.DeepEqual(h.forge.ForceCancelled[shadowName], []int64{1, 2}) || len(h.forge.ForceCancelRepos) != 2 {
+		t.Fatalf("force-cancelled %v, calls %v", h.forge.ForceCancelled, h.forge.ForceCancelRepos)
+	}
+	// 1s of looking per commit, the shared 30s window, one check after the force-cancels.
+	if waited := h.clock.Now().Sub(start); waited != 33*time.Second {
+		t.Fatalf("waited %s, want 33s", waited)
+	}
+}
+
+// A forbidden force-cancel stops the force-cancels for every commit: one
+// call, and one warning naming both runs.
+func TestSyncForceCancelForbiddenStopsForEveryCommit(t *testing.T) {
+	t.Parallel()
+	h, next := pushRunsHarness(t)
+	other := releasePush(t, h)
+	seedRun(h, fake.Run{SHA: next, Run: wfRun(1, "ci", "in_progress"), IgnoreCancel: true})
+	seedRun(h, fake.Run{SHA: other, Run: wfRun(2, "lint", "in_progress"), IgnoreCancel: true})
+	h.forge.ForceCancelForbidden = map[string]bool{shadowName: true}
+	_, warns, err := h.eng.Sync(h.ctx, h.pair, engine.SyncOptions{})
+	if err != nil || len(h.forge.ForceCancelRepos) != 1 {
+		t.Fatalf("%v; force-cancel calls %v", err, h.forge.ForceCancelRepos)
+	}
+	if len(warns) != 1 || !strings.Contains(warns[0].Message, "1 (https://github.example/runs/ci)") ||
+		!strings.Contains(warns[0].Message, "2 (https://github.example/runs/lint)") || !strings.Contains(warns[0].Message, "give it Actions write") ||
+		len(warns[0].Details["runs"].([]map[string]any)) != 2 {
+		t.Fatalf("warnings = %+v", warns)
+	}
+}
+
+// Each stuck run is warned about with its own force-cancel error, never
+// another run's.
+func TestSyncForceCancelErrorsAreNamedPerRun(t *testing.T) {
+	t.Parallel()
+	h, next := pushRunsHarness(t)
+	seedRun(h, fake.Run{SHA: next, Run: wfRun(1, "ci", "in_progress"), IgnoreCancel: true, ForceCancelErr: errors.New("boom")})
+	seedRun(h, fake.Run{SHA: next, Run: wfRun(2, "lint", "in_progress"), IgnoreCancel: true, IgnoreForceCancel: true})
+	_, warns, err := h.eng.Sync(h.ctx, h.pair, engine.SyncOptions{})
+	if err != nil || len(warns) != 2 {
+		t.Fatalf("%v %+v", err, warns)
+	}
+	byRun := map[string]string{}
+	for _, w := range warns {
+		for _, r := range w.Details["runs"].([]map[string]any) {
+			byRun[fmt.Sprint(r["id"])] = w.Message
+		}
+	}
+	if !strings.Contains(byRun["1"], "could not force-cancel them (boom)") || strings.Contains(byRun["1"], "2 (") {
+		t.Fatalf("run 1: %q", byRun["1"])
+	}
+	if !strings.Contains(byRun["2"], "kept running after sync cancelled and force-cancelled them") || strings.Contains(byRun["2"], "boom") {
+		t.Fatalf("run 2: %q", byRun["2"])
+	}
+}
+
+// Ctrl-C during the force window: a run whose force-cancel failed keeps
+// that reason, and only the run still unconfirmed is "interrupted".
+func TestSyncInterruptKeepsEachStuckRunsReason(t *testing.T) {
+	t.Parallel()
+	h, next := pushRunsHarness(t)
+	seedRun(h, fake.Run{SHA: next, Run: wfRun(1, "ci", "in_progress"), IgnoreCancel: true, ForceCancelErr: errors.New("boom")})
+	seedRun(h, fake.Run{SHA: next, Run: wfRun(2, "lint", "in_progress"), IgnoreCancel: true, IgnoreForceCancel: true})
+	ctx, cancel := context.WithCancel(h.ctx)
+	defer cancel()
+	sleep := h.eng.Sleep
+	h.eng.Sleep = func(c context.Context, d time.Duration) error {
+		if len(h.forge.ForceCancelRepos) == 2 { // after the force-cancel round
+			cancel()
+		}
+		return sleep(c, d)
+	}
+	_, warns, err := h.eng.Sync(ctx, h.pair, engine.SyncOptions{})
+	if err != nil {
+		t.Fatalf("an interrupt while checking cancels is a warning, not an error: %v", err)
+	}
+	var boom, interrupted bool
+	for _, w := range warns {
+		if w.Code != contract.CINotCancelled {
+			continue
+		}
+		boom = boom || strings.Contains(w.Message, "1 (") && strings.Contains(w.Message, "(boom)") && !strings.Contains(w.Message, "interrupted")
+		interrupted = interrupted || strings.Contains(w.Message, "2 (") && strings.Contains(w.Message, "interrupted before it could confirm") && !strings.Contains(w.Message, "1 (")
+	}
+	if !boom || !interrupted {
+		t.Fatalf("warnings = %+v", warns)
+	}
+}
+
+// An interrupt while checking names every commit's runs once, and adds no
+// "may have started" warning: every pushed commit was looked at.
+func TestSyncInterruptedWhileVerifyingNamesEveryCommitsRuns(t *testing.T) {
+	t.Parallel()
+	h, next := pushRunsHarness(t)
+	other := releasePush(t, h)
+	seedRun(h, fake.Run{SHA: next, Run: wfRun(1, "ci", "in_progress"), IgnoreCancel: true})
+	seedRun(h, fake.Run{SHA: other, Run: wfRun(2, "lint", "in_progress"), IgnoreCancel: true})
+	ctx, cancel := context.WithCancel(h.ctx)
+	defer cancel()
+	sleep := h.eng.Sleep
+	h.eng.Sleep = func(c context.Context, d time.Duration) error {
+		if h.forge.PushRunsCalls >= 4 { // both commits looked at: the first check's wait
+			cancel()
+		}
+		return sleep(c, d)
+	}
+	_, warns, err := h.eng.Sync(ctx, h.pair, engine.SyncOptions{})
+	if err != nil || len(h.forge.CancelRunRepos) != 2 {
+		t.Fatalf("%v; CancelRun calls %v", err, h.forge.CancelRunRepos)
+	}
+	// closeMerged's survey also fails under the cancelled context (a
+	// FEATURE_NOT_CLOSED warning): count only the cancel warnings.
+	var ci []contract.Warning
+	for _, w := range warns {
+		if w.Code == contract.CINotCancelled {
+			ci = append(ci, w)
+		}
+	}
+	if len(ci) != 1 || !strings.Contains(ci[0].Message, "interrupted before it could confirm") ||
+		!strings.Contains(ci[0].Message, "1 (") || !strings.Contains(ci[0].Message, "2 (") {
+		t.Fatalf("warnings = %+v", warns)
+	}
+}
+
+// One branch's push failing doesn't stop the others; each failure is a
+// SYNC_PUSH_FAILED warning, and sync's error is the first failure's.
+func TestSyncPushFailureOnOneBranchStillPushesTheOthers(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.setConfig("branches: [main]", "branches: [main, release]")
+	next := testutil.Commit(t, h.pubGit, "main", "next", map[string]string{"n.txt": "1\n"})
+	rel := testutil.Commit(t, h.pubGit, "release", "rel", map[string]string{"r.txt": "1\n"})
+	moved := ""
+	onPush := h.eng.OnPush
+	h.eng.OnPush = func(op, remote string, specs []string) {
+		onPush(op, remote, specs)
+		if op == "sync" && moved == "" && slices.Contains(specs, next+":refs/heads/main") {
+			// Someone else moves shadow main first: the leased push is refused.
+			moved = testutil.Commit(t, h.shadowGit(), "main", "elsewhere", map[string]string{"e.txt": "1\n"})
+		}
+	}
+	res, warns, err := h.eng.Sync(h.ctx, h.pair, engine.SyncOptions{})
+	_ = wantCode(t, err, contract.RefMoved)
+	got := map[string]engine.SyncBranch{}
+	for _, b := range res.Branches {
+		got[b.Name] = b
+	}
+	if m := got["main"]; m.Status != "push_failed" || m.To != m.From || res.Action != "push_failed" || res.ShadowMainAfter != m.From {
+		t.Fatalf("main = %+v, action %s", m, res.Action)
+	}
+	if r := got["release"]; r.Status != "created" || r.To != rel {
+		t.Fatalf("release = %+v", r)
+	}
+	if sha, _ := h.shadowGit().MustResolve(h.ctx, "refs/heads/release"); sha != rel {
+		t.Fatal("release was not pushed after main's push failed")
+	}
+	if codes(warns)[contract.SyncPushFailed] != 1 {
+		t.Fatalf("warnings = %+v", warns)
+	}
+	for _, w := range warns {
+		if w.Code == contract.SyncPushFailed && (w.Details["branch"] != "main" || w.Details["code"] != string(contract.RefMoved) ||
+			!strings.HasPrefix(w.Message, "sync could not push shadow main, and still synced the other branches: ")) {
+			t.Fatalf("warning = %+v", w)
+		}
+	}
+	validateResult(t, "sync.schema.json", res)
+}
+
+// With main the only branch to sync there are no other branches to speak of.
+func TestSyncPushFailureOnTheOnlyBranch(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	next := testutil.Commit(t, h.pubGit, "main", "next", map[string]string{"n.txt": "1\n"})
+	moved := ""
+	onPush := h.eng.OnPush
+	h.eng.OnPush = func(op, remote string, specs []string) {
+		onPush(op, remote, specs)
+		if op == "sync" && moved == "" && slices.Contains(specs, next+":refs/heads/main") {
+			moved = testutil.Commit(t, h.shadowGit(), "main", "elsewhere", map[string]string{"e.txt": "1\n"})
+		}
+	}
+	_, warns, err := h.eng.Sync(h.ctx, h.pair, engine.SyncOptions{})
+	_ = wantCode(t, err, contract.RefMoved)
+	n := 0
+	for _, w := range warns {
+		if w.Code != contract.SyncPushFailed {
+			continue
+		}
+		n++
+		if !strings.HasPrefix(w.Message, "sync could not push shadow main: ") || strings.Contains(w.Message, "other branches") {
+			t.Fatalf("warning = %+v", w)
+		}
+	}
+	if n != 1 {
+		t.Fatalf("warnings = %+v", warns)
+	}
 }
 
 func TestSyncNoCancelDryRunAndNoopNeverLookForRuns(t *testing.T) {
@@ -665,7 +879,7 @@ func TestSyncClosesMergedFeatures(t *testing.T) {
 		t.Fatalf("feature close entries = %+v", closes)
 	}
 	raw, _ := json.Marshal(closes[0])
-	validateSchema(t, "ledger-entry.schema.json", raw)
+	testutil.ValidateSchema(t, "ledger-entry.schema.json", raw)
 	es := h.ledger()
 	if last := es[len(es)-1]; last.Op != "sync" || !strings.Contains(last.Summary, "closed 1 merged feature(s)") {
 		t.Fatalf("sync ledger = %+v", last)
@@ -878,38 +1092,72 @@ func TestSyncCloseFailureIsAWarning(t *testing.T) {
 	}
 }
 
-// An unreadable plan file (even another pair's) fails the close with
-// INTERNAL before anything is deleted: a warning, never a failed sync.
-func TestSyncUnreadablePlanFileIsAWarning(t *testing.T) {
+// An unreadable plan file (even another pair's) is skipped with a warning:
+// the merged feature still closes, every ref of it.
+func TestSyncSkipsAnUnreadablePlanFile(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	h.init()
-	pr, _ := h.publish("feat-x")
+	pr, id := h.publish("feat-x")
 	h.forge.SetPRMerged(publicName, pr)
-	// other-pair.json links to a directory: listed as no directory, but
-	// reading it fails. Windows makes a junction, which needs no privilege.
-	link, target := filepath.Join(h.eng.WS.PlansDir(), "other-pair.json"), t.TempDir()
-	if err := os.Symlink(target, link); err != nil {
-		if runtime.GOOS != "windows" {
-			t.Fatal(err)
-		}
-		if out, err := exec.Command("cmd", "/c", "mklink", "/J", link, target).CombinedOutput(); err != nil {
-			t.Skipf("can't link a directory here: %v %s", err, out)
-		}
-	}
-	if _, err := os.ReadFile(link); err == nil {
-		t.Skip("the link reads as a file here")
-	}
-	before := h.shadowRefs()
+	want := h.featureRefs("feat-x", id)
+	link := unreadablePlanFile(t, h)
 	res, warns := h.syncOK(engine.SyncOptions{})
-	if res.Closed == nil || len(res.Closed) != 0 {
+	if len(res.Closed) != 1 || res.Closed[0].Name != "feat-x" || !reflect.DeepEqual(res.Closed[0].Deleted, want) {
 		t.Fatalf("closed = %+v", res.Closed)
 	}
-	if len(warns) != 1 || warns[0].Code != contract.FeatureNotClosed || warns[0].Details["error_code"] != string(contract.Internal) {
+	if len(warns) != 1 || warns[0].Code != contract.PlanFileUnreadable || warns[0].Details["path"] != link {
 		t.Fatalf("warnings = %+v", warns)
 	}
-	if !reflect.DeepEqual(h.shadowRefs(), before) {
-		t.Fatal("sync deleted something")
+	after := h.shadowRefs()
+	for ref := range want {
+		if _, ok := after[ref]; ok {
+			t.Errorf("%s is still in the shadow repo", ref)
+		}
+	}
+}
+
+// The ledger can't take sync's entries: the close still stands, and each
+// entry becomes a warning; the close's carries its deleted refs.
+func TestALedgerFailureAfterSyncClosesIsAWarning(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	pr, id := h.publish("feat-x")
+	h.forge.SetPRMerged(publicName, pr)
+	want := h.featureRefs("feat-x", id)
+	ledgerPath := h.eng.WS.LedgerPath()
+	if err := os.Remove(ledgerPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(ledgerPath, 0o755); err != nil { // appending to a folder fails
+		t.Fatal(err)
+	}
+	res, _ := h.syncOK(engine.SyncOptions{})
+	if len(res.Closed) != 1 || !reflect.DeepEqual(res.Closed[0].Deleted, want) {
+		t.Fatalf("closed = %+v", res.Closed)
+	}
+	ws := h.eng.LedgerWarnings()
+	var closeW, syncW *contract.Warning
+	for i := range ws {
+		if ws[i].Code != contract.LedgerNotWritten {
+			t.Fatalf("ledger warnings = %+v", ws)
+		}
+		switch ws[i].Details["op"] {
+		case "feature close":
+			closeW = &ws[i]
+		case "sync":
+			syncW = &ws[i]
+		}
+	}
+	if len(ws) != 2 || closeW == nil || syncW == nil {
+		t.Fatalf("ledger warnings = %+v", ws)
+	}
+	if closeW.Details["feature"] != "feat-x" || !reflect.DeepEqual(closeW.Details["refs"], want) {
+		t.Fatalf("the close's warning = %+v", *closeW)
+	}
+	if _, ok := syncW.Details["refs"]; ok {
+		t.Fatalf("the sync's warning has refs: %+v", *syncW)
 	}
 }
 
@@ -944,7 +1192,7 @@ func TestSyncRecordsTheDeletesWhenTheGatePRWontClose(t *testing.T) {
 }
 
 // corruptMeta points name's metadata ref in the shadow repo at a commit
-// whose feature.json doesn't parse, so every survey of the pair fails.
+// whose feature.json doesn't parse: the survey reports it unreadable.
 func (h *harness) corruptMeta(name string) {
 	h.t.Helper()
 	sh := h.shadowGit()
@@ -957,42 +1205,40 @@ func (h *harness) corruptMeta(name string) {
 	}
 }
 
-// A survey that fails never fails the sync: it closes nothing and says so
-// in a FEATURE_NOT_CLOSED warning with no feature. --no-close never surveys.
-func TestSyncSurveyFailureIsAWarning(t *testing.T) {
+// A corrupt record doesn't stop sync's closes: the merged feature closes,
+// and the unreadable one waits for a person. --no-close never surveys.
+func TestSyncClosesBesideAnUnreadableRecord(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	h.init()
-	pr, _ := h.publish("feat-x")
+	pr, id := h.publish("feat-x")
 	h.forge.SetPRMerged(publicName, pr)
+	want := h.featureRefs("feat-x", id)
 	h.corruptMeta("feat-bad")
-	next := testutil.Commit(t, h.pubGit, "main", "upstream", map[string]string{"up.txt": "1\n"})
-	before := h.shadowRefs()
-	delete(before, "refs/heads/main")
-
 	res, warns := h.syncOK(engine.SyncOptions{})
-	if res.ShadowMainAfter != next || res.Surveyed || len(res.Closed) != 0 || len(res.Attention) != 0 || res.ActiveFeatures != 0 {
+	if !res.Surveyed || res.ActiveFeatures != 1 || len(res.Closed) != 1 || res.Closed[0].Name != "feat-x" ||
+		!reflect.DeepEqual(res.Closed[0].Deleted, want) {
 		t.Fatalf("sync = %+v", res)
 	}
-	if len(warns) != 1 || warns[0].Code != contract.FeatureNotClosed ||
-		!strings.HasPrefix(warns[0].Message, "couldn't survey features, so nothing was closed: INTERNAL: ") ||
-		warns[0].Details["error_code"] != string(contract.Internal) || warns[0].Details["feature"] != nil {
+	if len(res.Attention) != 1 || res.Attention[0].Name != "feat-bad" || res.Attention[0].State != feature.StateUnreadable ||
+		res.Attention[0].Error == "" {
+		t.Fatalf("attention = %+v", res.Attention)
+	}
+	if len(warns) != 0 {
 		t.Fatalf("warnings = %+v", warns)
 	}
-	after := h.shadowRefs()
-	delete(after, "refs/heads/main")
-	if !reflect.DeepEqual(after, before) || len(h.closeEntries()) != 0 {
-		t.Fatal("sync deleted something without a survey")
+	if _, ok := h.shadowRefs()["refs/ghostbranch/features/feat-bad"]; !ok {
+		t.Fatal("sync deleted the unreadable record")
 	}
-
-	_, warns = h.syncOK(engine.SyncOptions{NoClose: true})
-	if len(warns) != 0 {
-		t.Fatalf("--no-close surveyed: %+v", warns)
+	res, warns = h.syncOK(engine.SyncOptions{NoClose: true})
+	if res.Surveyed || len(warns) != 0 {
+		t.Fatalf("--no-close surveyed: %+v %+v", res, warns)
 	}
 }
 
-// A failed survey doesn't mask a diverged branch: still SYNC_DIVERGED.
-func TestSyncSurveyFailureKeepsSyncDiverged(t *testing.T) {
+// An unreadable record doesn't mask a diverged branch: still SYNC_DIVERGED,
+// and the record is in attention.
+func TestAnUnreadableRecordKeepsSyncDiverged(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	h.init()
@@ -1001,8 +1247,11 @@ func TestSyncSurveyFailureKeepsSyncDiverged(t *testing.T) {
 	testutil.Commit(t, h.shadowGit(), "main", "rogue", map[string]string{"rogue.txt": "x\n"})
 	res, warns, err := h.eng.Sync(h.ctx, h.pair, engine.SyncOptions{})
 	_ = wantCode(t, err, contract.SyncDiverged)
-	if res == nil || res.Action != "diverged" || len(warns) != 1 || warns[0].Code != contract.FeatureNotClosed {
+	if res == nil || res.Action != "diverged" || len(warns) != 0 {
 		t.Fatalf("sync = %+v %+v", res, warns)
+	}
+	if len(res.Attention) != 1 || res.Attention[0].Name != "feat-bad" || res.Attention[0].State != feature.StateUnreadable {
+		t.Fatalf("attention = %+v", res.Attention)
 	}
 }
 
@@ -1144,12 +1393,38 @@ func TestSyncNeverClosesANewerRecord(t *testing.T) {
 	if len(res.Closed) != 0 || warning(warns, contract.RecordNewer) == nil {
 		t.Fatalf("closed = %+v, warnings = %+v", res.Closed, warns)
 	}
+	// Sync's output points at it: attention lists it, and RECORD_NEWER says why.
+	if len(res.Attention) != 1 || res.Attention[0].Name != "feat-x" || res.Attention[0].State != feature.StateMerged {
+		t.Fatalf("attention = %+v", res.Attention)
+	}
 	if !reflect.DeepEqual(h.shadowRefs(), before) || len(h.closeEntries()) != 0 {
 		t.Fatal("sync deleted something of a newer record")
 	}
 	st, _ := h.status(contract.RecordNewer)
 	if len(st.Features) != 1 || st.Features[0].Name != "feat-x" || st.Features[0].State != feature.StateMerged {
 		t.Fatalf("status features = %+v", st.Features)
+	}
+}
+
+// A newer record is never closed unattended by the branch_gone rule either.
+func TestSyncNeverClosesANewerBranchGoneRecord(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	pr, _ := h.publish("feat-x")
+	h.forge.SetPRMerged(publicName, pr)
+	h.newerMeta("feat-x")
+	if err := h.shadowGit().DeleteRef(h.ctx, "refs/heads/feat-x"); err != nil {
+		t.Fatal(err)
+	}
+	before := h.shadowRefs()
+	h.eng.Approver = nil
+	res, warns := h.syncOK(engine.SyncOptions{})
+	if len(res.Closed) != 0 || warning(warns, contract.RecordNewer) == nil {
+		t.Fatalf("closed = %+v, warnings = %+v", res.Closed, warns)
+	}
+	if !reflect.DeepEqual(h.shadowRefs(), before) || len(h.closeEntries()) != 0 {
+		t.Fatal("sync deleted something of a newer record")
 	}
 }
 

@@ -105,7 +105,11 @@ func human(r any) string {
 			previewText(&b, v.Preview)
 			break
 		}
-		fmt.Fprintf(&b, "Shadow repo %s is ready for %s.\n", v.Shadow, v.Public)
+		if v.Ready {
+			fmt.Fprintf(&b, "Shadow repo %s is ready for %s.\n", v.Shadow, v.Public)
+		} else {
+			fmt.Fprintf(&b, "Init of %s for %s stopped before the shadow repo was ready.\n", v.Shadow, v.Public)
+		}
 		if len(v.MirroredBranches)+len(v.MirroredTags) > 0 {
 			fmt.Fprintf(&b, "  mirrored %d branch(es) and %d tag(s)\n", len(v.MirroredBranches), len(v.MirroredTags))
 		}
@@ -154,6 +158,8 @@ func human(r any) string {
 			fmt.Fprintf(&b, "Shadow main is up to date with public main (%s).\n", short(v.PublicMain))
 		case "fast_forward":
 			fmt.Fprintf(&b, "Shadow main fast-forwarded %s -> %s.\n", short(v.ShadowMainBefore), short(v.PublicMain))
+		case "push_failed":
+			fmt.Fprintf(&b, "Shadow main could not be pushed; it was at %s when sync read it.\n", short(v.ShadowMainBefore))
 		default:
 			b.WriteString("Shadow main has diverged from public main; nothing was pushed to it.\n")
 		}
@@ -166,6 +172,10 @@ func human(r any) string {
 			fmt.Fprintf(&b, "  cancelled %d push-triggered workflow run(s) in the shadow repo\n", n)
 		}
 		for _, c := range v.Closed {
+			if c.GatePRLeftOpen != 0 {
+				fmt.Fprintf(&b, "  deleted merged feature %s (PR #%d), but its gate PR #%d is still open\n", c.Name, c.PublicPR, c.GatePRLeftOpen)
+				continue
+			}
 			fmt.Fprintf(&b, "  closed merged feature %s (PR #%d)\n", c.Name, c.PublicPR)
 		}
 	case *engine.FeatureStartResult:
@@ -316,11 +326,16 @@ func human(r any) string {
 			previewText(&b, v.Preview)
 			break
 		}
-		fmt.Fprintf(&b, "Closed %s (%s): deleted %d ref(s) from the shadow repo", oneLine(v.Feature), v.State, len(v.Deleted))
-		if v.GatePR != nil {
-			fmt.Fprintf(&b, "; closed gate PR #%d", *v.GatePR)
+		if v.GatePRLeftOpen != 0 {
+			fmt.Fprintf(&b, "Deleted %d ref(s) of %s (%s) from the shadow repo, but its gate PR #%d is still open.\n",
+				len(v.Deleted), oneLine(v.Feature), v.State, v.GatePRLeftOpen)
+		} else {
+			fmt.Fprintf(&b, "Closed %s (%s): deleted %d ref(s) from the shadow repo", oneLine(v.Feature), v.State, len(v.Deleted))
+			if v.GatePR != nil {
+				fmt.Fprintf(&b, "; closed gate PR #%d", *v.GatePR)
+			}
+			b.WriteString(".\n")
 		}
-		b.WriteString(".\n")
 		refs := make([]string, 0, len(v.Deleted))
 		for ref := range v.Deleted {
 			refs = append(refs, ref)
@@ -435,24 +450,29 @@ func featureTable(b *strings.Builder, rs []engine.FeatureReport) {
 		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", oneLine(r.Name), r.State, oneLine(r.Drift.Status), gateCell(r.Gate), prCell(r))
 	}
 	_ = tw.Flush()
+	for _, r := range rs {
+		if r.Error != "" {
+			fmt.Fprintf(b, "%s couldn't be read: %s\n", oneLine(r.Name), oneLine(r.Error))
+		}
+	}
 }
 
 // gateCell is a feature's last gate in a word: passed, a failed check
-// status, or leak; "-" when never gated, "(stale)" when the feature or the
-// repos moved since; a pending gate names its job.
+// status, or leak, with the scan when it didn't run; "-" when never gated,
+// "(stale)" when the feature or the repos moved since; a pending gate names
+// its job.
 func gateCell(g *engine.GateSummary) string {
 	if g == nil {
 		return "-"
 	}
-	if g.Job != nil {
-		return oneLine("pending (job " + *g.Job + ")")
-	}
 	out := g.Checks
 	switch {
+	case g.Job != nil:
+		out = "pending (job " + *g.Job + ")"
 	case g.Leak == feature.LeakFound:
 		out = "leak"
-	case g.Checks == feature.ChecksPassed && g.Leak != feature.LeakClean:
-		out = g.Leak
+	case g.Leak == feature.LeakNotRun && g.Checks != feature.ChecksNotRun:
+		out = g.Checks + ", scan not_run"
 	}
 	if !g.Fresh {
 		out += " (stale)"

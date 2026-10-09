@@ -3,8 +3,10 @@ package gitx_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,7 +21,9 @@ func repoWithFeature(t *testing.T) (g *gitx.Git, base, main string, feat []strin
 	ctx := context.Background()
 	g = testutil.BareRepo(t, filepath.Join(t.TempDir(), "r.git"))
 	base = testutil.Commit(t, g, "main", "base", map[string]string{"f.txt": "f\n", "o.txt": "o\n"})
-	_ = g.UpdateRef(ctx, "refs/heads/feat", base)
+	if err := g.UpdateRef(ctx, "refs/heads/feat", base); err != nil {
+		t.Fatal(err)
+	}
 	feat = append(feat,
 		testutil.Commit(t, g, "feat", "add a", map[string]string{"a.txt": "a1\n"}),
 		testutil.Commit(t, g, "feat", "add b", map[string]string{"b.txt": "b\n"}),
@@ -38,7 +42,10 @@ func TestSourceCommitsOldestFirstSkippingUpstreamPatches(t *testing.T) {
 	}
 	// The same patch as "add b" lands on main: replay leaves b out, as rebase does.
 	testutil.Commit(t, g, "main", "add b upstream", map[string]string{"b.txt": "b\n"})
-	main2, _ := g.MustResolve(ctx, "refs/heads/main")
+	main2, err := g.MustResolve(ctx, "refs/heads/main")
+	if err != nil {
+		t.Fatal(err)
+	}
 	got, _ = g.SourceCommits(ctx, main2, feat[2])
 	if !reflect.DeepEqual(got, []string{feat[0], feat[2]}) {
 		t.Fatalf("after upstream b: %v", got)
@@ -55,19 +62,30 @@ func TestSourceCommitsAndCherryPickLinearizeAMerge(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	g, base, main, _ := repoWithFeature(t)
-	_ = g.UpdateRef(ctx, "refs/heads/feat2", base)
+	if err := g.UpdateRef(ctx, "refs/heads/feat2", base); err != nil {
+		t.Fatal(err)
+	}
 	a := testutil.Commit(t, g, "feat2", "add x", map[string]string{"x.txt": "x\n"})
-	_ = g.UpdateRef(ctx, "refs/heads/side", a)
+	if err := g.UpdateRef(ctx, "refs/heads/side", a); err != nil {
+		t.Fatal(err)
+	}
 	s := testutil.Commit(t, g, "side", "side s", map[string]string{"s.txt": "s\n"})
 	b := testutil.Commit(t, g, "feat2", "add y", map[string]string{"y.txt": "y\n"})
 	// The merge's tree: y on top of the side (the files don't overlap).
-	_ = g.UpdateRef(ctx, "refs/heads/tmp", s)
-	merged, _ := g.TreeOf(ctx, testutil.Commit(t, g, "tmp", "tmp", map[string]string{"y.txt": "y\n"}))
+	if err := g.UpdateRef(ctx, "refs/heads/tmp", s); err != nil {
+		t.Fatal(err)
+	}
+	merged, err := g.TreeOf(ctx, testutil.Commit(t, g, "tmp", "tmp", map[string]string{"y.txt": "y\n"}))
+	if err != nil {
+		t.Fatal(err)
+	}
 	m, err := g.CommitTree(ctx, merged, []string{b, s}, "merge side", testutil.Author(5), testutil.Author(5))
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = g.UpdateRef(ctx, "refs/heads/feat2", m)
+	if err := g.UpdateRef(ctx, "refs/heads/feat2", m); err != nil {
+		t.Fatal(err)
+	}
 	c := testutil.Commit(t, g, "feat2", "add z", map[string]string{"z.txt": "z\n"})
 
 	got, err := g.SourceCommits(ctx, main, c)
@@ -147,7 +165,10 @@ func TestCherryPickKeepsCommitsThatBecomeEmpty(t *testing.T) {
 	ctx := context.Background()
 	g, _, main, feat := repoWithFeature(t)
 	wtDir := filepath.Join(t.TempDir(), "wt")
-	wt, _ := g.WorktreeAdd(ctx, wtDir, main)
+	wt, err := g.WorktreeAdd(ctx, wtDir, main)
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer func() { _ = g.WorktreeRemove(ctx, wtDir) }()
 	// Replaying "add a" twice: the second copy changes nothing.
 	got, err := wt.CherryPick(ctx, []string{feat[0], feat[0]}, bot())
@@ -166,16 +187,25 @@ func TestCherryPickConflictNamesTheCommitAndAborts(t *testing.T) {
 	ctx := context.Background()
 	g, _, main, feat := repoWithFeature(t)
 	wtDir := filepath.Join(t.TempDir(), "wt")
-	wt, _ := g.WorktreeAdd(ctx, wtDir, main)
+	wt, err := g.WorktreeAdd(ctx, wtDir, main)
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer func() { _ = g.WorktreeRemove(ctx, wtDir) }()
 	// "edit a" before "add a": a.txt does not exist yet.
-	_, err := wt.CherryPick(ctx, []string{feat[2], feat[0]}, bot())
+	_, err = wt.CherryPick(ctx, []string{feat[2], feat[0]}, bot())
 	var ce *gitx.ConflictError
 	if !errors.As(err, &ce) || ce.Commit != feat[2] || !reflect.DeepEqual(ce.Files, []string{"a.txt"}) {
 		t.Fatalf("err = %#v", err)
 	}
 	if _, err := wt.Run(ctx, "cherry-pick", "--abort"); err == nil {
 		t.Fatal("cherry-pick must already be aborted")
+	}
+	if head, err := wt.MustResolve(ctx, "HEAD"); err != nil || head != main {
+		t.Fatalf("HEAD after the abort = %s %v, want %s", head, err, main)
+	}
+	if st, err := wt.Run(ctx, "status", "--porcelain", "--untracked-files=all"); err != nil || st != "" {
+		t.Fatalf("the worktree isn't clean after the abort: %q %v", st, err)
 	}
 }
 
@@ -210,5 +240,64 @@ func TestMergeTreeCheck(t *testing.T) {
 	}
 	if _, _, err := g.MergeTreeCheck(ctx, "nonexistent", feat); err == nil {
 		t.Fatal("a bad ref must be an error, not a conflict")
+	}
+}
+
+// CommitAuthor reads an ident the way git does: the name is everything
+// before the first '<', the email runs from there to the next '>', and the
+// date follows the last '>'.
+func TestCommitAuthorParsesLikeGit(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	g := testutil.BareRepo(t, filepath.Join(t.TempDir(), "r.git"))
+	base := testutil.Commit(t, g, "main", "base", map[string]string{"f.txt": "f\n"})
+	tree, err := g.TreeOf(ctx, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	when := time.Unix(1700000000, 0).UTC()
+	for _, c := range []struct {
+		ident string
+		want  gitx.Identity
+	}{
+		{"Ann <ann@example.com> 1700000000 +0000", gitx.Identity{Name: "Ann", Email: "ann@example.com", When: when}},
+		{"Ann  <ann@example.com>   1700000000 +0200", gitx.Identity{Name: "Ann", Email: "ann@example.com", When: when}},
+		{"Ann <ann@example.com> extra> 1700000000 +0000", gitx.Identity{Name: "Ann", Email: "ann@example.com", When: when}},
+		{"Ann <a<b@example.com> 1700000000 +0000", gitx.Identity{Name: "Ann", Email: "a<b@example.com", When: when}},
+	} {
+		raw := fmt.Sprintf("tree %s\nauthor %s\ncommitter C <c@example.com> 1700000000 +0000\n\nmsg\n", tree, c.ident)
+		// --literally: git's own checks refuse the odd idents, which only
+		// hand-made objects have.
+		sha, err := g.RunInput(ctx, strings.NewReader(raw), "hash-object", "-t", "commit", "-w", "--literally", "--stdin")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, err := g.CommitAuthor(ctx, sha); err != nil || got != c.want {
+			t.Errorf("%q: CommitAuthor = %+v %v, want %+v", c.ident, got, err, c.want)
+		}
+	}
+}
+
+// A failure that isn't a conflict (a commit that doesn't exist) leaves no
+// cherry-pick to abort: the error names the commit and says nothing about an
+// abort, and HEAD stays where it was.
+func TestCherryPickOfAMissingCommitIsNotAConflict(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	g, _, main, _ := repoWithFeature(t)
+	wtDir := filepath.Join(t.TempDir(), "wt")
+	wt, err := g.WorktreeAdd(ctx, wtDir, main)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = g.WorktreeRemove(ctx, wtDir) }()
+	bad := strings.Repeat("1", 40)
+	_, err = wt.CherryPick(ctx, []string{bad}, bot())
+	var ce *gitx.ConflictError
+	if err == nil || errors.As(err, &ce) || !strings.Contains(err.Error(), "cherry-pick "+bad) || strings.Contains(err.Error(), "abort") {
+		t.Fatalf("err = %v", err)
+	}
+	if head, _ := wt.MustResolve(ctx, "HEAD"); head != main {
+		t.Fatalf("HEAD = %s, want %s", head, main)
 	}
 }

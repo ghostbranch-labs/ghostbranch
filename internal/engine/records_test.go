@@ -10,6 +10,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
+	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
 )
 
 // newerMeta makes a feature's record look written by a newer Ghostbranch.
@@ -156,6 +157,38 @@ func TestConsoleClosesACorruptRecord(t *testing.T) {
 	}
 }
 
+// One feature whose record can't be read is listed as unreadable, with the
+// error, and the others are still surveyed.
+func TestAnUnreadableRecordDoesNotHideTheRest(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.startFeature("feat-x", map[string]string{"x.txt": "x\n"})
+	head := h.startFeature("feat-bad", map[string]string{"bad.txt": "b\n"})
+	h.corruptMeta("feat-bad")
+	res, _ := h.status() // no warnings; checks status.schema.json
+	if len(res.Features) != 2 || res.Features[1].Name != "feat-x" || res.Features[1].State != feature.StateDraft || res.Features[1].Error != "" {
+		t.Fatalf("features = %+v", res.Features)
+	}
+	bad := res.Features[0]
+	if bad.Name != "feat-bad" || bad.State != feature.StateUnreadable || bad.Head != head ||
+		!strings.Contains(bad.Error, "feat-bad") || engine.ClosableWithoutConsole(bad) {
+		t.Fatalf("feat-bad = %+v", bad)
+	}
+	list, _, err := h.eng.FeatureList(h.ctx, h.pair, false)
+	if err != nil || len(list.Features) != 2 {
+		t.Fatalf("feature list = %+v %v", list, err)
+	}
+	validateResult(t, "feature-list.schema.json", list)
+	_, _, err = h.eng.FeatureShow(h.ctx, h.pair, "feat-bad")
+	if ce := wantCode(t, err, contract.Internal); !strings.Contains(ce.Message, "feat-bad") {
+		t.Fatalf("feature show feat-bad = %v", err)
+	}
+	if _, _, err := h.eng.FeatureShow(h.ctx, h.pair, "feat-x"); err != nil {
+		t.Fatalf("feature show feat-x: %v", err)
+	}
+}
+
 // A merged, unmoved feature closes unattended, but not when its record is
 // newer than this binary: what it can't read may matter.
 func TestConsoleClosesANewerRecord(t *testing.T) {
@@ -196,4 +229,25 @@ func TestNewerStoresStopPromoteAndRemove(t *testing.T) {
 	if ce := contract.From(err); ce == nil || ce.Code != contract.UpgradeNeeded || ce.Details["record"] != "waivers" {
 		t.Fatalf("remove with a newer waivers file: %v", err)
 	}
+}
+
+// A gate recorded before 0.5 has no commits. Decoding it and writing it back
+// at the current version leaves "commits": null, which the schema allows.
+func TestAnOldGateWithoutCommitsStillMatchesTheFeatureSchema(t *testing.T) {
+	t.Parallel()
+	sha := strings.Repeat("a", 40)
+	old := `{"schema_version":"0.4","name":"feat-x","branch":"feat-x","created_by":"human:octo",` +
+		`"created_at":"2026-10-01T00:00:00Z","base":"` + sha + `","abandoned":false,` +
+		`"gate":{"feature_head":"` + sha + `","public_main":"` + sha + `","overlay":"` + sha + `","candidate":"` + sha +
+		`","published_tree":"` + sha + `","checks":"passed","leak":"clean","at":"2026-10-01T00:00:00Z"},"promoted":null}`
+	m, err := feature.Decode([]byte(old))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.SchemaVersion = feature.SchemaVersion
+	raw := feature.Encode(m)
+	if !strings.Contains(string(raw), `"commits": null`) {
+		t.Fatalf("expected a null commits in %s", raw)
+	}
+	testutil.ValidateSchema(t, "feature.schema.json", raw)
 }

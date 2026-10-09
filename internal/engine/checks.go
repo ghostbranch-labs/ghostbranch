@@ -148,7 +148,15 @@ func (e *Engine) waitChecks(ctx context.Context, repo, sha string, cfg config.Ga
 			e.event(o, JobEvent{Type: EventSettled, Outcome: out.status, FailedChecks: out.failed})
 			return *out, nil
 		}
-		if err := e.Sleep(ctx, e.PollInterval); err != nil {
+		d := e.PollInterval
+		if !o.deadline.IsZero() {
+			// Never sleep past wait --timeout. The deadline case above has
+			// returned unless it is still ahead.
+			if left := o.deadline.Sub(now); left < d {
+				d = left
+			}
+		}
+		if err := e.Sleep(ctx, d); err != nil {
 			return checkOutcome{}, interruptedErr(o.job, "")
 		}
 	}

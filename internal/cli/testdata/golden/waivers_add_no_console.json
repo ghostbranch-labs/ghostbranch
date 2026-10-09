@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.8",
+  "schema_version": "0.9",
   "command": "waivers add",
   "ok": false,
   "exit_code": 5,
@@ -14,7 +14,9 @@
         "feat-x",
         "f-7b1b6723317f",
         "--reason",
-        "test fixture"
+        "test fixture",
+        "--repo",
+        "acme/widget"
       ],
       "why": "a person must run this in their own terminal and type the code it shows",
       "needs_human": true,

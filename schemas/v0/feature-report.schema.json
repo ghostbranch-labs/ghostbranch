@@ -6,10 +6,10 @@
   "required": ["name", "state", "branch", "head", "base", "drift", "gate", "public_pr", "pr_state", "plan_id", "moved", "abandoned"],
   "properties": {
     "name": { "type": "string" },
-    "state": { "enum": ["draft", "in_review", "gate_passed", "published", "merged", "merged_moved", "pr_closed", "branch_gone", "abandoned"] },
+    "state": { "enum": ["draft", "in_review", "gate_passed", "published", "merged", "merged_moved", "pr_closed", "branch_gone", "abandoned", "unreadable"] },
     "branch": { "type": "string" },
     "head": { "description": "the feature branch's head; empty when the branch is gone", "$ref": "common.schema.json#/$defs/shaOrEmpty" },
-    "base": { "$ref": "common.schema.json#/$defs/sha" },
+    "base": { "description": "empty when the record couldn't be read", "$ref": "common.schema.json#/$defs/shaOrEmpty" },
     "drift": {
       "description": "whether the feature still merges cleanly onto public main; n/a when the branch is gone",
       "type": "object",
@@ -42,7 +42,7 @@
         }
       ]
     },
-    "public_pr": { "description": "null when never published", "type": ["integer", "null"], "minimum": 1 },
+    "public_pr": { "description": "null when never published", "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 1 }] },
     "pr_state": {
       "description": "the public PR's state; empty when never published, unknown when GitHub couldn't be asked",
       "enum": ["", "open", "merged", "closed", "unknown"]
@@ -52,6 +52,7 @@
       "oneOf": [{ "const": "" }, { "$ref": "common.schema.json#/$defs/planId" }]
     },
     "moved": { "description": "the branch moved since it was published; false when unpublished", "type": "boolean" },
-    "abandoned": { "type": "boolean" }
+    "abandoned": { "type": "boolean" },
+    "error": { "description": "why the feature couldn't be surveyed; only with state unreadable (feature show returns it as its error)", "type": "string", "minLength": 1 }
   }
 }

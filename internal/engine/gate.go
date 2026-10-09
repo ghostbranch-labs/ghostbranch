@@ -37,10 +37,12 @@ type GateResult struct {
 	// guards in C; nil when no candidate was built.
 	RepoGuards *workflow.GuardReport `json:"repo_guards"`
 	// ShadowPR is the gate PR in the shadow repo; nil when none was opened
-	// (the gate failed before CI, or it was a dry run or a reused gate).
+	// (the gate failed before CI, a dry run, or a reused gate this promote
+	// didn't wait on).
 	ShadowPR *int `json:"shadow_pr"`
 	// Job names the gate's CI wait, for wait; nil when no candidate was
-	// pushed (a leak, a conflict, a dry run, or a reused gate).
+	// pushed (a leak, a conflict, a dry run, or a reused gate this promote
+	// didn't wait on).
 	Job *string `json:"job"`
 	// Reused is set by promote when it reuses a fresh green gate instead of re-running it.
 	Reused  bool             `json:"reused"`
@@ -149,12 +151,14 @@ func (e *Engine) runGate(ctx context.Context, p workspace.Pair, name string, det
 	}
 	var w []contract.Warning
 	if pending != nil {
-		if res, err = e.resultFromRecord(ctx, pc, name, *pending); err != nil {
-			return nil, nil, err
+		if res, w, err = e.resultFromRecord(ctx, pc, name, *pending); err != nil {
+			return nil, w, err
 		}
 		if !detach {
 			pc.release()
-			res, w, err = e.finish(ctx, pc, name, res, *pending, waitOpts{})
+			var fw []contract.Warning
+			res, fw, err = e.finish(ctx, pc, name, res, *pending, waitOpts{})
+			w = addWarnings(w, fw...)
 		}
 	} else {
 		// A standalone gate scans for the repo's promote.default_mode.

@@ -1,0 +1,26 @@
+{
+  "schema_version": "0.9",
+  "command": "feature abandon",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "feature": "feat-x",
+    "abandoned": true,
+    "changed": true,
+    "preview": {
+      "fingerprint": {},
+      "ops": [
+        {
+          "from": "39f1c6104ff2cccb8e3a17bf854cc4f124edce94",
+          "op": "push_ref",
+          "ref": "refs/ghostbranch/features/feat-x",
+          "repo": "acme/widget-shadow",
+          "to": null
+        }
+      ]
+    }
+  },
+  "warnings": [],
+  "next": [],
+  "error": null
+}

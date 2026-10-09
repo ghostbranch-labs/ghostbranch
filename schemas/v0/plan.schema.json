@@ -4,9 +4,9 @@
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "id", "kind", "actor", "created_at", "pair", "feature", "mode", "fingerprint",
-               "curate", "publish", "leak", "ci"],
+               "curate", "publish", "typed", "leak", "ci"],
   "properties": {
-    "schema_version": { "const": "0.8" },
+    "schema_version": { "const": "0.9" },
     "id": { "$ref": "common.schema.json#/$defs/planId" },
     "kind": { "const": "promote" },
     "actor": { "$ref": "common.schema.json#/$defs/actor" },
@@ -57,6 +57,11 @@
           "properties": { "title": { "type": "string", "minLength": 1 }, "body": { "type": "string" } }
         }
       }
+    },
+    "typed": {
+      "description": "which PR texts the person typed (--title, --body); a re-plan passes on only these and derives the others again",
+      "type": "object", "additionalProperties": false, "required": ["title", "body"],
+      "properties": { "title": { "type": "boolean" }, "body": { "type": "boolean" } }
     },
     "leak": {
       "type": "object", "additionalProperties": false, "required": ["findings", "waived", "warnings", "scanner_version"],

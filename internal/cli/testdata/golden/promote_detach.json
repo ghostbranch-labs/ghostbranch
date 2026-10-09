@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.8",
+  "schema_version": "0.9",
   "command": "promote",
   "ok": true,
   "exit_code": 0,
@@ -30,7 +30,8 @@
       "repo_guards": {
         "mode": "rewrite",
         "rewritten": [],
-        "unrewritable": []
+        "unrewritable": [],
+        "skipped": []
       },
       "shadow_pr": 1,
       "job": "gate/feat-x/ad7c1d975251",

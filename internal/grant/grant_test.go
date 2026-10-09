@@ -1,9 +1,12 @@
 package grant_test
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -215,8 +218,8 @@ func TestRevokeAllClearsAFileWithABadValue(t *testing.T) {
 			if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := s.Load(); err == nil {
-				t.Fatal("a bad value must be a Load error")
+			if _, err := s.Load(); err == nil || strings.Contains(err.Error(), "not valid JSON") || !strings.Contains(err.Error(), "can't read") {
+				t.Fatalf("a valid file with a bad value: %v", err)
 			}
 			if _, err := s.Revoke("", true, t0); err != nil {
 				t.Fatalf("revoke --all must clear it: %v", err)
@@ -239,5 +242,39 @@ func TestRevokeAllKeepsAnUnreadableGrantsFile(t *testing.T) {
 	}
 	if fi, err := os.Stat(path); err != nil || !fi.IsDir() {
 		t.Fatalf("the unreadable path was replaced: %v %v", fi, err)
+	}
+	if _, err := os.Stat(path + ".tmp"); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("revoke --all wrote a replacement it couldn't move into place: %v", err)
+	}
+}
+
+func TestLoadSaysWhenAFileIsNotJSON(t *testing.T) {
+	t.Parallel()
+	s, path := store(t)
+	if err := os.WriteFile(path, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Load(); err == nil || !strings.Contains(err.Error(), "not valid JSON") {
+		t.Fatalf("Load = %v", err)
+	}
+}
+
+// The version is read before anything else: a newer file whose values
+// changed shape is refused as newer, never treated as corrupt and replaced.
+func TestANewerGrantsFileWithReshapedValuesIsNeverReplaced(t *testing.T) {
+	t.Parallel()
+	s, path := store(t)
+	raw := []byte(`{"schema_version":"0.99","grants":"reshaped"}`)
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Load(); contract.From(err).Code != contract.UpgradeNeeded {
+		t.Fatalf("Load = %v, want UPGRADE_NEEDED", err)
+	}
+	if _, err := s.Revoke("", true, t0); contract.From(err).Code != contract.UpgradeNeeded {
+		t.Fatalf("revoke --all = %v, want UPGRADE_NEEDED", err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != string(raw) {
+		t.Fatalf("the newer file was replaced: %s", got)
 	}
 }

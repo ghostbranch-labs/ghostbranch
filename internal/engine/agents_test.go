@@ -164,3 +164,35 @@ func TestRevokeAllClearsACorruptGrantsFile(t *testing.T) {
 		t.Fatalf("%+v %v", st, err)
 	}
 }
+
+// --plan --all on a grants.json that doesn't decode previews replacing it, as
+// revoke --all does; a newer file is refused, as the real run refuses it.
+func TestAgentsRevokeAllPlanOnACorruptFile(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	path := h.eng.WS.GrantsPath()
+	if err := os.WriteFile(path, []byte("{nope"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h.eng.DryRun = true
+	res, _, err := h.eng.AgentsRevoke(h.ctx, nil, true)
+	h.eng.DryRun = false
+	if err != nil || len(res.Revoked) != 0 || res.Preview == nil || len(res.Preview.Ops) != 1 ||
+		res.Preview.Ops[0]["op"] != "write_file" || res.Preview.Ops[0]["path"] != path {
+		t.Fatalf("--plan --all = %+v %v", res, err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != "{nope" {
+		t.Fatal("the dry run changed the file")
+	}
+	if err := os.WriteFile(path, []byte(`{"schema_version":"0.99","grants":"reshaped"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h.eng.DryRun = true
+	_, _, err = h.eng.AgentsRevoke(h.ctx, nil, true)
+	h.eng.DryRun = false
+	_ = wantCode(t, err, contract.UpgradeNeeded)
+	// agents status reads the same file and says the same.
+	_, _, err = h.eng.AgentsStatus(h.ctx, nil)
+	_ = wantCode(t, err, contract.UpgradeNeeded)
+}

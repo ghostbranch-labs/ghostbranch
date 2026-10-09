@@ -8,11 +8,12 @@ import (
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
+	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
 )
 
 func TestValidateName(t *testing.T) {
-	ok := []string{"feat-x", "auth/login", "v2.1_fix", "A1"}
-	bad := []string{"", "-x", ".x", "x/", "x..y", "x//y", "x.lock", "x@{1}", "a b", "x/.y",
+	ok := []string{"feat-x", "auth/login", "v2.1_fix", "A1", "v1.lockstep/x"}
+	bad := []string{"", "-x", ".x", "x/", "x..y", "x//y", "x.lock", "x@{1}", "a b", "x/.y", "a.lock/b", "x/y.lock/z",
 		"ghostbranch", "ghostbranch/gate/x", "ghostbranch/x", "ghostbranch-gate/x", "main", "HEAD", strings.Repeat("a", 101)}
 	for _, n := range ok {
 		if err := feature.ValidateName(n, "name"); err != nil {
@@ -79,12 +80,17 @@ func TestStateOf(t *testing.T) {
 
 func TestDecodeOfA05FileHasNoFeatureHead(t *testing.T) {
 	t.Parallel()
-	old := `{"schema_version":"0.5","name":"x","branch":"x","created_by":"human:octo","created_at":"2026-10-05T12:00:00Z","base":"b","abandoned":false,"gate":null,` +
-		`"promoted":{"public_pr":3,"plan_id":"id"}}`
+	old := `{"schema_version":"0.5","name":"x","branch":"x","created_by":"human:octo","created_at":"2026-10-05T12:00:00Z",` +
+		`"base":"` + strings.Repeat("b", 40) + `","abandoned":false,"gate":null,` +
+		`"promoted":{"public_pr":3,"plan_id":"20261005T120000Z-000001"}}`
 	m, err := feature.Decode([]byte(old))
 	if err != nil || m.Promoted == nil || m.Promoted.FeatureHead != "" || m.Promoted.PublicPR != 3 {
 		t.Fatalf("decode 0.5: %+v %v", m, err)
 	}
+	// What a write of it puts in the shadow repo is a valid current record:
+	// the engine stamps the version, and the missing feature_head stays absent.
+	m.SchemaVersion = feature.SchemaVersion
+	testutil.ValidateSchema(t, "feature.schema.json", feature.Encode(m))
 }
 
 func TestDecodeOfAnOlderMetadataFileHasNoCommits(t *testing.T) {

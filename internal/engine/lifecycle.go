@@ -73,7 +73,7 @@ func (e *Engine) Status(ctx context.Context, p workspace.Pair) (*StatusResult, [
 	res := &StatusResult{Public: pc.pair.Public, Shadow: pc.pair.Shadow, PublicMain: m.Public, ShadowMain: m.Shadow,
 		ShadowBehind: m.Behind > 0, Overlay: O, OverlayStatus: overlayStatus(files),
 		ScheduledSync: cfg.Sync.Schedule != config.ScheduleOff}
-	warns = addWarnings(warns, m.warnings()...)
+	warns = addWarnings(warns, m.warnings(pc.pair.Public)...)
 	warns = addWarnings(warns, outdatedWarnings(files)...)
 	rs, sw, err := e.survey(ctx, pc)
 	warns = addWarnings(warns, sw...)
@@ -122,7 +122,8 @@ func (e *Engine) FeatureList(ctx context.Context, p workspace.Pair, all bool) (*
 }
 
 // FeatureShow reports one feature in full: its survey report, its commits
-// since public main and its ledger entries. It only reads.
+// since public main and its ledger entries. It only reads. A feature whose
+// record can't be read returns the read error.
 func (e *Engine) FeatureShow(ctx context.Context, p workspace.Pair, name string) (*FeatureShowResult, []contract.Warning, error) {
 	pc, err := e.open(ctx, "feature show", p, false)
 	if err != nil {
@@ -142,6 +143,9 @@ func (e *Engine) FeatureShow(ctx context.Context, p workspace.Pair, name string)
 	if len(rs) != 1 {
 		return nil, warns, contract.New(contract.FeatureNotFound,
 			"no feature %q in %s; list them with ghostbranch feature list --all", name, pc.pair.Shadow).WithField("feature")
+	}
+	if rs[0].err != nil {
+		return nil, warns, rs[0].err
 	}
 	res := &FeatureShowResult{Feature: rs[0], Commits: []CommitInfo{}, Ledger: []ledger.Entry{}}
 	if head := res.Feature.Head; head != "" {

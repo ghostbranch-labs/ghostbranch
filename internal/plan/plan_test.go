@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -116,5 +118,65 @@ func TestLoadRefusesAPlanFromANewerGhostbranch(t *testing.T) {
 	if ce := contract.From(err); ce == nil || ce.Code != contract.UpgradeNeeded || ce.Details["record"] != "plan" ||
 		ce.Details["record_version"] != "0.99" || ce.Details["supported"] != contract.SchemaVersion {
 		t.Fatalf("want UPGRADE_NEEDED for the plan, got %v", err)
+	}
+}
+
+func TestLoadTellsBadJSONFromABadValue(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	for name, c := range map[string]struct{ raw, want, not string }{
+		"not json":    {"{", "not valid JSON", "can't read"},
+		"a bad value": {`{"id": 5}`, "can't read", "not valid JSON"},
+	} {
+		path := filepath.Join(dir, name+".json")
+		if err := os.WriteFile(path, []byte(c.raw), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, _, err := plan.Load(dir, path)
+		if err == nil || !strings.Contains(err.Error(), c.want) || strings.Contains(err.Error(), c.not) {
+			t.Errorf("%s: Load = %v", name, err)
+		}
+	}
+}
+
+// A plan from before 0.9 has no typed: both texts count as typed, as they
+// did then. A plan that has it keeps it.
+func TestLoadTreatsAMissingTypedAsTyped(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	const id = "20261009T120000Z-abcdef"
+	path := filepath.Join(dir, id+".json")
+	for _, c := range []struct {
+		raw  string
+		want plan.Typed
+	}{
+		{`{"schema_version":"0.8","id":"` + id + `"}`, plan.Typed{Title: true, Body: true}},
+		{`{"schema_version":"0.9","id":"` + id + `","typed":{"title":true,"body":false}}`, plan.Typed{Title: true}},
+	} {
+		if err := os.WriteFile(path, []byte(c.raw), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		p, _, err := plan.Load(dir, id)
+		if err != nil || p.Typed != c.want {
+			t.Errorf("%s: typed = %+v %v, want %+v", c.raw, p.Typed, err, c.want)
+		}
+	}
+}
+
+// Plans name repos, branches and commits, so the file is private (the guide
+// says so). The mode comes from os.CreateTemp; this pins it.
+func TestSaveWritesAPrivateFile(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no Unix file modes")
+	}
+	p := plan.Plan{SchemaVersion: plan.SchemaVersion, ID: "20261005T123000Z-abcdef", Kind: "promote", Feature: "x",
+		CreatedAt: time.Date(2026, 10, 5, 12, 30, 0, 0, time.UTC), Leak: plan.Leak{Findings: []map[string]any{}}}
+	path, err := plan.Save(t.TempDir(), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Stat(path); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("mode %v %v, want 0600", fi.Mode().Perm(), err)
 	}
 }

@@ -39,7 +39,7 @@ func publishedTree(ctx context.Context, g *gitx.Git, rev string, cfg config.Conf
 // repo guards are rewritten (mode rewrite), the gate's report, and every
 // guard found. tEntries itself is never changed: it is what publishes.
 func (e *Engine) guardedEntries(ctx context.Context, g *gitx.Git, tEntries []gitx.TreeEntry, names workflow.Names, mode string) ([]gitx.TreeEntry, workflow.GuardReport, []workflow.Guard, error) {
-	rep := workflow.GuardReport{Mode: mode, Rewritten: []workflow.Guard{}, Unrewritable: []workflow.Guard{}}
+	rep := workflow.GuardReport{Mode: mode, Rewritten: []workflow.Guard{}, Unrewritable: []workflow.Guard{}, Skipped: []workflow.Guard{}}
 	out := append([]gitx.TreeEntry(nil), tEntries...)
 	if mode == "off" {
 		return out, rep, nil, nil
@@ -72,6 +72,8 @@ func (e *Engine) guardedEntries(ctx context.Context, g *gitx.Git, tEntries []git
 				rep.Unrewritable = append(rep.Unrewritable, gd)
 			case mode == "rewrite":
 				rep.Rewritten = append(rep.Rewritten, gd)
+			default: // warn: left as it is, so its job skips in the shadow repo
+				rep.Skipped = append(rep.Skipped, gd)
 			}
 		}
 		if mode == "rewrite" && !bytes.Equal(nb, src) {

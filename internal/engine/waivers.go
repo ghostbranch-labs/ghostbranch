@@ -36,9 +36,13 @@ func (e *Engine) splitFindings(p workspace.Pair, fs []leak.Finding) ([]leak.Find
 	if e.Waivers != nil {
 		var err error
 		if ws, err = e.Waivers.For(p.Public); err != nil {
-			warns = append(warns, contract.Warning{Code: contract.WaiversUnreadable,
-				Message: fmt.Sprintf("no waiver applied because %s could not be read (%v); a person fixes it or runs ghostbranch waivers revoke --all",
-					e.Waivers.Path(), err)})
+			msg := fmt.Sprintf("no waiver applied because %s could not be read (%v); a person fixes it or runs ghostbranch waivers revoke --all",
+				e.Waivers.Path(), err)
+			if contract.From(err).Code == contract.UpgradeNeeded {
+				msg = fmt.Sprintf("no waiver applied because %s was written by a newer Ghostbranch; upgrade ghostbranch on this machine (the waivers in it are kept)",
+					e.Waivers.Path())
+			}
+			warns = append(warns, contract.Warning{Code: contract.WaiversUnreadable, Message: msg})
 		}
 	}
 	for _, f := range fs {
@@ -189,7 +193,17 @@ func (e *Engine) WaiversAdd(ctx context.Context, p workspace.Pair, opt WaiversAd
 	// promote mode can raise.
 	b, warns, err := e.build(ctx, pc, opt.Feature, config.ModePreserve, true)
 	if err != nil {
-		return nil, warns, err
+		// A broken marker in an older commit only blocks a preserve publish.
+		// Under a squash or curated default, scan just the final tree, as
+		// that promote would; a marker broken in the tip itself still fails.
+		ce := contract.From(err)
+		commit, _ := ce.Details["commit"].(string)
+		if ce.Code != contract.MarkerInvalid || b == nil || b.cfg.Promote.DefaultMode == config.ModePreserve || commit == "" || commit == b.head {
+			return nil, warns, err
+		}
+		if b, warns, err = e.build(ctx, pc, opt.Feature, config.ModeSquash, true); err != nil {
+			return nil, warns, err
+		}
 	}
 	byID := map[string]leak.Finding{}
 	for _, f := range b.report.Findings {
@@ -227,10 +241,13 @@ func (e *Engine) WaiversAdd(ctx context.Context, p workspace.Pair, opt WaiversAd
 	// A waivers file that cannot be read could not be saved to either; say
 	// so before the person types a code.
 	if _, err := s.Load(); err != nil {
-		return nil, warns, internalErr(err, "read waivers")
+		return nil, warns, grantErr(err, "read waivers")
 	}
 	if err := e.confirm(ctx, "", waiveSummary(p, opt.Feature, picked, ids, reason)); err != nil {
 		return nil, warns, err
+	}
+	for i := range res.Waivers {
+		res.Waivers[i].Approval = &ledger.Approval{Kind: "console"}
 	}
 	if err := s.Add(res.Waivers, now); err != nil {
 		return nil, warns, grantErr(err, "save the waivers")
@@ -266,7 +283,7 @@ func (e *Engine) WaiversList(ctx context.Context, p *workspace.Pair) (*WaiversLi
 	}
 	ws, err := s.Load()
 	if err != nil {
-		return nil, nil, internalErr(err, "read waivers")
+		return nil, nil, grantErr(err, "read waivers")
 	}
 	res := &WaiversListResult{Waivers: []waiver.Waiver{}}
 	if p != nil {
@@ -282,7 +299,8 @@ func (e *Engine) WaiversList(ctx context.Context, p *workspace.Pair) (*WaiversLi
 
 // WaiversRevoke removes waivers by id for one pair, or every waiver with
 // all. Taking a waiver away only makes the gate stricter, so it needs no
-// console. With all it also clears a waivers.json that does not decode.
+// console. An id with no waiver for the repo is WAIVER_UNKNOWN, and nothing
+// is revoked. With all it also clears a waivers.json that does not decode.
 func (e *Engine) WaiversRevoke(ctx context.Context, p *workspace.Pair, ids []string, all bool) (res *WaiversRevokeResult, warns []contract.Warning, err error) {
 	defer func() {
 		var revoked []string
@@ -317,10 +335,20 @@ func (e *Engine) WaiversRevoke(ctx context.Context, p *workspace.Pair, ids []str
 	res = &WaiversRevokeResult{Revoked: []waiver.Waiver{}}
 	if e.DryRun {
 		ws, err := s.Load()
-		if err != nil && !all {
-			return nil, nil, internalErr(err, "read waivers")
-		}
 		res.Preview = preview.New(nil)
+		switch {
+		case err != nil && all && waiver.Corrupt(err):
+			// revoke --all replaces a waivers.json that doesn't decode.
+			res.Preview.Add(preview.WriteFile(s.Path()))
+			return res, nil, nil
+		case err != nil:
+			return nil, nil, grantErr(err, "read waivers")
+		}
+		if !all {
+			if unknown := waiver.Unknown(ws, public, ids); len(unknown) > 0 {
+				return nil, nil, waiver.UnknownError(public, unknown)
+			}
+		}
 		for _, w := range ws {
 			if waiver.Matches(w, public, ids, all) {
 				res.Revoked = append(res.Revoked, w)
@@ -329,7 +357,12 @@ func (e *Engine) WaiversRevoke(ctx context.Context, p *workspace.Pair, ids []str
 		}
 		return res, nil, nil
 	}
-	if res.Revoked, err = s.Revoke(public, ids, all, e.now()); err != nil {
+	if all {
+		res.Revoked, err = s.Revoke(public, nil, true, e.now())
+	} else {
+		res.Revoked, err = s.RevokeKnown(public, ids, e.now())
+	}
+	if err != nil {
 		return nil, nil, grantErr(err, "revoke waivers")
 	}
 	return res, nil, nil

@@ -81,7 +81,9 @@ func (e *Engine) relock(ctx context.Context, pc *pairCtx, job string) error {
 			break
 		}
 		if ce := contract.From(err); ce.Code != contract.Locked || waited >= finishLockWait {
-			ce.Retryable = true
+			// Only a busy lock is worth retrying; any other lock error is a
+			// plain error (owner, 2026-10-09). Either way the job is named.
+			ce.Retryable = ce.Code == contract.Locked
 			if ce.Details == nil {
 				ce.Details = map[string]any{}
 			}
@@ -154,11 +156,21 @@ func (e *Engine) finish(ctx context.Context, pc *pairCtx, name string, res *Gate
 			return res, warns, err
 		}
 		if res.Checks == feature.ChecksPassed {
-			return res, warns, err // a green gate that isn't recorded can't be promoted
+			// A green gate that isn't recorded can't be promoted. The record
+			// is still pending, so the error names the job: wait records it
+			// (or reports it, if the write landed after all).
+			ce := contract.From(err)
+			if ce.Details == nil {
+				ce.Details = map[string]any{}
+			}
+			ce.Details["job"] = job
+			return res, warns, ce
 		}
 		// The check outcome is what matters; don't replace it with a lesser error.
 		warns = append(warns, contract.Warning{Code: contract.GateNotRecorded,
-			Message: "the gate result could not be recorded in the feature metadata: " + contract.From(err).Message})
+			Message: "the gate result could not be recorded in the feature metadata: " + contract.From(err).Message +
+				"; run ghostbranch wait " + job + " to record it",
+			Details: map[string]any{"job": job}})
 	}
 	return res, warns, outcomeErr(checkOutcome{status: res.Checks, failed: res.FailedChecks}, pending.ShadowPR, cfg.Gate, shadow)
 }
@@ -239,15 +251,17 @@ func interrupted(ctx context.Context, res *GateResult, name string, err error) e
 }
 
 // resultFromRecord is the GateResult a gate record stands for, as wait and
-// a reused job report it. RepoGuards stays nil: the record doesn't keep it.
-func (e *Engine) resultFromRecord(ctx context.Context, pc *pairCtx, name string, g feature.Gate) (*GateResult, error) {
-	cfg, _, _, err := e.readConfig(ctx, pc)
+// a reused job report it, with the config's warnings, which a reused gate
+// reports as a fresh one would. RepoGuards stays nil: the record doesn't
+// keep it.
+func (e *Engine) resultFromRecord(ctx context.Context, pc *pairCtx, name string, g feature.Gate) (*GateResult, []contract.Warning, error) {
+	cfg, _, warns, err := e.readConfig(ctx, pc)
 	if err != nil {
-		return nil, err
+		return nil, warns, err
 	}
 	infos, err := gateCommitInfos(ctx, pc.git, cfg, g.PublicMain, g.Commits)
 	if err != nil {
-		return nil, err
+		return nil, warns, err
 	}
 	failed := g.FailedChecks
 	if failed == nil {
@@ -261,7 +275,7 @@ func (e *Engine) resultFromRecord(ctx context.Context, pc *pairCtx, name string,
 		pr, job := g.ShadowPR, jobID(name, g.Candidate)
 		res.ShadowPR, res.Job = &pr, &job
 	}
-	return res, nil
+	return res, warns, nil
 }
 
 // pendingFor returns the feature's gate record when it is a pending job
@@ -356,12 +370,14 @@ func (e *Engine) Wait(ctx context.Context, p workspace.Pair, job string, opt Wai
 	case !ref.matches(m.Gate):
 		return nil, nil, staleErr(ref.Feature, job, m.Gate, "")
 	}
-	if res, err = e.resultFromRecord(ctx, pc, ref.Feature, *m.Gate); err != nil {
-		return nil, nil, err
+	var rw []contract.Warning
+	if res, rw, err = e.resultFromRecord(ctx, pc, ref.Feature, *m.Gate); err != nil {
+		return nil, rw, err
 	}
+	warns = addWarnings(warns, rw...)
 	if !m.Gate.Pending() {
-		var cfg config.Config
-		if cfg, _, warns, err = e.readConfig(ctx, pc); err != nil {
+		cfg, _, _, err := e.readConfig(ctx, pc)
+		if err != nil {
 			return res, warns, err
 		}
 		return res, warns, outcomeErr(checkOutcome{status: res.Checks, failed: res.FailedChecks}, m.Gate.ShadowPR, cfg.Gate, pc.pair.Shadow)
@@ -370,5 +386,7 @@ func (e *Engine) Wait(ctx context.Context, p workspace.Pair, job string, opt Wai
 	if opt.Timeout > 0 {
 		deadline = e.Now().Add(opt.Timeout)
 	}
-	return e.finish(ctx, pc, ref.Feature, res, *m.Gate, waitOpts{deadline: deadline, emit: opt.Events})
+	var fw []contract.Warning
+	res, fw, err = e.finish(ctx, pc, ref.Feature, res, *m.Gate, waitOpts{deadline: deadline, emit: opt.Events})
+	return res, addWarnings(warns, fw...), err
 }

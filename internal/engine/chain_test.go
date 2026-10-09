@@ -83,8 +83,9 @@ func TestDeriveChainNothingToPublish(t *testing.T) {
 	for _, mode := range []string{config.ModePreserve, config.ModeSquash} {
 		_, _, err := deriveChain(context.Background(), g, config.Default(),
 			chainInput{mode: mode, pm: pm, T: T, tEntries: es, commits: cs, message: "m"}, nil)
-		if ce := contract.From(err); ce == nil || ce.Code != contract.NothingToPublish {
-			t.Fatalf("%s: want NOTHING_TO_PUBLISH, got %v", mode, err)
+		if ce := contract.From(err); ce == nil || ce.Code != contract.NothingToPublish ||
+			!reflect.DeepEqual(ce.Details["dropped_empty"], []string{cs[0].Source}) {
+			t.Fatalf("%s: want NOTHING_TO_PUBLISH listing every source, got %v", mode, err)
 		}
 	}
 }
@@ -255,21 +256,28 @@ func TestAssertChain(t *testing.T) {
 		t.Fatal(err)
 	}
 	pOv := write(pm, ovTree)
-	bad := map[string][]plan.Commit{
-		"no commits":           {},
-		"wrong parent":         {{Commit: p2, Tree: T, Parent: pm}},
-		"mid tree not planned": {{Commit: p1, Tree: T, Parent: pm}, {Commit: p2, Tree: T, Parent: p1}},
-		"tip is not T":         {{Commit: p1, Tree: t1, Parent: pm}},
-		"overlay path":         {{Commit: pOv, Tree: ovTree, Parent: pm}, {Commit: write(pOv, T), Tree: T, Parent: pOv}},
+	type badChain struct {
+		chain []plan.Commit
+		want  string // a substring of the message: which check fires
 	}
 	merge, err := g.CommitTree(ctx, T, []string{p1, pm}, "merge", who, who)
 	if err != nil {
 		t.Fatal(err)
 	}
-	bad["merge commit"] = []plan.Commit{{Commit: p1, Tree: t1, Parent: pm}, {Commit: merge, Tree: T, Parent: p1}}
-	for name, chain := range bad {
-		if ce := contract.From(assertChain(ctx, g, chain, T, C, pm, set, names)); ce == nil || ce.Code != contract.Internal {
-			t.Fatalf("%s: want INTERNAL, got %v", name, ce)
+	bad := map[string]badChain{
+		"no commits":           {[]plan.Commit{}, "the chain has no commits"},
+		"wrong parent":         {[]plan.Commit{{Commit: p2, Tree: T, Parent: pm}}, "'s parent is"},
+		"mid tree not planned": {[]plan.Commit{{Commit: p1, Tree: T, Parent: pm}, {Commit: p2, Tree: T, Parent: p1}}, "is not the planned"},
+		"tip is not T":         {[]plan.Commit{{Commit: p1, Tree: t1, Parent: pm}}, "is not the gated tree"},
+		"overlay path": {[]plan.Commit{{Commit: pOv, Tree: ovTree, Parent: pm}, {Commit: write(pOv, T), Tree: T, Parent: pOv}},
+			"holds overlay path .ghostbranch/x.md"},
+		"merge commit":    {[]plan.Commit{{Commit: p1, Tree: t1, Parent: pm}, {Commit: merge, Tree: T, Parent: p1}}, "must have exactly one parent"},
+		"recorded parent": {[]plan.Commit{{Commit: p1, Tree: t1, Parent: p2}}, "records parent"},
+	}
+	for name, c := range bad {
+		ce := contract.From(assertChain(ctx, g, c.chain, T, C, pm, set, names))
+		if ce == nil || ce.Code != contract.Internal || !strings.Contains(ce.Message, c.want) {
+			t.Fatalf("%s: want INTERNAL containing %q, got %v", name, c.want, ce)
 		}
 	}
 }

@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.8",
+  "schema_version": "0.9",
   "command": "feature start",
   "ok": false,
   "exit_code": 4,
@@ -33,7 +33,7 @@
   ],
   "error": {
     "code": "SHADOW_BEHIND",
-    "message": "shadow main is 1 commit(s) behind public main, so a feature started now would be based on old code; run ghostbranch sync, then start the feature again",
+    "message": "shadow main is 1 commit(s) behind public main, so a feature started now would be based on old code; run ghostbranch sync --repo acme/widget, then start the feature again",
     "field": null,
     "retryable": false,
     "details": {

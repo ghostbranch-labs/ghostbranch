@@ -63,6 +63,9 @@ func wrap(resp *gh.Response, err error) error {
 	if resp != nil && resp.StatusCode == 404 {
 		return fmt.Errorf("%w: %v", forge.ErrNotFound, err)
 	}
+	if isForbidden(resp, err) {
+		return fmt.Errorf("%w: %v", forge.ErrForbidden, err)
+	}
 	var rl *gh.RateLimitError
 	var arl *gh.AbuseRateLimitError
 	if errors.As(err, &rl) || errors.As(err, &arl) || resp == nil || resp.StatusCode >= 500 {

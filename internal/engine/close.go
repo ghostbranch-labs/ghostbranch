@@ -34,6 +34,9 @@ type FeatureCloseResult struct {
 	NeedsConsole bool              `json:"needs_console"` // closing takes a person at a console (not ClosableWithoutConsole); set under --plan too
 	Approval     *ledger.Approval  `json:"approval"`      // console; nil under --plan, and when none was needed
 	Preview      *preview.Preview  `json:"preview"`
+	// GatePRLeftOpen is the gate PR the close couldn't close, 0 when none;
+	// for human output only.
+	GatePRLeftOpen int `json:"-"`
 }
 
 // FeatureAbandon parks a feature (or, with undo, restores it) by flipping
@@ -135,15 +138,7 @@ func (e *Engine) FeatureClose(ctx context.Context, p workspace.Pair, name string
 	}
 	rs, sw, err := e.survey(ctx, pc, name)
 	warns = addWarnings(warns, sw...)
-	var bad *unreadableRecord
-	if errors.As(err, &bad) && bad.feature == name {
-		// The record can't be read: close what the refs say, at the console.
-		r, err := e.unreadableReport(ctx, pc, name)
-		if err != nil {
-			return nil, warns, err
-		}
-		rs = []FeatureReport{r}
-	} else if err != nil {
+	if err != nil {
 		return nil, warns, err
 	}
 	if len(rs) != 1 {
@@ -151,7 +146,19 @@ func (e *Engine) FeatureClose(ctx context.Context, p workspace.Pair, name string
 			"no feature %q in %s; list them with ghostbranch feature list --all", name, pc.pair.Shadow).WithField("feature")
 	}
 	r := rs[0]
-	t, err := e.closeTargets(ctx, pc, r)
+	if r.err != nil {
+		var bad *unreadableRecord
+		if !errors.As(r.err, &bad) {
+			return nil, warns, r.err
+		}
+		// The record doesn't parse: close what the refs say, at the console.
+		// The branch is read again, so the delete is leased on a head that was read.
+		if r, err = e.unreadableReport(ctx, pc, name); err != nil {
+			return nil, warns, err
+		}
+	}
+	t, tw, err := e.closeTargets(ctx, pc, r)
+	warns = addWarnings(warns, tw...)
 	if err != nil {
 		return nil, warns, err
 	}
@@ -199,6 +206,20 @@ func (e *Engine) unreadableReport(ctx context.Context, pc *pairCtx, name string)
 	return r, nil
 }
 
+// failedReport stands in for a feature the survey couldn't read: its record
+// is corrupt, or reading it or its refs failed. It is unreadable, so it never
+// closes unattended, and it carries the error. Its head is the mirror's
+// branch named for the feature, "" when that can't be read either.
+func (e *Engine) failedReport(ctx context.Context, pc *pairCtx, name string, cause error) FeatureReport {
+	r, _ := e.unreadableReport(ctx, pc, name)
+	var bad *unreadableRecord
+	if !errors.As(cause, &bad) {
+		r.unreadable = unreadableError
+	}
+	r.Error, r.err = contract.From(cause).Message, cause
+	return r
+}
+
 // unreadableWhy says why r's record couldn't be read as a whole.
 func unreadableWhy(r FeatureReport) string {
 	if r.unreadable == unreadableNewer {
@@ -211,13 +232,15 @@ func unreadableWhy(r FeatureReport) string {
 // auto-close calls it only for ClosableWithoutConsole reports. The caller
 // records the ledger entry, with Refs = res.Deleted. A non-nil res with an
 // error means the refs were deleted but the gate PR couldn't be closed.
-// The warnings are MIRROR_NOT_UPDATED from the local cleanup.
+// The warnings are PLAN_FILE_UNREADABLE from listing the plan files and
+// MIRROR_NOT_UPDATED from the local cleanup.
 func (e *Engine) closeFeature(ctx context.Context, pc *pairCtx, r FeatureReport) (*FeatureCloseResult, []contract.Warning, error) {
-	t, err := e.closeTargets(ctx, pc, r)
+	t, tw, err := e.closeTargets(ctx, pc, r)
 	if err != nil {
-		return nil, nil, err
+		return nil, tw, err
 	}
-	return e.closeWith(ctx, pc, r, t)
+	res, cw, err := e.closeWith(ctx, pc, r, t)
+	return res, addWarnings(tw, cw...), err
 }
 
 // closeTargets is what closing a feature deletes.
@@ -242,12 +265,12 @@ func (t closeTargets) sorted() []string {
 // gate branch, the metadata ref and each plan ref of the feature. A plan
 // ref counts when the metadata or a plan file of this pair names it for
 // this feature, and only if the mirror has it.
-func (e *Engine) closeTargets(ctx context.Context, pc *pairCtx, r FeatureReport) (closeTargets, error) {
+func (e *Engine) closeTargets(ctx context.Context, pc *pairCtx, r FeatureReport) (closeTargets, []contract.Warning, error) {
 	t := closeTargets{refs: map[string]string{}}
 	// The branch name comes from metadata in the shadow repo: delete only
 	// the branch feature start made, which is always named for the feature.
 	if r.Branch != r.Name {
-		return t, contract.New(contract.Internal,
+		return t, nil, contract.New(contract.Internal,
 			"feature %s's metadata names the branch %q, not %q; refusing to delete another branch", r.Name, r.Branch, r.Name).
 			WithDetails(map[string]any{"feature": r.Name, "branch": r.Branch})
 	}
@@ -266,18 +289,23 @@ func (e *Engine) closeTargets(ctx context.Context, pc *pairCtx, r FeatureReport)
 		t.refs["refs/heads/"+r.Branch], t.local = r.Head, append(t.local, shadowRef(r.Branch))
 	}
 	if err := add("refs/heads/"+gateBranch(r.Name), shadowRef(gateBranch(r.Name))); err != nil {
-		return t, err
+		return t, nil, err
 	}
 	if err := add(remoteMetaRef(r.Name), metaRef(r.Name)); err != nil {
-		return t, err
+		return t, nil, err
 	}
 	ids := map[string]bool{}
 	if plan.ValidID(r.PlanID) {
 		ids[r.PlanID] = true
 	}
-	files, err := planFiles(e.WS.PlansDir())
+	files, unreadable, err := planFiles(e.WS.PlansDir())
 	if err != nil {
-		return t, internalErr(err, "list plan files")
+		return t, nil, internalErr(err, "list plan files")
+	}
+	var warns []contract.Warning
+	for _, u := range unreadable {
+		warns = append(warns, planFileUnreadable(u, fmt.Sprintf(
+			"if it is a plan of feature %s, its plan ref stays in %s and the file stays on this machine", r.Name, pc.pair.Shadow)))
 	}
 	for _, f := range files {
 		// The ID names a ref, so it must be a plan ID.
@@ -289,10 +317,10 @@ func (e *Engine) closeTargets(ctx context.Context, pc *pairCtx, r FeatureReport)
 	sort.Strings(t.plans)
 	for id := range ids {
 		if err := add(remotePlanRef(id), planRef(id)); err != nil {
-			return t, err
+			return t, warns, err
 		}
 	}
-	return t, nil
+	return t, warns, nil
 }
 
 // closeWith deletes t. The deletes go first, in one atomic push: if any ref
@@ -365,9 +393,11 @@ func (e *Engine) closeWith(ctx context.Context, pc *pairCtx, r FeatureReport, t 
 			res.GatePR = &n
 		case errors.Is(err, forge.ErrNotFound):
 		case errors.Is(err, forge.ErrForbidden):
+			res.GatePRLeftOpen = pr.Number
 			return res, warns, afterDeletes(forgeErr(err, "deleted %d ref(s) of feature %s, but the token may not close its gate PR #%d in %s; close it by hand",
 				len(res.Deleted), r.Name, pr.Number, sh))
 		default:
+			res.GatePRLeftOpen = pr.Number
 			return res, warns, afterDeletes(forgeErr(err, "deleted %d ref(s) of feature %s, but couldn't close its gate PR #%d in %s; close it by hand",
 				len(res.Deleted), r.Name, pr.Number, sh))
 		}

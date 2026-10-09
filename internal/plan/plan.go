@@ -18,7 +18,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/workflow"
 )
 
-const SchemaVersion = "0.8"
+const SchemaVersion = "0.9"
 
 type Pair struct {
 	Public string `json:"public"`
@@ -116,6 +116,14 @@ type CI struct {
 	RepoGuards workflow.GuardReport `json:"repo_guards"`
 }
 
+// Typed records which PR texts the person typed (--title, --body). The
+// others were derived from the commits or the squash message, so a re-plan
+// derives them again rather than reusing them.
+type Typed struct {
+	Title bool `json:"title"`
+	Body  bool `json:"body"`
+}
+
 type Plan struct {
 	SchemaVersion string      `json:"schema_version"`
 	ID            string      `json:"id"`
@@ -128,6 +136,7 @@ type Plan struct {
 	Fingerprint   Fingerprint `json:"fingerprint"`
 	Curate        []Group     `json:"curate"` // null unless curated
 	Publish       Publish     `json:"publish"`
+	Typed         Typed       `json:"typed"`
 	Leak          Leak        `json:"leak"`
 	CI            CI          `json:"ci"`
 }
@@ -150,6 +159,8 @@ func Save(dir string, p Plan) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// CreateTemp makes the file 0600, and the rename keeps that: plans name
+	// repos, branches and commits, so they are private (the guide says so).
 	f, err := os.CreateTemp(dir, p.ID+".*.tmp")
 	if err != nil {
 		return "", err
@@ -203,9 +214,15 @@ func Load(dir, ref string) (Plan, string, error) {
 	if err != nil {
 		return Plan{}, "", contract.Wrap(contract.Internal, err, "read plan %q", ref)
 	}
-	var p Plan
+	// A plan from before 0.9 has no typed: count both texts as typed, as
+	// those binaries did. Unmarshal leaves a field the JSON lacks as set here.
+	p := Plan{Typed: Typed{Title: true, Body: true}}
 	if err := json.Unmarshal(b, &p); err != nil {
-		return Plan{}, "", contract.Wrap(contract.BadFlag, err, "plan %q is not valid JSON", ref).WithField("plan")
+		what := "is not valid JSON"
+		if json.Valid(b) {
+			what = "has a value Ghostbranch can't read"
+		}
+		return Plan{}, "", contract.Wrap(contract.BadFlag, err, "plan %q %s", ref, what).WithField("plan")
 	}
 	if contract.Newer(p.SchemaVersion) {
 		return Plan{}, "", contract.NewerRecord("plan", p.SchemaVersion)

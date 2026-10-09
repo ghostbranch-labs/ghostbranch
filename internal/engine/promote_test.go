@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync/atomic"
@@ -487,13 +488,15 @@ func TestPromoteNothingToPublish(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	h.init()
-	h.startFeature("feat-x", map[string]string{".ghostbranch/notes.md": "private\n"})
+	src := h.startFeature("feat-x", map[string]string{".ghostbranch/notes.md": "private\n"})
 	if _, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x"); err != nil {
 		t.Fatal(err)
 	}
 	for _, o := range []engine.PromoteOptions{{PlanOnly: true}, {Mode: "squash", Message: "m", PlanOnly: true}} {
 		_, err := promote(h, o)
-		_ = wantCode(t, err, contract.NothingToPublish)
+		if ce := wantCode(t, err, contract.NothingToPublish); !reflect.DeepEqual(ce.Details["dropped_empty"], []string{src}) {
+			t.Fatalf("%+v: details = %v", o, ce.Details)
+		}
 	}
 }
 
@@ -707,5 +710,206 @@ func TestApplyResumesAPromoteInterruptedAfterThePush(t *testing.T) {
 	}
 	if m := h.meta("feat-x"); m.Promoted == nil || m.Promoted.PlanID != id || m.Promoted.PublicPR != 1 {
 		t.Fatalf("record = %+v", m.Promoted)
+	}
+}
+
+func TestPlanRecordsWhichTextsWereTyped(t *testing.T) {
+	t.Parallel()
+	h := gated(t)
+	for _, c := range []struct {
+		o    engine.PromoteOptions
+		want plan.Typed
+	}{
+		{engine.PromoteOptions{Mode: "squash", Message: "Add feature\n\nIt does things.", PlanOnly: true}, plan.Typed{}},
+		{engine.PromoteOptions{Mode: "squash", Message: "Add feature", Title: "T", PlanOnly: true}, plan.Typed{Title: true}},
+		{engine.PromoteOptions{Mode: "squash", Message: "Add feature", Body: " B ", PlanOnly: true}, plan.Typed{Body: true}},
+	} {
+		res, err := promote(h, c.o)
+		if err != nil || res.Plan.Typed != c.want {
+			t.Errorf("%+v: typed = %+v %v, want %+v", c.o, res.Plan.Typed, err, c.want)
+		}
+	}
+}
+
+// A --curate file is read only once the mode is known: under a default
+// mode other than curated it doesn't apply (BAD_FLAG), whatever is in it.
+func TestPromoteReadsTheCurateFileOnlyInCuratedMode(t *testing.T) {
+	t.Parallel()
+	bad := filepath.Join(t.TempDir(), "c.json")
+	if err := os.WriteFile(bad, []byte("not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.ValidatePromoteOptions(&engine.PromoteOptions{Feature: "feat-x", Curate: bad}); err != nil {
+		t.Fatalf("with the mode not known yet the file must not be read: %v", err)
+	}
+	h := gated(t) // promote.default_mode: preserve
+	_, err := promote(h, engine.PromoteOptions{Curate: bad, PlanOnly: true})
+	if ce := wantCode(t, err, contract.BadFlag); ce.Field != "curate" {
+		t.Fatalf("field = %q", ce.Field)
+	}
+	h.setConfig("default_mode: preserve", "default_mode: curated")
+	_, err = promote(h, engine.PromoteOptions{Curate: bad, PlanOnly: true})
+	_ = wantCode(t, err, contract.CurateInvalid)
+}
+
+func TestPromoteWarnsAnUnusedAuthorMap(t *testing.T) {
+	t.Parallel()
+	h, _ := gatedHistory(t)
+	h.setConfig("author_email: noreply", "author_email: noreply\n  author_map:\n    \"a@b.example\": \"A <a@b.example>\"")
+	_, warns, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Title: "t", PlanOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var w *contract.Warning
+	for i := range warns {
+		if warns[i].Code == contract.ConfigKeyIgnored {
+			w = &warns[i]
+		}
+	}
+	if w == nil || w.Details["key"] != "promote.author_map" || !strings.Contains(w.Message, "noreply") {
+		t.Fatalf("warnings = %+v", warns)
+	}
+	h.setConfig("author_email: noreply", "author_email: map")
+	h.setConfig("\"a@b.example\": \"A <a@b.example>\"", "\"author@example.com\": \"A <a@b.example>\"")
+	_, warns, err = h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Title: "t", PlanOnly: true})
+	if err != nil || hasWarning(warns, contract.ConfigKeyIgnored) {
+		t.Fatalf("a used map must not warn: %+v %v", warns, err)
+	}
+}
+
+// A promote that waited on the gate job and then reused the green gate
+// keeps the job's shadow PR and id.
+func TestPromoteThatWaitedOnTheJobKeepsIt(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.startFeature("feat-x", map[string]string{"feature.txt": "x\n"})
+	o := engine.PromoteOptions{Feature: "feat-x", Mode: "squash", Message: "Add x", PlanOnly: true}
+	o.Detach = true
+	first, _, err := h.eng.Promote(h.ctx, h.pair, o)
+	if err != nil || first.Gate.Job == nil || first.Gate.ShadowPR == nil {
+		t.Fatalf("detached promote = %+v %v", first, err)
+	}
+	o.Detach = false
+	res, _, err := h.eng.Promote(h.ctx, h.pair, o)
+	if err != nil || res.Plan == nil || !res.Gate.Reused || res.Gate.Job == nil || *res.Gate.Job != *first.Gate.Job ||
+		res.Gate.ShadowPR == nil || *res.Gate.ShadowPR != *first.Gate.ShadowPR {
+		t.Fatalf("promote = %+v %v", res.Gate, err)
+	}
+}
+
+// A gate scanned as squash checks only the final tree; a preserve promote
+// that reuses it finds an older commit's broken marker in its own chain.
+// The error names the feature and mode, so next can offer the history steps.
+func TestPromoteChainMarkerInvalidNamesTheFeature(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.setConfig("default_mode: preserve", "default_mode: squash")
+	s1 := h.startFeature("feat-x", map[string]string{"app.go": "ok\n// BEGIN-INTERNAL\nx\n"})
+	testutil.Commit(t, h.shadowGit(), "feat-x", "fix the marker", map[string]string{"app.go": "ok\n"})
+	if _, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x"); err != nil {
+		t.Fatalf("a squash gate scans only the final tree: %v", err)
+	}
+	_, err := promote(h, engine.PromoteOptions{Mode: "preserve", Title: "t", PlanOnly: true})
+	ce := wantCode(t, err, contract.MarkerInvalid)
+	if ce.Details["feature"] != "feat-x" || ce.Details["mode"] != "preserve" || ce.Details["commit"] != s1 {
+		t.Fatalf("details = %v", ce.Details)
+	}
+}
+
+// candidatePushes counts pushes of name's gate candidate from now on.
+func candidatePushes(h *harness, name string) *int {
+	n := new(int)
+	h.eng.OnPush = func(_, _ string, specs []string) {
+		for _, s := range specs {
+			if strings.HasSuffix(s, ":refs/heads/ghostbranch-gate/"+name) {
+				*n++
+			}
+		}
+	}
+	return n
+}
+
+// detachedJob starts a squash promote's gate job for feat-x and leaves it pending.
+func detachedJob(t *testing.T) *harness {
+	t.Helper()
+	h := newHarness(t)
+	h.init()
+	h.startFeature("feat-x", map[string]string{"feature.txt": "x\n"})
+	if _, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "Add x", PlanOnly: true, Detach: true}); err != nil {
+		t.Fatal(err)
+	}
+	if !h.meta("feat-x").Gate.Pending() {
+		t.Fatal("no pending job")
+	}
+	return h
+}
+
+// A matching job whose CI fails: promote waits on it and returns the
+// recorded failure, with no new candidate and no plan.
+func TestPromoteReturnsAFailedJobWithoutAPlan(t *testing.T) {
+	t.Parallel()
+	h := detachedJob(t)
+	h.forge.Checks = func(string, string) []forge.Check {
+		return []forge.Check{{Name: "ci", Status: "completed", Conclusion: "failure"}}
+	}
+	n := candidatePushes(h, "feat-x")
+	res, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "Add x", PlanOnly: true})
+	_ = wantCode(t, err, contract.ChecksFailed)
+	if res == nil || res.Gate == nil || res.Gate.Checks != feature.ChecksFailed || res.Plan != nil || *n != 0 {
+		t.Fatalf("promote = %+v (%d candidate pushes)", res, *n)
+	}
+	if g := h.meta("feat-x").Gate; g.Checks != feature.ChecksFailed {
+		t.Fatalf("recorded gate = %+v", g)
+	}
+}
+
+// A dry run never finishes a pending job (that would wait on CI and write):
+// it says it would run the gate, pushes nothing, and the job stays pending.
+func TestPromoteDryRunLeavesAPendingJobAlone(t *testing.T) {
+	t.Parallel()
+	h := detachedJob(t)
+	pushes := len(h.pushes)
+	h.eng.DryRun = true
+	res, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "Add x"})
+	h.eng.DryRun = false
+	if err != nil || res.Preview == nil || len(res.Preview.Ops) != 1 || res.Preview.Ops[0]["op"] != "run_gate" || res.Plan != nil {
+		t.Fatalf("dry run = %+v %v", res, err)
+	}
+	if len(h.pushes) != pushes || !h.meta("feat-x").Gate.Pending() {
+		t.Fatalf("the dry run pushed (%d -> %d) or finished the job", pushes, len(h.pushes))
+	}
+}
+
+// A pending job scanned for another mode isn't this promote's: it gates
+// again, scanning for the promote's mode.
+func TestPromoteReGatesAJobScannedInAnotherMode(t *testing.T) {
+	t.Parallel()
+	h := detachedJob(t) // scanned as squash
+	n := candidatePushes(h, "feat-x")
+	res, err := promote(h, engine.PromoteOptions{Mode: "preserve", PlanOnly: true})
+	if err != nil || res.Plan == nil || res.Gate.Reused || res.Gate.ScannedAs != "preserve" || *n != 1 {
+		t.Fatalf("promote = %+v %v (%d candidate pushes)", res, err, *n)
+	}
+}
+
+// A recorded mapping that doesn't end at the candidate's parent is stale,
+// as is an empty mapping whose candidate isn't on public main.
+func TestPromoteReGatesWhenTheMappingDoesNotEndAtTheCandidate(t *testing.T) {
+	t.Parallel()
+	for name, edit := range map[string]func(*feature.Meta){
+		"last commit rebased elsewhere": func(m *feature.Meta) { m.Gate.Commits[len(m.Gate.Commits)-1].Rebased = m.Gate.PublicMain },
+		"empty mapping off main":        func(m *feature.Meta) { m.Gate.Commits = []feature.GateCommit{} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			h := gated(t)
+			forgeMeta(t, h, "feat-x", edit)
+			res, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "m", PlanOnly: true})
+			if err != nil || res.Gate.Reused {
+				t.Fatalf("promote must re-gate: %+v %v", res.Gate, err)
+			}
+		})
 	}
 }

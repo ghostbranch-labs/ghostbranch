@@ -118,13 +118,13 @@ func TestFakePRMergedAndClose(t *testing.T) {
 		}
 	}
 	f.SetPRMerged("acme/s", 1)
-	if pr, _ := f.GetPR(ctx, "acme/s", 1); !pr.Merged || pr.State != "closed" {
+	if pr, err := f.GetPR(ctx, "acme/s", 1); err != nil || !pr.Merged || pr.State != "closed" {
 		t.Fatalf("merged PR = %+v", pr)
 	}
 	if err := f.ClosePullRequest(ctx, "acme/s", 2); err != nil {
 		t.Fatal(err)
 	}
-	if pr, _ := f.GetPR(ctx, "acme/s", 2); pr.State != "closed" || pr.Merged {
+	if pr, err := f.GetPR(ctx, "acme/s", 2); err != nil || pr.State != "closed" || pr.Merged {
 		t.Fatalf("closed PR = %+v", pr)
 	}
 	if err := f.ClosePullRequest(ctx, "acme/s", 2); err != nil {
@@ -132,6 +132,19 @@ func TestFakePRMergedAndClose(t *testing.T) {
 	}
 	if err := f.ClosePullRequest(ctx, "acme/s", 99); !errors.Is(err, forge.ErrNotFound) {
 		t.Fatalf("unknown PR: %v", err)
+	}
+	boom := errors.New("down")
+	f.GetPRErr = func(_ string, n int) error {
+		if n == 1 {
+			return boom
+		}
+		return nil
+	}
+	if _, err := f.GetPR(ctx, "acme/s", 1); !errors.Is(err, boom) {
+		t.Fatalf("GetPRErr for PR 1: %v", err)
+	}
+	if pr, err := f.GetPR(ctx, "acme/s", 2); err != nil || pr.Number != 2 {
+		t.Fatalf("PR 2 must still read: %+v %v", pr, err)
 	}
 }
 
@@ -190,5 +203,32 @@ func TestFakeCancelAndForceCancel(t *testing.T) {
 	f.ForceCancelForbidden = map[string]bool{repo: true}
 	if err := f.ForceCancelRun(ctx, repo, 3); !errors.Is(err, forge.ErrForbidden) {
 		t.Fatalf("forbidden: %v", err)
+	}
+}
+
+// GitHub answers 409 to a force-cancel of a finished run; so does the fake.
+// A per-run ForceCancelErr fails only that run's force-cancel.
+func TestFakeForceCancelOfAFinishedRunAndPerRunErrors(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	const repo = "acme/s"
+	f := fake.New(filepath.Join(t.TempDir(), "forge"))
+	boom := errors.New("boom")
+	f.Runs = map[string][]fake.Run{repo: {
+		{SHA: "a", Run: forge.Run{ID: 1, Status: "completed", Conclusion: "success"}},
+		{SHA: "a", Run: forge.Run{ID: 2, Status: "in_progress"}, ForceCancelErr: boom},
+		{SHA: "a", Run: forge.Run{ID: 3, Status: "in_progress"}},
+	}}
+	if err := f.ForceCancelRun(ctx, repo, 1); !errors.Is(err, forge.ErrConflict) {
+		t.Fatalf("finished run: %v, want ErrConflict", err)
+	}
+	if err := f.ForceCancelRun(ctx, repo, 2); !errors.Is(err, boom) {
+		t.Fatalf("run 2: %v", err)
+	}
+	if err := f.ForceCancelRun(ctx, repo, 3); err != nil {
+		t.Fatalf("run 3: %v", err)
+	}
+	if got := f.ForceCancelled[repo]; len(got) != 1 || got[0] != 3 {
+		t.Fatalf("ForceCancelled = %v", f.ForceCancelled)
 	}
 }

@@ -2,7 +2,6 @@ package cli_test
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -12,8 +11,6 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-
-	"github.com/santhosh-tekuri/jsonschema/v6"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
@@ -33,32 +30,6 @@ var dataSchemas = map[string]string{
 	"status": "status.schema.json", "feature list": "feature-list.schema.json", "feature show": "feature-show.schema.json",
 	"feature abandon": "feature-abandon.schema.json", "feature close": "feature-close.schema.json",
 	"wait": "gate.schema.json",
-}
-
-func schema(t *testing.T, name string) *jsonschema.Schema {
-	t.Helper()
-	path, err := filepath.Abs(filepath.Join("..", "..", "schemas", "v0", name))
-	if err != nil {
-		t.Fatal(err)
-	}
-	c := jsonschema.NewCompiler()
-	c.AssertFormat()
-	s, err := c.Compile(path)
-	if err != nil {
-		t.Fatalf("compile %s: %v", name, err)
-	}
-	return s
-}
-
-func validate(t *testing.T, name string, raw []byte) {
-	t.Helper()
-	inst, err := jsonschema.UnmarshalJSON(bytes.NewReader(raw))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := schema(t, name).Validate(inst); err != nil {
-		t.Fatalf("%s does not match %s:\n%v\n%s", "output", name, err, raw)
-	}
 }
 
 var rootPath = regexp.MustCompile(`<ROOT>[^"]*`)
@@ -199,6 +170,7 @@ jobs:
 		{"feature_show", gatedFeature, []string{"feature", "show", "feat-x"}, 0},
 		{"feature_show_unknown", initOnly, []string{"feature", "show", "nope"}, 2},
 		{"feature_abandon", withFeature, []string{"feature", "abandon", "feat-x"}, 0},
+		{"feature_abandon_plan", withFeature, []string{"feature", "abandon", "feat-x", "--plan"}, 0},
 		{"feature_close_merged", func(te *testEnv) {
 			initOnly(te)
 			grantAgents(te)
@@ -252,14 +224,14 @@ jobs:
 			if args[0] == "wait" {
 				last = waitStream(t, out)
 			}
-			validate(t, "envelope.schema.json", last)
+			testutil.ValidateSchema(t, "envelope.schema.json", last)
 			var env struct {
 				Command string          `json:"command"`
 				Data    json.RawMessage `json:"data"`
 			}
 			_ = json.Unmarshal(last, &env)
 			if string(env.Data) != "{}" {
-				validate(t, dataSchemas[env.Command], env.Data)
+				testutil.ValidateSchema(t, dataSchemas[env.Command], env.Data)
 			}
 			got := normalize(out, te.root)
 			golden := filepath.Join("testdata", "golden", s.name+".json")
@@ -309,7 +281,7 @@ func waitStream(t *testing.T, out string) []byte {
 		}
 	}
 	for _, v := range values[:len(values)-1] {
-		validate(t, "wait-event.schema.json", v)
+		testutil.ValidateSchema(t, "wait-event.schema.json", v)
 	}
 	return values[len(values)-1]
 }
@@ -368,14 +340,14 @@ func TestArtifactsMatchTheirSchemas(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	validate(t, "plan.schema.json", planRaw)
+	testutil.ValidateSchema(t, "plan.schema.json", planRaw)
 
 	sh := gitx.New(te.forge.RepoDir("acme/widget-shadow"))
 	meta, ok, err := sh.ShowFile(te.t.Context(), "refs/ghostbranch/features/feat-x", "feature.json")
 	if err != nil || !ok {
 		t.Fatalf("feature.json: %v", err)
 	}
-	validate(t, "feature.schema.json", meta)
+	testutil.ValidateSchema(t, "feature.schema.json", meta)
 
 	f, err := os.Open(filepath.Join(home, "workspaces", "default", "ledger.jsonl"))
 	if err != nil {
@@ -385,7 +357,7 @@ func TestArtifactsMatchTheirSchemas(t *testing.T) {
 	sc := bufio.NewScanner(f)
 	n := 0
 	for sc.Scan() {
-		validate(t, "ledger-entry.schema.json", sc.Bytes())
+		testutil.ValidateSchema(t, "ledger-entry.schema.json", sc.Bytes())
 		n++
 	}
 	if n < 5 {
@@ -396,7 +368,7 @@ func TestArtifactsMatchTheirSchemas(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	validate(t, "grants.schema.json", grants)
+	testutil.ValidateSchema(t, "grants.schema.json", grants)
 }
 
 func TestWaiverArtifactsMatchTheirSchemas(t *testing.T) {
@@ -407,14 +379,14 @@ func TestWaiverArtifactsMatchTheirSchemas(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	validate(t, "waivers.schema.json", raw)
+	testutil.ValidateSchema(t, "waivers.schema.json", raw)
 	te.mustRun("gate", "feat-x")
 	te.mustRun("promote", "feat-x", "--mode", "squash", "-m", "Add config", "--plan")
 	planRaw, err := os.ReadFile(filepath.Join(te.vars["GHOSTBRANCH_HOME"], "workspaces", "default", "plans", te.lastPlanID()+".json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	validate(t, "plan.schema.json", planRaw)
+	testutil.ValidateSchema(t, "plan.schema.json", planRaw)
 	if !strings.Contains(string(planRaw), te.finding) {
 		t.Fatal("the plan does not record the waived finding")
 	}
@@ -425,7 +397,7 @@ func TestWaiverArtifactsMatchTheirSchemas(t *testing.T) {
 	defer func() { _ = f.Close() }()
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
-		validate(t, "ledger-entry.schema.json", sc.Bytes())
+		testutil.ValidateSchema(t, "ledger-entry.schema.json", sc.Bytes())
 	}
 	if err := sc.Err(); err != nil {
 		t.Fatal(err)

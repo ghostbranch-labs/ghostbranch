@@ -192,22 +192,57 @@ func Open(ctx context.Context, dir string) (*Checkout, error) {
 	return &Checkout{Dir: dir, Top: clean(top), GitDir: clean(gitDir), HooksDir: clean(hooks)}, nil
 }
 
-// Remotes maps each remote to its URL as configured: before insteadOf
-// rewriting, which git applies to the URL it hands the hook.
-func (c *Checkout) Remotes(ctx context.Context) (map[string]string, error) {
-	out, code, err := run(ctx, c.Dir, "config", "--get-regexp", `^remote\..*\.url$`)
+// remoteConfig reads every remote.<name>.url and remote.<name>.pushurl, in
+// config order, as configured: before insteadOf rewriting, which git
+// applies to the URL it hands the hook.
+func (c *Checkout) remoteConfig(ctx context.Context) (urls, pushURLs map[string][]string, err error) {
+	urls, pushURLs = map[string][]string{}, map[string][]string{}
+	out, code, err := run(ctx, c.Dir, "config", "--get-regexp", `^remote\..+\.(push)?url$`)
 	if code == 1 {
-		return map[string]string{}, nil
+		return urls, pushURLs, nil
 	}
 	if err != nil {
-		return nil, contract.Wrap(contract.Internal, err, "list the remotes")
+		return nil, nil, contract.Wrap(contract.Internal, err, "list the remotes")
 	}
-	m := map[string]string{}
 	for _, line := range strings.Split(out, "\n") {
 		key, url, ok := strings.Cut(strings.TrimSpace(line), " ")
-		if ok {
-			m[strings.TrimSuffix(strings.TrimPrefix(key, "remote."), ".url")] = url
+		if !ok {
+			continue
 		}
+		name := strings.TrimPrefix(key, "remote.")
+		if n, ok := strings.CutSuffix(name, ".pushurl"); ok {
+			pushURLs[n] = append(pushURLs[n], url)
+		} else if n, ok := strings.CutSuffix(name, ".url"); ok {
+			urls[n] = append(urls[n], url)
+		}
+	}
+	return urls, pushURLs, nil
+}
+
+// RemoteURLs maps each remote to every URL configured for it: its url
+// values, then its pushurl values. git pushes to the pushurls when there
+// are any, else to every url, so a push through the remote is public when
+// any of them is a public repo.
+func (c *Checkout) RemoteURLs(ctx context.Context) (map[string][]string, error) {
+	urls, pushURLs, err := c.remoteConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for n, us := range pushURLs {
+		urls[n] = append(urls[n], us...)
+	}
+	return urls, nil
+}
+
+// Remotes maps each remote to its first url, the one git fetches from.
+func (c *Checkout) Remotes(ctx context.Context) (map[string]string, error) {
+	urls, _, err := c.remoteConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+	m := make(map[string]string, len(urls))
+	for n, us := range urls {
+		m[n] = us[0]
 	}
 	return m, nil
 }
@@ -217,24 +252,29 @@ func within(base, p string) bool {
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }
 
-// committable reports whether a hook file could end up in a commit: the
-// hooks directory is in the working tree, outside .git, and not ignored.
+// committable reports whether a file the guard writes could end up in a
+// commit: the hooks directory is in the working tree, outside .git, and
+// pre-push, its chained copy or install's temporary file is not ignored.
 func (c *Checkout) committable(ctx context.Context) (bool, error) {
 	if within(c.GitDir, c.HooksDir) || !within(c.Top, c.HooksDir) {
 		return false, nil
 	}
-	_, code, err := run(ctx, c.Dir, "check-ignore", "-q", filepath.Join(c.HooksDir, "pre-push"))
-	switch code {
-	case 0:
-		return false, nil
-	case 1:
-		return true, nil
+	for _, p := range []string{c.hookPath(), c.chainedPath(), c.tmpPath()} {
+		_, code, err := run(ctx, c.Dir, "check-ignore", "-q", p)
+		switch code {
+		case 0:
+			continue
+		case 1:
+			return true, nil
+		}
+		return false, err
 	}
-	return false, err
+	return false, nil
 }
 
 func (c *Checkout) hookPath() string    { return filepath.Join(c.HooksDir, "pre-push") }
 func (c *Checkout) chainedPath() string { return filepath.Join(c.HooksDir, ChainedName) }
+func (c *Checkout) tmpPath() string     { return filepath.Join(c.HooksDir, "pre-push.ghostbranch-tmp") }
 
 func readFile(p string) (string, bool, error) {
 	b, err := os.ReadFile(p)
@@ -327,7 +367,7 @@ func Install(ctx context.Context, c *Checkout, h Hook, dryRun bool) (Result, err
 	}
 	if bad {
 		return Result{}, contract.New(contract.GuardUnsupported,
-			"the hooks directory %s is in the working tree and not git-ignored, so the hook could be committed; ignore it or point core.hooksPath elsewhere", c.HooksDir)
+			"the hooks directory %s is in the working tree and the guard's files there (pre-push and pre-push.ghostbranch-*) are not all git-ignored, so the hook could be committed; ignore them or point core.hooksPath elsewhere", c.HooksDir)
 	}
 	script := Script(h)
 	pv := preview.New(nil)
@@ -360,7 +400,7 @@ func Install(ctx context.Context, c *Checkout, h Hook, dryRun bool) (Result, err
 				return Result{}, contract.Wrap(contract.Internal, err, "keep the existing pre-push hook")
 			}
 		}
-		tmp := c.hookPath() + ".ghostbranch-tmp"
+		tmp := c.tmpPath()
 		if err := os.WriteFile(tmp, []byte(script), 0o755); err != nil {
 			return Result{}, contract.Wrap(contract.Internal, err, "write the hook")
 		}

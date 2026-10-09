@@ -17,6 +17,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/grant"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
+	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
 func nextOf(t *testing.T, env map[string]any) []map[string]any {
@@ -97,6 +98,7 @@ func TestNextForAPersonDropsAgentFlags(t *testing.T) {
 		if len(args) > 4 {
 			want = append(want, "--for", "24h")
 		}
+		want = append(want, "--repo", "acme/widget")
 		if len(n) != 1 || !reflect.DeepEqual(argv(n[0]), want) || n[0]["needs_human"] != true {
 			t.Fatalf("%v: next = %v", args, n)
 		}
@@ -117,7 +119,7 @@ func TestNextCarriesTheWorkspace(t *testing.T) {
 		t.Fatalf("next = %v", n)
 	}
 	_, env = te.runJSON("agents", "allow")
-	if n := nextOf(t, env); len(n) != 1 || !reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "agents", "allow", "--workspace", "other"}) {
+	if n := nextOf(t, env); len(n) != 1 || !reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "agents", "allow", "--repo", "acme/widget", "--workspace", "other"}) {
 		t.Fatalf("agents allow next = %v", n)
 	}
 }
@@ -131,7 +133,7 @@ func TestNextReplansForThePlansBranch(t *testing.T) {
 	testutil.Commit(t, te.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
 	_, env := te.runJSON("apply", te.lastPlanID())
 	n := nextOf(t, env)
-	if len(n) != 1 || !reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "promote", "feat-x", "--mode", "squash", "--plan", "--repo", "acme/widget", "--branch", "public-name", "--title", "Add feature"}) ||
+	if len(n) != 1 || !reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "promote", "feat-x", "--mode", "squash", "--plan", "--repo", "acme/widget", "--branch", "public-name"}) ||
 		!reflect.DeepEqual(n[0]["needs_input"], []any{"--message"}) {
 		t.Fatalf("next = %v", n)
 	}
@@ -683,7 +685,7 @@ func TestNextForLifecycleStates(t *testing.T) {
 		human bool
 		why   string
 	}{
-		{[]string{"ghostbranch", "sync", "--repo", "acme/widget"}, false, "sync closes merged features; or run `feature close feat-a`"},
+		{[]string{"ghostbranch", "sync", "--repo", "acme/widget"}, false, "sync closes merged features; or run `ghostbranch feature close feat-a --repo acme/widget`"},
 		{[]string{"ghostbranch", "feature", "close", "feat-b", "--repo", "acme/widget"}, true, "its PR merged but there are newer commits; promote them or a person closes it"},
 		{[]string{"ghostbranch", "feature", "close", "feat-c", "--repo", "acme/widget"}, true, "its PR was closed without merging"},
 	}
@@ -903,7 +905,7 @@ func TestNextForFeatureClose(t *testing.T) {
 	code, env := te.runJSON("feature", "close", "feat-d", "--non-interactive")
 	n := nextOf(t, env)
 	if code != 5 || len(n) != 1 || n[0]["needs_human"] != true ||
-		!reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "feature", "close", "feat-d"}) {
+		!reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "feature", "close", "feat-d", "--repo", "acme/widget"}) {
 		t.Fatalf("no console: exit %d, next = %v", code, n)
 	}
 
@@ -1148,5 +1150,90 @@ func TestNextForAPendingGateOnAMergedMovedFeature(t *testing.T) {
 	te.shadowCommit("feat-b", map[string]string{"later.txt": "later still\n"})
 	if code, out, _ := te.run("feature", "show", "feat-b"); code != 0 || !strings.Contains(out, "  gate: pending (job "+job+"), stale\n") {
 		t.Fatalf("feature show: %d %q", code, out)
+	}
+}
+
+// FEATURE_NOT_FOUND offers the list of every feature, abandoned ones too.
+func TestNextForAnUnknownFeatureListsThemAll(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	_, env := te.runJSON("feature", "show", "nope")
+	if n := nextOf(t, env); len(n) != 1 || !reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "feature", "list", "--all", "--repo", "acme/widget"}) {
+		t.Fatalf("next = %v", n)
+	}
+}
+
+// A secret the only commit introduced: amend it, don't fix it on top.
+func TestNextForATipLeakSaysAmend(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	te.mustRun("feature", "start", "feat-x")
+	te.shadowCommit("feat-x", map[string]string{"config.env": "TOKEN=" + testutil.FakeGitHubToken() + "\n"})
+	_, env := te.runJSON("gate", "feat-x")
+	n := nextOf(t, env)
+	if why := n[0]["why"].(string); !strings.Contains(why, "amend") || !strings.Contains(why, "git push --force-with-lease shadow feat-x") {
+		t.Fatalf("next = %v", n)
+	}
+}
+
+// The human next prints a positional input once: <name>, not <name> <<name>>.
+func TestSyncHumanNextNamesThePlaceholderOnce(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	_, out, _ := te.run("sync")
+	if !strings.Contains(out, "ghostbranch feature start --repo acme/widget <name>\n") || strings.Contains(out, "<<name>>") {
+		t.Fatalf("stdout:\n%s", out)
+	}
+}
+
+// A sync whose push failed still surveyed the features: next keeps what
+// they need, and the human output says where shadow main was, not where it
+// is now.
+func TestNextForASyncPushFailureKeepsAttention(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	grantAgents(te)
+	te.forge.ClosePR("acme/widget", publishFeature(te, "feat-c"))
+	testutil.Commit(t, te.pubGit, "main", "next", map[string]string{"n.txt": "1\n"})
+	hooks := filepath.Join(te.forge.RepoDir("acme/widget-shadow"), "hooks")
+	if err := os.MkdirAll(hooks, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(hooks, "pre-receive"), []byte("#!/bin/sh\necho 'GH013: repository rule violations found' >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	code, env := te.runJSON("sync")
+	e, _ := env["error"].(map[string]any)
+	if code == 0 || e["code"] != "PUSH_REFUSED" {
+		t.Fatalf("exit %d %v", code, env)
+	}
+	n := nextOf(t, env)
+	if len(n) != 1 || !reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "feature", "close", "feat-c", "--repo", "acme/widget"}) ||
+		n[0]["needs_human"] != true {
+		t.Fatalf("next = %v", n)
+	}
+	_, out, errOut := te.run("sync")
+	if !strings.Contains(out, "Shadow main could not be pushed; it was at ") || !strings.Contains(out, " when sync read it.\n") ||
+		!strings.Contains(out+errOut, "ghostbranch feature close feat-c --repo acme/widget") {
+		t.Fatalf("human output:\nstdout: %s\nstderr: %s", out, errOut)
+	}
+}
+
+// An agent's run with --repo . hands a person a replay that names the pair.
+func TestNextForAPersonNamesThePairForARelativeRepo(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	te.env.CwdRemotes = func() []workspace.Remote {
+		return []workspace.Remote{{Name: "origin", URL: "https://github.com/acme/widget.git"}}
+	}
+	_, env := te.runJSON("agents", "allow", "--repo", ".", "--non-interactive")
+	n := nextOf(t, env)
+	if len(n) != 1 || !reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "agents", "allow", "--repo", "acme/widget"}) || n[0]["needs_human"] != true {
+		t.Fatalf("next = %v", n)
 	}
 }

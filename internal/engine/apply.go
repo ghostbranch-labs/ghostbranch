@@ -75,11 +75,17 @@ func (e *Engine) Apply(ctx context.Context, opt ApplyOptions) (res *ApplyResult,
 }
 
 // stale is the PLAN_STALE details: what moved, plus the feature, public
-// repo, public branch, mode and PR texts so the re-plan command can be
-// named exactly.
+// repo, public branch and mode, and the PR texts the person typed, so the
+// re-plan command can be named exactly and derives the other texts again.
 func stale(pl plan.Plan, moved []string) map[string]any {
-	return map[string]any{"moved": moved, "feature": pl.Feature, "public": pl.Pair.Public, "branch": pl.Publish.TargetBranch,
-		"mode": pl.Mode, "title": pl.Publish.PR.Title, "body": pl.Publish.PR.Body}
+	d := map[string]any{"moved": moved, "feature": pl.Feature, "public": pl.Pair.Public, "branch": pl.Publish.TargetBranch, "mode": pl.Mode}
+	if pl.Typed.Title {
+		d["title"] = pl.Publish.PR.Title
+	}
+	if pl.Typed.Body {
+		d["body"] = pl.Publish.PR.Body
+	}
+	return d
 }
 
 // replanDetails adds to a MARKER_INVALID, CURATE_CONFLICT or
@@ -107,7 +113,8 @@ func replanDetails(err error, pl plan.Plan) error {
 // the feature record says was published: plan files outlive their apply,
 // and that publish is finished, not interrupted.
 func (e *Engine) earlierPlan(pair workspace.Pair, feature, branch, sha, published string) string {
-	files, err := planFiles(e.WS.PlansDir())
+	// A plan file that can't be read is simply not named.
+	files, _, err := planFiles(e.WS.PlansDir())
 	if err != nil {
 		return ""
 	}
@@ -199,105 +206,11 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 			"the repos changed since plan %s was made (%s); make a new plan with ghostbranch promote", pl.ID, strings.Join(moved, ", ")).
 			WithDetails(stale(pl, moved))
 	}
-	// The plan only stands while the recorded gate is green, fresh, and for
-	// the very candidate the plan was made from, and records the chain it
-	// rebased (a gate from an older binary does not).
-	gateStale := contract.New(contract.PlanStale,
-		"the recorded gate for %q is no longer green for plan %s's candidate; run ghostbranch gate, then make a new plan", pl.Feature, pl.ID).
-		WithDetails(stale(pl, []string{"gate"}))
-	if !m.Gate.Passed() || m.Gate.Commits == nil || m.Gate.Candidate != gateC || !m.Gate.FreshFor(head, pm, O) {
-		return nil, warns, gateStale
-	}
-	// The recorded chain must run from public main to the candidate's
-	// parent, one parent at a time.
-	prev := pm
-	for _, c := range m.Gate.Commits {
-		if parent, err := g.MustResolve(ctx, c.Rebased+"^"); err != nil || parent != prev {
-			return nil, warns, gateStale
-		}
-		prev = c.Rebased
-	}
-	if R, err := g.MustResolve(ctx, gateC+"^"); err != nil || R != prev {
-		return nil, warns, gateStale
-	}
-	P, ok, _ := g.Resolve(ctx, planRef(pl.ID))
-	if !ok || P != pl.Publish.Commit {
-		return nil, warns, contract.New(contract.PlanStale, "plan %s's commit is missing from the shadow repo", pl.ID).
-			WithDetails(stale(pl, []string{"publish.commit"}))
-	}
-	// P matching C proves nothing if C itself kept internal sections (a plan
-	// from a binary that did not strip, or a forged one): derive the
-	// published tree again from the candidate's parent.
-	T2, tEntries, err := publishedTree(ctx, g, gateC+"^", cfg)
+	P, links, err := e.verifyChain(ctx, pc, pl, m, cfg, live)
 	if err != nil {
-		return nil, warns, replanDetails(err, pl)
-	}
-	if T2 != pl.Publish.Tree {
-		return nil, warns, contract.New(contract.PlanStale,
-			"plan %s was not built with this version's strip of internal sections; make a new plan with ghostbranch promote", pl.ID).
-			WithDetails(stale(pl, []string{"publish.tree"}))
-	}
-	// The plan file is local and unsigned: derive the chain again from the
-	// shadow repo's objects, and refuse a plan that names any other.
-	// A curated plan replays its groups again; any other plan has none.
-	curateStale := contract.New(contract.PlanStale,
-		"plan %s's curate groups do not fit its mode %s; make a new plan with ghostbranch promote", pl.ID, pl.Mode).
-		WithDetails(stale(pl, []string{"curate"}))
-	if (pl.Mode == config.ModeCurated) != (pl.Curate != nil) {
-		return nil, warns, curateStale
-	}
-	for _, gr := range pl.Curate {
-		if len(gr.From) == 0 {
-			return nil, warns, curateStale
-		}
-	}
-	// The groups name each gated commit exactly once, by its full SHA.
-	if pl.Curate != nil {
-		if resolved, err := ResolveGroups(pl.Curate, sourcesOf(m.Gate.Commits)); err != nil || !reflect.DeepEqual(resolved, pl.Curate) {
-			return nil, warns, curateStale
-		}
-	}
-	links, dropped, err := deriveChain(ctx, g, cfg, chainInput{mode: pl.Mode, pm: pm, T: pl.Publish.Tree, tEntries: tEntries,
-		commits: m.Gate.Commits, groups: pl.Curate},
-		func(cs []string, onto string) ([]string, error) { return e.replay(ctx, pc, cs, onto) })
-	if err != nil {
-		return nil, warns, replanDetails(err, pl)
-	}
-	chainStale := contract.New(contract.PlanStale,
-		"plan %s's public commits are not the ones its feature's history gives; make a new plan with ghostbranch promote", pl.ID).
-		WithDetails(stale(pl, []string{"publish.commits"}))
-	commits := pl.Publish.Commits
-	if len(links) != len(commits) || !slices.Equal(dropped, pl.Publish.DroppedEmpty) {
-		return nil, warns, chainStale
-	}
-	for i, l := range links {
-		if l.tree != commits[i].Tree || !reflect.DeepEqual(l.sources, commits[i].Sources) {
-			return nil, warns, chainStale
-		}
-	}
-	// The chain publishes on public main; the approval's file list is
-	// measured from there, so the plan file's parent must be it.
-	if pl.Publish.Parent != pm {
-		return nil, warns, contract.New(contract.PlanStale,
-			"plan %s names parent %s, not public main %s; make a new plan with ghostbranch promote", pl.ID, short(pl.Publish.Parent), short(pm)).
-			WithDetails(stale(pl, []string{"publish.parent"}))
-	}
-	// The plan ref is the chain's tip: walk back from it.
-	at := P
-	for i := len(commits) - 1; i >= 0; i-- {
-		if at != commits[i].Commit {
-			return nil, warns, chainStale
-		}
-		if i > 0 {
-			if at, err = g.MustResolve(ctx, at+"^"); err != nil {
-				return nil, warns, chainStale
-			}
-		}
-	}
-	set := overlay.NewSet(cfg.LeakScan.Strip...)
-	if err := assertChain(ctx, g, commits, pl.Publish.Tree, gateC, pm, set, guardNames(pc)); err != nil {
 		return nil, warns, err
 	}
+	commits := pl.Publish.Commits
 	// Scan what is stored in the commits, not what the plan file says.
 	steps := make([]scanStep, len(commits))
 	authors := make([]string, len(commits))
@@ -333,6 +246,7 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 	if len(blocking) > 0 {
 		ce := contract.From(leakErr(pl.Feature, blocking))
 		ce.Details["mode"], ce.Details["public"], ce.Details["branch"] = pl.Mode, pl.Pair.Public, pl.Publish.TargetBranch
+		ce.Details["feature_head"] = pl.Fingerprint.FeatureHead // verified equal to the live head
 		return nil, warns, ce
 	}
 
@@ -394,4 +308,121 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 		return res, warns, err
 	}
 	return res, warns, nil
+}
+
+// verifyChain checks that plan pl still stands on the shadow repo's
+// objects, not on what the file says:
+//   - the recorded gate is green, fresh and for the live gate candidate;
+//   - its rebased chain runs from public main to the candidate's parent;
+//   - the plan ref holds the plan's commit;
+//   - the published tree is what this binary's strip gives;
+//   - the curate groups fit the mode and the gated commits;
+//   - the chain derived again from the gate is the plan's, commit by commit,
+//     on public main.
+//
+// It returns the plan ref's commit P and the derived links, whose sources
+// and entries the scan uses.
+func (e *Engine) verifyChain(ctx context.Context, pc *pairCtx, pl plan.Plan, m feature.Meta, cfg config.Config, live plan.Fingerprint) (string, []link, error) {
+	g := pc.git
+	pm, gateC := live.PublicMain, live.GateCandidate
+	// The plan only stands while the recorded gate is green, fresh, and for
+	// the very candidate the plan was made from, and records the chain it
+	// rebased (a gate from an older binary does not).
+	gateStale := contract.New(contract.PlanStale,
+		"the recorded gate for %q is no longer green for plan %s's candidate; run ghostbranch gate, then make a new plan", pl.Feature, pl.ID).
+		WithDetails(stale(pl, []string{"gate"}))
+	if !m.Gate.Passed() || m.Gate.Commits == nil || m.Gate.Candidate != gateC || !m.Gate.FreshFor(live.FeatureHead, pm, live.Overlay) {
+		return "", nil, gateStale
+	}
+	// The recorded chain must run from public main to the candidate's
+	// parent, one parent at a time.
+	prev := pm
+	for _, c := range m.Gate.Commits {
+		if parent, err := g.MustResolve(ctx, c.Rebased+"^"); err != nil || parent != prev {
+			return "", nil, gateStale
+		}
+		prev = c.Rebased
+	}
+	if R, err := g.MustResolve(ctx, gateC+"^"); err != nil || R != prev {
+		return "", nil, gateStale
+	}
+	P, ok, _ := g.Resolve(ctx, planRef(pl.ID))
+	if !ok || P != pl.Publish.Commit {
+		return "", nil, contract.New(contract.PlanStale, "plan %s's commit is missing from the shadow repo", pl.ID).
+			WithDetails(stale(pl, []string{"publish.commit"}))
+	}
+	// P matching C proves nothing if C itself kept internal sections (a plan
+	// from a binary that did not strip, or a forged one): derive the
+	// published tree again from the candidate's parent.
+	T2, tEntries, err := publishedTree(ctx, g, gateC+"^", cfg)
+	if err != nil {
+		return "", nil, replanDetails(err, pl)
+	}
+	if T2 != pl.Publish.Tree {
+		return "", nil, contract.New(contract.PlanStale,
+			"plan %s was not built with this version's strip of internal sections; make a new plan with ghostbranch promote", pl.ID).
+			WithDetails(stale(pl, []string{"publish.tree"}))
+	}
+	// The plan file is local and unsigned: derive the chain again from the
+	// shadow repo's objects, and refuse a plan that names any other.
+	// A curated plan replays its groups again; any other plan has none.
+	curateStale := contract.New(contract.PlanStale,
+		"plan %s's curate groups do not fit its mode %s; make a new plan with ghostbranch promote", pl.ID, pl.Mode).
+		WithDetails(stale(pl, []string{"curate"}))
+	if (pl.Mode == config.ModeCurated) != (pl.Curate != nil) {
+		return "", nil, curateStale
+	}
+	for _, gr := range pl.Curate {
+		if len(gr.From) == 0 {
+			return "", nil, curateStale
+		}
+	}
+	// The groups name each gated commit exactly once, by its full SHA.
+	if pl.Curate != nil {
+		if resolved, err := ResolveGroups(pl.Curate, sourcesOf(m.Gate.Commits)); err != nil || !reflect.DeepEqual(resolved, pl.Curate) {
+			return "", nil, curateStale
+		}
+	}
+	links, dropped, err := deriveChain(ctx, g, cfg, chainInput{mode: pl.Mode, pm: pm, T: pl.Publish.Tree, tEntries: tEntries,
+		commits: m.Gate.Commits, groups: pl.Curate},
+		func(cs []string, onto string) ([]string, error) { return e.replay(ctx, pc, cs, onto) })
+	if err != nil {
+		return "", nil, replanDetails(err, pl)
+	}
+	chainStale := contract.New(contract.PlanStale,
+		"plan %s's public commits are not the ones its feature's history gives; make a new plan with ghostbranch promote", pl.ID).
+		WithDetails(stale(pl, []string{"publish.commits"}))
+	commits := pl.Publish.Commits
+	if len(links) != len(commits) || !slices.Equal(dropped, pl.Publish.DroppedEmpty) {
+		return "", nil, chainStale
+	}
+	for i, l := range links {
+		if l.tree != commits[i].Tree || !reflect.DeepEqual(l.sources, commits[i].Sources) {
+			return "", nil, chainStale
+		}
+	}
+	// The chain publishes on public main; the approval's file list is
+	// measured from there, so the plan file's parent must be it.
+	if pl.Publish.Parent != pm {
+		return "", nil, contract.New(contract.PlanStale,
+			"plan %s names parent %s, not public main %s; make a new plan with ghostbranch promote", pl.ID, short(pl.Publish.Parent), short(pm)).
+			WithDetails(stale(pl, []string{"publish.parent"}))
+	}
+	// The plan ref is the chain's tip: walk back from it.
+	at := P
+	for i := len(commits) - 1; i >= 0; i-- {
+		if at != commits[i].Commit {
+			return "", nil, chainStale
+		}
+		if i > 0 {
+			if at, err = g.MustResolve(ctx, at+"^"); err != nil {
+				return "", nil, chainStale
+			}
+		}
+	}
+	set := overlay.NewSet(cfg.LeakScan.Strip...)
+	if err := assertChain(ctx, g, commits, pl.Publish.Tree, gateC, pm, set, guardNames(pc)); err != nil {
+		return "", nil, err
+	}
+	return P, links, nil
 }

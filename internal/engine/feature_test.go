@@ -28,8 +28,8 @@ func TestFeatureStartCreatesBranchAndMetadata(t *testing.T) {
 	h := newHarness(t)
 	h.init()
 	res, _, err := h.eng.FeatureStart(h.ctx, h.pair, "feat-x")
-	if err != nil || res.Branch != "feat-x" || !reflect.DeepEqual(res.Checkout, [][]string{{"git", "fetch"}, {"git", "switch", "feat-x"}}) ||
-		res.CheckoutHint != "git fetch && git switch feat-x" {
+	if err != nil || res.Branch != "feat-x" || !reflect.DeepEqual(res.Checkout, [][]string{{"git", "fetch", "shadow"}, {"git", "switch", "feat-x"}}) ||
+		res.CheckoutHint != "git fetch shadow && git switch feat-x" {
 		t.Fatalf("start: %+v %v", res, err)
 	}
 	sh := h.shadowGit()

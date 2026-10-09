@@ -1,10 +1,8 @@
 package engine
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -15,7 +13,6 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge/fake"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
-	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 func newCheckEngine(t *testing.T) (*Engine, *fake.Forge, *testutil.Clock) {
@@ -26,28 +23,6 @@ func newCheckEngine(t *testing.T) (*Engine, *fake.Forge, *testutil.Clock) {
 }
 
 var gateCfg = config.Gate{CIAppearTimeout: 10 * time.Second, CITimeout: 60 * time.Second}
-
-// validateEventSchema checks raw against schemas/v0/wait-event.schema.json.
-func validateEventSchema(t *testing.T, raw []byte) {
-	t.Helper()
-	path, err := filepath.Abs(filepath.Join("..", "..", "schemas", "v0", "wait-event.schema.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	c := jsonschema.NewCompiler()
-	c.AssertFormat()
-	s, err := c.Compile(path)
-	if err != nil {
-		t.Fatalf("compile wait-event.schema.json: %v", err)
-	}
-	inst, err := jsonschema.UnmarshalJSON(bytes.NewReader(raw))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := s.Validate(inst); err != nil {
-		t.Fatalf("the event does not match wait-event.schema.json:\n%v\n%s", err, raw)
-	}
-}
 
 func TestWaitChecksNeverReportsNoCIOnceACheckWasSeen(t *testing.T) {
 	t.Parallel()
@@ -123,7 +98,7 @@ func TestWaitChecksEmitsChangesAndTheOutcome(t *testing.T) {
 	for _, ev := range got {
 		types = append(types, ev.Type)
 		raw, _ := json.Marshal(ev)
-		validateEventSchema(t, raw)
+		testutil.ValidateSchema(t, "wait-event.schema.json", raw)
 	}
 	// One event per change, not per poll: in_progress, then completed, then the outcome.
 	if want := []string{EventCheck, EventCheck, EventSettled}; !reflect.DeepEqual(types, want) {

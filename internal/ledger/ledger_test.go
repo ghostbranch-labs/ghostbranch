@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -61,5 +62,28 @@ func TestRefsRoundTripAndAreOmittedWhenEmpty(t *testing.T) {
 	raw, _ := os.ReadFile(path)
 	if strings.Contains(strings.Split(string(raw), "\n")[1], "refs") {
 		t.Fatal("an entry that deleted nothing must omit refs")
+	}
+}
+
+// The ledger names repos, features and actors: it is private, like plans,
+// grants and waivers. A ledger made before 0.9 (0644) is tightened on the
+// next append.
+func TestAppendKeepsTheLedgerPrivate(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no Unix file modes")
+	}
+	dir := t.TempDir()
+	fresh, old := filepath.Join(dir, "ledger.jsonl"), filepath.Join(dir, "old.jsonl")
+	if err := os.WriteFile(old, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{fresh, old} {
+		if err := ledger.Append(p, ledger.Entry{Op: "sync", Summary: "x"}); err != nil {
+			t.Fatal(err)
+		}
+		if fi, err := os.Stat(p); err != nil || fi.Mode().Perm() != 0o600 {
+			t.Fatalf("%s: mode %v %v, want 0600", p, fi.Mode().Perm(), err)
+		}
 	}
 }

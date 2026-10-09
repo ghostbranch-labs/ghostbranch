@@ -14,6 +14,7 @@ import (
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
+	"github.com/ghostbranch-labs/ghostbranch/internal/grant"
 	"github.com/ghostbranch-labs/ghostbranch/internal/ledger"
 	"github.com/ghostbranch-labs/ghostbranch/internal/plan"
 	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
@@ -40,11 +41,19 @@ type RemoveResult struct {
 // console; --plan does not.
 func (e *Engine) Remove(ctx context.Context, p workspace.Pair) (res *RemoveResult, warns []contract.Warning, err error) {
 	var waived []string
+	var revoked []grant.Grant
 	defer func() {
 		summary := ""
 		if err == nil && res != nil && res.Preview == nil {
 			summary = fmt.Sprintf("removed %s from this machine: %d grant(s), %d waiver(s), %d plan file(s); the shadow repo %s is untouched",
 				p.Public, res.Grants, res.Waivers, len(res.Plans), p.Shadow)
+		}
+		// Each revoked grant gets its own entry, as agents revoke writes, even
+		// when remove then failed: the grants are gone.
+		for _, g := range revoked {
+			pair := workspace.Pair{Public: g.Public, Shadow: g.Shadow}
+			ref := grantRef(g)
+			e.recordWith("grant_revoked", &pair, "", "", "agents may no longer publish to "+g.Public, nil, func(ent *ledger.Entry) { ent.Grant = ref })
 		}
 		e.recordWith("remove", &p, "", "", summary, err, func(ent *ledger.Entry) { ent.Waivers = waived })
 	}()
@@ -100,9 +109,12 @@ func (e *Engine) Remove(ctx context.Context, p workspace.Pair) (res *RemoveResul
 		ids = append(ids, id)
 	}
 	slices.Sort(ids)
-	plans, err := pairPlans(e.WS.PlansDir(), p.Public)
+	plans, unreadable, err := pairPlans(e.WS.PlansDir(), p.Public)
 	if err != nil {
 		return nil, nil, internalErr(err, "list plan files")
+	}
+	for _, u := range unreadable {
+		warns = append(warns, planFileUnreadable(u, "if it is a plan of "+p.Public+", delete it by hand"))
 	}
 	res = &RemoveResult{Public: p.Public, Shadow: p.Shadow, Grants: len(grants), Waivers: len(ids), Plans: plans, Dir: e.WS.PairDir(p)}
 	if e.DryRun {
@@ -117,7 +129,7 @@ func (e *Engine) Remove(ctx context.Context, p workspace.Pair) (res *RemoveResul
 			res.Preview.Add(preview.RemoveFile(path))
 		}
 		res.Preview.Add(preview.RemoveFile(res.Dir), preview.WriteFile(filepath.Join(e.WS.Dir, "workspace.json")))
-		return res, nil, nil
+		return res, warns, nil
 	}
 	if err := e.confirm(ctx, "", removeSummary(e.WS.Name, res, ids)); err != nil {
 		return nil, nil, err
@@ -125,15 +137,15 @@ func (e *Engine) Remove(ctx context.Context, p workspace.Pair) (res *RemoveResul
 	// Revoke even when none was in force at the look above: agents allow
 	// does not take the pair lock, and a grant left behind would come back
 	// with the pair.
-	revoked, err := gstore.Revoke(p.Public, false, now)
+	rg, err := gstore.Revoke(p.Public, false, now)
 	if err != nil {
 		return nil, nil, grantErr(err, "revoke agent grants")
 	}
-	res.Grants = len(revoked)
+	revoked, res.Grants = rg, len(rg)
 	if len(ids) > 0 {
 		gone, err := wstore.Revoke(p.Public, ids, false, now)
 		if err != nil {
-			return nil, nil, grantErr(err, "revoke waivers")
+			return nil, nil, partway(grantErr(err, "revoke waivers"), p.Public)
 		}
 		res.Waivers = len(gone)
 		for _, w := range gone {
@@ -142,27 +154,38 @@ func (e *Engine) Remove(ctx context.Context, p workspace.Pair) (res *RemoveResul
 	}
 	for _, path := range plans {
 		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return nil, nil, internalErr(err, "remove plan file "+path)
+			return nil, nil, partway(internalErr(err, "remove plan file "+path), p.Public)
 		}
 	}
 	if err := os.RemoveAll(res.Dir); err != nil {
-		return nil, nil, internalErr(err, "remove "+res.Dir)
+		return nil, nil, partway(internalErr(err, "remove "+res.Dir), p.Public)
 	}
 	// Last, so a remove that failed above can simply be run again.
 	if err := e.WS.Update(e.Now(), func(w *workspace.Workspace) bool { return w.RemovePair(p.Public) }); err != nil {
-		return nil, nil, updateErr(err, "save workspace.json")
+		return nil, nil, partway(updateErr(err, "save workspace.json"), p.Public)
 	}
-	return res, nil, nil
+	return res, warns, nil
+}
+
+// partway marks an error after remove began revoking: each step is safe to
+// repeat, and the pair stays registered until the last one, so running
+// remove again finishes it.
+func partway(err error, public string) error {
+	ce := contract.From(err)
+	ce.Message += "; remove stopped partway (the pair's agent grants are already revoked): run ghostbranch remove --repo " + public + " again to finish"
+	return ce
 }
 
 // checkPairDir refuses a pair whose folder would not be a direct child of
 // the workspace's pairs folder. workspace.json is local and unchecked, and
 // an entry such as ".." would otherwise send RemoveAll at the workspace
-// itself, or further.
+// itself, or further. A key ending in a dot or a space is refused too:
+// Windows drops those from a path, so the folder would be another one
+// (owner/repo. would be owner/repo's).
 func (e *Engine) checkPairDir(p workspace.Pair) error {
 	dir, key := e.WS.PairDir(p), p.Key()
 	_, _, nameErr := forge.SplitName(p.Public)
-	if nameErr != nil || strings.Contains(key, "..") || strings.ContainsAny(key, `/\`) ||
+	if nameErr != nil || strings.HasSuffix(key, ".") || strings.HasSuffix(key, " ") || strings.ContainsAny(key, `/\`) ||
 		filepath.Dir(dir) != filepath.Join(e.WS.Dir, "pairs") || filepath.Base(dir) != key {
 		return contract.New(contract.Internal,
 			"refusing to remove %q: workspace.json names a repo whose folder %q is not inside %q; fix workspace.json by hand",
@@ -171,11 +194,12 @@ func (e *Engine) checkPairDir(p workspace.Pair) error {
 	return nil
 }
 
-// pairPlans lists the plan files in dir made for public, by path.
-func pairPlans(dir, public string) ([]string, error) {
-	files, err := planFiles(dir)
+// pairPlans lists the plan files in dir made for public, by path, and the
+// plan files it couldn't read.
+func pairPlans(dir, public string) ([]string, []unreadablePlan, error) {
+	files, unreadable, err := planFiles(dir)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	out := []string{}
 	for _, f := range files {
@@ -183,7 +207,7 @@ func pairPlans(dir, public string) ([]string, error) {
 			out = append(out, f.Path)
 		}
 	}
-	return out, nil
+	return out, unreadable, nil
 }
 
 // planFile is the part of a plan file that says whose it is, and what it
@@ -199,18 +223,26 @@ type planFile struct {
 	Path string `json:"-"`
 }
 
+// unreadablePlan is a plan file planFiles couldn't read.
+type unreadablePlan struct {
+	path string
+	err  error
+}
+
 // planFiles decodes every plan file in dir, in name order. A file that
-// isn't JSON is left out; one that can't be read is an error. Nothing here
-// is checked: the files are local and unsigned.
-func planFiles(dir string) ([]planFile, error) {
+// isn't JSON is left out, and so is one that can't be read: that one is
+// returned in unreadable, for the caller's PLAN_FILE_UNREADABLE warning.
+// Nothing here is checked: the files are local and unsigned.
+func planFiles(dir string) ([]planFile, []unreadablePlan, error) {
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
+		return nil, nil, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var out []planFile
+	var unreadable []unreadablePlan
 	for _, ent := range entries {
 		if ent.IsDir() || !strings.HasSuffix(ent.Name(), ".json") {
 			continue
@@ -218,7 +250,8 @@ func planFiles(dir string) ([]planFile, error) {
 		path := filepath.Join(dir, ent.Name())
 		b, err := os.ReadFile(path)
 		if err != nil {
-			return nil, err
+			unreadable = append(unreadable, unreadablePlan{path: path, err: err})
+			continue
 		}
 		var f planFile
 		if json.Unmarshal(b, &f) == nil {
@@ -226,7 +259,15 @@ func planFiles(dir string) ([]planFile, error) {
 			out = append(out, f)
 		}
 	}
-	return out, nil
+	return out, unreadable, nil
+}
+
+// planFileUnreadable is the warning for a plan file that was skipped; what
+// says what that may leave behind.
+func planFileUnreadable(u unreadablePlan, what string) contract.Warning {
+	return contract.Warning{Code: contract.PlanFileUnreadable,
+		Message: fmt.Sprintf("plan file %s couldn't be read (%v), so it was skipped; %s", u.path, u.err, what),
+		Details: map[string]any{"path": u.path}}
 }
 
 // removeSummary is what the person sees before typing the code.

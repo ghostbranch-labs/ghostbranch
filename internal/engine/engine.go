@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"time"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/approval"
@@ -72,6 +73,9 @@ type Engine struct {
 	DryRun         bool
 	// OnPush observes every push before it happens (tests).
 	OnPush func(op, remote string, refspecs []string)
+	// ledgerWarns holds a LEDGER_NOT_WRITTEN warning for each ledger entry
+	// that couldn't be written, until LedgerWarnings hands them over.
+	ledgerWarns []contract.Warning
 }
 
 func (e *Engine) now() time.Time { return e.Now().UTC().Truncate(time.Second) }
@@ -152,7 +156,8 @@ func leakErr(feat string, findings []leak.Finding) error {
 }
 
 // record appends to the ledger. Dry runs are not recorded. A ledger failure
-// is reported but never masks the command's own result.
+// never masks the command's own result: it becomes a LEDGER_NOT_WRITTEN
+// warning, which the CLI adds to the result through LedgerWarnings.
 func (e *Engine) record(op string, pair *workspace.Pair, feat, planID, summary string, err error) {
 	e.recordWith(op, pair, feat, planID, summary, err, nil)
 }
@@ -176,6 +181,30 @@ func (e *Engine) recordWith(op string, pair *workspace.Pair, feat, planID, summa
 		mod(&ent)
 	}
 	if werr := ledger.Append(e.WS.LedgerPath(), ent); werr != nil {
-		e.progressf("warning: could not write the ledger: %v", werr)
+		e.ledgerWarns = addWarnings(e.ledgerWarns, ledgerNotWritten(e.WS.LedgerPath(), ent, werr))
 	}
+}
+
+// LedgerWarnings returns the LEDGER_NOT_WRITTEN warnings since the last
+// call, and forgets them.
+func (e *Engine) LedgerWarnings() []contract.Warning {
+	w := e.ledgerWarns
+	e.ledgerWarns = nil
+	return w
+}
+
+// ledgerNotWritten is the warning for an entry the ledger couldn't take. A
+// close's deleted refs ride in details.refs: the ledger is where a person
+// looks for the SHAs to push a branch back.
+func ledgerNotWritten(path string, ent ledger.Entry, err error) contract.Warning {
+	details := map[string]any{"op": ent.Op, "path": path}
+	msg := fmt.Sprintf("the ledger entry for %s couldn't be written to %s: %v; the command's own result stands", ent.Op, path, err)
+	if ent.Feature != "" {
+		details["feature"] = ent.Feature
+	}
+	if len(ent.Refs) > 0 {
+		details["refs"] = maps.Clone(ent.Refs)
+		msg += fmt.Sprintf("; it deleted %d ref(s), listed with their SHAs in details.refs (keep them: a deleted branch can be pushed back from its SHA)", len(ent.Refs))
+	}
+	return contract.Warning{Code: contract.LedgerNotWritten, Message: msg, Details: details}
 }

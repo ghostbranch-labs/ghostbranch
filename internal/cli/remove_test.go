@@ -10,6 +10,7 @@ import (
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/ledger"
+	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
@@ -31,7 +32,7 @@ func TestLogNeedsNoToken(t *testing.T) {
 		}
 		var env struct{ Data json.RawMessage }
 		_ = json.Unmarshal([]byte(out), &env)
-		validate(t, "log.schema.json", env.Data)
+		testutil.ValidateSchema(t, "log.schema.json", env.Data)
 		var d struct{ Entries []any }
 		_ = json.Unmarshal(env.Data, &d)
 		return d.Entries
@@ -153,5 +154,30 @@ func TestRemoveThroughTheCLI(t *testing.T) {
 	}
 	if code, env := te.runJSON("sync"); code != 2 || env["error"].(map[string]any)["code"] != "PAIR_AMBIGUOUS" {
 		t.Fatalf("the pair is still registered: %d %v", code, env)
+	}
+}
+
+// remove asks GitHub nothing: no token, no client, and no login.
+func TestRemoveNeedsNoToken(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	delete(te.vars, "GHOSTBRANCH_TOKEN")
+	te.env.NewForge = func(string) (forge.Forge, error) {
+		t.Error("remove built a GitHub client")
+		return te.forge, nil
+	}
+	if code, env := te.runJSON("remove", "--plan"); code != 0 || len(env["warnings"].([]any)) != 0 {
+		t.Fatalf("remove --plan: %d %v", code, env)
+	}
+	atConsole(te, typeTheCode)
+	code, env := te.runJSON("remove")
+	ws, _ := env["warnings"].([]any)
+	if code != 0 || len(ws) != 1 || ws[0].(map[string]any)["code"] != "ACTOR_UNKNOWN" {
+		t.Fatalf("remove: %d %v", code, env)
+	}
+	es, err := ledger.Read(filepath.Join(te.vars["GHOSTBRANCH_HOME"], "workspaces", "default", "ledger.jsonl"))
+	if err != nil || es[len(es)-1].Op != "remove" || es[len(es)-1].Actor != "human:unknown" {
+		t.Fatalf("ledger: %+v %v", es, err)
 	}
 }

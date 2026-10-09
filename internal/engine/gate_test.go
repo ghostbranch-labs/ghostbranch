@@ -419,8 +419,17 @@ func TestGateCheckFailureWinsOverAFailureToRecordIt(t *testing.T) {
 	h.moveMetaOnPush("feat-x", 2)
 	_, warns, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
 	_ = wantCode(t, err, contract.ChecksFailed)
-	if !hasWarning(warns, contract.GateNotRecorded) {
+	var w *contract.Warning
+	for i := range warns {
+		if warns[i].Code == contract.GateNotRecorded {
+			w = &warns[i]
+		}
+	}
+	if w == nil {
 		t.Fatalf("want %s, got %+v", contract.GateNotRecorded, warns)
+	}
+	if job, _ := w.Details["job"].(string); !strings.HasPrefix(job, "gate/feat-x/") || !strings.Contains(w.Message, "ghostbranch wait "+job) {
+		t.Fatalf("%s must name the job: %+v", contract.GateNotRecorded, *w)
 	}
 }
 

@@ -28,23 +28,32 @@ func (g *Git) SourceCommits(ctx context.Context, base, head string) ([]string, e
 // CherryPick applies commits, in order, onto this worktree's HEAD, keeping
 // each commit's author and message and committing as committer. A commit
 // that becomes empty is kept. It returns the new SHA for each input commit.
-// On conflict it aborts and returns *ConflictError naming that commit.
+// On conflict it aborts and returns *ConflictError naming that commit; any
+// other failure names the commit and aborts nothing that wasn't started.
 func (g *Git) CherryPick(ctx context.Context, commits []string, committer Identity) ([]string, error) {
 	cg := g.With(g.Dir)
 	cg.Env = append(cg.Env, committer.env("GIT_COMMITTER")...)
 	out := make([]string, 0, len(commits))
 	for _, c := range commits {
 		if _, err := cg.Run(ctx, "cherry-pick", "--allow-empty", "--allow-empty-message", "--keep-redundant-commits", c); err != nil {
+			// Only a pick that stopped part-way leaves CHERRY_PICK_HEAD; a bad
+			// SHA or a refused overwrite leaves nothing to abort.
+			_, picking, herr := cg.Resolve(ctx, "CHERRY_PICK_HEAD")
+			if herr != nil {
+				return nil, fmt.Errorf("cherry-pick %s: %w", c, errors.Join(err, herr))
+			}
+			if !picking {
+				return nil, fmt.Errorf("cherry-pick %s: %w", c, err)
+			}
 			names, derr := cg.runRaw(ctx, nil, "diff", "--name-only", "--diff-filter=U", "-z")
 			if _, aerr := cg.Run(ctx, "cherry-pick", "--abort"); aerr != nil {
-				return nil, fmt.Errorf("cherry-pick failed and abort failed, worktree may be mid-pick: %w", errors.Join(err, aerr))
+				return nil, fmt.Errorf("cherry-pick %s failed and abort failed, worktree may be mid-pick: %w", c, errors.Join(err, aerr))
 			}
-			files := splitNUL(names)
-			if derr == nil && len(files) > 0 {
+			if files := splitNUL(names); derr == nil && len(files) > 0 {
 				sort.Strings(files)
 				return nil, &ConflictError{Files: files, Commit: c}
 			}
-			return nil, err
+			return nil, fmt.Errorf("cherry-pick %s: %w", c, err)
 		}
 		head, err := cg.MustResolve(ctx, "HEAD")
 		if err != nil {
@@ -68,11 +77,18 @@ func (g *Git) CommitAuthor(ctx context.Context, sha string) (Identity, error) {
 		if !ok {
 			continue
 		}
-		open, end := strings.LastIndexByte(rest, '<'), strings.LastIndexByte(rest, '>')
-		if open < 0 || end < open {
+		// As git's split_ident_line: the email runs from the first '<' to
+		// the next '>', and the date follows the last '>'.
+		open := strings.IndexByte(rest, '<')
+		if open < 0 {
 			break
 		}
-		f := strings.Fields(rest[end+1:])
+		n := strings.IndexByte(rest[open+1:], '>')
+		if n < 0 {
+			break
+		}
+		end := open + 1 + n
+		f := strings.Fields(rest[strings.LastIndexByte(rest, '>')+1:])
 		if len(f) < 1 {
 			break
 		}
@@ -99,7 +115,7 @@ func (g *Git) MergeTreeCheck(ctx context.Context, base, head string) (bool, []st
 	}
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 	// A bad ref also exits 1, but prints no tree id on stdout.
-	if len(lines[0]) != 40 && len(lines[0]) != 64 {
+	if !isObjectID(lines[0]) {
 		return false, nil, err
 	}
 	seen := map[string]bool{}
@@ -112,4 +128,10 @@ func (g *Git) MergeTreeCheck(ctx context.Context, base, head string) (bool, []st
 	}
 	sort.Strings(files)
 	return false, files, nil
+}
+
+// isObjectID reports whether s is a full SHA-1 or SHA-256 object id, as
+// git prints it: lowercase hex.
+func isObjectID(s string) bool {
+	return (len(s) == 40 || len(s) == 64) && strings.Trim(s, "0123456789abcdef") == ""
 }

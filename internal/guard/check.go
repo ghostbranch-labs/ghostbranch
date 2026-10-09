@@ -171,23 +171,25 @@ func (c *Checkout) RevList(ctx context.Context, args ...string) ([]string, error
 // repo (spec §11.4): by name, or by carrying any unpublished feature commit.
 // Any git error fails the check: a guard that waves pushes through when git
 // breaks is worse than none. Commits force-pushed out of the mirror can't be
-// recognized by content; the name check still applies.
+// recognized by content; the name check still applies. The content check
+// lists the whole push's commits with one rev-list (carried).
 func Check(ctx context.Context, checkout Objects, lines []Line, f Facts) ([]Block, error) {
 	names := make([]string, 0, len(f.Heads))
 	for n := range f.Heads {
 		names = append(names, n)
 	}
 	sort.Strings(names)
-	var blocks []Block
-	for _, l := range lines {
+	why := make([]string, len(lines))
+	var unchecked []int // lines left for the content check
+	for i, l := range lines {
 		if strings.Trim(l.LocalSHA, "0") == "" {
 			continue // a deletion publishes nothing
 		}
-		why := reserved(l.RemoteRef, f)
-		if why == "" {
-			why = reserved(l.LocalRef, f)
+		w := reserved(l.RemoteRef, f)
+		if w == "" {
+			w = reserved(l.LocalRef, f)
 		}
-		if why == "" && len(f.Commits) > 0 {
+		if w == "" && len(f.Commits) > 0 {
 			// A tree or blob lists no commits, so it would pass the content
 			// check whatever files it carries. With no unpublished feature
 			// commits there is nothing it could carry that the guard knows.
@@ -196,11 +198,11 @@ func Check(ctx context.Context, checkout Objects, lines []Line, f Facts) ([]Bloc
 				return nil, err
 			}
 			if !ok {
-				why = "it does not point at a commit, so the guard can't check it"
+				w = "it does not point at a commit, so the guard can't check it"
 			}
 		}
 		for _, n := range names {
-			if why != "" {
+			if w != "" {
 				break
 			}
 			head := f.Heads[n]
@@ -216,38 +218,84 @@ func Check(ctx context.Context, checkout Objects, lines []Line, f Facts) ([]Bloc
 				return nil, err
 			}
 			if in {
-				why = fmt.Sprintf("it contains the commits of feature %q", n)
+				w = fmt.Sprintf("it contains the commits of feature %q", n)
 			}
 		}
-		if why == "" && len(f.Commits) > 0 {
-			args := []string{l.LocalSHA, "--not"}
-			for _, base := range []string{l.RemoteSHA, f.PublicMain} {
-				if strings.Trim(base, "0") == "" {
-					continue
-				}
-				if _, ok, err := checkout.Resolve(ctx, base); err != nil {
-					return nil, err
-				} else if ok {
-					args = append(args, base)
-				}
-			}
-			// Tracking refs aren't excluded: a remote that fetches from the
-			// shadow, or any fetch into refs/remotes, can hold unpublished
-			// feature commits there.
-			commits, err := checkout.RevList(ctx, args...)
-			if err != nil {
-				return nil, err
-			}
-			for _, c := range commits {
-				if n, ok := f.Commits[c]; ok {
-					why = fmt.Sprintf("it contains commit %s of feature %q", c[:12], n)
-					break
-				}
-			}
+		why[i] = w
+		if w == "" && len(f.Commits) > 0 {
+			unchecked = append(unchecked, i)
 		}
-		if why != "" {
-			blocks = append(blocks, Block{Ref: l.RemoteRef, Reason: why})
+	}
+	if len(unchecked) > 0 {
+		if err := carried(ctx, checkout, lines, unchecked, f, why); err != nil {
+			return nil, err
+		}
+	}
+	var blocks []Block
+	for i, l := range lines {
+		if why[i] != "" {
+			blocks = append(blocks, Block{Ref: l.RemoteRef, Reason: why[i]})
 		}
 	}
 	return blocks, nil
+}
+
+// carried sets why[i] for each line i in idx that carries an unpublished
+// feature commit. One rev-list covers the whole push (git push --tags would
+// otherwise walk the shared history once per tag): every pushed commit,
+// minus the ones the public repo already has, which are public main and
+// each line's remote SHA. The remote holds those, so they are published
+// whichever ref this push puts them on. Tracking refs aren't excluded: a
+// remote that fetches from the shadow, or any fetch into refs/remotes, can
+// hold unpublished feature commits there. Only when the list has a feature
+// commit is each line asked which one it carries.
+func carried(ctx context.Context, checkout Objects, lines []Line, idx []int, f Facts, why []string) error {
+	var args []string
+	pushed := map[string]bool{}
+	for _, i := range idx {
+		if sha := lines[i].LocalSHA; !pushed[sha] {
+			pushed[sha] = true
+			args = append(args, sha)
+		}
+	}
+	args = append(args, "--not")
+	bases := []string{f.PublicMain}
+	for _, l := range lines {
+		bases = append(bases, l.RemoteSHA)
+	}
+	excluded := map[string]bool{}
+	for _, base := range bases {
+		if strings.Trim(base, "0") == "" || excluded[base] {
+			continue
+		}
+		excluded[base] = true
+		if _, ok, err := checkout.Resolve(ctx, base); err != nil {
+			return err
+		} else if ok {
+			args = append(args, base)
+		}
+	}
+	commits, err := checkout.RevList(ctx, args...)
+	if err != nil {
+		return err
+	}
+	var found []string
+	for _, c := range commits {
+		if _, ok := f.Commits[c]; ok {
+			found = append(found, c)
+		}
+	}
+	for _, i := range idx {
+		for _, c := range found {
+			in, err := checkout.IsAncestor(ctx, c, lines[i].LocalSHA)
+			if err != nil {
+				return err
+			}
+			if in {
+				why[i] = fmt.Sprintf("it contains commit %s of feature %q", c[:12], f.Commits[c])
+				break
+			}
+		}
+	}
+	return nil
 }

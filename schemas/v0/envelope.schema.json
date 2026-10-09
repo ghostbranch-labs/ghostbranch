@@ -5,7 +5,7 @@
   "additionalProperties": false,
   "required": ["schema_version", "command", "ok", "exit_code", "data", "warnings", "next", "error"],
   "properties": {
-    "schema_version": { "const": "0.8" },
+    "schema_version": { "const": "0.9" },
     "command": { "enum": ["ghostbranch", "init", "sync", "audit", "upgrade", "feature start", "gate", "promote", "apply", "agents allow", "agents revoke", "agents status", "explain", "guide", "guard install", "guard uninstall", "guard status", "guard check", "waivers add", "waivers list", "waivers revoke", "status", "feature list", "feature show", "feature abandon", "feature close", "remove", "log", "wait"] },
     "ok": { "type": "boolean" },
     "exit_code": { "type": "integer", "minimum": 0, "maximum": 6 },
@@ -22,7 +22,8 @@
                           "OVERLAY_OUTDATED", "REPO_GUARD", "REPO_GUARD_UNREWRITABLE", "SECRETS_UNLISTED", "SECRETS_MISSING",
                           "PUSH_TRIGGERS_ON_SYNC", "ACTIONS_MINUTES_BILLED", "SHADOW_BEHIND", "AUDIT_INCOMPLETE",
                           "CI_NOT_CANCELLED", "PR_STATE_UNKNOWN", "DRIFT_UNKNOWN", "FEATURE_NOT_CLOSED", "MIRROR_NOT_UPDATED",
-                          "RECORD_NEWER", "RECORD_UNREADABLE"] },
+                          "RECORD_NEWER", "RECORD_UNREADABLE", "LEDGER_NOT_WRITTEN",
+                          "SYNC_PUSH_FAILED", "PLAN_FILE_UNREADABLE"] },
           "message": { "type": "string" },
           "details": { "type": "object" }
         }

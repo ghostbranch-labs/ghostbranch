@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.8",
+  "schema_version": "0.9",
   "command": "feature close",
   "ok": false,
   "exit_code": 5,
@@ -11,7 +11,9 @@
         "ghostbranch",
         "feature",
         "close",
-        "feat-x"
+        "feat-x",
+        "--repo",
+        "acme/widget"
       ],
       "why": "a person must run this in their own terminal and type the code it shows",
       "needs_human": true,

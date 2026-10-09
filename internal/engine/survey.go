@@ -26,14 +26,22 @@ type FeatureReport struct {
 	PlanID    string        `json:"plan_id"`
 	Moved     bool          `json:"moved"` // since publish; false when unpublished; meaningless when the branch is gone (branch_gone reads only PRState)
 	Abandoned bool          `json:"abandoned"`
+	// Error is why the feature couldn't be surveyed; set only with state
+	// unreadable. feature show returns it as its error.
+	Error string `json:"error,omitempty"`
+	// err is the error behind Error, for feature show and feature close.
+	err error
 	// unreadable is why the record couldn't be read as a whole: "" when
-	// it could, "newer" (from a newer Ghostbranch) or "corrupt". Such a
-	// feature never closes unattended.
+	// it could, "newer" (from a newer Ghostbranch), "corrupt" (the record
+	// doesn't parse) or "error" (reading the record or the feature's refs
+	// failed). Such a feature never closes unattended.
 	unreadable string
 	// gateForPublished: the feature has no gate, or its gate is for the
 	// head that was published and its gate branch is gone or still at the
 	// gate's candidate. Otherwise the gate may hold commits never
-	// published, and a branch_gone feature doesn't close unattended.
+	// published, and a branch_gone feature doesn't close unattended. Set
+	// only for a merged branch_gone feature, the one case
+	// ClosableWithoutConsole reads it.
 	gateForPublished bool
 }
 
@@ -72,7 +80,11 @@ const (
 // survey reports every feature of the pair (sorted by name), or only
 // names when given. pc must be open (mirror fetched). It only reads: the
 // mirror, the plan files and the public PRs (one GetPR per published
-// feature). Names that aren't features are left out, not errors.
+// feature). Names that aren't features are left out, not errors. A feature
+// whose record or refs can't be read is reported as unreadable, with the
+// error (failedReport), and the survey goes on. Only a cancel, or a failure
+// that concerns every feature (listing them, the config, public main),
+// fails it.
 func (e *Engine) survey(ctx context.Context, pc *pairCtx, names ...string) ([]FeatureReport, []contract.Warning, error) {
 	const prefix = "refs/shadow-meta/features/"
 	refs, err := pc.git.Refs(ctx, strings.TrimSuffix(prefix, "/"))
@@ -110,7 +122,11 @@ func (e *Engine) survey(ctx context.Context, pc *pairCtx, names ...string) ([]Fe
 	for _, name := range list {
 		r, ws, err := e.surveyOne(ctx, pc, name, pm, O)
 		if err != nil {
-			return nil, warns, err
+			if ctx.Err() != nil {
+				return nil, warns, err
+			}
+			// One feature that can't be read doesn't hide the rest.
+			r, ws = e.failedReport(ctx, pc, name, err), nil
 		}
 		out = append(out, r)
 		warns = addWarnings(warns, ws...)
@@ -170,15 +186,6 @@ func (e *Engine) surveyOne(ctx context.Context, pc *pairCtx, name, pm, O string)
 		base := e.publishedHead(m)
 		r.Moved = base == "" || head != base
 	}
-	if g := m.Gate; g == nil {
-		r.gateForPublished = true
-	} else if m.Promoted != nil && g.FeatureHead != "" && g.FeatureHead == m.Promoted.FeatureHead {
-		tip, ok, err := pc.git.Resolve(ctx, shadowRef(gateBranch(name)))
-		if err != nil {
-			return FeatureReport{}, nil, internalErr(err, "read gate branch "+gateBranch(name))
-		}
-		r.gateForPublished = !ok || tip == g.Candidate
-	}
 	if exists {
 		clean, files, err := pc.git.MergeTreeCheck(ctx, pm, head)
 		switch {
@@ -195,7 +202,33 @@ func (e *Engine) surveyOne(ctx context.Context, pc *pairCtx, name, pm, O string)
 	}
 	r.State = feature.StateOf(feature.StateInput{Meta: m, BranchExists: exists, Head: head, PublicMain: pm,
 		Overlay: O, PRState: r.PRState, Moved: r.Moved})
+	// Only a merged branch_gone feature needs to know whether its gate is
+	// for what was published (ClosableWithoutConsole), so only it reads the
+	// gate branch.
+	if r.State == feature.StateBranchGone && r.PRState == prMerged {
+		if r.gateForPublished, err = gateIsForPublished(ctx, pc, name, m); err != nil {
+			return FeatureReport{}, nil, err
+		}
+	}
 	return r, warns, nil
+}
+
+// gateIsForPublished reports whether m has no gate, or a gate for the head
+// that was published whose gate branch is gone or still at the gate's
+// candidate. Otherwise the gate may hold commits never published.
+func gateIsForPublished(ctx context.Context, pc *pairCtx, name string, m feature.Meta) (bool, error) {
+	g := m.Gate
+	if g == nil {
+		return true, nil
+	}
+	if m.Promoted == nil || g.FeatureHead == "" || g.FeatureHead != m.Promoted.FeatureHead {
+		return false, nil
+	}
+	tip, ok, err := pc.git.Resolve(ctx, shadowRef(gateBranch(name)))
+	if err != nil {
+		return false, internalErr(err, "read gate branch "+gateBranch(name))
+	}
+	return !ok || tip == g.Candidate, nil
 }
 
 // publishedHead is the feature head a published feature was published
@@ -231,6 +264,7 @@ func (e *Engine) publishedHead(m feature.Meta) string {
 const (
 	unreadableNewer   = "newer"
 	unreadableCorrupt = "corrupt"
+	unreadableError   = "error"
 )
 
 // ClosableWithoutConsole is the one rule for unattended deletion: published,

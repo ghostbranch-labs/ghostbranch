@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	SchemaVersion = "0.8"
+	SchemaVersion = "0.9"
 	MetaFile      = "feature.json"
 )
 
@@ -125,8 +125,8 @@ const (
 	StatePRClosed    State = "pr_closed"
 	StateBranchGone  State = "branch_gone"
 	StateAbandoned   State = "abandoned"
-	// StateUnreadable is a feature whose record couldn't be read; only close
-	// results use it.
+	// StateUnreadable is a feature whose record couldn't be read: the survey
+	// reports it with an error, and only a console close removes it.
 	StateUnreadable State = "unreadable"
 )
 
@@ -187,6 +187,8 @@ func ValidateName(name, field string) error {
 		return bad("must not end with '/', '.' or '.lock'")
 	case strings.Contains(name, "/."):
 		return bad("no path component may start with '.'")
+	case strings.Contains(name, ".lock/"):
+		return bad("no path component may end with '.lock'")
 	case name == "main" || name == "HEAD" || name == "ghostbranch" || strings.HasPrefix(name, "ghostbranch/") || strings.HasPrefix(name, "ghostbranch-"):
 		return bad("this name is reserved")
 	}

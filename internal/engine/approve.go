@@ -139,6 +139,9 @@ func planSummary(pl plan.Plan, files []string, authors []string, waived []Waived
 	for _, g := range pl.CI.RepoGuards.Unrewritable {
 		fmt.Fprintf(&b, "  guard    %s skips in the shadow repo, so CI did not test it: %s\n", visible(guardWhere(g)), visible(g.Expr))
 	}
+	for _, g := range pl.CI.RepoGuards.Skipped {
+		fmt.Fprintf(&b, "  guard    %s skips in the shadow repo (ci.rewrite_repo_guards is warn), so CI did not test it: %s\n", visible(guardWhere(g)), visible(g.Expr))
+	}
 	for _, w := range warnings {
 		fmt.Fprintf(&b, "  warning  %s\n", visible(w.Message))
 	}

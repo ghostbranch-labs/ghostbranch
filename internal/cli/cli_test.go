@@ -183,7 +183,7 @@ func TestGuideNeedsNoTokenAndMatchesItsSchema(t *testing.T) {
 	}
 	var env struct{ Data json.RawMessage }
 	_ = json.Unmarshal([]byte(out), &env)
-	validate(t, "guide.schema.json", env.Data)
+	testutil.ValidateSchema(t, "guide.schema.json", env.Data)
 	code, human, _ := te.run("guide")
 	if code != 0 || !strings.HasPrefix(human, "# Ghostbranch: guide for coding agents") {
 		t.Fatalf("%d %q", code, human[:60])
@@ -341,5 +341,64 @@ func TestWaitUsageErrorIsOneLine(t *testing.T) {
 	code, out, _ := te.run("wait", "--json")
 	if code != 2 || strings.Count(out, "\n") != 1 || !json.Valid([]byte(out)) {
 		t.Fatalf("%d %q", code, out)
+	}
+}
+
+// The root help names wait's NDJSON stream, not only "one object".
+func TestRootHelpSaysWaitStreamsNDJSON(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	_, out, _ := te.run("--help")
+	if !strings.Contains(out, "streams NDJSON") {
+		t.Fatalf("root help:\n%s", out)
+	}
+}
+
+// Human init output says the shadow repo is ready only when init finished.
+func TestHumanInitSaysReadyOnlyWhenItIs(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	te.forge.CreateForbidden = true
+	code, out, errOut := te.run("init", "acme/widget")
+	if code != 1 || strings.Contains(out, "is ready") || !strings.Contains(out, "stopped before the shadow repo was ready") ||
+		!strings.Contains(errOut, "SHADOW_CREATE_DENIED") {
+		t.Fatalf("failed init: %d\nstdout: %q\nstderr: %q", code, out, errOut)
+	}
+	te.forge.CreateForbidden = false
+	if code, out, errOut := te.run("init", "acme/widget"); code != 0 || !strings.Contains(out, "Shadow repo acme/widget-shadow is ready for acme/widget.\n") {
+		t.Fatalf("init: %d\nstdout: %q\nstderr: %q", code, out, errOut)
+	}
+}
+
+// promote --detach returns the gate job, wait finishes it, and the same
+// promote then reuses the green gate: the job's candidate, no second gate.
+func TestPromoteDetachWaitPromote(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	withFeature(te)
+	args := []string{"promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--plan"}
+	code, env := te.runJSON(append(args, "--detach")...)
+	data, _ := env["data"].(map[string]any)
+	gate, _ := data["gate"].(map[string]any)
+	job := te.job("feat-x")
+	if code != 0 || gate["checks"] != "pending" || gate["job"] != job || data["plan"] != nil {
+		t.Fatalf("promote --detach: %d %v", code, env)
+	}
+	if next := nextOf(t, env); !slices.Equal(argv(next[0]), []string{"ghostbranch", "wait", job, "--repo", "acme/widget"}) {
+		t.Fatalf("next[0] = %v", argv(next[0]))
+	}
+	code, out, errOut := te.run("wait", job, "--json")
+	var w map[string]any
+	if err := json.Unmarshal(waitStream(t, out), &w); err != nil || code != 0 {
+		t.Fatalf("wait: %d %v\n%s\n%s", code, err, out, errOut)
+	}
+	if wd, _ := w["data"].(map[string]any); wd["checks"] != "passed" {
+		t.Fatalf("wait result = %v", w)
+	}
+	code, env = te.runJSON(args...)
+	data, _ = env["data"].(map[string]any)
+	gate, _ = data["gate"].(map[string]any)
+	if code != 0 || gate["reused"] != true || data["plan"] == nil || te.job("feat-x") != job {
+		t.Fatalf("promote after wait: %d %v", code, env)
 	}
 }

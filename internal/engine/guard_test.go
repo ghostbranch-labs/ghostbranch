@@ -62,9 +62,10 @@ func TestGateRewritesGuardsInTheCandidateOnly(t *testing.T) {
 func TestGateGuardModes(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
-		mode  string
-		warns int
-	}{{"warn", 1}, {"off", 0}} {
+		mode    string
+		warns   int
+		skipped int
+	}{{"warn", 1, 1}, {"off", 0, 0}} {
 		h := newHarness(t)
 		testutil.Commit(t, h.pubGit, "main", "guarded", map[string]string{".github/workflows/up.yml": guardedJob})
 		h.init()
@@ -77,7 +78,7 @@ func TestGateGuardModes(t *testing.T) {
 		if got := showAt(h, res.Candidate, ".github/workflows/up.yml"); got != guardedJob {
 			t.Fatalf("%s: C was rewritten:\n%s", tc.mode, got)
 		}
-		if res.RepoGuards == nil || res.RepoGuards.Mode != tc.mode || len(res.RepoGuards.Rewritten) != 0 {
+		if res.RepoGuards == nil || res.RepoGuards.Mode != tc.mode || len(res.RepoGuards.Rewritten) != 0 || len(res.RepoGuards.Skipped) != tc.skipped {
 			t.Fatalf("%s: repo_guards = %+v", tc.mode, res.RepoGuards)
 		}
 		if codes(warns)["REPO_GUARD"] != tc.warns {
@@ -251,5 +252,45 @@ func TestPromoteRegatesWhenTheCandidateLacksTheRewrite(t *testing.T) {
 	}
 	if got := showAt(h, res.Gate.Candidate, ".github/workflows/up.yml"); !strings.Contains(got, "'acme/widget-shadow'") {
 		t.Fatalf("the new candidate was not rewritten:\n%s", got)
+	}
+}
+
+// In warn mode a rewritable guard isn't rewritten either, so its job skips
+// in the shadow repo too: the approval summary lists it beside the guards
+// that can't be rewritten.
+func TestWarnModeSummaryListsEverySkippedGuard(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	const unrewritable = "on: [pull_request]\njobs:\n  up:\n    if: contains(fromJSON('[\"acme/widget\"]'), github.repository)\n    runs-on: x\n"
+	testutil.Commit(t, h.pubGit, "main", "guarded", map[string]string{
+		".github/workflows/up.yml": guardedJob, ".github/workflows/up2.yml": unrewritable})
+	h.init()
+	h.setConfig("rewrite_repo_guards: rewrite", "rewrite_repo_guards: warn")
+	h.startFeature("feat", map[string]string{"f.txt": "f\n"})
+	res, _, err := h.eng.Gate(h.ctx, h.pair, "feat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g := res.RepoGuards; len(g.Skipped) != 1 || len(g.Unrewritable) != 1 || len(g.Rewritten) != 0 || g.Skipped[0].Path != ".github/workflows/up.yml" {
+		t.Fatalf("repo_guards = %+v", g)
+	}
+	pres, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat", Mode: "squash", Message: "m", PlanOnly: true})
+	if err != nil || len(pres.Plan.CI.RepoGuards.Skipped) != 1 {
+		t.Fatalf("plan = %+v %v", pres, err)
+	}
+	validateResult(t, "plan.schema.json", pres.Plan)
+	if _, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: pres.Plan.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.approver.asked) != 1 {
+		t.Fatalf("asked %d times", len(h.approver.asked))
+	}
+	for _, want := range []string{
+		"  guard    .github/workflows/up.yml job upstream-only skips in the shadow repo (ci.rewrite_repo_guards is warn), so CI did not test it: ",
+		"  guard    .github/workflows/up2.yml job up skips in the shadow repo, so CI did not test it: ",
+	} {
+		if !strings.Contains(h.approver.asked[0], want) {
+			t.Errorf("summary lacks %q:\n%s", want, h.approver.asked[0])
+		}
 	}
 }

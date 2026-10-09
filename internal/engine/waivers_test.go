@@ -1,10 +1,8 @@
 package engine_test
 
 import (
-	"bytes"
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -13,7 +11,6 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
-	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 // leakyID gates a feature holding the fake token and returns its finding id.
@@ -58,6 +55,12 @@ func TestWaiversAddAtAConsole(t *testing.T) {
 	if err != nil || len(res.Waivers) != 1 || res.Waivers[0].Reason != "test fixture" || res.Waivers[0].Path != "test/fixtures/token.txt" ||
 		res.Waivers[0].CreatedBy != "human:octo" || len(res.Waivers[0].MatchSHA256) != 64 {
 		t.Fatalf("WaiversAdd = %+v %v", res, err)
+	}
+	if a := res.Waivers[0].Approval; a == nil || a.Kind != "console" {
+		t.Fatalf("approval = %+v", a)
+	}
+	if stored, _ := h.eng.Waivers.For(publicName); stored[id].Approval == nil || stored[id].Approval.Kind != "console" {
+		t.Fatalf("stored = %+v", stored[id])
 	}
 	tok := testutil.FakeGitHubToken()
 	asked := h.approver.asked[len(h.approver.asked)-1]
@@ -114,7 +117,8 @@ func TestWaiversAddRefusals(t *testing.T) {
 	h.eng.DryRun = true
 	res, err := add(h, "fixture", id)
 	h.eng.DryRun = false
-	if err != nil || res.Preview == nil || len(res.Preview.Ops) != 1 || res.Preview.Ops[0]["op"] != "waive" {
+	if err != nil || res.Preview == nil || len(res.Preview.Ops) != 1 || res.Preview.Ops[0]["op"] != "waive" ||
+		res.Waivers[0].Approval != nil /* nobody has approved a dry run */ {
 		t.Fatalf("--plan = %+v %v", res, err)
 	}
 	if _, err := os.Stat(h.eng.Waivers.Path()); !os.IsNotExist(err) {
@@ -230,7 +234,7 @@ func TestWaiversAddCoversAFindingInAnOldCommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	validateSchema(t, "gate.schema.json", raw)
+	testutil.ValidateSchema(t, "gate.schema.json", raw)
 }
 
 // Under a squash default, a finding only in an older commit is invisible to
@@ -261,24 +265,108 @@ func TestWaiversAddUnderASquashDefaultCoversAnOldCommit(t *testing.T) {
 	}
 }
 
-// validateSchema checks raw against schemas/v0/<name>.
-func validateSchema(t *testing.T, name string, raw []byte) {
-	t.Helper()
-	path, err := filepath.Abs(filepath.Join("..", "..", "schemas", "v0", name))
-	if err != nil {
+// Under a squash or curated default, a broken marker in an older commit that
+// the tip fixed doesn't stop waivers add: it scans the tip's tree, as the
+// squash would publish it. Under preserve the MARKER_INVALID stays.
+func TestWaiversAddFallsBackToTheTipUnderASquashDefault(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.setConfig("default_mode: preserve", "default_mode: squash")
+	h.startFeature("feat-x", map[string]string{"app.go": "ok\n// BEGIN-INTERNAL\nx\n"})
+	files := fixture()
+	files["app.go"] = "ok\n"
+	testutil.Commit(t, h.shadowGit(), "feat-x", "close it and leak", files)
+	res, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
+	_ = wantCode(t, err, contract.LeakFound)
+	id := res.Findings[0].ID
+
+	ar, err := add(h, "fixture", id)
+	if err != nil || len(ar.Waivers) != 1 || ar.Waivers[0].ID != id {
+		t.Fatalf("waivers add under squash = %+v %v", ar, err)
+	}
+	if _, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x"); err != nil {
+		t.Fatalf("the waived finding still blocks: %v", err)
+	}
+
+	h.setConfig("default_mode: squash", "default_mode: preserve")
+	_, err = add(h, "fixture", id)
+	if ce := wantCode(t, err, contract.MarkerInvalid); ce.Details["feature"] != "feat-x" {
+		t.Fatalf("under preserve: %+v", ce)
+	}
+}
+
+// Revoking an id with no waiver for the repo is an error naming it, and
+// changes nothing, with or without --plan.
+func TestWaiversRevokeUnknownID(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	id := leakyID(t, h)
+	if _, err := add(h, "fixture", id); err != nil {
 		t.Fatal(err)
 	}
-	c := jsonschema.NewCompiler()
-	c.AssertFormat()
-	s, err := c.Compile(path)
-	if err != nil {
-		t.Fatalf("compile %s: %v", name, err)
+	for _, dry := range []bool{true, false} {
+		h.eng.DryRun = dry
+		_, _, err := h.eng.WaiversRevoke(h.ctx, &h.pair, []string{id, "f-000000000000"}, false)
+		h.eng.DryRun = false
+		ce := wantCode(t, err, contract.WaiverUnknown)
+		if ce.Field != "id" || !strings.Contains(ce.Message, "f-000000000000") || strings.Contains(ce.Message, id) ||
+			!reflect.DeepEqual(ce.Details["ids"], []string{"f-000000000000"}) {
+			t.Fatalf("--plan %v: %+v", dry, ce)
+		}
 	}
-	inst, err := jsonschema.UnmarshalJSON(bytes.NewReader(raw))
-	if err != nil {
+	if ws, _ := h.eng.Waivers.For(publicName); len(ws) != 1 {
+		t.Fatal("a refused revoke removed the known waiver")
+	}
+}
+
+// --plan --all on a waivers.json that doesn't decode previews replacing it,
+// as revoke --all does; a newer file is refused, as the real run refuses it.
+func TestWaiversRevokeAllPlanOnACorruptFile(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	path := h.eng.Waivers.Path()
+	if err := os.WriteFile(path, []byte("{broken"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Validate(inst); err != nil {
-		t.Fatalf("the result does not match %s:\n%v\n%s", name, err, raw)
+	h.eng.DryRun = true
+	res, _, err := h.eng.WaiversRevoke(h.ctx, nil, nil, true)
+	h.eng.DryRun = false
+	if err != nil || len(res.Revoked) != 0 || res.Preview == nil || len(res.Preview.Ops) != 1 ||
+		res.Preview.Ops[0]["op"] != "write_file" || res.Preview.Ops[0]["path"] != path {
+		t.Fatalf("--plan --all = %+v %v", res, err)
 	}
+	if got, _ := os.ReadFile(path); string(got) != "{broken" {
+		t.Fatal("the dry run changed the file")
+	}
+	if err := os.WriteFile(path, []byte(`{"schema_version":"0.99","waivers":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h.eng.DryRun = true
+	_, _, err = h.eng.WaiversRevoke(h.ctx, nil, nil, true)
+	h.eng.DryRun = false
+	_ = wantCode(t, err, contract.UpgradeNeeded)
+}
+
+// A waivers file from a newer Ghostbranch stops waivers add before the
+// console with UPGRADE_NEEDED, not INTERNAL; list says the same.
+func TestWaiversAddOnANewerFile(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	id := leakyID(t, h)
+	path := h.eng.Waivers.Path()
+	if err := os.WriteFile(path, []byte(`{"schema_version":"0.99","waivers":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	asked := len(h.approver.asked)
+	_, err := add(h, "fixture", id)
+	_ = wantCode(t, err, contract.UpgradeNeeded)
+	if len(h.approver.asked) != asked {
+		t.Fatal("the person was asked for a code before the newer file was found")
+	}
+	_, _, err = h.eng.WaiversList(h.ctx, nil)
+	_ = wantCode(t, err, contract.UpgradeNeeded)
 }

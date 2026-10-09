@@ -116,6 +116,14 @@ var replaced = map[string]string{
 	"promote.require_human": "promote.require_human is replaced by agent grants (ghostbranch agents allow) and is ignored",
 }
 
+// notASection is the error for a scalar or a list where a section belongs
+// ("sync: off"). It has no details.unknown_key, so it stays CONFIG_INVALID
+// rather than reading as a key from a newer Ghostbranch.
+var notASection = map[string]string{
+	"sync": "sync must be a section; to turn scheduled sync off, remove sync.schedule",
+	"ci":   "ci must be a section; remove it, or put its keys under ci:",
+}
+
 // Parse reads and validates a config file.
 func Parse(data []byte) (Config, []contract.Warning, error) {
 	var raw map[string]any
@@ -133,8 +141,11 @@ func Parse(data []byte) (Config, []contract.Warning, error) {
 	cfg := Default()
 	var warns []contract.Warning
 	for _, k := range keys {
-		if (k == "sync" || k == "ci") && isEmptyMap(leaves[k]) {
-			continue // "sync: {}" means the defaults
+		if k == "sync" || k == "ci" {
+			if isEmptyMap(leaves[k]) {
+				continue // "sync: {}" means the defaults
+			}
+			return Config{}, nil, contract.New(contract.ConfigInvalid, "%s", notASection[k]).WithField(k)
 		}
 		switch root := ignoredRoot(k); {
 		case replaced[k] != "":
@@ -153,7 +164,10 @@ func Parse(data []byte) (Config, []contract.Warning, error) {
 				WithDetails(map[string]any{"unknown_key": k})
 		}
 	}
-	return cfg, warns, validate(cfg)
+	if err := validate(cfg); err != nil {
+		return Config{}, warns, err
+	}
+	return cfg, warns, nil
 }
 
 // isEmptyMap is true for "{}" and for a bare or comment-only section, which
@@ -448,7 +462,7 @@ func validBranch(b string) bool {
 		return false
 	}
 	for _, part := range strings.Split(b, "/") {
-		if !branchPart.MatchString(part) || strings.HasPrefix(part, ".") {
+		if !branchPart.MatchString(part) || strings.HasPrefix(part, ".") || strings.HasSuffix(part, ".lock") {
 			return false
 		}
 	}

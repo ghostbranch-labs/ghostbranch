@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
@@ -176,23 +177,33 @@ func TestCheck(t *testing.T) {
 	}
 }
 
-// staleClone builds a mirror whose feature feat-y has commits a, b and c
-// (head c), and a checkout that fetched only a and b, on branch spike, with
-// origin/main at public main. The checkout is read with plain git, so the
-// test keeps the developer's git config out.
-func staleClone(t *testing.T) (dir string, co *guard.Checkout, f guard.Facts, main, b string) {
+// staleMirror is the stale-clone tests' mirror: feature feat-y has commits
+// a, b and c (head c) on public main, and refs/heads/stale is at b. Tests
+// only read it.
+type staleMirror struct {
+	g       *gitx.Git
+	f       guard.Facts
+	main, b string
+}
+
+var (
+	staleOnce sync.Once
+	stale     staleMirror
+)
+
+// buildStaleMirror builds the stale-clone tests' mirror in dir.
+func buildStaleMirror(t testing.TB, dir string) staleMirror {
 	t.Helper()
-	hermetic(t)
 	ctx := context.Background()
-	g := testutil.BareRepo(t, t.TempDir())
-	main = testutil.Commit(t, g, "main", "m", map[string]string{"a.txt": "a\n"})
+	g := testutil.BareRepo(t, dir)
+	main := testutil.Commit(t, g, "main", "m", map[string]string{"a.txt": "a\n"})
 	for _, r := range []string{"refs/heads/feat-y", "refs/remotes/public/main", "refs/shadow-meta/features/feat-y"} {
 		if err := g.UpdateRef(ctx, r, main); err != nil {
 			t.Fatal(err)
 		}
 	}
 	testutil.Commit(t, g, "feat-y", "a", map[string]string{"y.txt": "1\n"})
-	b = testutil.Commit(t, g, "feat-y", "b", map[string]string{"y.txt": "2\n"})
+	b := testutil.Commit(t, g, "feat-y", "b", map[string]string{"y.txt": "2\n"})
 	if err := g.UpdateRef(ctx, "refs/heads/stale", b); err != nil {
 		t.Fatal(err)
 	}
@@ -204,15 +215,34 @@ func staleClone(t *testing.T) (dir string, co *guard.Checkout, f guard.Facts, ma
 	if err != nil {
 		t.Fatal(err)
 	}
+	return staleMirror{g, f, main, b}
+}
+
+// sharedStaleMirror builds the mirror once, under fixtureRoot.
+func sharedStaleMirror(t *testing.T) staleMirror {
+	t.Helper()
+	staleOnce.Do(func() { stale = buildStaleMirror(t, filepath.Join(fixtureRoot, "stale-mirror")) })
+	if stale.g == nil {
+		t.Fatal("the shared stale mirror failed to build; see the test that built it")
+	}
+	return stale
+}
+
+// staleClone gives the test its own checkout that fetched only a and b
+// from the shared mirror, on branch spike, with origin/main at public main.
+func staleClone(t *testing.T) (dir string, co *guard.Checkout, f guard.Facts, main, b string) {
+	t.Helper()
+	m := sharedStaleMirror(t)
 	dir = t.TempDir()
 	gitIn(t, dir, "init", "-q", "-b", "main")
 	gitIn(t, dir, "remote", "add", "origin", "https://github.com/acme/widget.git")
-	gitIn(t, dir, "fetch", "-q", filepath.ToSlash(g.Dir), "refs/heads/main:refs/remotes/origin/main", "refs/heads/stale:refs/heads/spike")
+	gitIn(t, dir, "fetch", "-q", filepath.ToSlash(m.g.Dir), "refs/heads/main:refs/remotes/origin/main", "refs/heads/stale:refs/heads/spike")
 	gitIn(t, dir, "switch", "-q", "spike")
-	if co, err = guard.Open(ctx, dir); err != nil {
+	co, err := guard.Open(context.Background(), dir)
+	if err != nil {
 		t.Fatal(err)
 	}
-	return dir, co, f, main, b
+	return dir, co, m.f, m.main, m.b
 }
 
 // checkPush runs Check on one push of sha to refs/heads/<branch>, whose
@@ -245,17 +275,20 @@ func commitOn(t *testing.T, dir, branch, start string) string {
 // A stale clone holds an older feature commit than the mirror's head; the
 // head check cannot see it, but the commit itself is still unpublished.
 func TestCheckRefusesAnOlderFeatureCommitUnderAnotherName(t *testing.T) {
+	t.Parallel()
 	_, co, f, _, b := staleClone(t)
 	wantBlockedFor(t, "spike at b", checkPush(t, co, "spike", b, zero, f), b)
 }
 
 func TestCheckRefusesABranchOffAMidFeatureCommit(t *testing.T) {
+	t.Parallel()
 	dir, co, f, _, b := staleClone(t)
 	d := commitOn(t, dir, "fix", b)
 	wantBlockedFor(t, "fix at d", checkPush(t, co, "fix", d, zero, f), b)
 }
 
 func TestCheckPassesPublishedAndUnrelatedCommits(t *testing.T) {
+	t.Parallel()
 	dir, co, f, main, _ := staleClone(t)
 	if blocks := checkPush(t, co, "release", main, zero, f); len(blocks) != 0 {
 		t.Fatalf("a branch at public main: %+v", blocks)
@@ -271,6 +304,7 @@ func TestCheckPassesPublishedAndUnrelatedCommits(t *testing.T) {
 // on top is checked, so unrelated work on top passes, while the same commit
 // pushed to a new branch is still refused.
 func TestCheckPassesUnrelatedWorkOnARemoteAlreadyAtAFeatureCommit(t *testing.T) {
+	t.Parallel()
 	dir, co, f, _, b := staleClone(t)
 	next := commitOn(t, dir, "next", b)
 	if blocks := checkPush(t, co, "next", next, b, f); len(blocks) != 0 {
@@ -282,6 +316,7 @@ func TestCheckPassesUnrelatedWorkOnARemoteAlreadyAtAFeatureCommit(t *testing.T) 
 // Tracking refs are not trusted as public: a remote that fetches from the
 // shadow, or any fetch into refs/remotes, can hold feature commits there.
 func TestCheckRefusesAFeatureCommitHeldByATrackingRef(t *testing.T) {
+	t.Parallel()
 	dir, co, f, _, b := staleClone(t)
 	gitIn(t, dir, "update-ref", "refs/remotes/origin/feat-y", b)
 	gitIn(t, dir, "update-ref", "refs/remotes/origin/shadow/feat-y", b)
@@ -291,6 +326,7 @@ func TestCheckRefusesAFeatureCommitHeldByATrackingRef(t *testing.T) {
 // An update to an existing remote branch only lists what is new on top of
 // it: feature work on top is refused, unrelated work passes.
 func TestCheckUpdatesOfAnExistingRemoteBranch(t *testing.T) {
+	t.Parallel()
 	dir, co, f, main, b := staleClone(t)
 	topic := commitOn(t, dir, "topic", main)
 	gitIn(t, dir, "update-ref", "refs/remotes/origin/topic", topic)
@@ -306,6 +342,7 @@ func TestCheckUpdatesOfAnExistingRemoteBranch(t *testing.T) {
 // A force push over a remote commit this clone never fetched is still
 // checked against public main.
 func TestCheckRefusesAForcePushOverAnUnknownCommit(t *testing.T) {
+	t.Parallel()
 	_, co, f, _, b := staleClone(t)
 	wantBlockedFor(t, "spike at b over an unknown commit", checkPush(t, co, "spike", b, "1234567890123456789012345678901234567890", f), b)
 }
@@ -313,11 +350,59 @@ func TestCheckRefusesAForcePushOverAnUnknownCommit(t *testing.T) {
 // A tree or blob lists no commits, so it can't be content-checked; it is
 // refused rather than waved through.
 func TestCheckRefusesARefThatIsNotACommit(t *testing.T) {
+	t.Parallel()
 	dir, co, f, _, b := staleClone(t)
 	tree := gitIn(t, dir, "rev-parse", b+"^{tree}")
 	blocks := checkPush(t, co, "files", tree, zero, f)
 	if len(blocks) != 1 || !strings.Contains(blocks[0].Reason, "does not point at a commit") {
 		t.Fatalf("a tree: %+v", blocks)
+	}
+}
+
+// countingObjects counts a checkout's rev-lists.
+type countingObjects struct {
+	guard.Objects
+	revLists int
+}
+
+func (c *countingObjects) RevList(ctx context.Context, args ...string) ([]string, error) {
+	c.revLists++
+	return c.Objects.RevList(ctx, args...)
+}
+
+// A push of many refs lists its commits once, and still blocks only the
+// ref that carries the feature commit.
+func TestCheckListsAPushOnce(t *testing.T) {
+	t.Parallel()
+	dir, co, f, main, b := staleClone(t)
+	other := commitOn(t, dir, "other", main)
+	objs := &countingObjects{Objects: co}
+	lines := []guard.Line{
+		{LocalRef: "refs/tags/v1", LocalSHA: main, RemoteRef: "refs/tags/v1", RemoteSHA: zero},
+		{LocalRef: "refs/tags/v2", LocalSHA: other, RemoteRef: "refs/tags/v2", RemoteSHA: zero},
+		{LocalRef: "refs/heads/spike", LocalSHA: b, RemoteRef: "refs/heads/spike", RemoteSHA: zero},
+	}
+	blocks, err := guard.Check(context.Background(), objs, lines, f)
+	if err != nil || len(blocks) != 1 || blocks[0].Ref != "refs/heads/spike" || !strings.Contains(blocks[0].Reason, b[:12]) {
+		t.Fatalf("blocks = %+v %v", blocks, err)
+	}
+	if objs.revLists != 1 {
+		t.Fatalf("%d rev-lists for one push, want 1", objs.revLists)
+	}
+}
+
+// A commit the remote already holds (here on next, where it was let through
+// before) is public whichever ref this push puts it on.
+func TestCheckPassesACommitTheRemoteAlreadyHas(t *testing.T) {
+	t.Parallel()
+	dir, co, f, _, b := staleClone(t)
+	next := commitOn(t, dir, "next", b)
+	lines := []guard.Line{
+		{LocalRef: "refs/heads/next", LocalSHA: next, RemoteRef: "refs/heads/next", RemoteSHA: b},
+		{LocalRef: "refs/heads/copy", LocalSHA: b, RemoteRef: "refs/heads/copy", RemoteSHA: zero},
+	}
+	if blocks, err := guard.Check(context.Background(), co, lines, f); err != nil || len(blocks) != 0 {
+		t.Fatalf("blocks = %+v %v", blocks, err)
 	}
 }
 
