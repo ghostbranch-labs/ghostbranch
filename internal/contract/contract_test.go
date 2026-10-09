@@ -298,8 +298,30 @@ func TestSubProject5d1CodesAreRegistered(t *testing.T) {
 	if contract.SchemaVersion != "0.8" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
-	if es, _ := contract.Explain(string(contract.Locked)); strings.Contains(es[0].WhatToDo, "delete the lock") {
-		t.Fatalf("LOCKED still says to delete the lock file: %q", es[0].WhatToDo)
+	if es, _ := contract.Explain(string(contract.Locked)); !strings.Contains(es[0].WhatToDo, "nothing to delete") ||
+		strings.Contains(es[0].WhatToDo, "delete the lock") {
+		t.Fatalf("LOCKED must say there is nothing to delete: %q", es[0].WhatToDo)
+	}
+}
+
+// An interrupted or half-published promote is resumed with apply, never by
+// promoting again under another name: the explain text must say so.
+func TestExplainSteersAnInterruptedPublishToApply(t *testing.T) {
+	t.Parallel()
+	es, _ := contract.Explain(string(contract.Interrupted))
+	for _, want := range []string{"plan_id", "apply", "job", "wait"} {
+		if !strings.Contains(es[0].WhatToDo, want) {
+			t.Errorf("INTERRUPTED what-to-do lacks %q: %q", want, es[0].WhatToDo)
+		}
+	}
+	if strings.Contains(es[0].WhatToDo, "safe to repeat") {
+		t.Errorf("INTERRUPTED still says to repeat the command blindly: %q", es[0].WhatToDo)
+	}
+	es, _ = contract.Explain(string(contract.BranchExists))
+	for _, want := range []string{"plan_id", "apply"} {
+		if !strings.Contains(es[0].WhatToDo, want) {
+			t.Errorf("BRANCH_EXISTS what-to-do lacks %q: %q", want, es[0].WhatToDo)
+		}
 	}
 }
 
