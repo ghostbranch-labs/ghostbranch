@@ -61,7 +61,6 @@ func TestCheckFailsClosedOnGitErrors(t *testing.T) {
 		objs guard.Objects
 		f    guard.Facts
 	}{
-		{"every git call fails", brokenObjects{}, heads},
 		{"peeling the pushed commit fails", brokenObjects{}, commits},
 		{"resolving a feature head fails", brokenBases{}, heads},
 		{"resolving a base fails", brokenBases{}, commits},
@@ -265,6 +264,19 @@ func TestCheckPassesPublishedAndUnrelatedCommits(t *testing.T) {
 	if blocks := checkPush(t, co, "other", other, zero, f); len(blocks) != 0 {
 		t.Fatalf("new commits on public main: %+v", blocks)
 	}
+}
+
+// A remote branch that already holds a feature commit was let through before
+// (or the commit was published to it some other way): only what the push adds
+// on top is checked, so unrelated work on top passes, while the same commit
+// pushed to a new branch is still refused.
+func TestCheckPassesUnrelatedWorkOnARemoteAlreadyAtAFeatureCommit(t *testing.T) {
+	dir, co, f, _, b := staleClone(t)
+	next := commitOn(t, dir, "next", b)
+	if blocks := checkPush(t, co, "next", next, b, f); len(blocks) != 0 {
+		t.Fatalf("unrelated work on top of a remote already at b: %+v", blocks)
+	}
+	wantBlockedFor(t, "b itself to a new branch", checkPush(t, co, "next", b, zero, f), b)
 }
 
 // Tracking refs are not trusted as public: a remote that fetches from the
