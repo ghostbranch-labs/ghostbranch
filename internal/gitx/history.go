@@ -115,7 +115,7 @@ func (g *Git) MergeTreeCheck(ctx context.Context, base, head string) (bool, []st
 	}
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 	// A bad ref also exits 1, but prints no tree id on stdout.
-	if len(lines[0]) != 40 && len(lines[0]) != 64 {
+	if !isObjectID(lines[0]) {
 		return false, nil, err
 	}
 	seen := map[string]bool{}
@@ -128,4 +128,10 @@ func (g *Git) MergeTreeCheck(ctx context.Context, base, head string) (bool, []st
 	}
 	sort.Strings(files)
 	return false, files, nil
+}
+
+// isObjectID reports whether s is a full SHA-1 or SHA-256 object id, as
+// git prints it: lowercase hex.
+func isObjectID(s string) bool {
+	return (len(s) == 40 || len(s) == 64) && strings.Trim(s, "0123456789abcdef") == ""
 }

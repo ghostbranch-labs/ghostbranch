@@ -201,6 +201,12 @@ func TestCherryPickConflictNamesTheCommitAndAborts(t *testing.T) {
 	if _, err := wt.Run(ctx, "cherry-pick", "--abort"); err == nil {
 		t.Fatal("cherry-pick must already be aborted")
 	}
+	if head, err := wt.MustResolve(ctx, "HEAD"); err != nil || head != main {
+		t.Fatalf("HEAD after the abort = %s %v, want %s", head, err, main)
+	}
+	if st, err := wt.Run(ctx, "status", "--porcelain", "--untracked-files=all"); err != nil || st != "" {
+		t.Fatalf("the worktree isn't clean after the abort: %q %v", st, err)
+	}
 }
 
 func TestCommitAuthor(t *testing.T) {
