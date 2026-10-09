@@ -364,9 +364,8 @@ func (e *Engine) cancelPushRuns(ctx context.Context, pc *pairCtx, pushed []pushe
 	listDenied := false
 	var failure error
 	var stuck []CancelledRun
-	forceDenied := false
-	var verifyErr error
-	for _, pu := range pushed {
+	var forceErr, verifyErr error
+	for i, pu := range pushed {
 		sha := pu.sha
 		if !e.pushStartsWorkflows(ctx, pc, sha, pu.branches) {
 			continue
@@ -420,11 +419,17 @@ func (e *Engine) cancelPushRuns(ctx context.Context, pc *pairCtx, pushed []pushe
 			}
 		}
 		if len(requested) > 0 {
-			done, left, forbidden, err := e.verifyCancels(ctx, repo, sha, requested, interval)
+			done, left, fe, err := e.verifyCancels(ctx, repo, sha, requested, interval)
 			cancelled = append(cancelled, done...)
 			stuck = append(stuck, left...)
-			forceDenied = forceDenied || forbidden
+			if fe != nil && (forceErr == nil || errors.Is(fe, forge.ErrForbidden)) {
+				forceErr = fe
+			}
 			verifyErr = err
+			if err != nil && failure == nil && i < len(pushed)-1 {
+				// The later commits go unchecked: say so.
+				failure = err
+			}
 		}
 		if listDenied || denied > 0 || failure != nil || verifyErr != nil {
 			break
@@ -440,12 +445,14 @@ func (e *Engine) cancelPushRuns(ctx context.Context, pc *pairCtx, pushed []pushe
 		list := strings.Join(names, ", ")
 		var msg string
 		switch {
-		case verifyErr != nil && ctx.Err() != nil:
+		case ctx.Err() != nil:
 			msg = fmt.Sprintf("sync was interrupted while checking that workflow run(s) %s were cancelled; check the shadow repo's Actions tab", list)
 		case verifyErr != nil:
 			msg = fmt.Sprintf("sync could not check that workflow run(s) %s were cancelled (%v); check the shadow repo's Actions tab", list, verifyErr)
-		case forceDenied:
+		case errors.Is(forceErr, forge.ErrForbidden):
 			msg = fmt.Sprintf("workflow run(s) %s kept running after sync cancelled them", list) + fix
+		case forceErr != nil:
+			msg = fmt.Sprintf("workflow run(s) %s kept running after sync cancelled them, and sync could not force-cancel them (%v); cancel them in the shadow repo's Actions tab", list, forceErr)
 		default:
 			msg = fmt.Sprintf("workflow run(s) %s kept running after sync cancelled and force-cancelled them; cancel them in the shadow repo's Actions tab", list)
 		}
@@ -467,17 +474,22 @@ func (e *Engine) cancelPushRuns(ctx context.Context, pc *pairCtx, pushed []pushe
 }
 
 // verifyCancels checks that the runs sync asked GitHub to cancel did stop.
-// It looks every interval for up to DefaultCancelVerifyWindow; a run that
-// completed as cancelled is done, and one that completed otherwise finished
-// on its own and is dropped. It force-cancels the runs still going and
-// looks again for up to DefaultForceCancelWindow. What is still going then
-// is stuck. forbidden is set when the token can't force-cancel. A failed
-// look or an interrupted wait ends it with err, the unsettled runs stuck.
-func (e *Engine) verifyCancels(ctx context.Context, repo, sha string, requested map[int64]CancelledRun, interval time.Duration) (done, stuck []CancelledRun, forbidden bool, err error) {
+// It looks every interval, starting one interval after the cancels, for up
+// to DefaultCancelVerifyWindow; a run that completed as cancelled is done,
+// and one that completed otherwise finished on its own and is dropped. It
+// force-cancels the runs still going and looks again for up to
+// DefaultForceCancelWindow. What is still going then is stuck. forceErr is
+// the force-cancel error that left runs going, an ErrForbidden one first
+// (the token can't force-cancel, so it stops asking). A failed look or an
+// interrupted wait ends it with err, the unsettled runs stuck.
+func (e *Engine) verifyCancels(ctx context.Context, repo, sha string, requested map[int64]CancelledRun, interval time.Duration) (done, stuck []CancelledRun, forceErr, err error) {
 	pending := maps.Clone(requested)
 	settle := func(window time.Duration) error {
 		start := e.Now()
 		for {
+			if err := e.Sleep(ctx, interval); err != nil {
+				return err
+			}
 			runs, err := e.Forge.PushRuns(ctx, repo, sha)
 			if err != nil {
 				return err
@@ -498,9 +510,6 @@ func (e *Engine) verifyCancels(ctx context.Context, repo, sha string, requested 
 			if len(pending) == 0 || e.Now().Sub(start) >= window {
 				return nil
 			}
-			if err := e.Sleep(ctx, interval); err != nil {
-				return err
-			}
 		}
 	}
 	unsettled := func() []CancelledRun {
@@ -509,25 +518,29 @@ func (e *Engine) verifyCancels(ctx context.Context, repo, sha string, requested 
 		return out
 	}
 	if err := settle(DefaultCancelVerifyWindow); err != nil || len(pending) == 0 {
-		return done, unsettled(), false, err
+		return done, unsettled(), nil, err
 	}
 	forced := 0
 	for _, r := range unsettled() {
-		switch err := e.Forge.ForceCancelRun(ctx, repo, r.ID); {
-		case err == nil || errors.Is(err, forge.ErrConflict):
+		ferr := e.Forge.ForceCancelRun(ctx, repo, r.ID)
+		if ferr == nil || errors.Is(ferr, forge.ErrConflict) {
 			e.progressf("force-cancelling workflow run %s (%d), which kept running", r.Workflow, r.ID)
 			forced++
-		case errors.Is(err, forge.ErrForbidden):
-			forbidden = true
-		default:
-			e.progressf("could not force-cancel workflow run %s (%d): %v", r.Workflow, r.ID, err)
+			continue
 		}
-		if forbidden {
-			break // every other force-cancel would be refused too
+		e.progressf("could not force-cancel workflow run %s (%d): %v", r.Workflow, r.ID, ferr)
+		if forceErr == nil || errors.Is(ferr, forge.ErrForbidden) {
+			forceErr = ferr
 		}
+		if errors.Is(ferr, forge.ErrForbidden) || ctx.Err() != nil {
+			break // every other force-cancel would fail too
+		}
+	}
+	if ctx.Err() != nil {
+		return done, unsettled(), forceErr, ctx.Err()
 	}
 	if forced > 0 {
 		err = settle(DefaultForceCancelWindow)
 	}
-	return done, unsettled(), forbidden, err
+	return done, unsettled(), forceErr, err
 }

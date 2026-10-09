@@ -380,8 +380,8 @@ func TestSyncCancelHonoured(t *testing.T) {
 	if err != nil || len(warns) != 0 || !reflect.DeepEqual(cancelledIDs(res), []int64{1}) {
 		t.Fatalf("%+v %+v %v", res, warns, err)
 	}
-	if len(h.forge.ForceCancelled) != 0 {
-		t.Fatalf("force-cancelled %v", h.forge.ForceCancelled)
+	if len(h.forge.ForceCancelRepos) != 0 {
+		t.Fatalf("force-cancel calls %v", h.forge.ForceCancelRepos)
 	}
 }
 
@@ -424,8 +424,8 @@ func TestSyncCancelConflictOnACompletedRun(t *testing.T) {
 	if err != nil || len(warns) != 0 || len(res.CancelledRuns) != 0 {
 		t.Fatalf("%+v %+v %v", res, warns, err)
 	}
-	if len(h.forge.CancelRunRepos) != 1 || len(h.forge.ForceCancelled) != 0 {
-		t.Fatalf("CancelRun calls %v, force-cancelled %v", h.forge.CancelRunRepos, h.forge.ForceCancelled)
+	if len(h.forge.CancelRunRepos) != 1 || len(h.forge.ForceCancelRepos) != 0 {
+		t.Fatalf("CancelRun calls %v, force-cancel calls %v", h.forge.CancelRunRepos, h.forge.ForceCancelRepos)
 	}
 }
 
@@ -471,6 +471,73 @@ func TestSyncCancelRunFinishedOnItsOwn(t *testing.T) {
 	}
 	if len(h.forge.ForceCancelRepos) != 0 {
 		t.Fatalf("force-cancel calls %v", h.forge.ForceCancelRepos)
+	}
+}
+
+// A run that ignores the force-cancel too but finishes on its own in the
+// force window is left alone.
+func TestSyncForceCancelledRunFinishedOnItsOwn(t *testing.T) {
+	t.Parallel()
+	h, next := pushRunsHarness(t)
+	// Two looks for runs, 30 checks in the 30s verify window, then the
+	// first check after the force-cancel still sees it going; the next sees
+	// it finished.
+	seedRun(h, fake.Run{SHA: next, Run: wfRun(1, "ci", "in_progress"), IgnoreCancel: true, IgnoreForceCancel: true, FinishAfterPolls: 33})
+	res, warns, err := h.eng.Sync(h.ctx, h.pair, engine.SyncOptions{})
+	if err != nil || len(warns) != 0 || len(res.CancelledRuns) != 0 {
+		t.Fatalf("%+v %+v %v", res, warns, err)
+	}
+	if len(h.forge.ForceCancelRepos) != 1 || h.forge.PushRunsCalls != 34 {
+		t.Fatalf("force-cancel calls %v, PushRuns calls %d", h.forge.ForceCancelRepos, h.forge.PushRunsCalls)
+	}
+}
+
+// A force-cancel that fails for another reason names the error.
+func TestSyncForceCancelFailure(t *testing.T) {
+	t.Parallel()
+	h, next := pushRunsHarness(t)
+	seedRun(h, fake.Run{SHA: next, Run: wfRun(1, "ci", "in_progress"), IgnoreCancel: true})
+	h.forge.ForceCancelErr = errors.New("actions are down")
+	res, warns, err := h.eng.Sync(h.ctx, h.pair, engine.SyncOptions{})
+	if err != nil || len(res.CancelledRuns) != 0 {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if len(warns) != 1 || warns[0].Code != contract.CINotCancelled ||
+		!strings.Contains(warns[0].Message, "sync could not force-cancel them (actions are down)") {
+		t.Fatalf("warnings = %+v", warns)
+	}
+}
+
+// An interrupt while checking one commit's cancels leaves the later
+// commits unchecked: a warning covers them too.
+func TestSyncInterruptedWhileVerifyingWarnsForTheLaterCommits(t *testing.T) {
+	t.Parallel()
+	h, next := pushRunsHarness(t)
+	h.setConfig("branches: [main]", "branches: [main, release]")
+	other := testutil.Commit(t, h.pubGit, "release", "rel", map[string]string{
+		".github/workflows/push.yml": strings.Replace(pushWorkflow, "[main]", "[main, release]", 1)})
+	seedRun(h, fake.Run{SHA: next, Run: wfRun(1, "ci", "in_progress"), IgnoreCancel: true})
+	seedRun(h, fake.Run{SHA: other, Run: wfRun(2, "ci", "in_progress"), IgnoreCancel: true})
+	ctx, cancel := context.WithCancel(h.ctx)
+	defer cancel()
+	sleep := h.eng.Sleep
+	h.eng.Sleep = func(c context.Context, d time.Duration) error {
+		if h.forge.PushRunsCalls >= 3 { // the first commit's first check
+			cancel()
+		}
+		return sleep(c, d)
+	}
+	_, warns, _ := h.eng.Sync(ctx, h.pair, engine.SyncOptions{})
+	if h.forge.PushRunsCalls != 3 || len(h.forge.CancelRunRepos) != 1 {
+		t.Fatalf("PushRuns calls = %d, CancelRun calls %v", h.forge.PushRunsCalls, h.forge.CancelRunRepos)
+	}
+	var interrupted, unchecked bool
+	for _, w := range warns {
+		interrupted = interrupted || w.Code == contract.CINotCancelled && strings.Contains(w.Message, "interrupted while checking")
+		unchecked = unchecked || w.Code == contract.CINotCancelled && strings.Contains(w.Message, "may have started workflow runs")
+	}
+	if !interrupted || !unchecked {
+		t.Fatalf("want both CI_NOT_CANCELLED warnings, got %+v", warns)
 	}
 }
 

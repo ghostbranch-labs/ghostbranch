@@ -91,7 +91,10 @@ type Forge interface {
 	// accepts the request: the run may keep going. A run the host won't
 	// cancel in its current state, finished or not, is ErrConflict.
 	CancelRun(ctx context.Context, full string, id int64) error
-	// ForceCancelRun force-cancels a run that ignored CancelRun.
+	// ForceCancelRun force-cancels a run that ignored CancelRun. Like
+	// CancelRun, the host only accepts the request (a 202): the run may
+	// still keep going. A 409 is ErrConflict, a plain permission refusal
+	// ErrForbidden.
 	ForceCancelRun(ctx context.Context, full string, id int64) error
 	// ClosePullRequest closes PR number in full. A PR that is already
 	// closed is not an error; a missing one is ErrNotFound, and a plain

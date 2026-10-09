@@ -2,6 +2,7 @@ package engine_test
 
 import (
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -47,7 +48,8 @@ func TestOnlyPromoteAndApplyReachThePublicRepo(t *testing.T) {
 	// pushes and looks for (and cancels) the runs that push started.
 	h.eng.CIAppearWindow, h.eng.CIAppearPoll = 3*time.Second, time.Second
 	next := testutil.Commit(t, h.pubGit, "main", "next", map[string]string{".github/workflows/push.yml": pushWorkflow})
-	seedRuns(h, next, wfRun(1, "ci", "queued"))
+	// The run ignores the cancel, so sync force-cancels it too.
+	seedRun(h, fake.Run{SHA: next, Run: wfRun(1, "ci", "queued"), IgnoreCancel: true})
 	h.forge.Runs[publicName] = []fake.Run{{SHA: next, Run: wfRun(2, "ci", "queued")}}
 	baseline = h.publicRefs()
 	n = len(h.pushes)
@@ -56,13 +58,15 @@ func TestOnlyPromoteAndApplyReachThePublicRepo(t *testing.T) {
 	if len(h.pushes) == n || sres.ShadowMainAfter != next || len(sres.CancelledRuns) != 1 {
 		t.Fatalf("sync did not push and cancel: %+v", sres)
 	}
-	for _, repo := range append(append([]string(nil), h.forge.PushRunsRepos...), h.forge.CancelRunRepos...) {
+	for _, repo := range slices.Concat(h.forge.PushRunsRepos, h.forge.CancelRunRepos, h.forge.ForceCancelRepos) {
 		if repo != shadowName {
 			t.Fatalf("sync asked about workflow runs in %s", repo)
 		}
 	}
-	if len(h.forge.PushRunsRepos) == 0 || len(h.forge.CancelRunRepos) == 0 || len(h.forge.Cancelled[publicName]) != 0 {
-		t.Fatalf("PushRuns %v CancelRun %v cancelled %v", h.forge.PushRunsRepos, h.forge.CancelRunRepos, h.forge.Cancelled)
+	if len(h.forge.PushRunsRepos) == 0 || len(h.forge.CancelRunRepos) == 0 || len(h.forge.ForceCancelRepos) == 0 ||
+		len(h.forge.Cancelled[publicName]) != 0 || len(h.forge.ForceCancelled[publicName]) != 0 {
+		t.Fatalf("PushRuns %v CancelRun %v ForceCancelRun %v cancelled %v force-cancelled %v", h.forge.PushRunsRepos,
+			h.forge.CancelRunRepos, h.forge.ForceCancelRepos, h.forge.Cancelled, h.forge.ForceCancelled)
 	}
 	n = len(h.pushes)
 	_, _, err = h.eng.Audit(h.ctx, h.pair)

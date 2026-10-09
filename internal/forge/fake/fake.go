@@ -49,10 +49,12 @@ type Forge struct {
 	PushRunsCalls   int
 	PushRunsRepos   []string
 	CancelRunRepos  []string
-	// ForceCancelForbidden makes ForceCancelRun fail with ErrForbidden.
-	// ForceCancelled records the run IDs ForceCancelRun cancelled, per
-	// repo, and ForceCancelRepos the repo each call named.
+	// ForceCancelForbidden makes ForceCancelRun fail with ErrForbidden,
+	// ForceCancelErr with that error. ForceCancelled records the run IDs
+	// ForceCancelRun cancelled, per repo, and ForceCancelRepos the repo
+	// each call named.
 	ForceCancelForbidden map[string]bool
+	ForceCancelErr       error
 	ForceCancelled       map[string][]int64
 	ForceCancelRepos     []string
 	// GetPRErr makes GetPR fail with that error.
@@ -383,6 +385,9 @@ func (f *Forge) ForceCancelRun(_ context.Context, full string, id int64) error {
 	f.ForceCancelRepos = append(f.ForceCancelRepos, full)
 	if f.ForceCancelForbidden[full] {
 		return fmt.Errorf("force-cancel workflow run %d of %s: %w", id, full, forge.ErrForbidden)
+	}
+	if f.ForceCancelErr != nil {
+		return f.ForceCancelErr
 	}
 	for i := range f.Runs[full] {
 		r := &f.Runs[full][i]
