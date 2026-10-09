@@ -59,7 +59,7 @@
         "--repo",
         "acme/widget"
       ],
-      "why": "after fixing the content on the feature branch in the shadow repo, gate again",
+      "why": "amend the feature's last commit to remove it (a fix commit on top would leave it in a commit that preserve and curated promotes publish), push with `git push --force-with-lease shadow feat-x`, then gate again",
       "needs_human": false,
       "needs_input": []
     },

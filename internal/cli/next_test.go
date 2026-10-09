@@ -97,6 +97,7 @@ func TestNextForAPersonDropsAgentFlags(t *testing.T) {
 		if len(args) > 4 {
 			want = append(want, "--for", "24h")
 		}
+		want = append(want, "--repo", "acme/widget")
 		if len(n) != 1 || !reflect.DeepEqual(argv(n[0]), want) || n[0]["needs_human"] != true {
 			t.Fatalf("%v: next = %v", args, n)
 		}
@@ -117,7 +118,7 @@ func TestNextCarriesTheWorkspace(t *testing.T) {
 		t.Fatalf("next = %v", n)
 	}
 	_, env = te.runJSON("agents", "allow")
-	if n := nextOf(t, env); len(n) != 1 || !reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "agents", "allow", "--workspace", "other"}) {
+	if n := nextOf(t, env); len(n) != 1 || !reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "agents", "allow", "--repo", "acme/widget", "--workspace", "other"}) {
 		t.Fatalf("agents allow next = %v", n)
 	}
 }
@@ -683,7 +684,7 @@ func TestNextForLifecycleStates(t *testing.T) {
 		human bool
 		why   string
 	}{
-		{[]string{"ghostbranch", "sync", "--repo", "acme/widget"}, false, "sync closes merged features; or run `feature close feat-a`"},
+		{[]string{"ghostbranch", "sync", "--repo", "acme/widget"}, false, "sync closes merged features; or run `ghostbranch feature close feat-a --repo acme/widget`"},
 		{[]string{"ghostbranch", "feature", "close", "feat-b", "--repo", "acme/widget"}, true, "its PR merged but there are newer commits; promote them or a person closes it"},
 		{[]string{"ghostbranch", "feature", "close", "feat-c", "--repo", "acme/widget"}, true, "its PR was closed without merging"},
 	}
@@ -903,7 +904,7 @@ func TestNextForFeatureClose(t *testing.T) {
 	code, env := te.runJSON("feature", "close", "feat-d", "--non-interactive")
 	n := nextOf(t, env)
 	if code != 5 || len(n) != 1 || n[0]["needs_human"] != true ||
-		!reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "feature", "close", "feat-d"}) {
+		!reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "feature", "close", "feat-d", "--repo", "acme/widget"}) {
 		t.Fatalf("no console: exit %d, next = %v", code, n)
 	}
 
@@ -1148,5 +1149,41 @@ func TestNextForAPendingGateOnAMergedMovedFeature(t *testing.T) {
 	te.shadowCommit("feat-b", map[string]string{"later.txt": "later still\n"})
 	if code, out, _ := te.run("feature", "show", "feat-b"); code != 0 || !strings.Contains(out, "  gate: pending (job "+job+"), stale\n") {
 		t.Fatalf("feature show: %d %q", code, out)
+	}
+}
+
+// FEATURE_NOT_FOUND offers the list of every feature, abandoned ones too.
+func TestNextForAnUnknownFeatureListsThemAll(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	_, env := te.runJSON("feature", "show", "nope")
+	if n := nextOf(t, env); len(n) != 1 || !reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "feature", "list", "--all", "--repo", "acme/widget"}) {
+		t.Fatalf("next = %v", n)
+	}
+}
+
+// A secret the only commit introduced: amend it, don't fix it on top.
+func TestNextForATipLeakSaysAmend(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	te.mustRun("feature", "start", "feat-x")
+	te.shadowCommit("feat-x", map[string]string{"config.env": "TOKEN=" + testutil.FakeGitHubToken() + "\n"})
+	_, env := te.runJSON("gate", "feat-x")
+	n := nextOf(t, env)
+	if why := n[0]["why"].(string); !strings.Contains(why, "amend") || !strings.Contains(why, "git push --force-with-lease shadow feat-x") {
+		t.Fatalf("next = %v", n)
+	}
+}
+
+// The human next prints a positional input once: <name>, not <name> <<name>>.
+func TestSyncHumanNextNamesThePlaceholderOnce(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	_, out, _ := te.run("sync")
+	if !strings.Contains(out, "ghostbranch feature start --repo acme/widget <name>\n") || strings.Contains(out, "<<name>>") {
+		t.Fatalf("stdout:\n%s", out)
 	}
 }

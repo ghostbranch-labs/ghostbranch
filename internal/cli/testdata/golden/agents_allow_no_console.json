@@ -10,7 +10,9 @@
       "command": [
         "ghostbranch",
         "agents",
-        "allow"
+        "allow",
+        "--repo",
+        "acme/widget"
       ],
       "why": "a person must run this in their own terminal and type the code it shows",
       "needs_human": true,
