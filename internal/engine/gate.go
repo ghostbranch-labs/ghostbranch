@@ -151,12 +151,14 @@ func (e *Engine) runGate(ctx context.Context, p workspace.Pair, name string, det
 	}
 	var w []contract.Warning
 	if pending != nil {
-		if res, err = e.resultFromRecord(ctx, pc, name, *pending); err != nil {
-			return nil, nil, err
+		if res, w, err = e.resultFromRecord(ctx, pc, name, *pending); err != nil {
+			return nil, w, err
 		}
 		if !detach {
 			pc.release()
-			res, w, err = e.finish(ctx, pc, name, res, *pending, waitOpts{})
+			var fw []contract.Warning
+			res, fw, err = e.finish(ctx, pc, name, res, *pending, waitOpts{})
+			w = addWarnings(w, fw...)
 		}
 	} else {
 		// A standalone gate scans for the repo's promote.default_mode.

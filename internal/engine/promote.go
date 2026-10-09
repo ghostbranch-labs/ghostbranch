@@ -187,7 +187,8 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 			return res, warns, err
 		}
 		if pg != nil {
-			gr, err := e.resultFromRecord(ctx, pc, opt.Feature, *pg)
+			gr, rw, err := e.resultFromRecord(ctx, pc, opt.Feature, *pg)
+			warns = addWarnings(warns, rw...)
 			if err != nil {
 				return res, warns, err
 			}
