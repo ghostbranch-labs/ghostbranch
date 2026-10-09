@@ -63,3 +63,27 @@ func TestNextForJobErrors(t *testing.T) {
 		t.Errorf("interrupted promote: next = %+v", next)
 	}
 }
+
+// A promote interrupted after its plan was saved resumes with apply <plan>,
+// and a public branch at an earlier plan's commits names that plan: making
+// new commits would only end in BRANCH_EXISTS.
+func TestNextPointsAtTheSavedPlan(t *testing.T) {
+	t.Parallel()
+	const id = "20261009T120000Z-abcdef"
+	apply := []string{"ghostbranch", "apply", id}
+	a := &app{env: Env{Getenv: func(string) string { return "" }}, command: "promote",
+		args:     []string{"promote", "feat-x", "--mode", "squash", "-m", "Add x", "--json"},
+		pairFull: workspace.Pair{Public: "acme/widget", Shadow: "acme/widget-shadow"}}
+	next := a.next(contract.New(contract.Interrupted, "x").WithDetails(map[string]any{"plan_id": id, "feature": "feat-x"}))
+	if len(next) != 1 || !slices.Equal(next[0].Command, apply) {
+		t.Errorf("interrupted after the plan: next = %+v, want %v", next, apply)
+	}
+	a.command, a.args = "apply", []string{"apply", "20261009T130000Z-123456", "--json"}
+	next = a.next(contract.New(contract.BranchExists, "x").WithDetails(map[string]any{"branch": "feat-x", "sha": "abc", "plan_id": id}))
+	if len(next) == 0 || !slices.Equal(next[0].Command, apply) {
+		t.Errorf("branch at an earlier plan: next = %+v, want %v first", next, apply)
+	}
+	if next := a.next(contract.New(contract.BranchExists, "x").WithDetails(map[string]any{"branch": "feat-x", "sha": "abc"})); len(next) != 0 {
+		t.Errorf("branch at another commit: next = %+v, want none", next)
+	}
+}

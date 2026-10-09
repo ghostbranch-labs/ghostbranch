@@ -195,12 +195,17 @@ func pairPlans(dir, public string) ([]string, error) {
 	return out, nil
 }
 
-// planFile is the part of a plan file that says whose it is.
+// planFile is the part of a plan file that says whose it is, and what it
+// publishes where.
 type planFile struct {
 	ID      string    `json:"id"`
 	Pair    plan.Pair `json:"pair"`
 	Feature string    `json:"feature"`
-	Path    string    `json:"-"`
+	Publish struct {
+		Commit       string `json:"commit"`
+		TargetBranch string `json:"target_branch"`
+	} `json:"publish"`
+	Path string `json:"-"`
 }
 
 // planFiles decodes every plan file in dir, in name order. A file that

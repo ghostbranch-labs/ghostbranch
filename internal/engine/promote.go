@@ -81,6 +81,14 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 			g = res.Gate
 		}
 		err = interrupted(ctx, g, opt.Feature, err)
+		// Once the plan is saved, apply resumes the publish wherever it
+		// stopped (an apply that began returns its partial result too).
+		if res != nil && res.PlanPath != "" && contract.From(err) != nil && contract.From(err).Code == contract.Interrupted {
+			id := res.Plan.ID
+			err = contract.New(contract.Interrupted,
+				"interrupted after plan %s was saved; resume the publish with ghostbranch apply %s (promoting again would make new commits)", id, id).
+				WithDetails(map[string]any{"plan_id": id, "feature": opt.Feature})
+		}
 	}()
 	if err := ValidatePromoteOptions(&opt); err != nil {
 		return nil, nil, err
@@ -331,7 +339,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 			res.Preview = pv
 			return res, warns, nil
 		}
-		if err := e.previewPublish(ctx, pc, pv, branch, P); err != nil {
+		if err := e.previewPublish(ctx, pc, pv, opt.Feature, branch, P); err != nil {
 			return res, warns, err
 		}
 		res.Preview = pv

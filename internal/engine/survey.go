@@ -30,6 +30,11 @@ type FeatureReport struct {
 	// it could, "newer" (from a newer Ghostbranch) or "corrupt". Such a
 	// feature never closes unattended.
 	unreadable string
+	// gateForPublished: the feature has no gate, or its gate is for the
+	// head that was published and its gate branch is gone or still at the
+	// gate's candidate. Otherwise the gate may hold commits never
+	// published, and a branch_gone feature doesn't close unattended.
+	gateForPublished bool
 }
 
 // Drift is whether a feature still merges cleanly onto public main.
@@ -165,6 +170,15 @@ func (e *Engine) surveyOne(ctx context.Context, pc *pairCtx, name, pm, O string)
 		base := e.publishedHead(m)
 		r.Moved = base == "" || head != base
 	}
+	if g := m.Gate; g == nil {
+		r.gateForPublished = true
+	} else if m.Promoted != nil && g.FeatureHead != "" && g.FeatureHead == m.Promoted.FeatureHead {
+		tip, ok, err := pc.git.Resolve(ctx, shadowRef(gateBranch(name)))
+		if err != nil {
+			return FeatureReport{}, nil, internalErr(err, "read gate branch "+gateBranch(name))
+		}
+		r.gateForPublished = !ok || tip == g.Candidate
+	}
 	if exists {
 		clean, files, err := pc.git.MergeTreeCheck(ctx, pm, head)
 		switch {
@@ -220,9 +234,13 @@ const (
 )
 
 // ClosableWithoutConsole is the one rule for unattended deletion: published,
-// merged and unmoved, or merged with its branch already gone (nothing left
-// on it to lose). A record this binary can't read as a whole never is.
+// merged and unmoved, or merged with its branch already gone, when the gate
+// (if any) is for what was published (nothing left on it to lose). A record
+// this binary can't read as a whole never is.
 func ClosableWithoutConsole(r FeatureReport) bool {
-	return r.unreadable == "" && (r.State == feature.StateMerged ||
-		(r.State == feature.StateBranchGone && r.PRState == "merged"))
+	if r.unreadable != "" {
+		return false
+	}
+	return r.State == feature.StateMerged ||
+		(r.State == feature.StateBranchGone && r.PRState == "merged" && r.gateForPublished)
 }

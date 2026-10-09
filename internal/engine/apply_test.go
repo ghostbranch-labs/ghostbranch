@@ -76,7 +76,10 @@ func TestApplyRefusesAPublicBranchAtAnotherCommit(t *testing.T) {
 	h, id := planned(t)
 	testutil.Commit(t, h.pubGit, "feat-x", "someone else", map[string]string{"x": "x\n"})
 	_, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: id, Yes: true})
-	_ = wantCode(t, err, contract.BranchExists)
+	// No plan of the feature publishes that commit: nothing to resume.
+	if ce := wantCode(t, err, contract.BranchExists); ce.Details["plan_id"] != nil {
+		t.Fatalf("details = %+v", ce.Details)
+	}
 }
 
 func TestApplyUnknownPlan(t *testing.T) {
@@ -403,4 +406,35 @@ func TestApplyRefusesAPlanWhoseGateIsPending(t *testing.T) {
 	if !reflect.DeepEqual(h.publicRefs(), before) {
 		t.Fatal("a plan with a pending gate changed the public repo")
 	}
+}
+
+// A public branch already at the commits of an earlier plan of the same
+// feature names that plan: apply <that plan> resumes its publish.
+func TestBranchExistsNamesTheEarlierPlan(t *testing.T) {
+	t.Parallel()
+	h := gated(t)
+	first, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "Add feature", Yes: true})
+	if err != nil || first.Applied == nil {
+		t.Fatalf("first promote = %+v %v", first, err)
+	}
+	testutil.Commit(t, h.shadowGit(), "feat-x", "nothing new", map[string]string{})
+	second, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "Add feature, again", PlanOnly: true})
+	if err != nil || second.Plan == nil || second.Plan.Publish.Commit == first.Plan.Publish.Commit {
+		t.Fatalf("second promote = %+v %v", second, err)
+	}
+	if got := h.publicRefs()["refs/heads/feat-x"]; got != first.Plan.Publish.Commit {
+		t.Fatalf("public branch at %s, want the first plan's commit", got)
+	}
+	check := func(what string) {
+		t.Helper()
+		_, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: second.Plan.ID, Yes: true})
+		ce := wantCode(t, err, contract.BranchExists)
+		if ce.Details["plan_id"] != first.Plan.ID || ce.Details["sha"] != first.Plan.Publish.Commit ||
+			!strings.Contains(ce.Message, "ghostbranch apply "+first.Plan.ID) {
+			t.Fatalf("%s: %s, details = %+v", what, ce.Message, ce.Details)
+		}
+	}
+	check("apply")
+	h.eng.DryRun = true
+	check("apply --dry-run")
 }

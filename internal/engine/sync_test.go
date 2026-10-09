@@ -1065,3 +1065,90 @@ func TestSyncBranchGoneFeatures(t *testing.T) {
 		t.Fatal("sync touched the feature whose PR is open")
 	}
 }
+
+// A merged feature whose branch is gone closes unattended only when its
+// gate (if any) is for what was published: a gate for a newer head, or a
+// gate branch moved off the recorded candidate, may hold commits never
+// published, so a person decides.
+func TestSyncLeavesABranchGoneFeatureWithANewerGate(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	sh := h.shadowGit()
+	prX, _ := h.publish("feat-x")
+	prY, _ := h.publish("feat-y")
+	h.forge.SetPRMerged(publicName, prX)
+	h.forge.SetPRMerged(publicName, prY)
+	// feat-x gets one more commit and is gated again: its gate is now for
+	// a head that was never published.
+	testutil.Commit(t, sh, "feat-x", "after the merge", map[string]string{"later.txt": "l\n"})
+	h.gateFeature("feat-x")
+	for _, b := range []string{"feat-x", "feat-y"} {
+		if err := sh.DeleteRef(h.ctx, "refs/heads/"+b); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if r := h.report("feat-x"); r.State != feature.StateBranchGone || r.PRState != "merged" || engine.ClosableWithoutConsole(r) {
+		t.Fatalf("gated past the publish: %+v closable %v", r, engine.ClosableWithoutConsole(r))
+	}
+	// feat-y's gate is for what was published, but only while its gate
+	// branch is at the recorded candidate.
+	gateRef := "refs/heads/ghostbranch-gate/feat-y"
+	candidate := h.shadowRefs()[gateRef]
+	main := h.shadowRefs()["refs/heads/main"]
+	if err := sh.UpdateRef(h.ctx, gateRef, main); err != nil {
+		t.Fatal(err)
+	}
+	if r := h.report("feat-y"); r.State != feature.StateBranchGone || engine.ClosableWithoutConsole(r) {
+		t.Fatalf("gate branch moved: %+v closable %v", r, engine.ClosableWithoutConsole(r))
+	}
+	if err := sh.UpdateRef(h.ctx, gateRef, candidate); err != nil {
+		t.Fatal(err)
+	}
+	keepX := h.featureRefs("feat-x", "")
+	h.eng.Approver = nil
+
+	res, _ := h.syncOK(engine.SyncOptions{})
+	if len(res.Closed) != 1 || res.Closed[0].Name != "feat-y" || res.Closed[0].PublicPR != prY {
+		t.Fatalf("closed = %+v, want only feat-y", res.Closed)
+	}
+	if len(res.Attention) != 1 || res.Attention[0].Name != "feat-x" || res.Attention[0].State != feature.StateBranchGone {
+		t.Fatalf("attention = %+v", res.Attention)
+	}
+	after := h.shadowRefs()
+	for ref, sha := range keepX {
+		if after[ref] != sha {
+			t.Errorf("sync deleted or moved %s of the feature gated past its publish", ref)
+		}
+	}
+	for _, ent := range h.closeEntries() {
+		if ent.Feature == "feat-x" {
+			t.Fatalf("a feature close of feat-x was recorded: %+v", ent)
+		}
+	}
+}
+
+// Review Focus 3: a record from a newer Ghostbranch is never closed
+// unattended, even published, merged and unmoved; status still lists it.
+func TestSyncNeverClosesANewerRecord(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	pr, _ := h.publish("feat-x")
+	h.forge.SetPRMerged(publicName, pr)
+	h.newerMeta("feat-x")
+	before := h.shadowRefs()
+	h.eng.Approver = nil
+
+	res, warns := h.syncOK(engine.SyncOptions{})
+	if len(res.Closed) != 0 || warning(warns, contract.RecordNewer) == nil {
+		t.Fatalf("closed = %+v, warnings = %+v", res.Closed, warns)
+	}
+	if !reflect.DeepEqual(h.shadowRefs(), before) || len(h.closeEntries()) != 0 {
+		t.Fatal("sync deleted something of a newer record")
+	}
+	st, _ := h.status(contract.RecordNewer)
+	if len(st.Features) != 1 || st.Features[0].Name != "feat-x" || st.Features[0].State != feature.StateMerged {
+		t.Fatalf("status features = %+v", st.Features)
+	}
+}
