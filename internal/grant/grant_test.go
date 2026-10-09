@@ -199,3 +199,45 @@ func TestNewerGrantsFile(t *testing.T) {
 		t.Fatalf("the newer file was changed: %s", got)
 	}
 }
+
+// A well-formed file whose values don't decode (a bad time) is as corrupt as
+// one that isn't JSON: revoke --all clears it. A file that can't be read, or
+// one from a newer Ghostbranch, is never replaced.
+func TestRevokeAllClearsAFileWithABadValue(t *testing.T) {
+	t.Parallel()
+	for name, raw := range map[string]string{
+		"bad created_at": `{"schema_version":"0.8","grants":[{"id":"g-1","created_at":"nope"}]}`,
+		"bad expires_at": `{"schema_version":"0.8","grants":[{"id":"g-1","expires_at":"nope"}]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			s, path := store(t)
+			if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.Load(); err == nil {
+				t.Fatal("a bad value must be a Load error")
+			}
+			if _, err := s.Revoke("", true, t0); err != nil {
+				t.Fatalf("revoke --all must clear it: %v", err)
+			}
+			if all, err := s.Load(); err != nil || len(all) != 0 {
+				t.Fatalf("after clearing: %v %v", all, err)
+			}
+		})
+	}
+}
+
+func TestRevokeAllKeepsAnUnreadableGrantsFile(t *testing.T) {
+	t.Parallel()
+	s, path := store(t)
+	if err := os.Mkdir(path, 0o755); err != nil { // reading a folder fails, and isn't a decode error
+		t.Fatal(err)
+	}
+	if _, err := s.Revoke("", true, t0); err == nil {
+		t.Fatal("revoke --all must not replace a file it couldn't read")
+	}
+	if fi, err := os.Stat(path); err != nil || !fi.IsDir() {
+		t.Fatalf("the unreadable path was replaced: %v %v", fi, err)
+	}
+}

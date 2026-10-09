@@ -68,7 +68,7 @@ func (s *Store) Load() ([]Waiver, error) {
 	}
 	var f file
 	if err := json.Unmarshal(b, &f); err != nil {
-		return nil, fmt.Errorf("%s is not valid JSON; fix it or run `ghostbranch waivers revoke --all`: %w", s.path, err)
+		return nil, corruptFile{fmt.Errorf("%s is not valid JSON; fix it or run `ghostbranch waivers revoke --all`: %w", s.path, err)}
 	}
 	if contract.Newer(f.SchemaVersion) {
 		return nil, contract.NewerRecord("waivers", f.SchemaVersion)
@@ -104,8 +104,10 @@ func (s *Store) Add(ws []Waiver, now time.Time) error {
 	})
 }
 
-// Revoke removes the waivers Matches selects and returns them. With all, an
-// unreadable file is replaced too, so a corrupt waivers.json can be cleared.
+// Revoke removes the waivers Matches selects and returns them. With all, a
+// file that isn't valid JSON or doesn't decode is replaced too, so a corrupt
+// waivers.json can be cleared; one it couldn't read, or from a newer
+// Ghostbranch, is kept.
 func (s *Store) Revoke(public string, ids []string, all bool, now time.Time) ([]Waiver, error) {
 	removed := []Waiver{}
 	err := s.update(now, all, func(old []Waiver) []Waiver {
@@ -153,11 +155,17 @@ func (s *Store) save(ws []Waiver) error {
 	return os.Rename(tmp, s.path)
 }
 
-// unparsable reports a Load error from a file that isn't valid JSON, the
-// only error revoke --all may replace the file over: a file it couldn't
+// corruptFile marks a Load error from a file whose bytes were read but didn't
+// decode: not JSON, or JSON with a value of the wrong kind or a bad time.
+type corruptFile struct{ err error }
+
+func (c corruptFile) Error() string { return c.err.Error() }
+func (c corruptFile) Unwrap() error { return c.err }
+
+// unparsable reports a Load error from a file that was read but didn't decode,
+// the only error revoke --all may replace the file over: a file it couldn't
 // read, or one from a newer Ghostbranch, stays as it is.
 func unparsable(err error) bool {
-	var syn *json.SyntaxError
-	var typ *json.UnmarshalTypeError
-	return errors.As(err, &syn) || errors.As(err, &typ)
+	var c corruptFile
+	return errors.As(err, &c)
 }

@@ -100,7 +100,7 @@ func (a *app) waiversRevokeCmd() *cobra.Command {
 			return done(a, res, w, err)
 		},
 	}
-	c.Flags().BoolVar(&all, "all", false, "revoke every waiver in this workspace (also clears an unreadable waivers.json)")
+	c.Flags().BoolVar(&all, "all", false, "revoke every waiver in this workspace (also clears a waivers.json that isn't valid JSON; a file from a newer Ghostbranch is kept)")
 	c.Flags().BoolVar(&a.dryRun, "plan", false, "preview what would be revoked")
 	return c
 }

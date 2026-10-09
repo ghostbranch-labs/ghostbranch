@@ -282,7 +282,7 @@ func (e *Engine) WaiversList(ctx context.Context, p *workspace.Pair) (*WaiversLi
 
 // WaiversRevoke removes waivers by id for one pair, or every waiver with
 // all. Taking a waiver away only makes the gate stricter, so it needs no
-// console. With all it also clears an unreadable waivers.json.
+// console. With all it also clears a waivers.json that does not decode.
 func (e *Engine) WaiversRevoke(ctx context.Context, p *workspace.Pair, ids []string, all bool) (res *WaiversRevokeResult, warns []contract.Warning, err error) {
 	defer func() {
 		var revoked []string
