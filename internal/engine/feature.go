@@ -53,7 +53,7 @@ func (e *Engine) FeatureStart(ctx context.Context, p workspace.Pair, name string
 	}
 	if mn.Behind > 0 {
 		return nil, warns, contract.New(contract.ShadowBehindError,
-			"shadow main is %d commit(s) behind public main, so a feature started now would be based on old code; run ghostbranch sync, then start the feature again", mn.Behind).
+			"shadow main is %d commit(s) behind public main, so a feature started now would be based on old code; run ghostbranch sync --repo %s, then start the feature again", mn.Behind, p.Public).
 			WithDetails(map[string]any{"public_main": mn.Public, "shadow_main": mn.Shadow})
 	}
 	if err := e.checkNameFree(ctx, pc, name); err != nil {
@@ -64,7 +64,7 @@ func (e *Engine) FeatureStart(ctx context.Context, p workspace.Pair, name string
 		return nil, warns, internalErr(err, "read shadow main")
 	}
 	res = &FeatureStartResult{Name: name, Branch: name, Base: base}
-	res.SetCheckout([][]string{{"git", "fetch"}, {"git", "switch", name}})
+	res.SetCheckout([][]string{{"git", "fetch", remoteShadow}, {"git", "switch", name}})
 	if e.DryRun {
 		res.Preview = preview.New(map[string]string{"shadow_main": base})
 		res.Preview.Add(preview.PushRef(p.Shadow, "refs/heads/"+name, "", base), preview.PushRef(p.Shadow, remoteMetaRef(name), "", ""))

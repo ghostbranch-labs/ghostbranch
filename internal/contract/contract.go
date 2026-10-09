@@ -13,7 +13,7 @@ import (
 
 // SchemaVersion versions the envelope and every data schema. It stays 0.x
 // until launch, and 0.x versions may break.
-const SchemaVersion = "0.8"
+const SchemaVersion = "0.9"
 
 // Exit codes. Agents branch on these, so they never change meaning.
 const (
@@ -41,6 +41,12 @@ const (
 	TokenCannotPublish Code = "TOKEN_CANNOT_PUBLISH"
 	GuardUnsupported   Code = "GUARD_UNSUPPORTED"
 	PushBlocked        Code = "PUSH_BLOCKED"
+	// NothingToPublish means every feature commit is empty once overlay
+	// paths and internal sections are stripped.
+	NothingToPublish Code = "NOTHING_TO_PUBLISH"
+	// AuthorUnmapped means promote.author_email is map and a commit's author
+	// email is not in promote.author_map.
+	AuthorUnmapped Code = "AUTHOR_UNMAPPED"
 
 	BadFlag         Code = "BAD_FLAG"
 	MissingInput    Code = "MISSING_INPUT"
@@ -48,17 +54,12 @@ const (
 	NameInvalid     Code = "NAME_INVALID"
 	FeatureNotFound Code = "FEATURE_NOT_FOUND"
 	// WaiverUnknown means waivers add named an id that is not a waivable
-	// finding in what the gate would publish now.
+	// finding, or waivers revoke named an id with no stored waiver for the
+	// repo.
 	WaiverUnknown Code = "WAIVER_UNKNOWN"
 	// CurateInvalid means a --curate file is malformed, or its groups do not
 	// name every feature commit exactly once.
 	CurateInvalid Code = "CURATE_INVALID"
-	// NothingToPublish means every feature commit is empty once overlay
-	// paths and internal sections are stripped.
-	NothingToPublish Code = "NOTHING_TO_PUBLISH"
-	// AuthorUnmapped means promote.author_email is map and a commit's author
-	// email is not in promote.author_map.
-	AuthorUnmapped Code = "AUTHOR_UNMAPPED"
 
 	NotAPairCheckout Code = "NOT_A_PAIR_CHECKOUT"
 
@@ -210,7 +211,8 @@ const (
 	ConfigKeyIgnored WarningCode = "CONFIG_KEY_IGNORED"
 	PublicNotPublic  WarningCode = "PUBLIC_NOT_PUBLIC"
 	// GateNotRecorded means the gate's result could not be saved to the
-	// feature metadata; the result itself still stands.
+	// feature metadata; the result itself still stands. With details.job the
+	// job's record is still there for wait to finish.
 	GateNotRecorded WarningCode = "GATE_NOT_RECORDED"
 	// ChecksLimited means the token cannot read check runs, so the gate saw
 	// only GitHub Actions workflows and commit statuses.
@@ -254,8 +256,9 @@ const (
 	// DriftUnknown means the survey couldn't check whether a feature still
 	// merges cleanly onto public main.
 	DriftUnknown WarningCode = "DRIFT_UNKNOWN"
-	// FeatureNotClosed means sync's auto-close of a merged feature failed;
-	// the sync itself still succeeded.
+	// FeatureNotClosed means sync didn't close a merged feature: its close
+	// failed (details.feature names it), or sync couldn't survey the features
+	// and closed none (no details.feature). The sync itself still succeeded.
 	FeatureNotClosed WarningCode = "FEATURE_NOT_CLOSED"
 	// MirrorNotUpdated means a push to the shadow repo succeeded, but the
 	// local mirror's copy of a ref (or a local plan file) couldn't be
@@ -267,13 +270,23 @@ const (
 	// RecordUnreadable means a feature record couldn't be read; a person at
 	// the console closed the feature anyway.
 	RecordUnreadable WarningCode = "RECORD_UNREADABLE"
+	// LedgerNotWritten means a command did what its result says, but its
+	// ledger entry couldn't be written; after a close, details.refs keeps the
+	// deleted refs and their SHAs.
+	LedgerNotWritten WarningCode = "LEDGER_NOT_WRITTEN"
+	// SyncPushFailed means sync couldn't push one of sync.branches to the
+	// shadow repo; it still pushed the others.
+	SyncPushFailed WarningCode = "SYNC_PUSH_FAILED"
+	// PlanFileUnreadable means a plan file on this machine couldn't be read
+	// and was skipped.
+	PlanFileUnreadable WarningCode = "PLAN_FILE_UNREADABLE"
 )
 
 var warningCodes = []WarningCode{ConfigKeyIgnored, PublicNotPublic, GateNotRecorded, ChecksLimited, ActorUnknown,
 	WorkflowChanged, LargeFile, BinaryFile, WaiversUnreadable,
 	OverlayOutdated, RepoGuard, RepoGuardUnrewritable, SecretsUnlisted, SecretsMissing, PushTriggersOnSync,
 	ActionsMinutesBilled, ShadowBehind, AuditIncomplete, CINotCancelled, PRStateUnknown, DriftUnknown, FeatureNotClosed,
-	MirrorNotUpdated, RecordNewer, RecordUnreadable}
+	MirrorNotUpdated, RecordNewer, RecordUnreadable, LedgerNotWritten, SyncPushFailed, PlanFileUnreadable}
 
 // AllWarnings lists every warning code, sorted.
 func AllWarnings() []WarningCode {

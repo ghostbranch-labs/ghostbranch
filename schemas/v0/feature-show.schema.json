@@ -9,7 +9,7 @@
     "commits": {
       "description": "the feature's commits since public main, oldest first; empty when the branch is gone. Each one's files are what it changes from its parent, overlay paths left out.",
       "type": "array",
-      "items": { "$ref": "gate.schema.json#/properties/commits/items" }
+      "items": { "$ref": "common.schema.json#/$defs/commitInfo" }
     },
     "ledger": { "description": "this pair's ledger entries for the feature, oldest first", "type": "array", "items": { "$ref": "ledger-entry.schema.json" } }
   }

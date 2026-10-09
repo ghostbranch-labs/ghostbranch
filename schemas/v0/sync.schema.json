@@ -26,6 +26,7 @@
       }
     },
     "cancelled_runs": {
+      "description": "workflow runs this sync's own pushes started in the shadow repo, which it cancelled: push-triggered CI re-testing code public CI already tested (PUSH_TRIGGERS_ON_SYNC in ghostbranch audit says how to stop them); empty with --no-cancel or when none started",
       "type": "array",
       "items": {
         "type": "object",
@@ -57,7 +58,7 @@
       }
     },
     "surveyed": { "description": "whether sync surveyed the features: false with --no-close or when the survey failed, and then active_features and attention say nothing", "type": "boolean" },
-    "active_features": { "description": "features not abandoned and not closable by sync", "type": "integer", "minimum": 0 },
+    "active_features": { "description": "features not abandoned and not closable by sync; 0 unless surveyed", "type": "integer", "minimum": 0 },
     "attention": {
       "description": "merged_moved, pr_closed and branch_gone features sync won't close: a person must look at them",
       "type": "array",

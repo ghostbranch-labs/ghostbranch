@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -116,5 +117,23 @@ func TestLoadRefusesAPlanFromANewerGhostbranch(t *testing.T) {
 	if ce := contract.From(err); ce == nil || ce.Code != contract.UpgradeNeeded || ce.Details["record"] != "plan" ||
 		ce.Details["record_version"] != "0.99" || ce.Details["supported"] != contract.SchemaVersion {
 		t.Fatalf("want UPGRADE_NEEDED for the plan, got %v", err)
+	}
+}
+
+func TestLoadTellsBadJSONFromABadValue(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	for name, c := range map[string]struct{ raw, want, not string }{
+		"not json":    {"{", "not valid JSON", "can't read"},
+		"a bad value": {`{"id": 5}`, "can't read", "not valid JSON"},
+	} {
+		path := filepath.Join(dir, name+".json")
+		if err := os.WriteFile(path, []byte(c.raw), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, _, err := plan.Load(dir, path)
+		if err == nil || !strings.Contains(err.Error(), c.want) || strings.Contains(err.Error(), c.not) {
+			t.Errorf("%s: Load = %v", name, err)
+		}
 	}
 }

@@ -20,7 +20,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
-const SchemaVersion = "0.8"
+const SchemaVersion = "0.9"
 
 // DefaultFor is the grant length when --for is not given.
 const DefaultFor = "6h"
@@ -103,7 +103,11 @@ func (s *Store) Load() ([]Grant, error) {
 	}
 	var f file
 	if err := json.Unmarshal(b, &f); err != nil {
-		return nil, corruptFile{fmt.Errorf("%s is not valid JSON; fix it or run `ghostbranch agents revoke --all`: %w", s.path, err)}
+		what := "is not valid JSON"
+		if json.Valid(b) {
+			what = "has a value Ghostbranch can't read"
+		}
+		return nil, corruptFile{fmt.Errorf("%s %s; fix it or run `ghostbranch agents revoke --all`: %w", s.path, what, err)}
 	}
 	if contract.Newer(f.SchemaVersion) {
 		return nil, contract.NewerRecord("grants", f.SchemaVersion)

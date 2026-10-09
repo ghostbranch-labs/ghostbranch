@@ -20,20 +20,7 @@
     "commits": {
       "description": "The feature's commits as the gate replayed them, oldest first, for drafting a --curate file; empty when the replay didn't finish.",
       "type": "array",
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["source", "subject", "author", "files"],
-        "properties": {
-          "source": { "$ref": "common.schema.json#/$defs/sha" },
-          "subject": { "type": "string" },
-          "author": { "type": "string" },
-          "files": {
-            "description": "paths each commit changes on the feature branch, overlay paths left out; may include internal-only changes",
-            "type": "array", "items": { "type": "string" }
-          }
-        }
-      }
+      "items": { "$ref": "common.schema.json#/$defs/commitInfo" }
     },
     "checks": { "enum": ["passed", "failed", "no_ci", "timeout", "not_run", "pending"] },
     "failed_checks": { "type": "array", "items": { "type": "string" } },

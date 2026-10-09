@@ -158,7 +158,9 @@ func (e *Engine) finish(ctx context.Context, pc *pairCtx, name string, res *Gate
 		}
 		// The check outcome is what matters; don't replace it with a lesser error.
 		warns = append(warns, contract.Warning{Code: contract.GateNotRecorded,
-			Message: "the gate result could not be recorded in the feature metadata: " + contract.From(err).Message})
+			Message: "the gate result could not be recorded in the feature metadata: " + contract.From(err).Message +
+				"; run ghostbranch wait " + job + " to record it",
+			Details: map[string]any{"job": job}})
 	}
 	return res, warns, outcomeErr(checkOutcome{status: res.Checks, failed: res.FailedChecks}, pending.ShadowPR, cfg.Gate, shadow)
 }

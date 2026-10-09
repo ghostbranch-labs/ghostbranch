@@ -63,7 +63,7 @@ func TestSuccessEnvelopeShape(t *testing.T) {
 	if err := json.Unmarshal(b, &m); err != nil {
 		t.Fatal(err)
 	}
-	if m["schema_version"] != "0.8" || m["ok"] != true || m["exit_code"] != float64(0) ||
+	if m["schema_version"] != "0.9" || m["ok"] != true || m["exit_code"] != float64(0) ||
 		m["command"] != "sync" || m["error"] != nil {
 		t.Fatalf("bad envelope: %s", b)
 	}
@@ -134,7 +134,7 @@ func TestSubProject4CodesAreRegistered(t *testing.T) {
 	if err != nil || !es[0].NeedsHuman || !strings.Contains(es[0].WhatToDo, "--adopt") {
 		t.Fatalf("SHADOW_CREATE_DENIED doc: %+v %v", es, err)
 	}
-	if contract.SchemaVersion != "0.8" {
+	if contract.SchemaVersion != "0.9" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 }
@@ -157,7 +157,7 @@ func TestSubProject5aCodesAreRegistered(t *testing.T) {
 	if es, _ := contract.Explain("AUTHOR_UNMAPPED"); !es[0].NeedsHuman {
 		t.Fatal("AUTHOR_UNMAPPED needs a person: only they may edit the overlay config's author_map")
 	}
-	if contract.SchemaVersion != "0.8" {
+	if contract.SchemaVersion != "0.9" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 }
@@ -173,7 +173,7 @@ func TestSubProject5bCodesAreRegistered(t *testing.T) {
 			t.Fatalf("%s is not documented: %+v %v", c, es, err)
 		}
 	}
-	if contract.SchemaVersion != "0.8" {
+	if contract.SchemaVersion != "0.9" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 }
@@ -201,7 +201,7 @@ func TestFeatureNotClosedIsRegistered(t *testing.T) {
 	}
 	es, err := contract.Explain("FEATURE_NOT_CLOSED")
 	if err != nil || len(es) != 1 || es[0].Kind != contract.KindWarning ||
-		es[0].Summary != "Sync couldn't close a merged feature." ||
+		es[0].Summary != "Sync didn't close a merged feature: the close failed, or sync couldn't survey the features and so closed none." ||
 		!strings.HasPrefix(es[0].WhatToDo, "If details.deleted is set, the feature is gone: close its gate draft PR in the shadow repo by hand. Otherwise run ghostbranch feature show <name>, then feature close <name>.") ||
 		!strings.Contains(es[0].WhatToDo, "With no details.feature") {
 		t.Fatalf("FEATURE_NOT_CLOSED is not documented: %+v %v", es, err)
@@ -217,7 +217,7 @@ func TestShadowBehindIsAnErrorAndAWarning(t *testing.T) {
 	}
 	es, err := contract.Explain("shadow_behind")
 	if err != nil || len(es) != 2 || es[0].Kind != contract.KindError || *es[0].ExitCode != 4 ||
-		es[0].WhatToDo != "Run ghostbranch sync, then start the feature again." ||
+		es[0].WhatToDo != "Run ghostbranch sync --repo <public>, then start the feature again." ||
 		es[1].Kind != contract.KindWarning || es[1].ExitCode != nil {
 		t.Fatalf("explain SHADOW_BEHIND = %+v %v", es, err)
 	}
@@ -279,7 +279,7 @@ func TestSubProject5cCodesAreRegistered(t *testing.T) {
 			t.Fatalf("%s is not documented: %+v %v", c, es, err)
 		}
 	}
-	if contract.SchemaVersion != "0.8" {
+	if contract.SchemaVersion != "0.9" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 }
@@ -295,7 +295,7 @@ func TestSubProject5d1CodesAreRegistered(t *testing.T) {
 			t.Fatalf("%s is not documented: %+v %v", w, es, err)
 		}
 	}
-	if contract.SchemaVersion != "0.8" {
+	if contract.SchemaVersion != "0.9" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 	if es, _ := contract.Explain(string(contract.Locked)); !strings.Contains(es[0].WhatToDo, "nothing to delete") ||
@@ -327,7 +327,7 @@ func TestExplainSteersAnInterruptedPublishToApply(t *testing.T) {
 
 func TestNewer(t *testing.T) {
 	t.Parallel()
-	for v, want := range map[string]bool{"0.8": false, "0.7": false, "0.10": true, "0.9": true, "1.0": true,
+	for v, want := range map[string]bool{"0.9": false, "0.7": false, "0.10": true, "0.11": true, "1.0": true,
 		"": false, "x": false, "0.8.1": false, "0.4": false,
 		// A malformed version is never newer: it would lock users out.
 		"+1.0": false, "1.-5": false, "0.+9": false, " 0.9": false, "0.9 ": false, "1.": false, ".9": false} {
@@ -343,5 +343,49 @@ func TestNewerRecord(t *testing.T) {
 	if ce.Code != contract.UpgradeNeeded || ce.Details["record"] != "plan" || ce.Details["record_version"] != "0.99" ||
 		ce.Details["supported"] != contract.SchemaVersion || !strings.Contains(ce.Message, "plan record") {
 		t.Fatalf("NewerRecord = %+v", ce)
+	}
+}
+
+func TestSubProject5d2Contract(t *testing.T) {
+	t.Parallel()
+	if contract.SchemaVersion != "0.9" {
+		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
+	}
+	for _, c := range []contract.WarningCode{contract.LedgerNotWritten, contract.SyncPushFailed, contract.PlanFileUnreadable} {
+		if !slices.Contains(contract.AllWarnings(), c) {
+			t.Fatalf("%s is not in the warning list", c)
+		}
+	}
+	es, err := contract.Explain(string(contract.LedgerNotWritten))
+	if err != nil || len(es) != 1 || es[0].Summary == "" || !strings.Contains(es[0].WhatToDo, "details.refs") {
+		t.Fatalf("LEDGER_NOT_WRITTEN is not documented: %+v %v", es, err)
+	}
+	for code, wants := range map[string][]string{
+		"SHADOW_BEHIND":        {"--repo"}, // both the error and the warning
+		"GATE_NOT_RECORDED":    {"details.job", "ghostbranch wait"},
+		"WAIVERS_UNREADABLE":   {"newer", "upgrade"},
+		"FEATURE_NOT_CLOSED":   {"survey"},
+		"SYNC_PUSH_FAILED":     {"details.branch", "REF_MOVED"},
+		"PLAN_FILE_UNREADABLE": {"details.path"},
+		"WAIVER_UNKNOWN":       {"waivers revoke", "details.ids"},
+		"CI_NOT_CANCELLED":     {"details.runs"},
+	} {
+		es, _ := contract.Explain(code)
+		if len(es) == 0 {
+			t.Errorf("%s is not documented", code)
+		}
+		for _, e := range es {
+			for _, w := range wants {
+				if !strings.Contains(e.Summary+" "+e.WhatToDo, w) {
+					t.Errorf("%s (%s) lacks %q: %+v", code, e.Kind, w, e)
+				}
+			}
+		}
+	}
+	if es, _ := contract.Explain("GATE_NOT_RECORDED"); strings.HasPrefix(es[0].WhatToDo, "Gate again") {
+		t.Errorf("GATE_NOT_RECORDED still leads with gate again: %q", es[0].WhatToDo)
+	}
+	if es, _ := contract.Explain("ACTOR_UNKNOWN"); strings.Contains(es[0].Summary, "could not be read") {
+		t.Errorf("ACTOR_UNKNOWN summary: %q", es[0].Summary)
 	}
 }

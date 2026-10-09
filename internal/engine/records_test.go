@@ -197,3 +197,24 @@ func TestNewerStoresStopPromoteAndRemove(t *testing.T) {
 		t.Fatalf("remove with a newer waivers file: %v", err)
 	}
 }
+
+// A gate recorded before 0.5 has no commits. Decoding it and writing it back
+// at the current version leaves "commits": null, which the schema allows.
+func TestAnOldGateWithoutCommitsStillMatchesTheFeatureSchema(t *testing.T) {
+	t.Parallel()
+	sha := strings.Repeat("a", 40)
+	old := `{"schema_version":"0.4","name":"feat-x","branch":"feat-x","created_by":"human:octo",` +
+		`"created_at":"2026-10-01T00:00:00Z","base":"` + sha + `","abandoned":false,` +
+		`"gate":{"feature_head":"` + sha + `","public_main":"` + sha + `","overlay":"` + sha + `","candidate":"` + sha +
+		`","published_tree":"` + sha + `","checks":"passed","leak":"clean","at":"2026-10-01T00:00:00Z"},"promoted":null}`
+	m, err := feature.Decode([]byte(old))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.SchemaVersion = feature.SchemaVersion
+	raw := feature.Encode(m)
+	if !strings.Contains(string(raw), `"commits": null`) {
+		t.Fatalf("expected a null commits in %s", raw)
+	}
+	validateSchema(t, "feature.schema.json", raw)
+}

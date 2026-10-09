@@ -343,3 +343,13 @@ func TestWaitUsageErrorIsOneLine(t *testing.T) {
 		t.Fatalf("%d %q", code, out)
 	}
 }
+
+// The root help names wait's NDJSON stream, not only "one object".
+func TestRootHelpSaysWaitStreamsNDJSON(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	_, out, _ := te.run("--help")
+	if !strings.Contains(out, "streams NDJSON") {
+		t.Fatalf("root help:\n%s", out)
+	}
+}

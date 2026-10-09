@@ -6,7 +6,7 @@
   "required": ["schema_version", "id", "kind", "actor", "created_at", "pair", "feature", "mode", "fingerprint",
                "curate", "publish", "leak", "ci"],
   "properties": {
-    "schema_version": { "const": "0.8" },
+    "schema_version": { "const": "0.9" },
     "id": { "$ref": "common.schema.json#/$defs/planId" },
     "kind": { "const": "promote" },
     "actor": { "$ref": "common.schema.json#/$defs/actor" },

@@ -106,7 +106,7 @@ func TestFileIsPrivateAtomicAndHoldsNoSecret(t *testing.T) {
 		Waivers       []map[string]any `json:"waivers"`
 	}
 	b, _ := os.ReadFile(s.Path())
-	if err := json.Unmarshal(b, &raw); err != nil || raw.SchemaVersion != "0.8" || len(raw.Waivers) != 1 {
+	if err := json.Unmarshal(b, &raw); err != nil || raw.SchemaVersion != "0.9" || len(raw.Waivers) != 1 {
 		t.Fatalf("%s %v", b, err)
 	}
 	var keys []string
@@ -191,8 +191,8 @@ func TestRevokeAllClearsAFileWithABadValue(t *testing.T) {
 	if err := os.WriteFile(s.Path(), []byte(raw), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Load(); err == nil {
-		t.Fatal("a bad value must be a Load error")
+	if _, err := s.Load(); err == nil || strings.Contains(err.Error(), "not valid JSON") || !strings.Contains(err.Error(), "can't read") {
+		t.Fatalf("a valid file with a bad value: %v", err)
 	}
 	if _, err := s.Revoke("", nil, true, now); err != nil {
 		t.Fatalf("revoke --all must clear it: %v", err)
@@ -213,5 +213,16 @@ func TestRevokeAllKeepsAnUnreadableWaiversFile(t *testing.T) {
 	}
 	if fi, err := os.Stat(s.Path()); err != nil || !fi.IsDir() {
 		t.Fatalf("the unreadable path was replaced: %v %v", fi, err)
+	}
+}
+
+func TestLoadSaysWhenAFileIsNotJSON(t *testing.T) {
+	t.Parallel()
+	s, _ := newStore(t)
+	if err := os.WriteFile(s.Path(), []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Load(); err == nil || !strings.Contains(err.Error(), "not valid JSON") {
+		t.Fatalf("Load = %v", err)
 	}
 }

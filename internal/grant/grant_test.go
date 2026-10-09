@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -215,8 +216,8 @@ func TestRevokeAllClearsAFileWithABadValue(t *testing.T) {
 			if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := s.Load(); err == nil {
-				t.Fatal("a bad value must be a Load error")
+			if _, err := s.Load(); err == nil || strings.Contains(err.Error(), "not valid JSON") || !strings.Contains(err.Error(), "can't read") {
+				t.Fatalf("a valid file with a bad value: %v", err)
 			}
 			if _, err := s.Revoke("", true, t0); err != nil {
 				t.Fatalf("revoke --all must clear it: %v", err)
@@ -239,5 +240,16 @@ func TestRevokeAllKeepsAnUnreadableGrantsFile(t *testing.T) {
 	}
 	if fi, err := os.Stat(path); err != nil || !fi.IsDir() {
 		t.Fatalf("the unreadable path was replaced: %v %v", fi, err)
+	}
+}
+
+func TestLoadSaysWhenAFileIsNotJSON(t *testing.T) {
+	t.Parallel()
+	s, path := store(t)
+	if err := os.WriteFile(path, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Load(); err == nil || !strings.Contains(err.Error(), "not valid JSON") {
+		t.Fatalf("Load = %v", err)
 	}
 }

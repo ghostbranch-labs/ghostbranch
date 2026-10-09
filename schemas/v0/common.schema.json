@@ -2,6 +2,20 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Ghostbranch shared definitions",
   "$defs": {
+    "commitInfo": {
+      "description": "one feature commit: its source SHA, subject, author and the files it changes",
+      "type": "object", "additionalProperties": false,
+      "required": ["source", "subject", "author", "files"],
+      "properties": {
+        "source": { "$ref": "#/$defs/sha" },
+        "subject": { "type": "string" },
+        "author": { "description": "\"Name <email>\" as committed", "type": "string" },
+        "files": {
+          "description": "the paths the commit changes from its parent, overlay paths left out; may include changes that are internal only",
+          "type": "array", "items": { "type": "string" }
+        }
+      }
+    },
     "sha": { "type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$" },
     "shaOrEmpty": { "type": "string", "pattern": "^([0-9a-f]{40}([0-9a-f]{24})?)?$" },
     "repo": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },

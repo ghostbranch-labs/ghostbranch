@@ -73,7 +73,7 @@ func (e *Engine) Status(ctx context.Context, p workspace.Pair) (*StatusResult, [
 	res := &StatusResult{Public: pc.pair.Public, Shadow: pc.pair.Shadow, PublicMain: m.Public, ShadowMain: m.Shadow,
 		ShadowBehind: m.Behind > 0, Overlay: O, OverlayStatus: overlayStatus(files),
 		ScheduledSync: cfg.Sync.Schedule != config.ScheduleOff}
-	warns = addWarnings(warns, m.warnings()...)
+	warns = addWarnings(warns, m.warnings(pc.pair.Public)...)
 	warns = addWarnings(warns, outdatedWarnings(files)...)
 	rs, sw, err := e.survey(ctx, pc)
 	warns = addWarnings(warns, sw...)

@@ -36,9 +36,13 @@ func (e *Engine) splitFindings(p workspace.Pair, fs []leak.Finding) ([]leak.Find
 	if e.Waivers != nil {
 		var err error
 		if ws, err = e.Waivers.For(p.Public); err != nil {
-			warns = append(warns, contract.Warning{Code: contract.WaiversUnreadable,
-				Message: fmt.Sprintf("no waiver applied because %s could not be read (%v); a person fixes it or runs ghostbranch waivers revoke --all",
-					e.Waivers.Path(), err)})
+			msg := fmt.Sprintf("no waiver applied because %s could not be read (%v); a person fixes it or runs ghostbranch waivers revoke --all",
+				e.Waivers.Path(), err)
+			if contract.From(err).Code == contract.UpgradeNeeded {
+				msg = fmt.Sprintf("no waiver applied because %s was written by a newer Ghostbranch; upgrade ghostbranch on this machine (the waivers in it are kept)",
+					e.Waivers.Path())
+			}
+			warns = append(warns, contract.Warning{Code: contract.WaiversUnreadable, Message: msg})
 		}
 	}
 	for _, f := range fs {
