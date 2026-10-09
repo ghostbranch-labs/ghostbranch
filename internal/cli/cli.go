@@ -241,6 +241,10 @@ func printNext(w io.Writer, next []contract.Next) {
 	for _, n := range next {
 		line := shellJoin(n.Command)
 		for _, in := range n.NeedsInput {
+			if strings.HasPrefix(in, "<") { // a positional argument, already named <like-this>
+				line += " " + in
+				continue
+			}
 			line += " " + in + " <" + strings.TrimLeft(in, "-") + ">"
 		}
 		who := ""
