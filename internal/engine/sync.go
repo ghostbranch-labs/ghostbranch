@@ -50,6 +50,9 @@ type ClosedFeature struct {
 	Name     string            `json:"name"`
 	PublicPR int               `json:"public_pr"`
 	Deleted  map[string]string `json:"deleted"`
+	// GatePRLeftOpen is the gate PR the close couldn't close, 0 when none;
+	// for human output only.
+	GatePRLeftOpen int `json:"-"`
 }
 
 // CancelledRun is a workflow run sync cancelled in the shadow repo.
@@ -285,8 +288,12 @@ func (e *Engine) closeMerged(ctx context.Context, pc *pairCtx, p *workspace.Pair
 			if r.PublicPR != nil {
 				pr = *r.PublicPR
 			}
-			e.progressf("closed merged feature %s (PR #%d)", r.Name, pr)
-			res.Closed = append(res.Closed, ClosedFeature{Name: r.Name, PublicPR: pr, Deleted: cr.Deleted})
+			if cr.GatePRLeftOpen != 0 {
+				e.progressf("deleted merged feature %s (PR #%d), but its gate PR #%d is still open", r.Name, pr, cr.GatePRLeftOpen)
+			} else {
+				e.progressf("closed merged feature %s (PR #%d)", r.Name, pr)
+			}
+			res.Closed = append(res.Closed, ClosedFeature{Name: r.Name, PublicPR: pr, Deleted: cr.Deleted, GatePRLeftOpen: cr.GatePRLeftOpen})
 		}
 		if err != nil {
 			var gone map[string]string

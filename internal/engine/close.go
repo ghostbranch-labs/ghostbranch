@@ -34,6 +34,9 @@ type FeatureCloseResult struct {
 	NeedsConsole bool              `json:"needs_console"` // closing takes a person at a console (not ClosableWithoutConsole); set under --plan too
 	Approval     *ledger.Approval  `json:"approval"`      // console; nil under --plan, and when none was needed
 	Preview      *preview.Preview  `json:"preview"`
+	// GatePRLeftOpen is the gate PR the close couldn't close, 0 when none;
+	// for human output only.
+	GatePRLeftOpen int `json:"-"`
 }
 
 // FeatureAbandon parks a feature (or, with undo, restores it) by flipping
@@ -390,9 +393,11 @@ func (e *Engine) closeWith(ctx context.Context, pc *pairCtx, r FeatureReport, t 
 			res.GatePR = &n
 		case errors.Is(err, forge.ErrNotFound):
 		case errors.Is(err, forge.ErrForbidden):
+			res.GatePRLeftOpen = pr.Number
 			return res, warns, afterDeletes(forgeErr(err, "deleted %d ref(s) of feature %s, but the token may not close its gate PR #%d in %s; close it by hand",
 				len(res.Deleted), r.Name, pr.Number, sh))
 		default:
+			res.GatePRLeftOpen = pr.Number
 			return res, warns, afterDeletes(forgeErr(err, "deleted %d ref(s) of feature %s, but couldn't close its gate PR #%d in %s; close it by hand",
 				len(res.Deleted), r.Name, pr.Number, sh))
 		}

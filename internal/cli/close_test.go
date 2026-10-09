@@ -3,6 +3,7 @@ package cli_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -45,6 +46,26 @@ func TestAbandonAndCloseHumanOutput(t *testing.T) {
 	}
 	if !strings.Contains(out, "ghostbranch log") {
 		t.Errorf("close output doesn't say where the SHAs are kept:\n%s", out)
+	}
+}
+
+// Refs deleted but the gate PR still open: neither close nor sync says "closed".
+func TestAPartialCloseDoesNotReadAsClosed(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	grantAgents(te)
+	te.forge.SetPRMerged("acme/widget", publishFeature(te, "feat-a"))
+	te.forge.SetPRMerged("acme/widget", publishFeature(te, "feat-b"))
+	te.forge.ClosePRErr = errors.New("boom")
+	code, out, errOut := te.run("feature", "close", "feat-a")
+	if code == 0 || !strings.HasPrefix(out, "Deleted 4 ref(s) of feat-a (merged) from the shadow repo, but its gate PR #") || strings.Contains(out, "Closed") {
+		t.Fatalf("close: exit %d\nstdout: %s\nstderr: %s", code, out, errOut)
+	}
+	code, out, errOut = te.run("sync")
+	if code != 0 || !strings.Contains(out, "deleted merged feature feat-b (PR #") || strings.Contains(out, "closed merged feature feat-b") ||
+		strings.Contains(errOut, "closed merged feature feat-b") {
+		t.Fatalf("sync: exit %d\nstdout: %s\nstderr: %s", code, out, errOut)
 	}
 }
 
