@@ -513,10 +513,8 @@ func TestGetPRReportsMerged(t *testing.T) {
 func TestClosePullRequest(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
-	var method string
 	var body map[string]any
 	mux.HandleFunc("PATCH /repos/acme/widget/pulls/3", func(w http.ResponseWriter, r *http.Request) {
-		method = r.Method
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		writeJSON(w, map[string]any{"number": 3, "state": "closed"})
 	})
@@ -531,8 +529,8 @@ func TestClosePullRequest(t *testing.T) {
 	if err := c.ClosePullRequest(ctx, "acme/widget", 3); err != nil {
 		t.Fatal(err)
 	}
-	if method != "PATCH" || len(body) != 1 || body["state"] != "closed" {
-		t.Fatalf("request = %s %v", method, body)
+	if len(body) != 1 || body["state"] != "closed" {
+		t.Fatalf("request body = %v", body)
 	}
 	if err := c.ClosePullRequest(ctx, "acme/widget", 9); !errors.Is(err, forge.ErrNotFound) {
 		t.Fatalf("404: %v", err)

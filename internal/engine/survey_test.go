@@ -323,15 +323,32 @@ func TestSurveyPRStateUnknown(t *testing.T) {
 	h := newHarness(t)
 	h.init()
 	pr, _ := h.publish("feat-x")
+	prY, _ := h.publish("feat-y") // stays open
 	h.forge.SetPRMerged(publicName, pr)
-	h.forge.GetPRErr = errors.New("github is down")
+	h.forge.GetPRErr = func(full string, n int) error {
+		if full == publicName && n == pr {
+			return errors.New("github is down")
+		}
+		return nil
+	}
 	rs, warns := h.survey()
-	if len(rs) != 1 {
+	if len(rs) != 2 {
 		t.Fatalf("survey = %+v", rs)
 	}
-	r := rs[0]
+	var r, y engine.FeatureReport
+	for _, x := range rs {
+		switch x.Name {
+		case "feat-x":
+			r = x
+		case "feat-y":
+			y = x
+		}
+	}
 	if r.PRState != "unknown" || r.State != feature.StatePublished || r.PublicPR == nil || *r.PublicPR != pr || engine.ClosableWithoutConsole(r) {
 		t.Fatalf("report = %+v", r)
+	}
+	if y.PRState != "open" || y.PublicPR == nil || *y.PublicPR != prY {
+		t.Fatalf("feat-y report = %+v", y)
 	}
 	if len(warns) != 1 || warns[0].Code != contract.PRStateUnknown || warns[0].Details["feature"] != "feat-x" {
 		t.Fatalf("warnings = %+v", warns)

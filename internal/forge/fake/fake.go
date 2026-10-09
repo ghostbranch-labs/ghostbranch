@@ -57,8 +57,9 @@ type Forge struct {
 	ForceCancelErr       error
 	ForceCancelled       map[string][]int64
 	ForceCancelRepos     []string
-	// GetPRErr makes GetPR fail with that error.
-	GetPRErr error
+	// GetPRErr, when set, is asked before each GetPR (under the fake's
+	// lock, so it must not call the fake); a non-nil error fails that call.
+	GetPRErr func(full string, number int) error
 	// ClosePRErr makes ClosePullRequest fail with that error; ClosePRRepos
 	// records the repo each ClosePullRequest call named.
 	ClosePRErr   error
@@ -268,7 +269,9 @@ func (f *Forge) GetPR(_ context.Context, full string, number int) (forge.PR, err
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.GetPRErr != nil {
-		return forge.PR{}, f.GetPRErr
+		if err := f.GetPRErr(full, number); err != nil {
+			return forge.PR{}, err
+		}
 	}
 	for _, pr := range f.prs[full] {
 		if pr.Number == number {
