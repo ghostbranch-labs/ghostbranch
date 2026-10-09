@@ -105,7 +105,11 @@ func human(r any) string {
 			previewText(&b, v.Preview)
 			break
 		}
-		fmt.Fprintf(&b, "Shadow repo %s is ready for %s.\n", v.Shadow, v.Public)
+		if v.Ready {
+			fmt.Fprintf(&b, "Shadow repo %s is ready for %s.\n", v.Shadow, v.Public)
+		} else {
+			fmt.Fprintf(&b, "Init of %s for %s stopped before the shadow repo was ready.\n", v.Shadow, v.Public)
+		}
 		if len(v.MirroredBranches)+len(v.MirroredTags) > 0 {
 			fmt.Fprintf(&b, "  mirrored %d branch(es) and %d tag(s)\n", len(v.MirroredBranches), len(v.MirroredTags))
 		}

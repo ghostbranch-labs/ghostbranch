@@ -37,6 +37,9 @@ type InitResult struct {
 	DefaultBranchSet bool             `json:"default_branch_set"`
 	Audit            *AuditResult     `json:"audit"`
 	Preview          *preview.Preview `json:"preview"`
+	// Ready is true once Init returned without an error; human output says
+	// "ready" only then. It is not part of the JSON result.
+	Ready bool `json:"-"`
 }
 
 const overlayReadme = `# Ghostbranch overlay
@@ -60,6 +63,7 @@ func (e *Engine) Init(ctx context.Context, opt InitOptions) (res *InitResult, wa
 	defer func() {
 		summary := ""
 		if res != nil && err == nil {
+			res.Ready = true
 			summary = fmt.Sprintf("shadow %s ready (created=%v adopted=%v resumed=%v)", res.Shadow, res.CreatedShadow, res.Adopted, res.Resumed)
 		}
 		e.record("init", pair, "", "", summary, err)

@@ -353,3 +353,19 @@ func TestRootHelpSaysWaitStreamsNDJSON(t *testing.T) {
 		t.Fatalf("root help:\n%s", out)
 	}
 }
+
+// Human init output says the shadow repo is ready only when init finished.
+func TestHumanInitSaysReadyOnlyWhenItIs(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	te.forge.CreateForbidden = true
+	code, out, errOut := te.run("init", "acme/widget")
+	if code != 1 || strings.Contains(out, "is ready") || !strings.Contains(out, "stopped before the shadow repo was ready") ||
+		!strings.Contains(errOut, "SHADOW_CREATE_DENIED") {
+		t.Fatalf("failed init: %d\nstdout: %q\nstderr: %q", code, out, errOut)
+	}
+	te.forge.CreateForbidden = false
+	if code, out, errOut := te.run("init", "acme/widget"); code != 0 || !strings.Contains(out, "Shadow repo acme/widget-shadow is ready for acme/widget.\n") {
+		t.Fatalf("init: %d\nstdout: %q\nstderr: %q", code, out, errOut)
+	}
+}
