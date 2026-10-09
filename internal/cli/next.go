@@ -313,7 +313,10 @@ func (a *app) featureNexts(out []contract.Next, rs []engine.FeatureReport) []con
 			rest = append(rest, contract.Next{Command: closeCmd, NeedsHuman: true,
 				Why: "its PR was closed without merging"})
 		case feature.StateDraft, feature.StateInReview, feature.StateGatePassed, feature.StatePublished:
-			if r.Drift.Status == "conflicts" {
+			if r.Gate != nil && r.Gate.Job != nil {
+				rest = append(rest, contract.Next{Command: a.scoped("wait", *r.Gate.Job),
+					Why: "its gate is waiting on CI; finish it (wait streams progress with --json)"})
+			} else if r.Drift.Status == "conflicts" {
 				rest = append(rest, contract.Next{Command: a.scoped("gate", r.Name),
 					Why: "no longer merges cleanly onto public main"})
 			}

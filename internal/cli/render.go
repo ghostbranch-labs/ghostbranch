@@ -470,6 +470,8 @@ func featureShowText(b *strings.Builder, v *engine.FeatureShowResult) {
 	}
 	if g := r.Gate; g == nil {
 		b.WriteString("  gate: never run\n")
+	} else if g.Job != nil {
+		fmt.Fprintf(b, "  gate: pending (job %s)\n", oneLine(*g.Job))
 	} else {
 		fresh := "fresh"
 		if !g.Fresh {
