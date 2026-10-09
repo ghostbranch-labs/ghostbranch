@@ -214,13 +214,15 @@ func (e *Engine) Sync(ctx context.Context, p workspace.Pair, o SyncOptions) (res
 // closeMerged is sync's auto-close, under sync's pair lock. It surveys the
 // pair's features, which costs one GetPR per published feature: the only
 // way to learn which public PRs merged, and acceptable for the handful of
-// features a pair has. It sets res.ActiveFeatures and res.Attention, then
-// closes each feature that is ClosableWithoutConsole through closeFeature,
-// the same code as feature close: nothing that needs a person is ever
-// touched here. noClose skips all of it, the survey too. In a dry run the
-// closes' ops join res.Preview. Nothing here fails the sync: a survey that
-// fails closes nothing, and a close that fails (or, in a dry run, can't be
-// previewed) is a FEATURE_NOT_CLOSED warning. The ledger records each
+// features a pair has. Once the survey succeeds it sets res.Surveyed, then
+// res.ActiveFeatures and res.Attention (a survey that fails leaves all
+// three unset); then it closes each feature that is ClosableWithoutConsole
+// through closeFeature, the same code as feature close: nothing that needs
+// a person is ever touched here. noClose skips all of it, the survey too.
+// In a dry run the closes' ops join res.Preview. Nothing here fails the
+// sync: a survey that fails closes nothing, a feature whose record can't be
+// read is in res.Attention, and a close that fails (or, in a dry run, can't
+// be previewed) is a FEATURE_NOT_CLOSED warning. The ledger records each
 // close, with every ref it deleted, and a feature whose refs were deleted
 // is in res.Closed even if its gate PR then wouldn't close.
 func (e *Engine) closeMerged(ctx context.Context, pc *pairCtx, p *workspace.Pair, res *SyncResult, noClose bool) []contract.Warning {

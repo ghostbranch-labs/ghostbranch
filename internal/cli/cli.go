@@ -197,6 +197,9 @@ func commandName(cmd *cobra.Command) string {
 }
 
 func (a *app) render(err error) int {
+	if a.eng != nil {
+		a.warnings = append(a.warnings, a.eng.LedgerWarnings()...)
+	}
 	next := a.next(err)
 	env := contract.NewEnvelope(a.command, a.result, a.warnings, next, err)
 	if a.jsonOut {

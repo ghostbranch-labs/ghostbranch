@@ -235,6 +235,24 @@ func TestRemoveRefusesAPairFolderOutsidePairs(t *testing.T) {
 	}
 }
 
+// A plan file that can't be read is skipped with a warning: remove still
+// finishes.
+func TestRemoveSkipsAnUnreadablePlanFile(t *testing.T) {
+	t.Parallel()
+	h := removeFixture(t)
+	link := unreadablePlanFile(t, h)
+	_, warns, err := h.eng.Remove(h.ctx, h.pair)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w := warning(warns, contract.PlanFileUnreadable); w == nil || w.Details["path"] != link {
+		t.Fatalf("warnings = %+v", warns)
+	}
+	if _, ok := h.eng.WS.Find(publicName); ok {
+		t.Fatal("the pair is still registered")
+	}
+}
+
 func TestRemovePlanChangesNothing(t *testing.T) {
 	t.Parallel()
 	h := removeFixture(t)

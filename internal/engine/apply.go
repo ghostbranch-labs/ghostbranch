@@ -113,7 +113,8 @@ func replanDetails(err error, pl plan.Plan) error {
 // the feature record says was published: plan files outlive their apply,
 // and that publish is finished, not interrupted.
 func (e *Engine) earlierPlan(pair workspace.Pair, feature, branch, sha, published string) string {
-	files, err := planFiles(e.WS.PlansDir())
+	// A plan file that can't be read is simply not named.
+	files, _, err := planFiles(e.WS.PlansDir())
 	if err != nil {
 		return ""
 	}

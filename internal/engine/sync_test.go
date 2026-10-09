@@ -7,10 +7,8 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -1062,38 +1060,72 @@ func TestSyncCloseFailureIsAWarning(t *testing.T) {
 	}
 }
 
-// An unreadable plan file (even another pair's) fails the close with
-// INTERNAL before anything is deleted: a warning, never a failed sync.
-func TestSyncUnreadablePlanFileIsAWarning(t *testing.T) {
+// An unreadable plan file (even another pair's) is skipped with a warning:
+// the merged feature still closes, every ref of it.
+func TestSyncSkipsAnUnreadablePlanFile(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	h.init()
-	pr, _ := h.publish("feat-x")
+	pr, id := h.publish("feat-x")
 	h.forge.SetPRMerged(publicName, pr)
-	// other-pair.json links to a directory: listed as no directory, but
-	// reading it fails. Windows makes a junction, which needs no privilege.
-	link, target := filepath.Join(h.eng.WS.PlansDir(), "other-pair.json"), t.TempDir()
-	if err := os.Symlink(target, link); err != nil {
-		if runtime.GOOS != "windows" {
-			t.Fatal(err)
-		}
-		if out, err := exec.Command("cmd", "/c", "mklink", "/J", link, target).CombinedOutput(); err != nil {
-			t.Skipf("can't link a directory here: %v %s", err, out)
-		}
-	}
-	if _, err := os.ReadFile(link); err == nil {
-		t.Skip("the link reads as a file here")
-	}
-	before := h.shadowRefs()
+	want := h.featureRefs("feat-x", id)
+	link := unreadablePlanFile(t, h)
 	res, warns := h.syncOK(engine.SyncOptions{})
-	if res.Closed == nil || len(res.Closed) != 0 {
+	if len(res.Closed) != 1 || res.Closed[0].Name != "feat-x" || !reflect.DeepEqual(res.Closed[0].Deleted, want) {
 		t.Fatalf("closed = %+v", res.Closed)
 	}
-	if len(warns) != 1 || warns[0].Code != contract.FeatureNotClosed || warns[0].Details["error_code"] != string(contract.Internal) {
+	if len(warns) != 1 || warns[0].Code != contract.PlanFileUnreadable || warns[0].Details["path"] != link {
 		t.Fatalf("warnings = %+v", warns)
 	}
-	if !reflect.DeepEqual(h.shadowRefs(), before) {
-		t.Fatal("sync deleted something")
+	after := h.shadowRefs()
+	for ref := range want {
+		if _, ok := after[ref]; ok {
+			t.Errorf("%s is still in the shadow repo", ref)
+		}
+	}
+}
+
+// The ledger can't take sync's entries: the close still stands, and each
+// entry becomes a warning; the close's carries its deleted refs.
+func TestALedgerFailureAfterSyncClosesIsAWarning(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	pr, id := h.publish("feat-x")
+	h.forge.SetPRMerged(publicName, pr)
+	want := h.featureRefs("feat-x", id)
+	ledgerPath := h.eng.WS.LedgerPath()
+	if err := os.Remove(ledgerPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(ledgerPath, 0o755); err != nil { // appending to a folder fails
+		t.Fatal(err)
+	}
+	res, _ := h.syncOK(engine.SyncOptions{})
+	if len(res.Closed) != 1 || !reflect.DeepEqual(res.Closed[0].Deleted, want) {
+		t.Fatalf("closed = %+v", res.Closed)
+	}
+	ws := h.eng.LedgerWarnings()
+	var closeW, syncW *contract.Warning
+	for i := range ws {
+		if ws[i].Code != contract.LedgerNotWritten {
+			t.Fatalf("ledger warnings = %+v", ws)
+		}
+		switch ws[i].Details["op"] {
+		case "feature close":
+			closeW = &ws[i]
+		case "sync":
+			syncW = &ws[i]
+		}
+	}
+	if len(ws) != 2 || closeW == nil || syncW == nil {
+		t.Fatalf("ledger warnings = %+v", ws)
+	}
+	if closeW.Details["feature"] != "feat-x" || !reflect.DeepEqual(closeW.Details["refs"], want) {
+		t.Fatalf("the close's warning = %+v", *closeW)
+	}
+	if _, ok := syncW.Details["refs"]; ok {
+		t.Fatalf("the sync's warning has refs: %+v", *syncW)
 	}
 }
 

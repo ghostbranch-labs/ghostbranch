@@ -39,7 +39,9 @@ type FeatureReport struct {
 	// gateForPublished: the feature has no gate, or its gate is for the
 	// head that was published and its gate branch is gone or still at the
 	// gate's candidate. Otherwise the gate may hold commits never
-	// published, and a branch_gone feature doesn't close unattended.
+	// published, and a branch_gone feature doesn't close unattended. Set
+	// only for a merged branch_gone feature, the one case
+	// ClosableWithoutConsole reads it.
 	gateForPublished bool
 }
 
@@ -184,15 +186,6 @@ func (e *Engine) surveyOne(ctx context.Context, pc *pairCtx, name, pm, O string)
 		base := e.publishedHead(m)
 		r.Moved = base == "" || head != base
 	}
-	if g := m.Gate; g == nil {
-		r.gateForPublished = true
-	} else if m.Promoted != nil && g.FeatureHead != "" && g.FeatureHead == m.Promoted.FeatureHead {
-		tip, ok, err := pc.git.Resolve(ctx, shadowRef(gateBranch(name)))
-		if err != nil {
-			return FeatureReport{}, nil, internalErr(err, "read gate branch "+gateBranch(name))
-		}
-		r.gateForPublished = !ok || tip == g.Candidate
-	}
 	if exists {
 		clean, files, err := pc.git.MergeTreeCheck(ctx, pm, head)
 		switch {
@@ -209,7 +202,33 @@ func (e *Engine) surveyOne(ctx context.Context, pc *pairCtx, name, pm, O string)
 	}
 	r.State = feature.StateOf(feature.StateInput{Meta: m, BranchExists: exists, Head: head, PublicMain: pm,
 		Overlay: O, PRState: r.PRState, Moved: r.Moved})
+	// Only a merged branch_gone feature needs to know whether its gate is
+	// for what was published (ClosableWithoutConsole), so only it reads the
+	// gate branch.
+	if r.State == feature.StateBranchGone && r.PRState == prMerged {
+		if r.gateForPublished, err = gateIsForPublished(ctx, pc, name, m); err != nil {
+			return FeatureReport{}, nil, err
+		}
+	}
 	return r, warns, nil
+}
+
+// gateIsForPublished reports whether m has no gate, or a gate for the head
+// that was published whose gate branch is gone or still at the gate's
+// candidate. Otherwise the gate may hold commits never published.
+func gateIsForPublished(ctx context.Context, pc *pairCtx, name string, m feature.Meta) (bool, error) {
+	g := m.Gate
+	if g == nil {
+		return true, nil
+	}
+	if m.Promoted == nil || g.FeatureHead == "" || g.FeatureHead != m.Promoted.FeatureHead {
+		return false, nil
+	}
+	tip, ok, err := pc.git.Resolve(ctx, shadowRef(gateBranch(name)))
+	if err != nil {
+		return false, internalErr(err, "read gate branch "+gateBranch(name))
+	}
+	return !ok || tip == g.Candidate, nil
 }
 
 // publishedHead is the feature head a published feature was published

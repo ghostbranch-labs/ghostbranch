@@ -100,9 +100,12 @@ func (e *Engine) Remove(ctx context.Context, p workspace.Pair) (res *RemoveResul
 		ids = append(ids, id)
 	}
 	slices.Sort(ids)
-	plans, err := pairPlans(e.WS.PlansDir(), p.Public)
+	plans, unreadable, err := pairPlans(e.WS.PlansDir(), p.Public)
 	if err != nil {
 		return nil, nil, internalErr(err, "list plan files")
+	}
+	for _, u := range unreadable {
+		warns = append(warns, planFileUnreadable(u, "if it is a plan of "+p.Public+", delete it by hand"))
 	}
 	res = &RemoveResult{Public: p.Public, Shadow: p.Shadow, Grants: len(grants), Waivers: len(ids), Plans: plans, Dir: e.WS.PairDir(p)}
 	if e.DryRun {
@@ -117,7 +120,7 @@ func (e *Engine) Remove(ctx context.Context, p workspace.Pair) (res *RemoveResul
 			res.Preview.Add(preview.RemoveFile(path))
 		}
 		res.Preview.Add(preview.RemoveFile(res.Dir), preview.WriteFile(filepath.Join(e.WS.Dir, "workspace.json")))
-		return res, nil, nil
+		return res, warns, nil
 	}
 	if err := e.confirm(ctx, "", removeSummary(e.WS.Name, res, ids)); err != nil {
 		return nil, nil, err
@@ -152,7 +155,7 @@ func (e *Engine) Remove(ctx context.Context, p workspace.Pair) (res *RemoveResul
 	if err := e.WS.Update(e.Now(), func(w *workspace.Workspace) bool { return w.RemovePair(p.Public) }); err != nil {
 		return nil, nil, updateErr(err, "save workspace.json")
 	}
-	return res, nil, nil
+	return res, warns, nil
 }
 
 // checkPairDir refuses a pair whose folder would not be a direct child of
@@ -171,11 +174,12 @@ func (e *Engine) checkPairDir(p workspace.Pair) error {
 	return nil
 }
 
-// pairPlans lists the plan files in dir made for public, by path.
-func pairPlans(dir, public string) ([]string, error) {
-	files, err := planFiles(dir)
+// pairPlans lists the plan files in dir made for public, by path, and the
+// plan files it couldn't read.
+func pairPlans(dir, public string) ([]string, []unreadablePlan, error) {
+	files, unreadable, err := planFiles(dir)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	out := []string{}
 	for _, f := range files {
@@ -183,7 +187,7 @@ func pairPlans(dir, public string) ([]string, error) {
 			out = append(out, f.Path)
 		}
 	}
-	return out, nil
+	return out, unreadable, nil
 }
 
 // planFile is the part of a plan file that says whose it is, and what it
@@ -199,18 +203,26 @@ type planFile struct {
 	Path string `json:"-"`
 }
 
+// unreadablePlan is a plan file planFiles couldn't read.
+type unreadablePlan struct {
+	path string
+	err  error
+}
+
 // planFiles decodes every plan file in dir, in name order. A file that
-// isn't JSON is left out; one that can't be read is an error. Nothing here
-// is checked: the files are local and unsigned.
-func planFiles(dir string) ([]planFile, error) {
+// isn't JSON is left out, and so is one that can't be read: that one is
+// returned in unreadable, for the caller's PLAN_FILE_UNREADABLE warning.
+// Nothing here is checked: the files are local and unsigned.
+func planFiles(dir string) ([]planFile, []unreadablePlan, error) {
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
+		return nil, nil, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var out []planFile
+	var unreadable []unreadablePlan
 	for _, ent := range entries {
 		if ent.IsDir() || !strings.HasSuffix(ent.Name(), ".json") {
 			continue
@@ -218,7 +230,8 @@ func planFiles(dir string) ([]planFile, error) {
 		path := filepath.Join(dir, ent.Name())
 		b, err := os.ReadFile(path)
 		if err != nil {
-			return nil, err
+			unreadable = append(unreadable, unreadablePlan{path: path, err: err})
+			continue
 		}
 		var f planFile
 		if json.Unmarshal(b, &f) == nil {
@@ -226,7 +239,15 @@ func planFiles(dir string) ([]planFile, error) {
 			out = append(out, f)
 		}
 	}
-	return out, nil
+	return out, unreadable, nil
+}
+
+// planFileUnreadable is the warning for a plan file that was skipped; what
+// says what that may leave behind.
+func planFileUnreadable(u unreadablePlan, what string) contract.Warning {
+	return contract.Warning{Code: contract.PlanFileUnreadable,
+		Message: fmt.Sprintf("plan file %s couldn't be read (%v), so it was skipped; %s", u.path, u.err, what),
+		Details: map[string]any{"path": u.path}}
 }
 
 // removeSummary is what the person sees before typing the code.

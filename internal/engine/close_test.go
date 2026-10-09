@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -755,5 +757,77 @@ func TestAbandonWarnsWhenTheMirrorCantBeUpdated(t *testing.T) {
 	}
 	if !h.shadowMeta("feat-x").Abandoned {
 		t.Fatal("the shadow repo's metadata isn't abandoned")
+	}
+}
+
+// The ledger can't take the entry: the close still stands, and the warning
+// carries the deleted refs the ledger would have kept.
+func TestALedgerFailureAfterACloseIsAWarning(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	pr, id := h.publish("feat-x")
+	h.forge.SetPRMerged(publicName, pr)
+	want := h.featureRefs("feat-x", id)
+	ledgerPath := h.eng.WS.LedgerPath()
+	if err := os.Remove(ledgerPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(ledgerPath, 0o755); err != nil { // appending to a folder fails
+		t.Fatal(err)
+	}
+	res, _, err := h.eng.FeatureClose(h.ctx, h.pair, "feat-x")
+	if err != nil || !reflect.DeepEqual(res.Deleted, want) {
+		t.Fatalf("close = %+v %v", res, err)
+	}
+	ws := h.eng.LedgerWarnings()
+	if len(ws) != 1 || ws[0].Code != contract.LedgerNotWritten || ws[0].Details["op"] != "feature close" ||
+		ws[0].Details["feature"] != "feat-x" || ws[0].Details["path"] != ledgerPath || !reflect.DeepEqual(ws[0].Details["refs"], want) {
+		t.Fatalf("ledger warnings = %+v", ws)
+	}
+	if again := h.eng.LedgerWarnings(); again != nil {
+		t.Fatalf("LedgerWarnings must forget what it returned: %+v", again)
+	}
+}
+
+// unreadablePlanFile makes other-pair.json in the plans dir a link to a
+// folder: listed as a file, but reading it fails. Windows makes a junction,
+// which needs no privilege. It returns the path, or skips the test.
+func unreadablePlanFile(t *testing.T, h *harness) string {
+	t.Helper()
+	link, target := filepath.Join(h.eng.WS.PlansDir(), "other-pair.json"), t.TempDir()
+	if err := os.MkdirAll(h.eng.WS.PlansDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		if runtime.GOOS != "windows" {
+			t.Fatal(err)
+		}
+		if out, err := exec.Command("cmd", "/c", "mklink", "/J", link, target).CombinedOutput(); err != nil {
+			t.Skipf("can't link a directory here: %v %s", err, out)
+		}
+	}
+	if _, err := os.ReadFile(link); err == nil {
+		t.Skip("the link reads as a file here")
+	}
+	return link
+}
+
+// A plan file that can't be read is skipped with a warning: it doesn't
+// stop the close.
+func TestCloseSkipsAnUnreadablePlanFile(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	pr, id := h.publish("feat-x")
+	h.forge.SetPRMerged(publicName, pr)
+	want := h.featureRefs("feat-x", id)
+	link := unreadablePlanFile(t, h)
+	res, warns, err := h.eng.FeatureClose(h.ctx, h.pair, "feat-x")
+	if err != nil || !reflect.DeepEqual(res.Deleted, want) {
+		t.Fatalf("close = %+v %v", res, err)
+	}
+	if w := warning(warns, contract.PlanFileUnreadable); w == nil || w.Details["path"] != link {
+		t.Fatalf("warnings = %+v", warns)
 	}
 }

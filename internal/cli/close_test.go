@@ -3,6 +3,8 @@ package cli_test
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -85,5 +87,33 @@ func TestStatusShowsAnUnreadableFeature(t *testing.T) {
 	code, m := te.runJSON("feature", "show", "feat-bad")
 	if e, _ := m["error"].(map[string]any); code == 0 || e["code"] != "INTERNAL" {
 		t.Fatalf("feature show: %d %v", code, m)
+	}
+}
+
+func TestALedgerFailureIsAWarningInTheEnvelope(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	ledgerPath := filepath.Join(te.vars["GHOSTBRANCH_HOME"], "workspaces", "default", "ledger.jsonl")
+	if err := os.Remove(ledgerPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(ledgerPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	code, env := te.runJSON("feature", "start", "feat-x")
+	ws, _ := env["warnings"].([]any)
+	found := false
+	for _, w := range ws {
+		m := w.(map[string]any)
+		d, _ := m["details"].(map[string]any)
+		found = found || (m["code"] == "LEDGER_NOT_WRITTEN" && d["op"] == "feature start")
+	}
+	if code != 0 || !found {
+		t.Fatalf("feature start: %d %v", code, env)
+	}
+	_, _, errOut := te.run("feature", "start", "feat-y")
+	if !strings.Contains(errOut, "warning: the ledger entry for feature start couldn't be written") || strings.Contains(errOut, "could not write the ledger") {
+		t.Fatalf("stderr:\n%s", errOut)
 	}
 }
