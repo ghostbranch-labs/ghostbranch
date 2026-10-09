@@ -191,7 +191,7 @@ func (e *Engine) AgentsStatus(ctx context.Context, p *workspace.Pair) (*AgentsSt
 	}
 	gs, err := s.Load()
 	if err != nil {
-		return nil, nil, internalErr(err, "read agent grants")
+		return nil, nil, grantErr(err, "read agent grants")
 	}
 	now := e.now()
 	res := &AgentsStatusResult{Grants: []GrantStatus{}, TokenCanPublish: "unknown", Token: TokenCheck{Source: e.TokenSource}}

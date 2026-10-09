@@ -349,3 +349,24 @@ func TestWaiversRevokeAllPlanOnACorruptFile(t *testing.T) {
 	h.eng.DryRun = false
 	_ = wantCode(t, err, contract.UpgradeNeeded)
 }
+
+// A waivers file from a newer Ghostbranch stops waivers add before the
+// console with UPGRADE_NEEDED, not INTERNAL; list says the same.
+func TestWaiversAddOnANewerFile(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	id := leakyID(t, h)
+	path := h.eng.Waivers.Path()
+	if err := os.WriteFile(path, []byte(`{"schema_version":"0.99","waivers":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	asked := len(h.approver.asked)
+	_, err := add(h, "fixture", id)
+	_ = wantCode(t, err, contract.UpgradeNeeded)
+	if len(h.approver.asked) != asked {
+		t.Fatal("the person was asked for a code before the newer file was found")
+	}
+	_, _, err = h.eng.WaiversList(h.ctx, nil)
+	_ = wantCode(t, err, contract.UpgradeNeeded)
+}

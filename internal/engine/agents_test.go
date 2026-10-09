@@ -192,4 +192,7 @@ func TestAgentsRevokeAllPlanOnACorruptFile(t *testing.T) {
 	_, _, err = h.eng.AgentsRevoke(h.ctx, nil, true)
 	h.eng.DryRun = false
 	_ = wantCode(t, err, contract.UpgradeNeeded)
+	// agents status reads the same file and says the same.
+	_, _, err = h.eng.AgentsStatus(h.ctx, nil)
+	_ = wantCode(t, err, contract.UpgradeNeeded)
 }

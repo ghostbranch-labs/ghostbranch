@@ -241,7 +241,7 @@ func (e *Engine) WaiversAdd(ctx context.Context, p workspace.Pair, opt WaiversAd
 	// A waivers file that cannot be read could not be saved to either; say
 	// so before the person types a code.
 	if _, err := s.Load(); err != nil {
-		return nil, warns, internalErr(err, "read waivers")
+		return nil, warns, grantErr(err, "read waivers")
 	}
 	if err := e.confirm(ctx, "", waiveSummary(p, opt.Feature, picked, ids, reason)); err != nil {
 		return nil, warns, err
@@ -283,7 +283,7 @@ func (e *Engine) WaiversList(ctx context.Context, p *workspace.Pair) (*WaiversLi
 	}
 	ws, err := s.Load()
 	if err != nil {
-		return nil, nil, internalErr(err, "read waivers")
+		return nil, nil, grantErr(err, "read waivers")
 	}
 	res := &WaiversListResult{Waivers: []waiver.Waiver{}}
 	if p != nil {
