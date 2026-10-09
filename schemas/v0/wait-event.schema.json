@@ -4,7 +4,7 @@
   "type": "object",
   "required": ["schema_version", "type", "job", "at"],
   "properties": {
-    "schema_version": { "const": "0.7" },
+    "schema_version": { "const": "0.8" },
     "type": { "enum": ["waiting", "check", "settled"] },
     "job": { "type": "string" },
     "at": { "$ref": "common.schema.json#/$defs/time" }

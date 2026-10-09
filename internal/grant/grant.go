@@ -20,7 +20,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
-const SchemaVersion = "0.7"
+const SchemaVersion = "0.8"
 
 // DefaultFor is the grant length when --for is not given.
 const DefaultFor = "6h"

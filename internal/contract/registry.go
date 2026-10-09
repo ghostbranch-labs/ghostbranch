@@ -57,7 +57,7 @@ var errorDocs = map[Code]Doc{
 		WhatToDo: "A person makes the shadow repo private (and not a fork) on GitHub.", NeedsHuman: true},
 	ConfigInvalid: {Summary: ".ghostbranch.yml on the overlay branch is missing or invalid, or the overlay branch holds non-overlay paths.",
 		WhatToDo: "A person fixes .ghostbranch.yml on the shadow repo's ghostbranch branch.", NeedsHuman: true},
-	Locked:   {Summary: "Another ghostbranch operation on this pair is running on this machine.", WhatToDo: "Wait and retry. If none is running, delete the lock file named in the message."},
+	Locked:   {Summary: "Another ghostbranch operation on this pair is running on this machine (error.details.held_by names it).", WhatToDo: "Wait for it to finish and retry. The lock frees itself when that process ends, even if it crashed; there is nothing to delete."},
 	Internal: {Summary: "An unexpected local failure.", WhatToDo: "Read the message; report it if it repeats."},
 	TokenCannotPublish: {Summary: "The token in use cannot push to the public repo.", Causes: []string{"the token is scoped to the shadow repo only (the strict-isolation setup)", "the token lacks Contents: write on the public repo"},
 		WhatToDo: "A person publishes from their own terminal with a token that can write to the public repo (`ghostbranch apply <plan>`).", NeedsHuman: true},
@@ -174,6 +174,10 @@ var warningDocs = map[WarningCode]Doc{
 	MirrorNotUpdated: {Summary: "The shadow repo has the change, but this machine's mirror of it (a ref, or a plan file) couldn't be updated.",
 		Causes:   []string{"the mirror directory is not writable, or the disk is full", "a stale lock file in the mirror"},
 		WhatToDo: "Nothing is required: the shadow repo is the truth, and the next command's fetch corrects the mirror. If it repeats, check the path in details and the disk."},
+	RecordNewer: {Summary: "A record was written by a newer Ghostbranch; this binary shows what it can read of it and won't change it.",
+		WhatToDo: "Upgrade ghostbranch on this machine (the other machine is probably newer). Reads still work; commands that would change the record stop with UPGRADE_NEEDED."},
+	RecordUnreadable: {Summary: "A feature's record couldn't be read (corrupt, or from a newer Ghostbranch); a person at the console closed the feature anyway.",
+		WhatToDo: "Nothing more to do: the feature's refs were deleted and logged in the ledger with their SHAs, so a branch can still be recovered."},
 }
 
 func intp(n int) *int { return &n }

@@ -8,7 +8,7 @@
     "feature": { "type": "string" },
     "state": {
       "description": "the state the feature was closed from",
-      "enum": ["draft", "in_review", "gate_passed", "published", "merged", "merged_moved", "pr_closed", "branch_gone", "abandoned"]
+      "enum": ["draft", "in_review", "gate_passed", "published", "merged", "merged_moved", "pr_closed", "branch_gone", "abandoned", "unreadable"]
     },
     "deleted": {
       "description": "each shadow-repo ref deleted, with the SHA it pointed at; empty under --plan",

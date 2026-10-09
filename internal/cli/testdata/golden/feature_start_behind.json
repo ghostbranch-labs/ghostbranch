@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.7",
+  "schema_version": "0.8",
   "command": "feature start",
   "ok": false,
   "exit_code": 4,

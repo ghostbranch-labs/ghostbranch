@@ -63,7 +63,7 @@ func TestSuccessEnvelopeShape(t *testing.T) {
 	if err := json.Unmarshal(b, &m); err != nil {
 		t.Fatal(err)
 	}
-	if m["schema_version"] != "0.7" || m["ok"] != true || m["exit_code"] != float64(0) ||
+	if m["schema_version"] != "0.8" || m["ok"] != true || m["exit_code"] != float64(0) ||
 		m["command"] != "sync" || m["error"] != nil {
 		t.Fatalf("bad envelope: %s", b)
 	}
@@ -134,7 +134,7 @@ func TestSubProject4CodesAreRegistered(t *testing.T) {
 	if err != nil || !es[0].NeedsHuman || !strings.Contains(es[0].WhatToDo, "--adopt") {
 		t.Fatalf("SHADOW_CREATE_DENIED doc: %+v %v", es, err)
 	}
-	if contract.SchemaVersion != "0.7" {
+	if contract.SchemaVersion != "0.8" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 }
@@ -157,7 +157,7 @@ func TestSubProject5aCodesAreRegistered(t *testing.T) {
 	if es, _ := contract.Explain("AUTHOR_UNMAPPED"); !es[0].NeedsHuman {
 		t.Fatal("AUTHOR_UNMAPPED needs a person: only they may edit the overlay config's author_map")
 	}
-	if contract.SchemaVersion != "0.7" {
+	if contract.SchemaVersion != "0.8" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 }
@@ -173,7 +173,7 @@ func TestSubProject5bCodesAreRegistered(t *testing.T) {
 			t.Fatalf("%s is not documented: %+v %v", c, es, err)
 		}
 	}
-	if contract.SchemaVersion != "0.7" {
+	if contract.SchemaVersion != "0.8" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 }
@@ -279,7 +279,36 @@ func TestSubProject5cCodesAreRegistered(t *testing.T) {
 			t.Fatalf("%s is not documented: %+v %v", c, es, err)
 		}
 	}
-	if contract.SchemaVersion != "0.7" {
+	if contract.SchemaVersion != "0.8" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
+	}
+}
+
+func TestSubProject5d1CodesAreRegistered(t *testing.T) {
+	t.Parallel()
+	for _, w := range []contract.WarningCode{contract.RecordNewer, contract.RecordUnreadable} {
+		if !slices.Contains(contract.AllWarnings(), w) {
+			t.Fatalf("%s is not in the warning list", w)
+		}
+		es, err := contract.Explain(string(w))
+		if err != nil || len(es) != 1 || es[0].Summary == "" || es[0].WhatToDo == "" {
+			t.Fatalf("%s is not documented: %+v %v", w, es, err)
+		}
+	}
+	if contract.SchemaVersion != "0.8" {
+		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
+	}
+	if es, _ := contract.Explain(string(contract.Locked)); strings.Contains(es[0].WhatToDo, "delete the lock") {
+		t.Fatalf("LOCKED still says to delete the lock file: %q", es[0].WhatToDo)
+	}
+}
+
+func TestNewer(t *testing.T) {
+	t.Parallel()
+	for v, want := range map[string]bool{"0.8": false, "0.7": false, "0.10": true, "0.9": true, "1.0": true,
+		"": false, "x": false, "0.8.1": false, "0.4": false} {
+		if got := contract.Newer(v); got != want {
+			t.Errorf("Newer(%q) = %v, want %v", v, got, want)
+		}
 	}
 }

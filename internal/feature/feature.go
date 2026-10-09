@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	SchemaVersion = "0.7"
+	SchemaVersion = "0.8"
 	MetaFile      = "feature.json"
 )
 
@@ -61,8 +61,10 @@ type Gate struct {
 	StartedAt time.Time `json:"started_at,omitzero"`
 }
 
-// Pending reports a gate whose CI wait hasn't finished: a job.
-func (g *Gate) Pending() bool { return g != nil && g.Checks == ChecksPending }
+// Pending reports a gate whose CI wait hasn't finished: a job. A pending
+// record without its shadow PR was rewritten by an older binary and is no
+// job: gate it again.
+func (g *Gate) Pending() bool { return g != nil && g.Checks == ChecksPending && g.ShadowPR != 0 }
 
 // Passed reports a green gate: checks passed and no leak findings.
 func (g *Gate) Passed() bool {
@@ -123,6 +125,9 @@ const (
 	StatePRClosed    State = "pr_closed"
 	StateBranchGone  State = "branch_gone"
 	StateAbandoned   State = "abandoned"
+	// StateUnreadable is a feature whose record couldn't be read; only close
+	// results use it.
+	StateUnreadable State = "unreadable"
 )
 
 // StateInput is everything state depends on.
