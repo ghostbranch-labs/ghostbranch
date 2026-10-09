@@ -59,8 +59,10 @@ func (j JobRef) matches(g *feature.Gate) bool {
 	return g != nil && strings.HasPrefix(g.Candidate, j.Candidate)
 }
 
-// fetchMeta refreshes the mirror's feature metadata only, so a caller
-// mid-operation re-reads records without moving public main under itself.
+// fetchMeta refreshes everything under the shadow repo's refs/ghostbranch/*
+// (the feature metadata and the plan refs), pruned, so a caller
+// mid-operation re-reads records. It never fetches the branches or public
+// main, which stay where the operation read them.
 func (e *Engine) fetchMeta(ctx context.Context, g *gitx.Git) error {
 	if err := g.Fetch(ctx, remoteShadow, "+refs/ghostbranch/*:refs/shadow-meta/*"); err != nil {
 		return remoteErr(err, "fetch the shadow repo's feature metadata")
@@ -141,6 +143,12 @@ func (e *Engine) finish(ctx context.Context, pc *pairCtx, name string, res *Gate
 	rw, err := e.recordFinish(ctx, pc, name, res, JobRef{Feature: name, Candidate: short(C)}, job)
 	warns = addWarnings(warns, rw...)
 	if err != nil {
+		if ctx.Err() != nil {
+			// A cancel stopped the write: the record is still pending, so the
+			// job is named and wait can finish it.
+			res.Checks, res.FailedChecks = feature.ChecksPending, []string{}
+			return res, warns, interruptedErr(job, "")
+		}
 		switch contract.From(err).Code {
 		case contract.JobStale, contract.JobNotFound, contract.FeatureNotFound, contract.Interrupted:
 			return res, warns, err
@@ -207,9 +215,14 @@ func staleErr(name, job string, g *feature.Gate, what string) error {
 }
 
 // interrupted turns an error a cancel caused into INTERRUPTED. A pending
-// job in res is named, so wait can finish it; otherwise the feature is.
+// job in res is named, so wait can finish it; otherwise the feature is. A
+// settled outcome (a gate failure: failed or missing CI, a leak, a broken
+// marker) is the answer, cancel or not, and passes through unchanged.
 func interrupted(ctx context.Context, res *GateResult, name string, err error) error {
-	if err == nil || ctx.Err() == nil || contract.From(err).Code == contract.Interrupted {
+	if err == nil || ctx.Err() == nil {
+		return err
+	}
+	if c := contract.From(err).Code; c == contract.Interrupted || c.Exit() == contract.ExitGateFailed {
 		return err
 	}
 	job := ""
@@ -308,10 +321,18 @@ func (e *Engine) Wait(ctx context.Context, p workspace.Pair, job string, opt Wai
 		}
 		e.record("wait", &p, ref.Feature, "", summary, err)
 	}()
-	defer func() { err = interrupted(ctx, res, ref.Feature, err) }()
 	if ref, err = ParseJob(job); err != nil {
 		return nil, nil, err
 	}
+	defer func() {
+		if res == nil && err != nil && ctx.Err() != nil && contract.From(err).Code != contract.Interrupted {
+			// Nothing was read, so nothing changed: the job is as it was.
+			err = contract.New(contract.Interrupted, "interrupted before the job was read; run ghostbranch wait again").
+				WithDetails(map[string]any{"job": job})
+			return
+		}
+		err = interrupted(ctx, res, ref.Feature, err)
+	}()
 	pc, err := e.open(ctx, "wait", p, false)
 	if err != nil {
 		return nil, nil, err

@@ -1,6 +1,7 @@
 package engine_test
 
 import (
+	"context"
 	"errors"
 	"os"
 	"reflect"
@@ -546,9 +547,17 @@ func TestPromoteDetachedReturnsTheGateJob(t *testing.T) {
 		t.Fatalf("detached promote = %+v %v", res, err)
 	}
 	// Again while pending: the same job, no new candidate.
+	candidates := 0
+	h.eng.OnPush = func(_, _ string, specs []string) {
+		for _, s := range specs {
+			if strings.HasSuffix(s, ":refs/heads/ghostbranch-gate/feat-x") {
+				candidates++
+			}
+		}
+	}
 	again, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Mode: "squash", Message: "Add x", PlanOnly: true, Detach: true})
-	if err != nil || *again.Gate.Job != *res.Gate.Job {
-		t.Fatalf("second detached promote = %+v %v", again, err)
+	if err != nil || *again.Gate.Job != *res.Gate.Job || candidates != 0 {
+		t.Fatalf("second detached promote = %+v %v (%d candidate pushes)", again, err, candidates)
 	}
 }
 
@@ -571,5 +580,23 @@ func TestPromoteWaitsOnAMatchingJob(t *testing.T) {
 	res, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Mode: "squash", Message: "Add x", PlanOnly: true})
 	if err != nil || res.Plan == nil || !res.Gate.Reused || candidates != 0 {
 		t.Fatalf("promote = %+v %v (%d candidate pushes)", res, err, candidates)
+	}
+}
+
+// A cancelled promote is INTERRUPTED, in its result and in the ledger.
+func TestAnInterruptedPromoteIsInterrupted(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.startFeature("feat-x", map[string]string{"feature.txt": "x\n"})
+	ctx, cancel := context.WithCancel(h.ctx)
+	cancel()
+	_, _, err := h.eng.Promote(ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Mode: "squash", Message: "Add x", PlanOnly: true})
+	if ce := wantCode(t, err, contract.Interrupted); ce.Details["feature"] != "feat-x" {
+		t.Fatalf("details = %+v", ce.Details)
+	}
+	es := h.ledger()
+	if last := es[len(es)-1]; last.Op != "promote" || last.ErrorCode != string(contract.Interrupted) {
+		t.Fatalf("ledger = %+v", last)
 	}
 }

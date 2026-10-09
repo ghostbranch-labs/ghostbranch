@@ -73,6 +73,15 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 			}
 		})
 	}()
+	// Registered after the ledger's defer, so it runs first and the ledger
+	// records INTERRUPTED.
+	defer func() {
+		var g *GateResult
+		if res != nil {
+			g = res.Gate
+		}
+		err = interrupted(ctx, g, opt.Feature, err)
+	}()
 	if err := ValidatePromoteOptions(&opt); err != nil {
 		return nil, nil, err
 	}

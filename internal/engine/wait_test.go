@@ -160,6 +160,74 @@ func TestAnInterruptBeforeTheRecordHasNoJob(t *testing.T) {
 	}
 }
 
+// A cancel while the final record is being written leaves the record
+// pending, so INTERRUPTED names the job, and wait finishes it.
+func TestAnInterruptDuringTheFinalWriteKeepsTheJob(t *testing.T) {
+	t.Parallel()
+	failing := func(string, string) []forge.Check {
+		return []forge.Check{{Name: "lint", Status: "completed", Conclusion: "failure"}}
+	}
+	for _, c := range []struct {
+		name   string
+		checks func(string, string) []forge.Check
+		want   string
+		code   contract.Code
+	}{{"passed", passing, feature.ChecksPassed, ""}, {"failed", failing, feature.ChecksFailed, contract.ChecksFailed}} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			h := newHarness(t)
+			h.init()
+			h.startFeature("feat-x", map[string]string{"feature.txt": "x\n"})
+			h.forge.Checks = c.checks
+			ctx, cancel := context.WithCancel(h.ctx)
+			defer cancel()
+			metaPushes := 0
+			h.eng.OnPush = func(_, _ string, specs []string) {
+				for _, s := range specs {
+					if strings.HasSuffix(s, ":refs/ghostbranch/features/feat-x") {
+						if metaPushes++; metaPushes == 2 { // the final record
+							cancel()
+						}
+					}
+				}
+			}
+			res, _, err := h.eng.Gate(ctx, h.pair, "feat-x")
+			ce := wantCode(t, err, contract.Interrupted)
+			if res == nil || res.Job == nil || ce.Details["job"] != *res.Job || res.Checks != feature.ChecksPending || !h.meta("feat-x").Gate.Pending() {
+				t.Fatalf("want INTERRUPTED with the job and a pending record: %+v %+v %+v", ce.Details, res, h.meta("feat-x").Gate)
+			}
+			gatePushes := 0
+			h.eng.OnPush = func(_, _ string, specs []string) {
+				for _, s := range specs {
+					if strings.HasSuffix(s, ":refs/heads/ghostbranch-gate/feat-x") {
+						gatePushes++
+					}
+				}
+			}
+			done, _, err := h.eng.Wait(h.ctx, h.pair, *res.Job, engine.WaitOptions{})
+			if codeOf(err) != c.code || done == nil || done.Checks != c.want || gatePushes != 0 || h.meta("feat-x").Gate.Checks != c.want {
+				t.Fatalf("wait = %+v %v (%d candidate pushes)", done, err, gatePushes)
+			}
+		})
+	}
+}
+
+// A cancel before wait reads the record still names the job: nothing
+// about it changed, so wait again finishes it.
+func TestAnInterruptBeforeWaitReadsNamesTheJob(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.startFeature("feat-x", map[string]string{"feature.txt": "x\n"})
+	job := detached(t, h, "feat-x")
+	ctx, cancel := context.WithCancel(h.ctx)
+	cancel()
+	_, _, err := h.eng.Wait(ctx, h.pair, job, engine.WaitOptions{})
+	if ce := wantCode(t, err, contract.Interrupted); ce.Details["job"] != job || !strings.Contains(ce.Message, "run ghostbranch wait again") {
+		t.Fatalf("want INTERRUPTED naming the job: %s %+v", ce.Message, ce.Details)
+	}
+}
+
 // Review Focus 3, at wait.
 func TestWaitOnAReplacedJobIsStale(t *testing.T) {
 	t.Parallel()
@@ -188,9 +256,17 @@ func TestGateReusesAPendingJobForTheSameInputs(t *testing.T) {
 	if again := detached(t, h, "feat-x"); again != job || len(h.pushes) != pushes {
 		t.Fatalf("second detached gate: job %s (want %s), %d new pushes", again, job, len(h.pushes)-pushes)
 	}
+	gatePushes := 0
+	h.eng.OnPush = func(_, _ string, specs []string) {
+		for _, s := range specs {
+			if strings.HasSuffix(s, ":refs/heads/ghostbranch-gate/feat-x") {
+				gatePushes++
+			}
+		}
+	}
 	res, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x") // blocking: waits on that job
-	if err != nil || *res.Job != job || res.Checks != feature.ChecksPassed {
-		t.Fatalf("blocking gate = %+v %v", res, err)
+	if err != nil || *res.Job != job || res.Checks != feature.ChecksPassed || gatePushes != 0 {
+		t.Fatalf("blocking gate = %+v %v (%d candidate pushes)", res, err, gatePushes)
 	}
 }
 

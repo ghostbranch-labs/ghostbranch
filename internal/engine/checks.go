@@ -62,13 +62,13 @@ func (e *Engine) event(o waitOpts, ev JobEvent) {
 }
 
 // interruptedErr is a cancelled run. A job still pending is named, so wait
-// can finish it; otherwise the feature is, so the gate can run again.
+// can finish it; otherwise the feature is, so the command can run again.
 func interruptedErr(job, feature string) error {
 	if job != "" {
 		return contract.New(contract.Interrupted, "interrupted while waiting for CI; the job %s is still pending: finish it with ghostbranch wait", job).
 			WithDetails(map[string]any{"job": job})
 	}
-	return contract.New(contract.Interrupted, "interrupted before the gate's CI started; nothing is pending, so gate again").
+	return contract.New(contract.Interrupted, "interrupted before any gate job was recorded; nothing is pending, so run the command again").
 		WithDetails(map[string]any{"feature": feature})
 }
 
