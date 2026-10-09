@@ -1,6 +1,7 @@
 package engine_test
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -325,6 +326,32 @@ func TestSyncWarnsWhenListingRunsFails(t *testing.T) {
 	if len(warns) != 1 || warns[0].Code != contract.CINotCancelled || !strings.Contains(warns[0].Message, "actions are down") {
 		t.Fatalf("warnings = %+v", warns)
 	}
+}
+
+// A cancel while sync waits to look for runs again leaves runs it may
+// never see: it still warns.
+func TestSyncInterruptedWhileLookingForRunsWarns(t *testing.T) {
+	t.Parallel()
+	h, _ := pushRunsHarness(t)
+	ctx, cancel := context.WithCancel(h.ctx)
+	defer cancel()
+	sleep := h.eng.Sleep
+	h.eng.Sleep = func(c context.Context, d time.Duration) error {
+		if h.forge.PushRunsCalls > 0 { // the poll between looks
+			cancel()
+		}
+		return sleep(c, d)
+	}
+	_, warns, _ := h.eng.Sync(ctx, h.pair, engine.SyncOptions{})
+	if h.forge.PushRunsCalls != 1 {
+		t.Fatalf("PushRuns calls = %d, want 1", h.forge.PushRunsCalls)
+	}
+	for _, w := range warns {
+		if w.Code == contract.CINotCancelled && strings.Contains(w.Message, "could not cancel") {
+			return
+		}
+	}
+	t.Fatalf("want CI_NOT_CANCELLED, got %+v", warns)
 }
 
 func TestSyncNoCancelDryRunAndNoopNeverLookForRuns(t *testing.T) {

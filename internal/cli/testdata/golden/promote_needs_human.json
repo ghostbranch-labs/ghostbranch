@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.6",
+  "schema_version": "0.7",
   "command": "promote",
   "ok": false,
   "exit_code": 5,
@@ -33,11 +33,12 @@
         "unrewritable": []
       },
       "shadow_pr": null,
+      "job": null,
       "reused": true,
       "preview": null
     },
     "plan": {
-      "schema_version": "0.6",
+      "schema_version": "0.7",
       "id": "20261005T120005Z-0c0d0e",
       "kind": "promote",
       "actor": "agent:claude-code",

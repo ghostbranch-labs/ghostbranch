@@ -57,7 +57,7 @@ func TestPreviewsWriteNothing(t *testing.T) {
 		t.Fatalf("sync preview: %+v %v", sres, err)
 	}
 	gres, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
-	if err != nil || !reflect.DeepEqual(opNames(gres.Preview), []string{"push_ref", "open_pr", "wait_checks", "push_ref"}) {
+	if err != nil || !reflect.DeepEqual(opNames(gres.Preview), []string{"push_ref", "open_pr", "push_ref", "wait_checks", "push_ref"}) {
 		t.Fatalf("gate preview: %+v %v", gres, err)
 	}
 	// No fresh gate yet: promote --dry-run says to run the gate, and makes no plan.
@@ -68,6 +68,25 @@ func TestPreviewsWriteNothing(t *testing.T) {
 	h.eng.DryRun = false
 	if len(h.pushes) != pushes || !reflect.DeepEqual(h.publicRefs(), before) || len(h.ledger()) != entries {
 		t.Fatal("a preview pushed or recorded something")
+	}
+}
+
+// gate --detach --dry-run previews only what it does: the candidate, the
+// PR and the pending record; no CI wait and no final record.
+func TestGateDetachedPreviewHasNoWait(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.startFeature("feat-x", map[string]string{"feature.txt": "new\n"})
+	pushes := len(h.pushes)
+	h.eng.DryRun = true
+	res, _, err := h.eng.GateDetached(h.ctx, h.pair, "feat-x")
+	h.eng.DryRun = false
+	if err != nil || !reflect.DeepEqual(opNames(res.Preview), []string{"push_ref", "open_pr", "push_ref"}) {
+		t.Fatalf("gate --detach preview: %+v %v", res, err)
+	}
+	if len(h.pushes) != pushes {
+		t.Fatal("gate --detach --dry-run pushed")
 	}
 }
 

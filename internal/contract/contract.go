@@ -11,7 +11,7 @@ import (
 
 // SchemaVersion versions the envelope and every data schema. It stays 0.x
 // until launch, and 0.x versions may break.
-const SchemaVersion = "0.6"
+const SchemaVersion = "0.7"
 
 // Exit codes. Agents branch on these, so they never change meaning.
 const (
@@ -103,6 +103,14 @@ const (
 	// behind public main. It shares its string with the ShadowBehind
 	// warning: one is an error.code, the other a warnings[].code.
 	ShadowBehindError Code = "SHADOW_BEHIND"
+
+	// Interrupted means the command was cancelled (Ctrl-C); details.job names
+	// a gate job still pending.
+	Interrupted Code = "INTERRUPTED"
+	// JobNotFound means a feature has no gate job to wait on.
+	JobNotFound Code = "JOB_NOT_FOUND"
+	// JobStale means a newer gate replaced the job.
+	JobStale Code = "JOB_STALE"
 )
 
 var exitCodes = map[Code]int{
@@ -123,6 +131,9 @@ var exitCodes = map[Code]int{
 	UpgradeNeeded:     ExitFailure,
 	FeatureMoved:      ExitConflict,
 	ShadowBehindError: ExitConflict,
+	Interrupted:       ExitFailure,
+	JobNotFound:       ExitUsage,
+	JobStale:          ExitConflict,
 }
 
 // Exit is the process exit code for c.

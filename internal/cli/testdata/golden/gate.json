@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.6",
+  "schema_version": "0.7",
   "command": "gate",
   "ok": true,
   "exit_code": 0,
@@ -32,6 +32,7 @@
       "unrewritable": []
     },
     "shadow_pr": 1,
+    "job": "gate/feat-x/ad7c1d975251",
     "reused": false,
     "preview": null
   },

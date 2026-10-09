@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.6",
+  "schema_version": "0.7",
   "command": "gate",
   "ok": false,
   "exit_code": 3,
@@ -45,6 +45,7 @@
       "unrewritable": []
     },
     "shadow_pr": null,
+    "job": null,
     "reused": false,
     "preview": null
   },

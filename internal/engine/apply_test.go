@@ -388,3 +388,19 @@ func TestApplySummaryListsEachPublicCommit(t *testing.T) {
 		}
 	}
 }
+
+// A gate still pending is not green: apply refuses a plan made from it.
+func TestApplyRefusesAPlanWhoseGateIsPending(t *testing.T) {
+	t.Parallel()
+	h, id := planned(t)
+	h.editRemoteMeta("feat-x", func(m *feature.Meta) { m.Gate.Checks = feature.ChecksPending })
+	before := h.publicRefs()
+	_, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: id, Yes: true})
+	ce := wantCode(t, err, contract.PlanStale)
+	if !reflect.DeepEqual(ce.Details["moved"], []string{"gate"}) {
+		t.Fatalf("details = %v", ce.Details)
+	}
+	if !reflect.DeepEqual(h.publicRefs(), before) {
+		t.Fatal("a plan with a pending gate changed the public repo")
+	}
+}

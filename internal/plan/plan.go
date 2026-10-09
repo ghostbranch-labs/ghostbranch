@@ -18,7 +18,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/workflow"
 )
 
-const SchemaVersion = "0.6"
+const SchemaVersion = "0.7"
 
 type Pair struct {
 	Public string `json:"public"`

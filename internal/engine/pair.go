@@ -38,7 +38,23 @@ type pairCtx struct {
 	git    *gitx.Git
 	public forge.Repo
 	shadow forge.Repo
+	// unlock releases the lock at the end of the operation; it is release.
 	unlock func()
+	// lockPath is the pair lock's file; empty in a dry run. held reports
+	// whether this operation holds it now, and drop removes it.
+	lockPath string
+	held     bool
+	drop     func()
+}
+
+// release drops the pair lock, early before a long CI wait or at the end
+// of the operation. It never removes a lock it doesn't hold, so a lock
+// another run took meanwhile is safe.
+func (pc *pairCtx) release() {
+	if pc.held {
+		pc.drop()
+		pc.held = false
+	}
 }
 
 // open runs the shared preflight: look up both repos, refuse unless the
@@ -60,18 +76,22 @@ func (e *Engine) open(ctx context.Context, op string, p workspace.Pair, mutating
 	if err != nil {
 		return nil, internalErr(err, "make operation id")
 	}
-	unlock := func() {}
+	pc := &pairCtx{pair: p, op: op, opID: opID, public: pub, shadow: sh}
+	pc.unlock = pc.release
+	if !e.DryRun {
+		pc.lockPath = e.WS.LockPath(p)
+	}
 	if mutating && !e.DryRun {
-		if unlock, err = workspace.Lock(e.WS.LockPath(p), e.Now()); err != nil {
+		if pc.drop, err = workspace.Lock(pc.lockPath, e.Now()); err != nil {
 			return nil, err
 		}
+		pc.held = true
 	}
-	pc := &pairCtx{pair: p, op: op, opID: opID, public: pub, shadow: sh, unlock: unlock}
 	if pc.git, err = e.mirror(ctx, p, pub, sh); err == nil {
 		err = e.fetch(ctx, pc.git)
 	}
 	if err != nil {
-		unlock()
+		pc.release()
 		return nil, err
 	}
 	return pc, nil

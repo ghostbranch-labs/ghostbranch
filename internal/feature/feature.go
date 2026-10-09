@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	SchemaVersion = "0.6"
+	SchemaVersion = "0.7"
 	MetaFile      = "feature.json"
 )
 
@@ -24,6 +24,7 @@ const (
 	ChecksNoCI    = "no_ci"
 	ChecksTimeout = "timeout"
 	ChecksNotRun  = "not_run"
+	ChecksPending = "pending"
 	LeakClean     = "clean"
 	LeakFound     = "found"
 	LeakNotRun    = "not_run"
@@ -50,7 +51,18 @@ type Gate struct {
 	// ScannedAs is the mode the gate's leak scan covered; empty in a gate
 	// recorded before it was stored, which promote does not reuse.
 	ScannedAs string `json:"scanned_as,omitempty"`
+	// FailedChecks names the checks that failed; absent before 0.7.
+	FailedChecks []string `json:"failed_checks,omitempty"`
+	// ShadowPR is the gate's draft PR in the shadow repo; 0 before 0.7.
+	ShadowPR int `json:"shadow_pr,omitempty"`
+	// StartedAt is when the gate pushed its candidate. CI time budgets
+	// count from it, so a wait in another process keeps the same budget.
+	// Zero before 0.7.
+	StartedAt time.Time `json:"started_at,omitzero"`
 }
+
+// Pending reports a gate whose CI wait hasn't finished: a job.
+func (g *Gate) Pending() bool { return g != nil && g.Checks == ChecksPending }
 
 // Passed reports a green gate: checks passed and no leak findings.
 func (g *Gate) Passed() bool {

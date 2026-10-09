@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.6",
+  "schema_version": "0.7",
   "command": "gate",
   "ok": true,
   "exit_code": 0,
@@ -32,6 +32,7 @@
       "unrewritable": []
     },
     "shadow_pr": null,
+    "job": null,
     "reused": false,
     "preview": {
       "fingerprint": {
@@ -55,12 +56,19 @@
           "repo": "acme/widget-shadow"
         },
         {
+          "from": "ed3d36aa6640c2f137b3cf61de90ac573e7dce78",
+          "op": "push_ref",
+          "ref": "refs/ghostbranch/features/feat-x",
+          "repo": "acme/widget-shadow",
+          "to": null
+        },
+        {
           "op": "wait_checks",
           "repo": "acme/widget-shadow",
           "sha": "ad7c1d9752519d03b74752a472ecf072aacd2fb7"
         },
         {
-          "from": "f06bce060071e39ecbf817c3bb9097d20c90e2c8",
+          "from": null,
           "op": "push_ref",
           "ref": "refs/ghostbranch/features/feat-x",
           "repo": "acme/widget-shadow",

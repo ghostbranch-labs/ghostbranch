@@ -41,6 +41,7 @@ type GateSummary struct {
 	ScannedAs string    `json:"scanned_as"`
 	Fresh     bool      `json:"fresh"`
 	At        time.Time `json:"at"`
+	Job       *string   `json:"job"` // non-nil exactly when the gate is pending: what wait takes
 }
 
 // PR states in a FeatureReport.
@@ -126,6 +127,10 @@ func (e *Engine) surveyOne(ctx context.Context, pc *pairCtx, name, pm, O string)
 	if g := m.Gate; g != nil {
 		r.Gate = &GateSummary{Checks: g.Checks, Leak: g.Leak, ScannedAs: g.ScannedAs, At: g.At,
 			Fresh: exists && g.FreshFor(head, pm, O)}
+		if g.Pending() {
+			job := jobID(name, g.Candidate)
+			r.Gate.Job = &job
+		}
 	}
 	if m.Promoted != nil {
 		n := m.Promoted.PublicPR

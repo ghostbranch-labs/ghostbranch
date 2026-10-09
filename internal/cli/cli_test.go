@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -260,5 +261,85 @@ func TestSyncCancelsPushRunsAndNoCancelSkips(t *testing.T) {
 	data, _ := env["data"].(map[string]any)
 	if runs, ok := data["cancelled_runs"].([]any); code != 0 || !ok || len(runs) != 0 || te.forge.PushRunsCalls != calls {
 		t.Fatalf("--no-cancel: %d %v, PushRuns calls %d -> %d", code, env, calls, te.forge.PushRunsCalls)
+	}
+}
+
+// Without --json, wait reports progress on stderr and the result on stdout.
+func TestWaitHumanOutput(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	withFeature(te)
+	te.mustRun("gate", "feat-x", "--detach")
+	code, out, errOut := te.run("wait", te.job("feat-x"))
+	if code != 0 || !strings.Contains(errOut, "waiting for CI on ") || !strings.Contains(out, "Gate for feat-x: checks passed") {
+		t.Fatalf("%d\nstdout: %q\nstderr: %q", code, out, errOut)
+	}
+}
+
+func TestGateDetachNextIsWait(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	withFeature(te)
+	code, env := te.runJSON("gate", "feat-x", "--detach")
+	data, _ := env["data"].(map[string]any)
+	if code != 0 || data["checks"] != "pending" {
+		t.Fatalf("%d %v", code, env)
+	}
+	want := []string{"ghostbranch", "wait", te.job("feat-x"), "--repo", "acme/widget"}
+	if next := nextOf(t, env); !reflect.DeepEqual(argv(next[0]), want) {
+		t.Fatalf("next[0] = %v, want %v", argv(next[0]), want)
+	}
+	code, out, errOut := te.run("gate", "feat-x", "--detach")
+	if wantLine := "Gate for feat-x: CI running on candidate "; code != 0 || !strings.Contains(out, wantLine) || !strings.Contains(out, "; job "+te.job("feat-x")+".\n") {
+		t.Fatalf("%d\nstdout: %q\nstderr: %q", code, out, errOut)
+	}
+}
+
+// status and feature show name a pending gate's job, and status offers wait.
+func TestPendingGateShowsItsJob(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	withFeature(te)
+	te.mustRun("gate", "feat-x", "--detach")
+	job := te.job("feat-x")
+	if code, out, _ := te.run("status"); code != 0 || !strings.Contains(out, "pending (job "+job+")") {
+		t.Fatalf("status: %d %q", code, out)
+	}
+	code, env := te.runJSON("status")
+	found := false
+	for _, n := range nextOf(t, env) {
+		found = found || slices.Equal(argv(n), []string{"ghostbranch", "wait", job, "--repo", "acme/widget"})
+	}
+	if code != 0 || !found {
+		t.Fatalf("status --json next has no wait %s: %d %v", job, code, env)
+	}
+	if code, out, _ := te.run("feature", "show", "feat-x"); code != 0 || !strings.Contains(out, "  gate: pending (job "+job+")\n") {
+		t.Fatalf("feature show: %d %q", code, out)
+	}
+}
+
+// A dry-run wait would wait on CI and then refuse to write: wait refuses it.
+func TestWaitRefusesDryRun(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	withFeature(te)
+	te.mustRun("gate", "feat-x", "--detach")
+	code, out, _ := te.run("wait", te.job("feat-x"), "--dry-run", "--json")
+	var env map[string]any
+	if err := json.Unmarshal([]byte(out), &env); err != nil {
+		t.Fatalf("%v: %q", err, out)
+	}
+	if e, _ := env["error"].(map[string]any); code != 2 || e["code"] != "BAD_FLAG" || e["field"] != "dry-run" {
+		t.Fatalf("%d %v", code, env)
+	}
+}
+
+// wait --json is NDJSON even when its arguments are wrong.
+func TestWaitUsageErrorIsOneLine(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	code, out, _ := te.run("wait", "--json")
+	if code != 2 || strings.Count(out, "\n") != 1 || !json.Valid([]byte(out)) {
+		t.Fatalf("%d %q", code, out)
 	}
 }

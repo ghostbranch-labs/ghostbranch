@@ -31,7 +31,9 @@ func TestRenderListsEveryCodeFromTheRegistry(t *testing.T) {
 	// 274: two sub-project 5b error codes (UPGRADE_NEEDED, FEATURE_MOVED).
 	// 293: the lifecycle section (with --repo on each example and the grant note), --repo in the loop, and the stdout/stderr note (sub-project 5b).
 	// 296: the SHADOW_BEHIND error row, data.checkout as argvs, and feature start refusing a stale shadow main (sub-project 5b).
-	if n := strings.Count(out, "\n"); n > 296 {
+	// 314: the jobs section (+15), and the sub-project 5c error rows (JOB_STALE and the other new codes).
+	// 318: the jobs section's recovery lines (status names a pending job, an empty current_job, promote --detach's next step).
+	if n := strings.Count(out, "\n"); n > 318 {
 		t.Errorf("the guide is %d lines; keep it short (spec: about 150 plus the tables)", n)
 	}
 }
@@ -242,6 +244,36 @@ func TestGuideTeachesTheLifecycle(t *testing.T) {
 		"JSON is on stdout and progress on stderr: never merge the two streams",
 		"`ghostbranch feature start <name> --repo <public> --json`",
 		"`ghostbranch gate <name> --repo <public> --json`",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the guide lacks %q", want)
+		}
+	}
+}
+
+// An agent that reads the first line of `wait --json` gets a progress event
+// instead of the result, and one that re-gates after an interrupt starts the
+// CI it was already waiting on.
+func TestGuideTeachesJobsAndWait(t *testing.T) {
+	t.Parallel()
+	out := strings.Join(strings.Fields(guide.Render(contract.Registry())), " ")
+	for _, want := range []string{
+		"## Long CI: jobs",
+		"`gate` waits for CI by default; that is the normal path",
+		"`ghostbranch gate <name> --detach --repo <public> --json` returns `data.job` once CI has started",
+		"`ghostbranch wait <job> --repo <public> --json`",
+		// The last-line rule.
+		"`wait --json` prints one JSON object per line. **The last line is the result**, the same as `gate --json`",
+		"the lines before it are progress events",
+		"A finished job answers at once.",
+		"`wait --timeout 10m` returns `checks: pending` (exit 0) if CI is still running",
+		// The interrupt rule.
+		"After Ctrl-C you get `INTERRUPTED`.",
+		"With `error.details.job`, CI is still running: run `ghostbranch wait <job> --repo <public> --json`, not `gate`.",
+		"Without it nothing is pending: run the command again.",
+		"If the session dropped, `ghostbranch status --repo <public> --json` names a pending job (`gate.job`): wait on it.",
+		"`JOB_STALE`", "`error.details.current_job`", "if `current_job` is empty, gate again",
+		"`promote --detach` returns the job in `data.gate.job` and no plan; once `wait` passes, run the same promote without `--detach` (it reuses the green gate).",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the guide lacks %q", want)

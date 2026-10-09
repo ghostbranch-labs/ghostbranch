@@ -27,16 +27,17 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["checks", "leak", "scanned_as", "fresh", "at"],
+          "required": ["checks", "leak", "scanned_as", "fresh", "at", "job"],
           "properties": {
-            "checks": { "enum": ["passed", "failed", "no_ci", "timeout", "not_run"] },
+            "checks": { "enum": ["passed", "failed", "no_ci", "timeout", "not_run", "pending"] },
             "leak": { "enum": ["clean", "found", "not_run"] },
             "scanned_as": {
               "description": "the mode the gate's leak scan covered; empty in a gate recorded by an older binary",
               "enum": ["", "squash", "preserve", "curated"]
             },
             "fresh": { "description": "the gate still matches the feature head, public main and the overlay", "type": "boolean" },
-            "at": { "$ref": "common.schema.json#/$defs/time" }
+            "at": { "$ref": "common.schema.json#/$defs/time" },
+            "job": { "description": "the gate job to wait on; null unless checks is pending", "type": ["string", "null"] }
           }
         }
       ]

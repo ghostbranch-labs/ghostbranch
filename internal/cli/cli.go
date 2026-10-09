@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -46,7 +47,7 @@ type Env struct {
 	// OpenConsole opens the console device for the approval code.
 	OpenConsole  func() (io.ReadWriteCloser, error)
 	Now          func() time.Time
-	Sleep        func(time.Duration)
+	Sleep        func(context.Context, time.Duration) error
 	Rand         io.Reader
 	NewForge     func(token string) (forge.Forge, error)
 	GHToken      func() (string, error)
@@ -78,7 +79,7 @@ func DefaultEnv() Env {
 	return Env{
 		Stdout: os.Stdout, Stderr: os.Stderr, Stdin: os.Stdin, Getenv: os.Getenv, UserHome: os.UserHomeDir,
 		ConsoleUsable: console.Usable(os.Stdin, os.Stderr), OpenConsole: console.Open,
-		Now: time.Now, Sleep: time.Sleep, Rand: rand.Reader,
+		Now: time.Now, Sleep: sleepCtx, Rand: rand.Reader,
 		NewForge:     func(token string) (forge.Forge, error) { return ghforge.New(token), nil },
 		GHToken:      auth.GHCLI,
 		CwdRemotes:   cwdRemotes,
@@ -95,6 +96,7 @@ func DefaultEnv() Env {
 type app struct {
 	env            Env
 	jsonOut        bool
+	ndjson         bool // wait --json: events stream first, so the envelope is one line too
 	nonInteractive bool
 	dryRun         bool
 	repo           string
@@ -126,8 +128,18 @@ func Run(args []string, env Env) int {
 	root.SetArgs(args)
 	root.SetOut(env.Stdout)
 	root.SetErr(env.Stderr)
-	cmd, err := root.ExecuteContextC(context.Background())
+	// Ctrl-C cancels the context: a gate waiting on CI leaves its job
+	// pending for wait, and the command reports INTERRUPTED.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	// After the first Ctrl-C, stop restores the default handling, so a
+	// second Ctrl-C kills the process if the command is slow to wind down.
+	context.AfterFunc(ctx, stop)
+	cmd, err := root.ExecuteContextC(ctx)
 	a.command = commandName(cmd)
+	if a.command == "wait" {
+		a.ndjson = a.jsonOut // a usage error before RunE is one line too
+	}
 	if err != nil {
 		var ce *contract.Error
 		if !errors.As(err, &ce) {
@@ -156,7 +168,9 @@ func (a *app) render(err error) int {
 	if a.jsonOut {
 		enc := json.NewEncoder(a.env.Stdout)
 		enc.SetEscapeHTML(false)
-		enc.SetIndent("", "  ")
+		if !a.ndjson {
+			enc.SetIndent("", "  ")
+		}
 		_ = enc.Encode(env)
 		return env.ExitCode
 	}
@@ -309,4 +323,16 @@ func (a *app) pair(e *engine.Engine) (workspace.Pair, error) {
 		a.pairFull = p
 	}
 	return p, err
+}
+
+// sleepCtx sleeps d, or returns early with ctx's error.
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
 }

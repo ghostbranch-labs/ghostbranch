@@ -309,3 +309,57 @@ func TestStatusFeatureListFeatureShowAreReads(t *testing.T) {
 		t.Fatalf("pushes %d -> %d, ledger %d -> %d; want none", pushes, len(h.pushes), entries, len(h.ledger()))
 	}
 }
+
+func TestStatusAndFeatureShowNameAPendingGatesJob(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.startFeature("feat-x", map[string]string{"feature.txt": "x\n"})
+	h.startFeature("f-other", map[string]string{"other.txt": "o\n"})
+	job := detached(t, h, "feat-x")
+	if want := "gate/feat-x/" + h.meta("feat-x").Gate.Candidate[:12]; job != want {
+		t.Fatalf("job = %q, want %q", job, want)
+	}
+
+	check := func(r engine.FeatureReport) {
+		t.Helper()
+		if r.Gate == nil || r.Gate.Checks != feature.ChecksPending || r.Gate.Job == nil || *r.Gate.Job != job {
+			t.Fatalf("%s gate = %+v, want pending with job %s", r.Name, r.Gate, job)
+		}
+	}
+	show, _, err := h.eng.FeatureShow(h.ctx, h.pair, "feat-x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	validateResult(t, "feature-show.schema.json", show)
+	check(show.Feature)
+
+	st, _ := h.status()
+	var found bool
+	for _, r := range st.Features {
+		switch r.Name {
+		case "feat-x":
+			check(r)
+			found = true
+		case "f-other":
+			if r.Gate != nil {
+				t.Fatalf("f-other gate = %+v, want never gated", r.Gate)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("status features = %+v, want feat-x", st.Features)
+	}
+
+	if _, _, err := h.eng.Wait(h.ctx, h.pair, job, engine.WaitOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	show, _, err = h.eng.FeatureShow(h.ctx, h.pair, "feat-x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	validateResult(t, "feature-show.schema.json", show)
+	if g := show.Feature.Gate; g == nil || g.Checks != feature.ChecksPassed || g.Job != nil {
+		t.Fatalf("gate after wait = %+v, want passed with no job", g)
+	}
+}

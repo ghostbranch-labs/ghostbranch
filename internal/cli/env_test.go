@@ -31,6 +31,7 @@ type testEnv struct {
 	vars    map[string]string
 	env     cli.Env
 	finding string
+	oldJob  string // a replaced gate job, for <OLD_JOB>
 }
 
 func newTestEnv(t *testing.T) *testEnv {
@@ -52,7 +53,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		Getenv:       func(k string) string { return te.vars[k] },
 		UserHome:     func() (string, error) { return filepath.Join(root, "home-dir"), nil },
 		Now:          clock.Now,
-		Sleep:        clock.Sleep,
+		Sleep:        clock.SleepCtx,
 		Rand:         &testutil.SeqReader{},
 		NewForge:     func(string) (forge.Forge, error) { return f, nil },
 		GHToken:      func() (string, error) { return "", errors.New("gh is not logged in") },
@@ -100,6 +101,25 @@ func (te *testEnv) shadowCommit(branch string, files map[string]string) {
 func (te *testEnv) shadowCommitMsg(branch, msg string, files map[string]string) {
 	te.t.Helper()
 	testutil.Commit(te.t, gitx.New(te.forge.RepoDir("acme/widget-shadow")), branch, msg, files)
+}
+
+// job is the id of feature name's last gate job, from the candidate its
+// metadata in the shadow repo records.
+func (te *testEnv) job(name string) string {
+	te.t.Helper()
+	raw, ok, err := gitx.New(te.forge.RepoDir("acme/widget-shadow")).ShowFile(te.t.Context(), "refs/ghostbranch/features/"+name, "feature.json")
+	if err != nil || !ok {
+		te.t.Fatalf("read %s's metadata: %v", name, err)
+	}
+	var m struct {
+		Gate *struct {
+			Candidate string `json:"candidate"`
+		} `json:"gate"`
+	}
+	if err := json.Unmarshal(raw, &m); err != nil || m.Gate == nil || len(m.Gate.Candidate) < 12 {
+		te.t.Fatalf("%s has no gate candidate: %v %s", name, err, raw)
+	}
+	return "gate/" + name + "/" + m.Gate.Candidate[:12]
 }
 
 func (te *testEnv) lastPlanID() string {

@@ -33,6 +33,7 @@ type PromoteOptions struct {
 	Groups   []plan.Group // the --curate file's groups, as read (ValidatePromoteOptions loads them)
 	PlanOnly bool
 	Yes      bool
+	Detach   bool // gate and return the pending job without waiting on CI
 }
 
 type PromoteResult struct {
@@ -71,6 +72,15 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 				ent.Approval = res.Applied.Approval
 			}
 		})
+	}()
+	// Registered after the ledger's defer, so it runs first and the ledger
+	// records INTERRUPTED.
+	defer func() {
+		var g *GateResult
+		if res != nil {
+			g = res.Gate
+		}
+		err = interrupted(ctx, g, opt.Feature, err)
 	}()
 	if err := ValidatePromoteOptions(&opt); err != nil {
 		return nil, nil, err
@@ -145,38 +155,38 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 		}
 	}
 
-	// A fresh green gate is reused only while the shadow gate branch still
-	// points at its candidate; apply checks that branch, so a deleted or moved
-	// one would make every plan stale.
-	tip, tipOK, _ := g.Resolve(ctx, shadowRef(gateBranch(opt.Feature)))
-	candidateLive := m.Gate != nil && m.Gate.Candidate != "" && tipOK && tip == m.Gate.Candidate
-	// A gate recorded without the mode its scan covered is not reused, so
-	// the result never claims a scan that did not happen.
-	fresh := m.Gate.Passed() && m.Gate.FreshFor(head, pm, O) && candidateLive && m.Gate.Commits != nil && m.Gate.ScannedAs != ""
 	names := guardNames(pc)
-	var R, T2 string
-	var entries []gitx.TreeEntry
+	fresh, T2, entries, guardRep := e.reusableGate(ctx, g, cfg, m, opt.Feature, head, pm, O, names)
 	var commits []feature.GateCommit
-	var guardRep workflow.GuardReport
-	if fresh {
-		// A gate recorded by a binary that built its candidate differently
-		// is stale: one that stripped differently (an upgrade that added
-		// internal markers), or one that did not rewrite repo guards (so its
-		// guarded jobs skipped). Gate again rather than publish a tree this
-		// binary would not build, or reuse CI that did not run those jobs.
-		fresh = false
-		var rerr error
-		if R, rerr = g.MustResolve(ctx, m.Gate.Candidate+"^"); rerr == nil {
-			if n := len(m.Gate.Commits); (n == 0 && R != pm) || (n > 0 && m.Gate.Commits[n-1].Rebased != R) {
-				rerr = errStaleGate
-			}
+	// A pending gate job for exactly these inputs is waited on, not gated
+	// again; --detach returns it at once. A dry run never reuses one:
+	// finishing it would wait on CI and write.
+	if !fresh && !e.DryRun {
+		pg, err := e.pendingFor(ctx, pc, opt.Feature, mode)
+		if err != nil {
+			return res, warns, err
 		}
-		if rerr == nil {
-			if T2, entries, rerr = publishedTree(ctx, g, R, cfg); rerr == nil && T2 == m.Gate.PublishedTree {
-				want, rep, _, werr := e.candidateTree(ctx, g, R, entries, O, names, cfg.CI.RewriteRepoGuards)
-				have, herr := g.TreeOf(ctx, m.Gate.Candidate)
-				fresh, guardRep = werr == nil && herr == nil && want == have, rep
+		if pg != nil {
+			gr, err := e.resultFromRecord(ctx, pc, opt.Feature, *pg)
+			if err != nil {
+				return res, warns, err
 			}
+			if opt.Detach {
+				res.Gate = gr
+				return res, warns, nil
+			}
+			gr, gw, err := e.finish(ctx, pc, opt.Feature, gr, *pg, waitOpts{})
+			warns = addWarnings(warns, gw...)
+			if err != nil {
+				res.Gate = gr
+				return res, warns, err
+			}
+			// The finish wrote the outcome: re-read it, and reuse a green gate
+			// through the fresh case, which recomputes the guard report.
+			if m, _, err = e.readMeta(ctx, pc, opt.Feature); err != nil {
+				return res, warns, err
+			}
+			fresh, T2, entries, guardRep = e.reusableGate(ctx, g, cfg, m, opt.Feature, head, pm, O, names)
 		}
 	}
 	switch {
@@ -199,13 +209,17 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	default:
 		e.progressf("the gate for %s is missing or stale; running it", opt.Feature)
 		// The internal gate scans for the mode this promote publishes.
-		gr, gw, err := e.gate(ctx, pc, opt.Feature, mode)
+		gr, gw, err := e.gate(ctx, pc, opt.Feature, mode, gateHow{detach: opt.Detach})
 		res.Gate = gr
 		warns = addWarnings(warns, gw...)
 		if err != nil {
 			return res, warns, err
 		}
-		if R, err = g.MustResolve(ctx, gr.Candidate+"^"); err != nil {
+		if gr.Checks == feature.ChecksPending {
+			return res, warns, nil // detached: the job is the result
+		}
+		R, err := g.MustResolve(ctx, gr.Candidate+"^")
+		if err != nil {
 			return res, warns, internalErr(err, "read the rebased feature")
 		}
 		if T2, entries, err = publishedTree(ctx, g, R, cfg); err != nil {
@@ -338,6 +352,42 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	ar, aw, err := e.apply(ctx, pc, pl, opt.Yes)
 	res.Applied = ar
 	return res, addWarnings(warns, aw...), err
+}
+
+// reusableGate reports whether the recorded gate can be reused as is, with
+// the published tree T2 and its entries, and the repo guard report it
+// rebuilt on the way. A fresh green gate is reused only
+// while the shadow gate branch still points at its candidate; apply checks
+// that branch, so a deleted or moved one would make every plan stale.
+func (e *Engine) reusableGate(ctx context.Context, g *gitx.Git, cfg config.Config, m feature.Meta, name, head, pm, O string, names workflow.Names) (ok bool, T2 string, entries []gitx.TreeEntry, rep workflow.GuardReport) {
+	tip, tipOK, _ := g.Resolve(ctx, shadowRef(gateBranch(name)))
+	candidateLive := m.Gate != nil && m.Gate.Candidate != "" && tipOK && tip == m.Gate.Candidate
+	// A gate recorded without the mode its scan covered is not reused, so
+	// the result never claims a scan that did not happen.
+	ok = m.Gate.Passed() && m.Gate.FreshFor(head, pm, O) && candidateLive && m.Gate.Commits != nil && m.Gate.ScannedAs != ""
+	if ok {
+		// A gate recorded by a binary that built its candidate differently
+		// is stale: one that stripped differently (an upgrade that added
+		// internal markers), or one that did not rewrite repo guards (so its
+		// guarded jobs skipped). Gate again rather than publish a tree this
+		// binary would not build, or reuse CI that did not run those jobs.
+		ok = false
+		var R string
+		var rerr error
+		if R, rerr = g.MustResolve(ctx, m.Gate.Candidate+"^"); rerr == nil {
+			if n := len(m.Gate.Commits); (n == 0 && R != pm) || (n > 0 && m.Gate.Commits[n-1].Rebased != R) {
+				rerr = errStaleGate
+			}
+		}
+		if rerr == nil {
+			if T2, entries, rerr = publishedTree(ctx, g, R, cfg); rerr == nil && T2 == m.Gate.PublishedTree {
+				want, r, _, werr := e.candidateTree(ctx, g, R, entries, O, names, cfg.CI.RewriteRepoGuards)
+				have, herr := g.TreeOf(ctx, m.Gate.Candidate)
+				ok, rep = werr == nil && herr == nil && want == have, r
+			}
+		}
+	}
+	return ok, T2, entries, rep
 }
 
 // ValidatePromoteOptions checks everything about a promote that needs no

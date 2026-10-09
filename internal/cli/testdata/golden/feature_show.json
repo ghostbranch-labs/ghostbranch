@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.6",
+  "schema_version": "0.7",
   "command": "feature show",
   "ok": true,
   "exit_code": 0,
@@ -19,7 +19,8 @@
         "leak": "clean",
         "scanned_as": "preserve",
         "fresh": true,
-        "at": "2026-10-05T12:00:05Z"
+        "at": "2026-10-05T12:00:05Z",
+        "job": null
       },
       "public_pr": null,
       "pr_state": "",

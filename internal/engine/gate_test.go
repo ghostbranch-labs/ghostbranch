@@ -257,7 +257,7 @@ func TestGateLeakWinsOverAFailureToRecordIt(t *testing.T) {
 	h := newHarness(t)
 	h.init()
 	h.startFeature("feat-x", map[string]string{"config.env": "TOKEN=" + testutil.FakeGitHubToken() + "\n"})
-	h.moveMetaOnPush("feat-x")
+	h.moveMetaOnPush("feat-x", 1) // a leak writes one record
 	res, warns, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
 	_ = wantCode(t, err, contract.LeakFound)
 	if res == nil || len(res.Findings) == 0 {
@@ -331,14 +331,19 @@ func TestGateWarnsWhenCheckVisibilityIsLimited(t *testing.T) {
 }
 
 // moveMetaOnPush makes someone else move the feature's metadata ref just as
-// the gate pushes it, so the leased push fails.
-func (h *harness) moveMetaOnPush(name string) {
+// the gate pushes it, so the leased push fails. Only metadata pushes
+// numbered from or later (counting from 1) are hit; earlier ones succeed.
+func (h *harness) moveMetaOnPush(name string, from int) {
 	t := h.t
 	sg := h.shadowGit()
 	metaRef := "refs/ghostbranch/features/" + name
+	n := 0
 	h.eng.OnPush = func(_, _ string, specs []string) {
 		for _, s := range specs {
 			if !strings.HasSuffix(s, ":"+metaRef) {
+				continue
+			}
+			if n++; n < from {
 				continue
 			}
 			// Someone else moves the metadata ref first, so the leased push fails.
@@ -410,7 +415,8 @@ func TestGateCheckFailureWinsOverAFailureToRecordIt(t *testing.T) {
 	h.forge.Checks = func(string, string) []forge.Check {
 		return []forge.Check{{Name: "lint", Status: "completed", Conclusion: "failure"}}
 	}
-	h.moveMetaOnPush("feat-x")
+	// The pending record succeeds; the final write and its one retry fail.
+	h.moveMetaOnPush("feat-x", 2)
 	_, warns, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
 	_ = wantCode(t, err, contract.ChecksFailed)
 	if !hasWarning(warns, contract.GateNotRecorded) {
