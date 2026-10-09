@@ -34,14 +34,16 @@ func ParseInput(r io.Reader) ([]Line, error) {
 
 // Facts are what the pair's mirror knows about features.
 type Facts struct {
-	Names map[string]bool   // every feature
-	Heads map[string]string // feature -> shadow head, for features with commits not in public main
+	Names      map[string]bool   // every feature
+	Heads      map[string]string // feature -> shadow head, for features with commits not in public main
+	Commits    map[string]string // unpublished feature commit -> its feature
+	PublicMain string            // public main in the mirror, if known
 }
 
 // LoadFacts reads features from the engine's mirror, offline. Any git error
 // is returned, so the check fails closed.
 func LoadFacts(ctx context.Context, mirror *gitx.Git) (Facts, error) {
-	f := Facts{Names: map[string]bool{}, Heads: map[string]string{}}
+	f := Facts{Names: map[string]bool{}, Heads: map[string]string{}, Commits: map[string]string{}}
 	metas, err := mirror.Refs(ctx, "refs/shadow-meta/features")
 	if err != nil {
 		return f, err
@@ -49,6 +51,9 @@ func LoadFacts(ctx context.Context, mirror *gitx.Git) (Facts, error) {
 	pm, hasPM, err := mirror.Resolve(ctx, "refs/remotes/public/main")
 	if err != nil {
 		return f, err
+	}
+	if hasPM {
+		f.PublicMain = pm
 	}
 	for ref := range metas {
 		name := strings.TrimPrefix(ref, "refs/shadow-meta/features/")
@@ -70,6 +75,17 @@ func LoadFacts(ctx context.Context, mirror *gitx.Git) (Facts, error) {
 			}
 		}
 		f.Heads[name] = head
+		args := []string{"rev-list", head}
+		if hasPM {
+			args = append(args, "^"+pm)
+		}
+		out, err := mirror.Run(ctx, args...)
+		if err != nil {
+			return f, err
+		}
+		for _, c := range strings.Fields(out) {
+			f.Commits[c] = name
+		}
 	}
 	return f, nil
 }
@@ -104,6 +120,7 @@ func reserved(ref string, f Facts) string {
 type Objects interface {
 	Resolve(ctx context.Context, rev string) (string, bool, error)
 	IsAncestor(ctx context.Context, a, b string) (bool, error)
+	RevList(ctx context.Context, args ...string) ([]string, error)
 }
 
 // Resolve returns the object rev names, with ok=false when there is none.
@@ -133,11 +150,21 @@ func (c *Checkout) IsAncestor(ctx context.Context, a, b string) (bool, error) {
 	return false, err
 }
 
+// RevList runs git rev-list in the checkout and returns the commits.
+func (c *Checkout) RevList(ctx context.Context, args ...string) ([]string, error) {
+	out, _, err := run(ctx, c.Dir, append([]string{"rev-list"}, args...)...)
+	if err != nil {
+		return nil, err
+	}
+	return strings.Fields(out), nil
+}
+
 // Check returns the pushed refs that would put feature work in the public
-// repo (spec §11.4): by name, or by containing a feature's commits. Any git
-// error fails the check: a guard that waves pushes through when git breaks
-// is worse than none.
-func Check(ctx context.Context, checkout Objects, lines []Line, f Facts) ([]Block, error) {
+// repo (spec §11.4): by name, or by carrying any unpublished feature commit.
+// Any git error fails the check: a guard that waves pushes through when git
+// breaks is worse than none. Commits force-pushed out of the mirror can't be
+// recognized by content; the name check still applies.
+func Check(ctx context.Context, checkout Objects, remote string, lines []Line, f Facts) ([]Block, error) {
 	names := make([]string, 0, len(f.Heads))
 	for n := range f.Heads {
 		names = append(names, n)
@@ -170,6 +197,34 @@ func Check(ctx context.Context, checkout Objects, lines []Line, f Facts) ([]Bloc
 			}
 			if in {
 				why = fmt.Sprintf("it contains the commits of feature %q", n)
+			}
+		}
+		if why == "" && len(f.Commits) > 0 {
+			args := []string{l.LocalSHA, "--not"}
+			for _, base := range []string{l.RemoteSHA, f.PublicMain} {
+				if strings.Trim(base, "0") == "" {
+					continue
+				}
+				if _, ok, err := checkout.Resolve(ctx, base); err != nil {
+					return nil, err
+				} else if ok {
+					args = append(args, base)
+				}
+			}
+			// A named remote's tracking refs are already public; a push to a
+			// bare URL has none to exclude, so the list is just longer.
+			if remote != "" && !strings.ContainsAny(remote, ":/") {
+				args = append(args, "--remotes="+remote)
+			}
+			commits, err := checkout.RevList(ctx, args...)
+			if err != nil {
+				return nil, err
+			}
+			for _, c := range commits {
+				if n, ok := f.Commits[c]; ok {
+					why = fmt.Sprintf("it contains commit %s of feature %q", c[:12], n)
+					break
+				}
 			}
 		}
 		if why != "" {
