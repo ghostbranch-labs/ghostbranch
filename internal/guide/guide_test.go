@@ -32,7 +32,8 @@ func TestRenderListsEveryCodeFromTheRegistry(t *testing.T) {
 	// 293: the lifecycle section (with --repo on each example and the grant note), --repo in the loop, and the stdout/stderr note (sub-project 5b).
 	// 296: the SHADOW_BEHIND error row, data.checkout as argvs, and feature start refusing a stale shadow main (sub-project 5b).
 	// 314: the jobs section (+15), and the sub-project 5c error rows (JOB_STALE and the other new codes).
-	if n := strings.Count(out, "\n"); n > 314 {
+	// 318: the jobs section's recovery lines (status names a pending job, an empty current_job, promote --detach's next step).
+	if n := strings.Count(out, "\n"); n > 318 {
 		t.Errorf("the guide is %d lines; keep it short (spec: about 150 plus the tables)", n)
 	}
 }
@@ -265,13 +266,14 @@ func TestGuideTeachesJobsAndWait(t *testing.T) {
 		"`wait --json` prints one JSON object per line. **The last line is the result**, the same as `gate --json`",
 		"the lines before it are progress events",
 		"A finished job answers at once.",
-		"`--timeout 10m` returns `checks: pending` (exit 0) if CI is still running",
+		"`wait --timeout 10m` returns `checks: pending` (exit 0) if CI is still running",
 		// The interrupt rule.
-		"After Ctrl-C or a dropped session you get `INTERRUPTED`.",
-		"With `error.details.job`, CI is still running: run `ghostbranch wait <job>`, not `gate`.",
+		"After Ctrl-C you get `INTERRUPTED`.",
+		"With `error.details.job`, CI is still running: run `ghostbranch wait <job> --repo <public> --json`, not `gate`.",
 		"Without it nothing is pending: run the command again.",
-		"`JOB_STALE`", "`error.details.current_job`",
-		"`promote --detach`",
+		"If the session dropped, `ghostbranch status --repo <public> --json` names a pending job (`gate.job`): wait on it.",
+		"`JOB_STALE`", "`error.details.current_job`", "if `current_job` is empty, gate again",
+		"`promote --detach` returns the job in `data.gate.job` and no plan; once `wait` passes, run the same promote without `--detach` (it reuses the green gate).",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the guide lacks %q", want)

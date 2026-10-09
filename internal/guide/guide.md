@@ -55,12 +55,16 @@ main, green CI, and a leak scan of exactly what will be published.
 - `wait --json` prints one JSON object per line. **The last line is the result**, the same as
   `gate --json`; the lines before it are progress events (`waiting`, `check`, `settled`, whose
   `outcome` is `passed`, `failed`, `no_ci` or `timeout`). Read the last line only.
-- A finished job answers at once. `--timeout 10m` returns `checks: pending` (exit 0) if CI is still running;
-  run `wait` again later.
-- After Ctrl-C or a dropped session you get `INTERRUPTED`. With `error.details.job`, CI is still running:
-  run `ghostbranch wait <job>`, not `gate`. Without it nothing is pending: run the command again.
-- `JOB_STALE`: a newer gate replaced the job; `error.details.current_job` names the current one.
-- `promote --detach` does the same when promote needs a gate: it returns the job to `wait` on.
+- A finished job answers at once. `wait --timeout 10m` returns `checks: pending` (exit 0) if CI is still
+  running; run `wait` again later.
+- After Ctrl-C you get `INTERRUPTED`. With `error.details.job`, CI is still running: run
+  `ghostbranch wait <job> --repo <public> --json`, not `gate`. Without it nothing is pending: run the command
+  again. If the session dropped, `ghostbranch status --repo <public> --json` names a pending job
+  (`gate.job`): wait on it.
+- `JOB_STALE`: a newer gate replaced the job; `error.details.current_job` names the current one; if
+  `current_job` is empty, gate again.
+- `promote --detach` returns the job in `data.gate.job` and no plan; once `wait` passes, run the same
+  promote without `--detach` (it reuses the green gate).
 
 ## Set up a repo
 
