@@ -49,6 +49,12 @@ type Forge struct {
 	PushRunsCalls   int
 	PushRunsRepos   []string
 	CancelRunRepos  []string
+	// ForceCancelForbidden makes ForceCancelRun fail with ErrForbidden.
+	// ForceCancelled records the run IDs ForceCancelRun cancelled, per
+	// repo, and ForceCancelRepos the repo each call named.
+	ForceCancelForbidden map[string]bool
+	ForceCancelled       map[string][]int64
+	ForceCancelRepos     []string
 	// GetPRErr makes GetPR fail with that error.
 	GetPRErr error
 	// ClosePRErr makes ClosePullRequest fail with that error; ClosePRRepos
@@ -57,10 +63,21 @@ type Forge struct {
 	ClosePRRepos []string
 }
 
-// Run is a seeded workflow run that a push of SHA started.
+// Run is a seeded workflow run that a push of SHA started. The flags script
+// GitHub's behaviours: IgnoreCancel accepts CancelRun but leaves the run
+// going, IgnoreForceCancel does the same for ForceCancelRun, and Conflict
+// makes CancelRun answer ErrConflict (a 409). FinishAfterPolls, when
+// greater than 0, has the run turn completed/success on its own once
+// PushRuns has listed it that many times.
 type Run struct {
 	SHA string
 	forge.Run
+	IgnoreCancel      bool
+	IgnoreForceCancel bool
+	Conflict          bool
+	FinishAfterPolls  int
+
+	polls int
 }
 
 // New stores bare repos under root.
@@ -314,9 +331,15 @@ func (f *Forge) PushRuns(_ context.Context, full, sha string) ([]forge.Run, erro
 		return nil, f.RunsErr
 	}
 	out := []forge.Run{}
-	for _, r := range f.Runs[full] {
-		if r.SHA == sha {
-			out = append(out, r.Run)
+	for i := range f.Runs[full] {
+		r := &f.Runs[full][i]
+		if r.SHA != sha {
+			continue
+		}
+		out = append(out, r.Run)
+		r.polls++
+		if r.FinishAfterPolls > 0 && r.polls >= r.FinishAfterPolls && r.Status != "completed" {
+			r.Status, r.Conclusion = "completed", "success"
 		}
 	}
 	return out, nil
@@ -337,12 +360,41 @@ func (f *Forge) CancelRun(_ context.Context, full string, id int64) error {
 		if r.ID != id {
 			continue
 		}
-		if r.Status != "completed" {
-			r.Status = "completed"
+		switch {
+		case r.Conflict:
+			return fmt.Errorf("cancel workflow run %d of %s: %w", id, full, forge.ErrConflict)
+		case r.IgnoreCancel:
+			// Accepted, as GitHub's 202 is, but the run keeps going.
+		case r.Status != "completed":
+			r.Status, r.Conclusion = "completed", "cancelled"
 			if f.Cancelled == nil {
 				f.Cancelled = map[string][]int64{}
 			}
 			f.Cancelled[full] = append(f.Cancelled[full], id)
+		}
+		return nil
+	}
+	return fmt.Errorf("workflow run %d of %s: %w", id, full, forge.ErrNotFound)
+}
+
+func (f *Forge) ForceCancelRun(_ context.Context, full string, id int64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.ForceCancelRepos = append(f.ForceCancelRepos, full)
+	if f.ForceCancelForbidden[full] {
+		return fmt.Errorf("force-cancel workflow run %d of %s: %w", id, full, forge.ErrForbidden)
+	}
+	for i := range f.Runs[full] {
+		r := &f.Runs[full][i]
+		if r.ID != id {
+			continue
+		}
+		if !r.IgnoreForceCancel && r.Status != "completed" {
+			r.Status, r.Conclusion = "completed", "cancelled"
+			if f.ForceCancelled == nil {
+				f.ForceCancelled = map[string][]int64{}
+			}
+			f.ForceCancelled[full] = append(f.ForceCancelled[full], id)
 		}
 		return nil
 	}

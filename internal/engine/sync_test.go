@@ -209,9 +209,10 @@ func TestSyncCancelsTheWorkflowRunsItsPushStarts(t *testing.T) {
 	if c := res.CancelledRuns[0]; c.Workflow != "ci" || c.URL != "https://github.example/runs/ci" {
 		t.Fatalf("cancelled run = %+v", c)
 	}
-	// Runs were there at the first look; one more look found nothing new.
-	if h.forge.PushRunsCalls != 2 {
-		t.Fatalf("PushRuns calls = %d, want 2", h.forge.PushRunsCalls)
+	// Runs were there at the first look; one more look found nothing new,
+	// and a third saw every cancel had taken.
+	if h.forge.PushRunsCalls != 3 {
+		t.Fatalf("PushRuns calls = %d, want 3", h.forge.PushRunsCalls)
 	}
 	last := h.ledger()[len(h.ledger())-1]
 	if last.Op != "sync" || !strings.Contains(last.Summary, "cancelled 5 workflow run(s)") {
@@ -348,6 +349,155 @@ func TestSyncInterruptedWhileLookingForRunsWarns(t *testing.T) {
 	}
 	for _, w := range warns {
 		if w.Code == contract.CINotCancelled && strings.Contains(w.Message, "could not cancel") {
+			return
+		}
+	}
+	t.Fatalf("want CI_NOT_CANCELLED, got %+v", warns)
+}
+
+// seedRun seeds one run for sha with the fake's behaviour flags.
+func seedRun(h *harness, r fake.Run) {
+	if h.forge.Runs == nil {
+		h.forge.Runs = map[string][]fake.Run{}
+	}
+	h.forge.Runs[shadowName] = append(h.forge.Runs[shadowName], r)
+}
+
+// cancelledIDs is the IDs in res.CancelledRuns.
+func cancelledIDs(res *engine.SyncResult) []int64 {
+	ids := []int64{}
+	for _, c := range res.CancelledRuns {
+		ids = append(ids, c.ID)
+	}
+	return ids
+}
+
+func TestSyncCancelHonoured(t *testing.T) {
+	t.Parallel()
+	h, next := pushRunsHarness(t)
+	seedRuns(h, next, wfRun(1, "ci", "queued"))
+	res, warns, err := h.eng.Sync(h.ctx, h.pair, engine.SyncOptions{})
+	if err != nil || len(warns) != 0 || !reflect.DeepEqual(cancelledIDs(res), []int64{1}) {
+		t.Fatalf("%+v %+v %v", res, warns, err)
+	}
+	if len(h.forge.ForceCancelled) != 0 {
+		t.Fatalf("force-cancelled %v", h.forge.ForceCancelled)
+	}
+}
+
+// A run that ignores the cancel is force-cancelled, and then listed.
+func TestSyncCancelIgnoredThenForced(t *testing.T) {
+	t.Parallel()
+	h, next := pushRunsHarness(t)
+	seedRun(h, fake.Run{SHA: next, Run: wfRun(1, "ci", "in_progress"), IgnoreCancel: true})
+	res, warns, err := h.eng.Sync(h.ctx, h.pair, engine.SyncOptions{})
+	if err != nil || len(warns) != 0 || !reflect.DeepEqual(cancelledIDs(res), []int64{1}) {
+		t.Fatalf("%+v %+v %v", res, warns, err)
+	}
+	if !reflect.DeepEqual(h.forge.ForceCancelled[shadowName], []int64{1}) {
+		t.Fatalf("force-cancelled %v", h.forge.ForceCancelled)
+	}
+}
+
+// A run that ignores both is not listed, and the warning names it.
+func TestSyncCancelIgnoredTwice(t *testing.T) {
+	t.Parallel()
+	h, next := pushRunsHarness(t)
+	seedRun(h, fake.Run{SHA: next, Run: wfRun(7, "ci", "in_progress"), IgnoreCancel: true, IgnoreForceCancel: true})
+	res, warns, err := h.eng.Sync(h.ctx, h.pair, engine.SyncOptions{})
+	if err != nil || res.ShadowMainAfter != next || len(res.CancelledRuns) != 0 {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if len(warns) != 1 || warns[0].Code != contract.CINotCancelled || !strings.Contains(warns[0].Message, "7 (https://github.example/runs/ci)") ||
+		!strings.Contains(warns[0].Message, "kept running after sync cancelled and force-cancelled them") {
+		t.Fatalf("warnings = %+v", warns)
+	}
+}
+
+// A 409 for a run that has finished meanwhile: nothing to do.
+func TestSyncCancelConflictOnACompletedRun(t *testing.T) {
+	t.Parallel()
+	h, next := pushRunsHarness(t)
+	// Listed in progress at the first look, finished by the time the cancel lands.
+	seedRun(h, fake.Run{SHA: next, Run: wfRun(1, "ci", "in_progress"), Conflict: true, FinishAfterPolls: 1})
+	res, warns, err := h.eng.Sync(h.ctx, h.pair, engine.SyncOptions{})
+	if err != nil || len(warns) != 0 || len(res.CancelledRuns) != 0 {
+		t.Fatalf("%+v %+v %v", res, warns, err)
+	}
+	if len(h.forge.CancelRunRepos) != 1 || len(h.forge.ForceCancelled) != 0 {
+		t.Fatalf("CancelRun calls %v, force-cancelled %v", h.forge.CancelRunRepos, h.forge.ForceCancelled)
+	}
+}
+
+// A 409 for a run that is still active goes on to the force-cancel.
+func TestSyncCancelConflictOnAnActiveRun(t *testing.T) {
+	t.Parallel()
+	h, next := pushRunsHarness(t)
+	seedRun(h, fake.Run{SHA: next, Run: wfRun(1, "ci", "in_progress"), Conflict: true})
+	res, warns, err := h.eng.Sync(h.ctx, h.pair, engine.SyncOptions{})
+	if err != nil || len(warns) != 0 || !reflect.DeepEqual(cancelledIDs(res), []int64{1}) {
+		t.Fatalf("%+v %+v %v", res, warns, err)
+	}
+	if !reflect.DeepEqual(h.forge.ForceCancelled[shadowName], []int64{1}) {
+		t.Fatalf("force-cancelled %v", h.forge.ForceCancelled)
+	}
+}
+
+func TestSyncForceCancelForbidden(t *testing.T) {
+	t.Parallel()
+	h, next := pushRunsHarness(t)
+	seedRun(h, fake.Run{SHA: next, Run: wfRun(1, "ci", "in_progress"), IgnoreCancel: true})
+	h.forge.ForceCancelForbidden = map[string]bool{shadowName: true}
+	res, warns, err := h.eng.Sync(h.ctx, h.pair, engine.SyncOptions{})
+	if err != nil || len(res.CancelledRuns) != 0 {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if len(warns) != 1 || warns[0].Code != contract.CINotCancelled || !strings.Contains(warns[0].Message, "1 (https://github.example/runs/ci)") ||
+		!strings.Contains(warns[0].Message, "give it Actions write") {
+		t.Fatalf("warnings = %+v", warns)
+	}
+}
+
+// A run that ignores the cancel but finishes on its own before the
+// force-cancel is left alone.
+func TestSyncCancelRunFinishedOnItsOwn(t *testing.T) {
+	t.Parallel()
+	h, next := pushRunsHarness(t)
+	// The two looks for runs see it active; the first check sees it finished.
+	seedRun(h, fake.Run{SHA: next, Run: wfRun(1, "ci", "in_progress"), IgnoreCancel: true, FinishAfterPolls: 2})
+	res, warns, err := h.eng.Sync(h.ctx, h.pair, engine.SyncOptions{})
+	if err != nil || len(warns) != 0 || len(res.CancelledRuns) != 0 {
+		t.Fatalf("%+v %+v %v", res, warns, err)
+	}
+	if len(h.forge.ForceCancelRepos) != 0 {
+		t.Fatalf("force-cancel calls %v", h.forge.ForceCancelRepos)
+	}
+}
+
+// Ctrl-C while sync checks its cancels: a warning, and the result.
+func TestSyncInterruptedWhileVerifying(t *testing.T) {
+	t.Parallel()
+	h, next := pushRunsHarness(t)
+	seedRun(h, fake.Run{SHA: next, Run: wfRun(1, "ci", "in_progress"), IgnoreCancel: true})
+	ctx, cancel := context.WithCancel(h.ctx)
+	defer cancel()
+	sleep := h.eng.Sleep
+	h.eng.Sleep = func(c context.Context, d time.Duration) error {
+		if h.forge.PushRunsCalls >= 3 { // two looks for runs, then the first check
+			cancel()
+		}
+		return sleep(c, d)
+	}
+	res, warns, _ := h.eng.Sync(ctx, h.pair, engine.SyncOptions{})
+	if res == nil || res.ShadowMainAfter != next || len(res.CancelledRuns) != 0 {
+		t.Fatalf("result = %+v", res)
+	}
+	if h.forge.PushRunsCalls != 3 || len(h.forge.ForceCancelRepos) != 0 {
+		t.Fatalf("PushRuns calls = %d, force-cancel calls %v", h.forge.PushRunsCalls, h.forge.ForceCancelRepos)
+	}
+	for _, w := range warns {
+		if w.Code == contract.CINotCancelled && strings.Contains(w.Message, "interrupted while checking") &&
+			strings.Contains(w.Message, "1 (https://github.example/runs/ci)") {
 			return
 		}
 	}

@@ -407,7 +407,7 @@ func (c *Client) PushRuns(ctx context.Context, full, sha string) ([]forge.Run, e
 			return nil, err
 		}
 		for _, r := range runs.WorkflowRuns {
-			out = append(out, forge.Run{ID: r.GetID(), Workflow: r.GetName(), Status: r.GetStatus(), URL: r.GetHTMLURL()})
+			out = append(out, forge.Run{ID: r.GetID(), Workflow: r.GetName(), Status: r.GetStatus(), Conclusion: r.GetConclusion(), URL: r.GetHTMLURL()})
 		}
 		if resp.NextPage == 0 {
 			return out, nil
@@ -416,8 +416,9 @@ func (c *Client) PushRuns(ctx context.Context, full, sha string) ([]forge.Run, e
 	}
 }
 
-// CancelRun cancels workflow run id. GitHub answers 202; a 409 means the
-// run has already finished, which is what cancelling wanted.
+// CancelRun asks GitHub to cancel workflow run id. GitHub answers 202, which
+// only accepts the request; a 409 (forge.ErrConflict) means GitHub won't
+// cancel the run in its current state, often because it has finished.
 func (c *Client) CancelRun(ctx context.Context, full string, id int64) error {
 	owner, name, err := forge.SplitName(full)
 	if err != nil {
@@ -425,11 +426,40 @@ func (c *Client) CancelRun(ctx context.Context, full string, id int64) error {
 	}
 	resp, err := c.c.Actions.CancelWorkflowRunByID(ctx, owner, name, id)
 	var accepted *gh.AcceptedError
-	if errors.As(err, &accepted) || (err != nil && resp != nil && resp.StatusCode == http.StatusConflict) {
+	if errors.As(err, &accepted) {
 		return nil
+	}
+	if err != nil && resp != nil && resp.StatusCode == http.StatusConflict {
+		return fmt.Errorf("%w: cancel workflow run %d of %s", forge.ErrConflict, id, full)
 	}
 	if isForbidden(resp, err) {
 		return fmt.Errorf("%w: cancel workflow run %d of %s: %v", forge.ErrForbidden, id, full, err)
+	}
+	return wrap(resp, err)
+}
+
+// ForceCancelRun force-cancels workflow run id, for a run that ignored
+// CancelRun. go-github has no wrapper, so this is a raw request; GitHub
+// answers 202.
+func (c *Client) ForceCancelRun(ctx context.Context, full string, id int64) error {
+	owner, name, err := forge.SplitName(full)
+	if err != nil {
+		return err
+	}
+	req, err := c.c.NewRequest(ctx, "POST", fmt.Sprintf("repos/%s/%s/actions/runs/%d/force-cancel", owner, name, id), nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.c.Do(req, nil)
+	var accepted *gh.AcceptedError
+	if errors.As(err, &accepted) {
+		return nil
+	}
+	if err != nil && resp != nil && resp.StatusCode == http.StatusConflict {
+		return fmt.Errorf("%w: force-cancel workflow run %d of %s", forge.ErrConflict, id, full)
+	}
+	if isForbidden(resp, err) {
+		return fmt.Errorf("%w: force-cancel workflow run %d of %s: %v", forge.ErrForbidden, id, full, err)
 	}
 	return wrap(resp, err)
 }

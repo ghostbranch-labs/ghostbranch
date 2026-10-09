@@ -19,6 +19,10 @@ var ErrTransient = errors.New("transient forge error")
 // limit): the token may not do this.
 var ErrForbidden = errors.New("forbidden")
 
+// ErrConflict wraps a 409: the host refused the change in the resource's
+// current state.
+var ErrConflict = errors.New("conflict")
+
 type Repo struct {
 	FullName      string
 	Private       bool
@@ -55,10 +59,11 @@ type Check struct {
 
 // Run is a GitHub Actions workflow run.
 type Run struct {
-	ID       int64
-	Workflow string
-	Status   string // queued | in_progress | waiting | requested | pending | completed
-	URL      string
+	ID         int64
+	Workflow   string
+	Status     string // queued | in_progress | waiting | requested | pending | completed
+	Conclusion string // set once Status is completed: success | failure | cancelled | …
+	URL        string
 }
 
 type User struct {
@@ -82,9 +87,12 @@ type Forge interface {
 	SecretNames(ctx context.Context, full string) ([]string, error)
 	// PushRuns lists Actions runs for sha triggered by event "push" (any status).
 	PushRuns(ctx context.Context, full, sha string) ([]Run, error)
-	// CancelRun cancels a queued or in-progress run. A run that has already
-	// finished is not an error.
+	// CancelRun asks to cancel a queued or in-progress run. The host only
+	// accepts the request: the run may keep going. A run the host won't
+	// cancel in its current state, finished or not, is ErrConflict.
 	CancelRun(ctx context.Context, full string, id int64) error
+	// ForceCancelRun force-cancels a run that ignored CancelRun.
+	ForceCancelRun(ctx context.Context, full string, id int64) error
 	// ClosePullRequest closes PR number in full. A PR that is already
 	// closed is not an error; a missing one is ErrNotFound, and a plain
 	// permission refusal ErrForbidden.

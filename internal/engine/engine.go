@@ -32,6 +32,12 @@ const (
 	DefaultCIAppearWindow = 30 * time.Second
 	// DefaultCIAppearPoll is how often sync looks within that window.
 	DefaultCIAppearPoll = 3 * time.Second
+	// DefaultCancelVerifyWindow is how long sync waits for the runs it
+	// cancelled to finish before it force-cancels the ones still going.
+	DefaultCancelVerifyWindow = 30 * time.Second
+	// DefaultForceCancelWindow is how long it then waits for the
+	// force-cancelled runs to finish.
+	DefaultForceCancelWindow = 15 * time.Second
 	// OverlayBranch holds the overlay and is the shadow repo's default branch.
 	OverlayBranch = "ghostbranch"
 )
