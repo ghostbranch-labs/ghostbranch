@@ -159,10 +159,15 @@ func (e *Engine) AgentsRevoke(ctx context.Context, p *workspace.Pair, all bool) 
 	res = &AgentsRevokeResult{Revoked: []grant.Grant{}}
 	if e.DryRun {
 		gs, err := s.Load()
-		if err != nil && !all {
-			return nil, nil, internalErr(err, "read agent grants")
-		}
 		res.Preview = preview.New(nil)
+		switch {
+		case err != nil && all && grant.Corrupt(err):
+			// revoke --all replaces a grants.json that doesn't decode.
+			res.Preview.Add(preview.WriteFile(s.Path()))
+			return res, nil, nil
+		case err != nil:
+			return nil, nil, grantErr(err, "read agent grants")
+		}
 		for _, g := range gs {
 			if (all || strings.EqualFold(g.Public, public)) && g.ValidAt(e.now()) {
 				res.Revoked = append(res.Revoked, g)

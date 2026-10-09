@@ -101,18 +101,32 @@ func (s *Store) Load() ([]Grant, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", s.path, err)
 	}
+	// The version first: a newer Ghostbranch may have changed how values
+	// look, and such a file must be refused as newer, not cleared as corrupt.
+	var head struct {
+		SchemaVersion string `json:"schema_version"`
+	}
+	if err := json.Unmarshal(b, &head); err != nil {
+		return nil, s.corrupt(b, err)
+	}
+	if contract.Newer(head.SchemaVersion) {
+		return nil, contract.NewerRecord("grants", head.SchemaVersion)
+	}
 	var f file
 	if err := json.Unmarshal(b, &f); err != nil {
-		what := "is not valid JSON"
-		if json.Valid(b) {
-			what = "has a value Ghostbranch can't read"
-		}
-		return nil, corruptFile{fmt.Errorf("%s %s; fix it or run `ghostbranch agents revoke --all`: %w", s.path, what, err)}
-	}
-	if contract.Newer(f.SchemaVersion) {
-		return nil, contract.NewerRecord("grants", f.SchemaVersion)
+		return nil, s.corrupt(b, err)
 	}
 	return f.Grants, nil
+}
+
+// corrupt wraps a decode error of b, marking it as one revoke --all may
+// replace the file over.
+func (s *Store) corrupt(b []byte, err error) error {
+	what := "is not valid JSON"
+	if json.Valid(b) {
+		what = "has a value Ghostbranch can't read"
+	}
+	return corruptFile{fmt.Errorf("%s %s; fix it or run `ghostbranch agents revoke --all`: %w", s.path, what, err)}
 }
 
 // Valid returns the grant in force for the pair at now.
@@ -175,7 +189,7 @@ func (s *Store) update(now time.Time, replaceCorrupt bool, fn func([]Grant) []Gr
 	}
 	defer unlock()
 	gs, err := s.Load()
-	if err != nil && (!replaceCorrupt || !unparsable(err)) {
+	if err != nil && (!replaceCorrupt || !Corrupt(err)) {
 		return err
 	}
 	live := make([]Grant, 0, len(gs))
@@ -212,10 +226,9 @@ type corruptFile struct{ err error }
 func (c corruptFile) Error() string { return c.err.Error() }
 func (c corruptFile) Unwrap() error { return c.err }
 
-// unparsable reports a Load error from a file that was read but didn't decode,
-// the only error revoke --all may replace the file over: a file it couldn't
-// read, or one from a newer Ghostbranch, stays as it is.
-func unparsable(err error) bool {
+// Corrupt reports a Load error from a file that was read but didn't decode:
+// the only kind revoke --all replaces.
+func Corrupt(err error) bool {
 	var c corruptFile
 	return errors.As(err, &c)
 }
