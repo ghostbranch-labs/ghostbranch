@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
+	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
+	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
@@ -85,5 +87,22 @@ func TestNextPointsAtTheSavedPlan(t *testing.T) {
 	}
 	if next := a.next(contract.New(contract.BranchExists, "x").WithDetails(map[string]any{"branch": "feat-x", "sha": "abc"})); len(next) != 0 {
 		t.Errorf("branch at another commit: next = %+v, want none", next)
+	}
+}
+
+// A merged feature whose branch is gone but whose gate is past what was
+// published isn't closed by sync: a person closes it at the console.
+func TestNextForAMergedBranchGoneFeatureSyncLeaves(t *testing.T) {
+	t.Parallel()
+	a := &app{env: Env{Getenv: func(string) string { return "" }}, command: "status",
+		pairFull: workspace.Pair{Public: "acme/widget", Shadow: "acme/widget-shadow"}}
+	r := engine.FeatureReport{Name: "feat-x", State: feature.StateBranchGone, PRState: "merged"}
+	if engine.ClosableWithoutConsole(r) {
+		t.Fatal("a report the survey didn't tie to its publish must not be closable unattended")
+	}
+	next := a.featureNexts(nil, []engine.FeatureReport{r})
+	want := []string{"ghostbranch", "feature", "close", "feat-x", "--repo", "acme/widget"}
+	if len(next) != 1 || !slices.Equal(next[0].Command, want) || !next[0].NeedsHuman {
+		t.Fatalf("next = %+v, want %v for a person", next, want)
 	}
 }

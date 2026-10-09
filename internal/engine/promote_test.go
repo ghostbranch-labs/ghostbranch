@@ -677,6 +677,11 @@ func TestApplyResumesAPromoteInterruptedAfterThePush(t *testing.T) {
 	if got := h.publicRefs()["refs/heads/feat-x"]; got != P || len(h.forge.PRs(publicName)) != 0 {
 		t.Fatalf("after the interrupt: branch at %s (plan %s), PRs %+v", got, P, h.forge.PRs(publicName))
 	}
+	// Nothing was published as a PR: the ledger says the plan was saved.
+	es := h.ledger()
+	if last := es[len(es)-1]; last.Op != "promote" || last.ErrorCode != string(contract.Interrupted) || last.Summary != "plan "+id+" saved" {
+		t.Fatalf("ledger = %+v", last)
+	}
 
 	h.eng.Forge = h.forge
 	ar, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: id})

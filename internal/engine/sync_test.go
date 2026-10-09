@@ -1152,3 +1152,22 @@ func TestSyncNeverClosesANewerRecord(t *testing.T) {
 		t.Fatalf("status features = %+v", st.Features)
 	}
 }
+
+// A record from before 0.6 doesn't say which head was published, so a
+// gate can't be tied to the publish: merged with its branch gone, it
+// still waits for a person.
+func TestABranchGoneFeatureWithAnOldRecordNeedsAPerson(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	pr, _ := h.publish("feat-x")
+	h.forge.SetPRMerged(publicName, pr)
+	h.editRemoteMeta("feat-x", func(m *feature.Meta) { m.Promoted.FeatureHead = "" })
+	if err := h.shadowGit().DeleteRef(h.ctx, "refs/heads/feat-x"); err != nil {
+		t.Fatal(err)
+	}
+	r := h.report("feat-x")
+	if r.State != feature.StateBranchGone || r.PRState != "merged" || r.Gate == nil || engine.ClosableWithoutConsole(r) {
+		t.Fatalf("report = %+v, closable %v", r, engine.ClosableWithoutConsole(r))
+	}
+}

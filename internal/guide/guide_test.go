@@ -237,7 +237,7 @@ func TestGuideTeachesTheLifecycle(t *testing.T) {
 		"`ghostbranch sync --repo <public>` closes features whose public PR merged and whose branch hasn't moved",
 		"`ghostbranch feature close <name> --repo <public>` with `needs_human`",
 		"needs a person at the console unless the feature is merged and unmoved",
-		"`merged_moved`, `pr_closed` and an unmerged `branch_gone` are for a person to close",
+		"`merged_moved`, `pr_closed` and a `branch_gone` that is unmerged, or merged but gated past its publish, are for a person to close",
 		"an agent grant does not cover it, so don't ask for `agents allow` to unblock a close",
 		"`ghostbranch feature abandon <name> --repo <public>` parks a feature and deletes nothing",
 		"`ghostbranch log --repo <public>` shows the history",

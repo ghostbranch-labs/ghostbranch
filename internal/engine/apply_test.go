@@ -1,6 +1,7 @@
 package engine_test
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -409,32 +410,59 @@ func TestApplyRefusesAPlanWhoseGateIsPending(t *testing.T) {
 }
 
 // A public branch already at the commits of an earlier plan of the same
-// feature names that plan: apply <that plan> resumes its publish.
+// feature names that plan when its publish was interrupted: apply <that
+// plan> resumes it. A plan the feature's record says was published is
+// finished, so it is never named: that branch needs --branch.
 func TestBranchExistsNamesTheEarlierPlan(t *testing.T) {
 	t.Parallel()
-	h := gated(t)
-	first, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "Add feature", Yes: true})
-	if err != nil || first.Applied == nil {
-		t.Fatalf("first promote = %+v %v", first, err)
-	}
-	testutil.Commit(t, h.shadowGit(), "feat-x", "nothing new", map[string]string{})
-	second, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "Add feature, again", PlanOnly: true})
-	if err != nil || second.Plan == nil || second.Plan.Publish.Commit == first.Plan.Publish.Commit {
-		t.Fatalf("second promote = %+v %v", second, err)
-	}
-	if got := h.publicRefs()["refs/heads/feat-x"]; got != first.Plan.Publish.Commit {
-		t.Fatalf("public branch at %s, want the first plan's commit", got)
-	}
-	check := func(what string) {
-		t.Helper()
-		_, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: second.Plan.ID, Yes: true})
-		ce := wantCode(t, err, contract.BranchExists)
-		if ce.Details["plan_id"] != first.Plan.ID || ce.Details["sha"] != first.Plan.Publish.Commit ||
-			!strings.Contains(ce.Message, "ghostbranch apply "+first.Plan.ID) {
-			t.Fatalf("%s: %s, details = %+v", what, ce.Message, ce.Details)
+	for _, interrupted := range []bool{true, false} {
+		name := "applied"
+		if interrupted {
+			name = "interrupted"
 		}
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			h := gated(t)
+			ctx, cancel := context.WithCancel(h.ctx)
+			defer cancel()
+			if interrupted {
+				h.eng.Forge = &cancelAtFindPR{Forge: h.forge, cancel: cancel}
+			}
+			first, _, err := h.eng.Promote(ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Mode: "squash", Message: "Add feature", Yes: true})
+			if interrupted {
+				_ = wantCode(t, err, contract.Interrupted)
+			} else if err != nil || first.Applied == nil {
+				t.Fatalf("first promote = %+v %v", first, err)
+			}
+			h.eng.Forge = h.forge
+			if got := h.publicRefs()["refs/heads/feat-x"]; got != first.Plan.Publish.Commit {
+				t.Fatalf("public branch at %s, want the first plan's commit", got)
+			}
+			testutil.Commit(t, h.shadowGit(), "feat-x", "nothing new", map[string]string{})
+			second, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "Add feature, again", PlanOnly: true})
+			if err != nil || second.Plan == nil || second.Plan.Publish.Commit == first.Plan.Publish.Commit {
+				t.Fatalf("second promote = %+v %v", second, err)
+			}
+			check := func(what string) {
+				t.Helper()
+				_, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: second.Plan.ID, Yes: true})
+				ce := wantCode(t, err, contract.BranchExists)
+				if ce.Details["sha"] != first.Plan.Publish.Commit {
+					t.Fatalf("%s: details = %+v", what, ce.Details)
+				}
+				if !interrupted {
+					if _, ok := ce.Details["plan_id"]; ok || !strings.Contains(ce.Message, "--branch") {
+						t.Fatalf("%s: a finished publish was named: %s, details = %+v", what, ce.Message, ce.Details)
+					}
+					return
+				}
+				if ce.Details["plan_id"] != first.Plan.ID || !strings.Contains(ce.Message, "ghostbranch apply "+first.Plan.ID) {
+					t.Fatalf("%s: %s, details = %+v", what, ce.Message, ce.Details)
+				}
+			}
+			check("apply")
+			h.eng.DryRun = true
+			check("apply --dry-run")
+		})
 	}
-	check("apply")
-	h.eng.DryRun = true
-	check("apply --dry-run")
 }

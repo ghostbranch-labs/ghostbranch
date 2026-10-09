@@ -59,7 +59,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	planID := ""
 	defer func() {
 		summary := ""
-		if res != nil && res.Applied != nil {
+		if res != nil && res.Applied != nil && err == nil {
 			summary = fmt.Sprintf("published %s as PR #%d", res.Applied.PublicBranch, res.Applied.PublicPR)
 		} else if res != nil && res.Plan != nil {
 			summary = "plan " + res.Plan.ID + " saved"
@@ -339,7 +339,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 			res.Preview = pv
 			return res, warns, nil
 		}
-		if err := e.previewPublish(ctx, pc, pv, opt.Feature, branch, P); err != nil {
+		if err := e.previewPublish(ctx, pc, pv, opt.Feature, publishedPlan(m), branch, P); err != nil {
 			return res, warns, err
 		}
 		res.Preview = pv
