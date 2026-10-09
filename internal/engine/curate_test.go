@@ -27,7 +27,7 @@ func writeCurate(t *testing.T, body string) string {
 func TestLoadCurateShape(t *testing.T) {
 	t.Parallel()
 	good := `{"commits": [{"from": ["abcdef1"], "message": "feat: a"}]}`
-	if gs, err := engine.LoadCurate(writeCurate(t, good)); err != nil || len(gs) != 1 || gs[0].From[0] != "abcdef1" {
+	if gs, err := engine.LoadCurate(writeCurate(t, good)); err != nil || len(gs) != 1 || !reflect.DeepEqual(gs[0].From, []string{"abcdef1"}) {
 		t.Fatalf("good = %+v %v", gs, err)
 	}
 	for name, body := range map[string]string{
@@ -56,7 +56,7 @@ func TestResolveGroups(t *testing.T) {
 	a, b, c := strings.Repeat("a", 40), "bbbbbbb1"+strings.Repeat("0", 32), "bbbbbbb2"+strings.Repeat("0", 32)
 	sources := []string{a, b, c}
 	got, err := engine.ResolveGroups([]plan.Group{{From: []string{c[:12], a}, Message: "x"}, {From: []string{b}, Message: "y"}}, sources)
-	if err != nil || !reflect.DeepEqual(got[0].From, []string{c, a}) || got[1].From[0] != b {
+	if err != nil || len(got) != 2 || !reflect.DeepEqual(got[0].From, []string{c, a}) || !reflect.DeepEqual(got[1].From, []string{b}) {
 		t.Fatalf("resolve = %+v %v", got, err)
 	}
 	_, err = engine.ResolveGroups([]plan.Group{
@@ -92,11 +92,11 @@ func TestCuratedGroupsAndRewords(t *testing.T) {
 		{"from": ["`+s[0]+`", "`+s[2]+`"], "message": "feat: a"},
 		{"from": ["`+s[1][:10]+`"], "message": "feat: b"}]}`)
 	res, err := promote(h, engine.PromoteOptions{Curate: file, Title: "a and b", Yes: true})
-	if err != nil || res.Plan.Mode != "curated" || len(res.Plan.Publish.Commits) != 2 {
+	if err != nil || res == nil || res.Plan == nil || res.Plan.Mode != "curated" || len(res.Plan.Publish.Commits) != 2 {
 		t.Fatalf("promote = %+v %v", res.Plan, err)
 	}
 	c := res.Plan.Publish.Commits
-	if c[0].Subject != "feat: a" || !reflect.DeepEqual(c[0].Sources, []string{s[0], s[2]}) || c[1].Sources[0] != s[1] ||
+	if len(res.Plan.Curate) != 2 || c[0].Subject != "feat: a" || !reflect.DeepEqual(c[0].Sources, []string{s[0], s[2]}) || !reflect.DeepEqual(c[1].Sources, []string{s[1]}) ||
 		!reflect.DeepEqual(res.Plan.Curate[1].From, []string{s[1]}) {
 		t.Fatalf("commits = %+v curate = %+v", c, res.Plan.Curate)
 	}
@@ -156,7 +156,7 @@ func TestCuratedFlags(t *testing.T) {
 	}
 }
 
-func TestApplyReplaysCuratedAndRefusesAChangedGroup(t *testing.T) {
+func TestApplyRefusesAChangedCurateGroupAsStale(t *testing.T) {
 	t.Parallel()
 	h, s := curatedFeature(t)
 	file := writeCurate(t, `{"commits": [{"from": ["`+s[0]+`", "`+s[2]+`"], "message": "a"}, {"from": ["`+s[1]+`"], "message": "b"}]}`)
@@ -166,7 +166,9 @@ func TestApplyReplaysCuratedAndRefusesAChangedGroup(t *testing.T) {
 	}
 	pl := *res.Plan
 	pl.Curate = []plan.Group{{From: []string{s[0], s[1], s[2]}, Message: "all"}}
-	_, _ = plan.Save(h.eng.WS.PlansDir(), pl)
+	if _, err := plan.Save(h.eng.WS.PlansDir(), pl); err != nil {
+		t.Fatal(err)
+	}
 	_, _, err = h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: pl.ID, Yes: true})
 	_ = wantCode(t, err, contract.PlanStale)
 }
@@ -190,7 +192,9 @@ func TestApplyRefusesCurateGroupsThatDoNotFit(t *testing.T) {
 	} {
 		pl := *res.Plan
 		pl.Curate = groups
-		_, _ = plan.Save(h.eng.WS.PlansDir(), pl)
+		if _, err := plan.Save(h.eng.WS.PlansDir(), pl); err != nil {
+			t.Fatal(err)
+		}
 		_, _, err = h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: pl.ID, Yes: true})
 		if ce := wantCode(t, err, contract.PlanStale); !reflect.DeepEqual(ce.Details["moved"], []string{"curate"}) {
 			t.Fatalf("%s: details = %v", name, ce.Details)

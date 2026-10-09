@@ -1374,6 +1374,28 @@ func TestSyncNeverClosesANewerRecord(t *testing.T) {
 	}
 }
 
+// A newer record is never closed unattended by the branch_gone rule either.
+func TestSyncNeverClosesANewerBranchGoneRecord(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	pr, _ := h.publish("feat-x")
+	h.forge.SetPRMerged(publicName, pr)
+	h.newerMeta("feat-x")
+	if err := h.shadowGit().DeleteRef(h.ctx, "refs/heads/feat-x"); err != nil {
+		t.Fatal(err)
+	}
+	before := h.shadowRefs()
+	h.eng.Approver = nil
+	res, warns := h.syncOK(engine.SyncOptions{})
+	if len(res.Closed) != 0 || warning(warns, contract.RecordNewer) == nil {
+		t.Fatalf("closed = %+v, warnings = %+v", res.Closed, warns)
+	}
+	if !reflect.DeepEqual(h.shadowRefs(), before) || len(h.closeEntries()) != 0 {
+		t.Fatal("sync deleted something of a newer record")
+	}
+}
+
 // A record from before 0.6 doesn't say which head was published, so a
 // gate can't be tied to the publish: merged with its branch gone, it
 // still waits for a person.
