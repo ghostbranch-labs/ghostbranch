@@ -171,7 +171,7 @@ func (s *Store) update(now time.Time, replaceCorrupt bool, fn func([]Grant) []Gr
 	}
 	defer unlock()
 	gs, err := s.Load()
-	if err != nil && !(replaceCorrupt && unparsable(err)) {
+	if err != nil && (!replaceCorrupt || !unparsable(err)) {
 		return err
 	}
 	live := make([]Grant, 0, len(gs))

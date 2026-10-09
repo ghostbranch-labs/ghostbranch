@@ -131,7 +131,7 @@ func (s *Store) update(now time.Time, replaceCorrupt bool, fn func([]Waiver) []W
 	}
 	defer unlock()
 	ws, err := s.Load()
-	if err != nil && !(replaceCorrupt && unparsable(err)) {
+	if err != nil && (!replaceCorrupt || !unparsable(err)) {
 		return err
 	}
 	return s.save(fn(ws))

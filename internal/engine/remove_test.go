@@ -175,7 +175,7 @@ func TestRemoveLeavesAnotherRunsLockAlone(t *testing.T) {
 	}
 	t.Cleanup(drop) // on a failure before the drop below; a second drop is harmless
 	_, _, err = h.eng.Remove(h.ctx, h.pair)
-	wantCode(t, err, contract.Locked)
+	_ = wantCode(t, err, contract.Locked)
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("the lock file is gone: %v", err)
 	}
