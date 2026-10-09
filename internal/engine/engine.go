@@ -128,6 +128,15 @@ func internalErr(err error, what string) error {
 	return contract.Wrap(contract.Internal, err, "%s", what)
 }
 
+// updateErr passes on a LOCKED from workspace.Update as it is, with who
+// holds workspace.json, so the caller can retry; anything else is INTERNAL.
+func updateErr(err error, what string) error {
+	if contract.From(err).Code == contract.Locked {
+		return err
+	}
+	return internalErr(err, what)
+}
+
 func leakErr(feat string, findings []leak.Finding) error {
 	waivable, notWaivable := []string{}, []string{}
 	for _, f := range findings {
