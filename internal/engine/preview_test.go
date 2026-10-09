@@ -57,7 +57,7 @@ func TestPreviewsWriteNothing(t *testing.T) {
 		t.Fatalf("sync preview: %+v %v", sres, err)
 	}
 	gres, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
-	if err != nil || !reflect.DeepEqual(opNames(gres.Preview), []string{"push_ref", "open_pr", "wait_checks", "push_ref"}) {
+	if err != nil || !reflect.DeepEqual(opNames(gres.Preview), []string{"push_ref", "open_pr", "push_ref", "wait_checks", "push_ref"}) {
 		t.Fatalf("gate preview: %+v %v", gres, err)
 	}
 	// No fresh gate yet: promote --dry-run says to run the gate, and makes no plan.

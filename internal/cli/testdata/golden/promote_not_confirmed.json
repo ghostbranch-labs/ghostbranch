@@ -33,6 +33,7 @@
         "unrewritable": []
       },
       "shadow_pr": null,
+      "job": null,
       "reused": true,
       "preview": null
     },

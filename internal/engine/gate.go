@@ -39,6 +39,9 @@ type GateResult struct {
 	// ShadowPR is the gate PR in the shadow repo; nil when none was opened
 	// (the gate failed before CI, or it was a dry run or a reused gate).
 	ShadowPR *int `json:"shadow_pr"`
+	// Job names the gate's CI wait, for wait; nil when no candidate was
+	// pushed (a leak, a conflict, a dry run, or a reused gate).
+	Job *string `json:"job"`
 	// Reused is set by promote when it reuses a fresh green gate instead of re-running it.
 	Reused  bool             `json:"reused"`
 	Preview *preview.Preview `json:"preview"`
@@ -105,8 +108,20 @@ const gatePRBody = "Automated Ghostbranch gate candidate: the feature rebased on
 
 // Gate rebases a feature onto public main, scans what would be published,
 // runs CI on the candidate through a draft shadow PR, and records the
-// result. It never touches the public repo.
-func (e *Engine) Gate(ctx context.Context, p workspace.Pair, name string) (res *GateResult, warns []contract.Warning, err error) {
+// result. The pair lock is free while CI runs. It never touches the public
+// repo.
+func (e *Engine) Gate(ctx context.Context, p workspace.Pair, name string) (*GateResult, []contract.Warning, error) {
+	return e.runGate(ctx, p, name, false)
+}
+
+// GateDetached is gate --detach: it records the gate as a pending job and
+// returns without waiting on CI; wait finishes the job.
+func (e *Engine) GateDetached(ctx context.Context, p workspace.Pair, name string) (*GateResult, []contract.Warning, error) {
+	return e.runGate(ctx, p, name, true)
+}
+
+// runGate is the body Gate and GateDetached share.
+func (e *Engine) runGate(ctx context.Context, p workspace.Pair, name string, detach bool) (res *GateResult, warns []contract.Warning, err error) {
 	defer func() {
 		summary := ""
 		if res != nil {
@@ -124,7 +139,7 @@ func (e *Engine) Gate(ctx context.Context, p workspace.Pair, name string) (res *
 	}
 	defer pc.unlock()
 	// A standalone gate scans for the repo's promote.default_mode.
-	res, w, err := e.gate(ctx, pc, name, "")
+	res, w, err := e.gate(ctx, pc, name, "", gateHow{detach: detach, release: !detach})
 	return res, addWarnings(e.behind(ctx, pc), w...), err
 }
 
@@ -271,9 +286,15 @@ func (e *Engine) scanHistory(ctx context.Context, g *gitx.Git, cfg config.Config
 	return rep, err
 }
 
-// gate builds and scans for mode ("" for promote.default_mode), then runs
-// CI on the candidate and records the result.
-func (e *Engine) gate(ctx context.Context, pc *pairCtx, name, mode string) (*GateResult, []contract.Warning, error) {
+// gateHow is how a gate runs past its start: detach returns once the
+// pending job is recorded; release frees the pair lock during the CI wait.
+// Promote does neither: it holds the lock from gate to publish.
+type gateHow struct{ detach, release bool }
+
+// gate builds and scans for mode ("" for promote.default_mode), pushes the
+// candidate and records it as a pending job, then (unless detached) waits
+// on CI and records the result.
+func (e *Engine) gate(ctx context.Context, pc *pairCtx, name, mode string, how gateHow) (*GateResult, []contract.Warning, error) {
 	g := pc.git
 	b, warns, err := e.build(ctx, pc, name, mode, false)
 	if b == nil {
@@ -309,7 +330,7 @@ func (e *Engine) gate(ctx context.Context, pc *pairCtx, name, mode string) (*Gat
 		if !e.DryRun {
 			// The leak is the result that matters: a failure to record it
 			// must not replace LEAK_FOUND with a lesser error.
-			rw, err := e.recordGate(ctx, pc, m, metaSHA, res, b.commits)
+			rw, err := e.writeGate(ctx, pc, m, metaSHA, e.gateRecord(res, b.commits))
 			warns = addWarnings(warns, rw...)
 			if err != nil {
 				warns = append(warns, contract.Warning{Code: contract.GateNotRecorded,
@@ -331,7 +352,9 @@ func (e *Engine) gate(ctx context.Context, pc *pairCtx, name, mode string) (*Gat
 		if pr == nil {
 			pv.Add(preview.OpenPR(pc.pair.Shadow, gateBranch(name), "main", true))
 		}
-		pv.Add(preview.WaitChecks(pc.pair.Shadow, C), preview.PushRef(pc.pair.Shadow, remoteMetaRef(name), metaSHA, ""))
+		// The pending record, the wait, then the final record over it.
+		pv.Add(preview.PushRef(pc.pair.Shadow, remoteMetaRef(name), metaSHA, ""), preview.WaitChecks(pc.pair.Shadow, C),
+			preview.PushRef(pc.pair.Shadow, remoteMetaRef(name), "", ""))
 		res.Preview = pv
 		return res, warns, nil
 	}
@@ -355,39 +378,26 @@ func (e *Engine) gate(ctx context.Context, pc *pairCtx, name, mode string) (*Gat
 		}
 		pr = &created
 	}
-	res.ShadowPR = &pr.Number
-
-	e.progressf("waiting for CI on %s (shadow PR #%d: %s)", short(C), pr.Number, pr.URL)
-	out, err := e.waitChecks(ctx, pc.pair.Shadow, C, cfg.Gate, waitOpts{})
-	if err != nil {
-		return res, warns, err
-	}
-	if v, ok := e.Forge.(forge.CheckVisibility); ok && v.ChecksLimited(pc.pair.Shadow) {
-		warns = append(warns, contract.Warning{Code: contract.ChecksLimited,
-			Message: "the token cannot read check runs, so only GitHub Actions workflows and commit statuses were considered; checks from other CI apps were not seen"})
-	}
-	res.Checks, res.FailedChecks = out.status, out.failed
-	rw, err := e.recordGate(ctx, pc, m, metaSHA, res, b.commits)
+	res.ShadowPR, res.Checks = &pr.Number, feature.ChecksPending
+	job := jobID(name, C)
+	res.Job = &job
+	pending := e.gateRecord(res, b.commits)
+	pending.ShadowPR, pending.StartedAt = pr.Number, e.now()
+	pending.At = pending.StartedAt
+	rw, err := e.writeGate(ctx, pc, m, metaSHA, pending)
 	warns = addWarnings(warns, rw...)
 	if err != nil {
-		if out.status == feature.ChecksPassed {
-			return res, warns, err // a green gate that isn't recorded can't be promoted
-		}
-		// The check outcome is what matters; don't replace it with a lesser error.
-		warns = append(warns, contract.Warning{Code: contract.GateNotRecorded,
-			Message: "the gate result could not be recorded in the feature metadata: " + contract.From(err).Message})
+		res.Job = nil // no job was recorded, so there is nothing to wait on
+		return res, warns, err
 	}
-	switch out.status {
-	case feature.ChecksFailed:
-		return res, warns, contract.New(contract.ChecksFailed, "checks failed on the gate candidate: %s", strings.Join(out.failed, ", ")).
-			WithDetails(map[string]any{"failed": out.failed, "shadow_pr": pr.Number})
-	case feature.ChecksNoCI:
-		return res, warns, contract.New(contract.NoCI,
-			"no checks appeared on shadow PR #%d within %s; check that Actions is enabled in %s", pr.Number, cfg.Gate.CIAppearTimeout, pc.pair.Shadow)
-	case feature.ChecksTimeout:
-		return res, warns, contract.New(contract.CITimeout, "checks did not finish within %s", cfg.Gate.CITimeout)
+	if how.detach {
+		return res, warns, nil
 	}
-	return res, warns, nil
+	if how.release {
+		pc.release()
+	}
+	r, w, err := e.finish(ctx, pc, name, res, pending, waitOpts{})
+	return r, addWarnings(warns, w...), err
 }
 
 // guardNames are the repo names the guard rewrite uses. The gate, promote,
@@ -403,10 +413,17 @@ func guardNames(pc *pairCtx) workflow.Names {
 	return n
 }
 
-func (e *Engine) recordGate(ctx context.Context, pc *pairCtx, m feature.Meta, metaSHA string, res *GateResult, commits []feature.GateCommit) ([]contract.Warning, error) {
+// gateRecord is the metadata record of res's gate, stamped now.
+func (e *Engine) gateRecord(res *GateResult, commits []feature.GateCommit) feature.Gate {
+	return feature.Gate{FeatureHead: res.FeatureHead, PublicMain: res.PublicMain, Overlay: res.Overlay,
+		Candidate: res.Candidate, PublishedTree: res.PublishedTree, ScannedAs: res.ScannedAs, Commits: commits,
+		Checks: res.Checks, FailedChecks: res.FailedChecks, Leak: res.Leak, At: e.now()}
+}
+
+// writeGate records g as the feature's gate, leased on metaSHA.
+func (e *Engine) writeGate(ctx context.Context, pc *pairCtx, m feature.Meta, metaSHA string, g feature.Gate) ([]contract.Warning, error) {
 	m.SchemaVersion = feature.SchemaVersion
-	m.Gate = &feature.Gate{FeatureHead: res.FeatureHead, PublicMain: res.PublicMain, Overlay: res.Overlay,
-		Candidate: res.Candidate, PublishedTree: res.PublishedTree, ScannedAs: res.ScannedAs, Commits: commits, Checks: res.Checks, Leak: res.Leak, At: e.now()}
+	m.Gate = &g
 	return e.updateMeta(ctx, pc, m, metaSHA)
 }
 

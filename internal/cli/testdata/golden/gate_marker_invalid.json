@@ -28,6 +28,7 @@
     "waived": [],
     "repo_guards": null,
     "shadow_pr": null,
+    "job": null,
     "reused": false,
     "preview": null
   },

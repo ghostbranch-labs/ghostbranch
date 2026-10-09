@@ -199,7 +199,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	default:
 		e.progressf("the gate for %s is missing or stale; running it", opt.Feature)
 		// The internal gate scans for the mode this promote publishes.
-		gr, gw, err := e.gate(ctx, pc, opt.Feature, mode)
+		gr, gw, err := e.gate(ctx, pc, opt.Feature, mode, gateHow{})
 		res.Gate = gr
 		warns = addWarnings(warns, gw...)
 		if err != nil {
