@@ -156,6 +156,65 @@ func TestGuardCheckMirror(t *testing.T) {
 	}
 }
 
+// A remote counts as public when any of its URLs is the public repo: a
+// pushurl too, for install's GB_REMOTES and for guard check's fallback.
+func TestGuardCountsEveryURLOfARemote(t *testing.T) {
+	hermeticGit(t)
+	te := newTestEnv(t)
+	initOnly(te)
+	dir := pairCheckout(te)
+	for _, args := range [][]string{
+		{"-C", dir, "remote", "add", "mirror", "https://github.com/acme/mirror.git"},
+		{"-C", dir, "config", "remote.mirror.pushurl", "https://github.com/acme/widget.git"},
+	} {
+		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	if code, env := te.runJSON("guard", "install"); code != 0 {
+		t.Fatalf("install: %d %v", code, env)
+	}
+	hook, err := os.ReadFile(filepath.Join(dir, ".git", "hooks", "pre-push"))
+	if err != nil || !strings.Contains(string(hook), "GB_REMOTES='mirror origin'") {
+		t.Fatalf("hook:\n%s %v", hook, err)
+	}
+	te.env.Stdin = strings.NewReader("refs/heads/main 1111111111111111111111111111111111111111 refs/heads/main 0000000000000000000000000000000000000000\n")
+	if code, env := te.runJSON("guard", "check", "mirror", "/some/rewritten/path"); code != 0 {
+		t.Fatalf("check through mirror's pushurl: %d %v", code, env)
+	}
+}
+
+// status and uninstall make install's pair check, but a guard that is
+// installed stays visible and removable: guard check tells a person to
+// uninstall a guard it can't place.
+func TestGuardStatusAndUninstallCheckThePair(t *testing.T) {
+	hermeticGit(t)
+	te := newTestEnv(t)
+	initOnly(te)
+	dir := pairCheckout(te)
+	setOrigin := func(url string) {
+		t.Helper()
+		if out, err := exec.Command("git", "-C", dir, "remote", "set-url", "origin", url).CombinedOutput(); err != nil {
+			t.Fatalf("%v %s", err, out)
+		}
+	}
+	setOrigin("https://github.com/someone/else.git")
+	for _, cmd := range [][]string{{"guard", "status"}, {"guard", "uninstall"}} {
+		if code, env := te.runJSON(cmd...); code != 2 || env["error"].(map[string]any)["code"] != "NOT_A_PAIR_CHECKOUT" {
+			t.Fatalf("%v outside a pair: %d %v", cmd, code, env)
+		}
+	}
+	setOrigin("https://github.com/acme/widget.git")
+	te.mustRun("guard", "install")
+	setOrigin("https://github.com/someone/else.git")
+	if code, env := te.runJSON("guard", "status"); code != 0 || env["data"].(map[string]any)["installed"] != true {
+		t.Fatalf("status of an installed guard: %d %v", code, env)
+	}
+	if code, env := te.runJSON("guard", "uninstall"); code != 0 || env["data"].(map[string]any)["action"] != "removed" {
+		t.Fatalf("uninstall of an installed guard: %d %v", code, env)
+	}
+}
+
 func TestGuardOutsideAPairCheckout(t *testing.T) {
 	hermeticGit(t)
 	te := newTestEnv(t)

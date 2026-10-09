@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -187,6 +188,32 @@ func TestOpenAndRemotes(t *testing.T) {
 	}
 }
 
+// Every url and pushurl of a remote is read, as configured, in order.
+func TestRemoteURLsReadsEveryURL(t *testing.T) {
+	hermetic(t)
+	ctx := context.Background()
+	dir := newCheckout(t) // origin = https://github.com/acme/widget.git
+	gitIn(t, dir, "config", "--add", "remote.origin.url", "https://github.com/acme/second.git")
+	gitIn(t, dir, "config", "remote.origin.pushurl", "git@github.com:acme/pushed.git")
+	gitIn(t, dir, "remote", "add", "a.b", "https://github.com/acme/dotted.git")
+	c, err := guard.Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	all, err := c.RemoteURLs(ctx)
+	want := map[string][]string{
+		"origin": {"https://github.com/acme/widget.git", "https://github.com/acme/second.git", "git@github.com:acme/pushed.git"},
+		"a.b":    {"https://github.com/acme/dotted.git"},
+	}
+	if err != nil || !reflect.DeepEqual(all, want) {
+		t.Fatalf("RemoteURLs = %v %v", all, err)
+	}
+	first, err := c.Remotes(ctx)
+	if err != nil || first["origin"] != "https://github.com/acme/widget.git" || first["a.b"] != "https://github.com/acme/dotted.git" {
+		t.Fatalf("Remotes = %v %v", first, err)
+	}
+}
+
 // Review Focus 1 and 5: an existing hook is chained, kept on reinstall, never
 // replaced by our own script, and restored on uninstall.
 func TestInstallChainsAndUninstallRestores(t *testing.T) {
@@ -259,6 +286,14 @@ func TestInstallRefusesACommittableHooksDir(t *testing.T) {
 	}
 	if _, err := guard.Install(ctx, c, hook, false); contract.From(err) == nil || contract.From(err).Code != contract.GuardUnsupported {
 		t.Fatalf("tracked hooks dir: %v", err)
+	}
+	// pre-push alone is not enough: the guard also writes its chained copy
+	// and a temporary file there.
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("hooks/pre-push\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := guard.Install(ctx, c, hook, false); contract.From(err) == nil || contract.From(err).Code != contract.GuardUnsupported {
+		t.Fatalf("hooks dir with only pre-push ignored: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("hooks/\n"), 0o644); err != nil {
 		t.Fatal(err)
