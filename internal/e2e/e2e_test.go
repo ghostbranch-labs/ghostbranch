@@ -191,12 +191,16 @@ func newRunners(t *testing.T, tok string) (func(want int, args ...string) map[st
 		e := env
 		e.Stdout, e.Stderr = &out, testWriter{t}
 		code := cli.Run(append(args, "--json"), e)
+		// NDJSON: each line is one complete JSON object, so decode line by
+		// line; a value split across lines or two on one line fails.
 		var vals []map[string]any
-		dec := json.NewDecoder(bytes.NewReader(out.Bytes()))
-		for dec.More() {
+		for i, line := range strings.Split(out.String(), "\n") {
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
 			var m map[string]any
-			if err := dec.Decode(&m); err != nil {
-				t.Fatalf("%v: not a JSON stream: %v\n%s", args, err, out.String())
+			if err := json.Unmarshal([]byte(line), &m); err != nil {
+				t.Fatalf("%v: line %d is not one JSON object: %v\n%s", args, i+1, err, out.String())
 			}
 			vals = append(vals, m)
 		}
