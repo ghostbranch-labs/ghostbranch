@@ -746,11 +746,43 @@ func TestSyncPushFailureOnOneBranchStillPushesTheOthers(t *testing.T) {
 		t.Fatalf("warnings = %+v", warns)
 	}
 	for _, w := range warns {
-		if w.Code == contract.SyncPushFailed && (w.Details["branch"] != "main" || w.Details["code"] != string(contract.RefMoved)) {
-			t.Fatalf("details = %+v", w.Details)
+		if w.Code == contract.SyncPushFailed && (w.Details["branch"] != "main" || w.Details["code"] != string(contract.RefMoved) ||
+			!strings.HasPrefix(w.Message, "sync could not push shadow main, and still synced the other branches: ")) {
+			t.Fatalf("warning = %+v", w)
 		}
 	}
 	validateResult(t, "sync.schema.json", res)
+}
+
+// With main the only branch to sync there are no other branches to speak of.
+func TestSyncPushFailureOnTheOnlyBranch(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	next := testutil.Commit(t, h.pubGit, "main", "next", map[string]string{"n.txt": "1\n"})
+	moved := ""
+	onPush := h.eng.OnPush
+	h.eng.OnPush = func(op, remote string, specs []string) {
+		onPush(op, remote, specs)
+		if op == "sync" && moved == "" && slices.Contains(specs, next+":refs/heads/main") {
+			moved = testutil.Commit(t, h.shadowGit(), "main", "elsewhere", map[string]string{"e.txt": "1\n"})
+		}
+	}
+	_, warns, err := h.eng.Sync(h.ctx, h.pair, engine.SyncOptions{})
+	_ = wantCode(t, err, contract.RefMoved)
+	n := 0
+	for _, w := range warns {
+		if w.Code != contract.SyncPushFailed {
+			continue
+		}
+		n++
+		if !strings.HasPrefix(w.Message, "sync could not push shadow main: ") || strings.Contains(w.Message, "other branches") {
+			t.Fatalf("warning = %+v", w)
+		}
+	}
+	if n != 1 {
+		t.Fatalf("warnings = %+v", warns)
+	}
 }
 
 func TestSyncNoCancelDryRunAndNoopNeverLookForRuns(t *testing.T) {

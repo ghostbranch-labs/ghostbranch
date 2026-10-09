@@ -10,7 +10,7 @@
     "action": { "enum": ["noop", "fast_forward", "diverged", "push_failed"] },
     "public_main": { "$ref": "common.schema.json#/$defs/sha" },
     "shadow_main_before": { "$ref": "common.schema.json#/$defs/shaOrEmpty" },
-    "shadow_main_after": { "$ref": "common.schema.json#/$defs/shaOrEmpty" },
+    "shadow_main_after": { "description": "where sync left shadow main; when action is push_failed, the SHA sync read", "$ref": "common.schema.json#/$defs/shaOrEmpty" },
     "branches": {
       "type": "array",
       "items": {

@@ -26,7 +26,7 @@ type SyncResult struct {
 	Action           string           `json:"action"`
 	PublicMain       string           `json:"public_main"`
 	ShadowMainBefore string           `json:"shadow_main_before"`
-	ShadowMainAfter  string           `json:"shadow_main_after"`
+	ShadowMainAfter  string           `json:"shadow_main_after"` // where sync left shadow main; when its push failed, the SHA sync read
 	Branches         []SyncBranch     `json:"branches"`
 	CancelledRuns    []CancelledRun   `json:"cancelled_runs"`
 	Closed           []ClosedFeature  `json:"closed"`          // merged features sync closed; never null
@@ -172,8 +172,11 @@ func (e *Engine) Sync(ctx context.Context, p workspace.Pair, o SyncOptions) (res
 					}
 					// The other branches still go; the first failure is sync's error.
 					br.Status = "push_failed"
-					warns = append(warns, contract.Warning{Code: contract.SyncPushFailed,
-						Message: fmt.Sprintf("sync could not push shadow %s, and still synced the other branches: %v", b, err),
+					msg := fmt.Sprintf("sync could not push shadow %s: %v", b, err)
+					if len(cfg.Sync.Branches) > 1 {
+						msg = fmt.Sprintf("sync could not push shadow %s, and still synced the other branches: %v", b, err)
+					}
+					warns = append(warns, contract.Warning{Code: contract.SyncPushFailed, Message: msg,
 						Details: map[string]any{"branch": b, "code": string(contract.From(err).Code)}})
 					if pushErr == nil {
 						pushErr = err

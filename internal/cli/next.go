@@ -50,8 +50,8 @@ func (a *app) scoped(args ...string) []string {
 
 // again is this run's own argv plus extra flags, with --workspace when gb
 // would add it. For a person (forHuman) it drops --non-interactive, which
-// hides the console they need, and --json, and names the pair with --repo:
-// they run it in their own terminal.
+// hides the console they need, and --json, and names the pair with --repo
+// (in place of any --repo given): they run it in their own terminal.
 func (a *app) again(forHuman bool, extra ...string) []string {
 	out := []string{"ghostbranch"}
 	hasWS := false
@@ -68,8 +68,10 @@ func (a *app) again(forHuman bool, extra ...string) []string {
 	out = append(out, extra...)
 	// A person runs it in their own terminal, which may not be in this
 	// checkout: name the pair this run found here.
-	if _, hasRepo := flagValue(a.args, "--repo"); forHuman && !hasRepo && a.pairFull.Public != "" {
-		out = append(out, "--repo", a.pairFull.Public)
+	// A relative --repo (".", say) names this checkout, which their
+	// terminal may not be in, so it is replaced too.
+	if forHuman && a.pairFull.Public != "" {
+		out = append(withoutFlags(out, "--repo"), "--repo", a.pairFull.Public)
 	}
 	if ws := a.usedWorkspace(); !hasWS && ws != "default" {
 		out = append(out, "--workspace", ws)
@@ -178,7 +180,11 @@ func (a *app) steps(err error) []contract.Next {
 				}
 				return out
 			}
-			return []contract.Next{{Command: a.again(false), Why: "nothing is pending; run it again"}}
+			why := "nothing is pending; run it again"
+			if a.command == "apply" {
+				why = "apply resumes where it stopped; run it again"
+			}
+			return []contract.Next{{Command: a.again(false), Why: why}}
 		case contract.BranchExists:
 			// The public branch holds an earlier plan's commits: resume that publish.
 			if id, _ := ce.Details["plan_id"].(string); id != "" {
@@ -257,6 +263,15 @@ func (a *app) steps(err error) []contract.Next {
 				return []contract.Next{{Command: withoutFlags(a.again(false), "--curate"),
 					Why: "--curate is only for --mode curated; drop it, or add --mode curated"}}
 			}
+		}
+		// A sync whose push failed still surveyed the features: they still
+		// need what they need, and a shadow branch that moved under the
+		// push syncs again.
+		if r, ok := a.result.(*engine.SyncResult); ok && a.command == "sync" {
+			if ce.Code == contract.RefMoved {
+				return a.featureNexts([]contract.Next{{Command: a.scoped("sync"), Why: "a shadow branch moved during the push; sync again"}}, r.Attention)
+			}
+			return a.featureNexts(nil, r.Attention)
 		}
 		return nil
 	}
@@ -400,7 +415,7 @@ func (a *app) featureNexts(out []contract.Next, rs []engine.FeatureReport) []con
 		switch r.State {
 		case feature.StateUnreadable:
 			rest = append(rest, contract.Next{Command: closeCmd, NeedsHuman: true,
-				Why: "its record couldn't be read; a person at the console can close it (feature show " + r.Name + " gives the read error)"})
+				Why: "its record couldn't be read; run feature show " + r.Name + " for the error: run the command again if it was a passing failure, and if the record is corrupt a person closes it at the console"})
 		case feature.StateBranchGone:
 			rest = append(rest, contract.Next{Command: closeCmd, NeedsHuman: true,
 				Why: "its branch was deleted; a person closes it at the console"})

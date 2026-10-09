@@ -159,7 +159,7 @@ func human(r any) string {
 		case "fast_forward":
 			fmt.Fprintf(&b, "Shadow main fast-forwarded %s -> %s.\n", short(v.ShadowMainBefore), short(v.PublicMain))
 		case "push_failed":
-			fmt.Fprintf(&b, "Shadow main could not be pushed; it is still at %s.\n", short(v.ShadowMainBefore))
+			fmt.Fprintf(&b, "Shadow main could not be pushed; it was at %s when sync read it.\n", short(v.ShadowMainBefore))
 		default:
 			b.WriteString("Shadow main has diverged from public main; nothing was pushed to it.\n")
 		}

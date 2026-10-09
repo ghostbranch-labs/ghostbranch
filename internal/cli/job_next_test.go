@@ -333,7 +333,7 @@ func TestNextForANewerOrUnreadableRecord(t *testing.T) {
 	if !strings.Contains(next[0].Why, "newer Ghostbranch") || !strings.Contains(next[0].Why, "upgrade") {
 		t.Errorf("newer why = %q", next[0].Why)
 	}
-	if want := "its record couldn't be read; a person at the console can close it (feature show feat-y gives the read error)"; next[1].Why != want {
+	if want := "its record couldn't be read; run feature show feat-y for the error: run the command again if it was a passing failure, and if the record is corrupt a person closes it at the console"; next[1].Why != want {
 		t.Errorf("unreadable why = %q, want %q", next[1].Why, want)
 	}
 }
@@ -393,5 +393,53 @@ func TestNextWaitsOnTheJobAnErrorNames(t *testing.T) {
 	next = a.next(contract.New(contract.Locked, "x").WithDetails(map[string]any{"job": job}))
 	if len(next) != 1 || !slices.Equal(next[0].Command, wait) || !strings.Contains(next[0].Why, "held the lock") {
 		t.Errorf("locked: next = %+v", next)
+	}
+}
+
+// A shadow branch that moved under sync's push syncs again; any other push
+// failure leaves only what the features need.
+func TestNextForASyncPushFailure(t *testing.T) {
+	t.Parallel()
+	attention := []engine.FeatureReport{{Name: "feat-c", State: feature.StatePRClosed}}
+	closeC := []string{"ghostbranch", "feature", "close", "feat-c", "--repo", "acme/widget"}
+	a := testApp("sync", "sync")
+	a.result = &engine.SyncResult{Surveyed: true, Attention: attention}
+	next := a.next(contract.New(contract.RefMoved, "x"))
+	if len(next) != 2 || !slices.Equal(next[0].Command, []string{"ghostbranch", "sync", "--repo", "acme/widget"}) ||
+		next[0].Why != "a shadow branch moved during the push; sync again" ||
+		!slices.Equal(next[1].Command, closeC) || !next[1].NeedsHuman {
+		t.Fatalf("REF_MOVED: next = %+v", next)
+	}
+	next = a.next(contract.New(contract.PushRefused, "x"))
+	if len(next) != 1 || !slices.Equal(next[0].Command, closeC) {
+		t.Fatalf("PUSH_REFUSED: next = %+v", next)
+	}
+}
+
+// An INTERRUPTED apply with nothing pending resumes where it stopped.
+func TestNextForAnInterruptedApply(t *testing.T) {
+	t.Parallel()
+	a := testApp("apply", "apply", "20261009T120000Z-abcdef")
+	next := a.next(contract.New(contract.Interrupted, "x"))
+	if len(next) != 1 || !slices.Equal(next[0].Command, []string{"ghostbranch", "apply", "20261009T120000Z-abcdef"}) ||
+		next[0].Why != "apply resumes where it stopped; run it again" {
+		t.Fatalf("next = %+v", next)
+	}
+	next = testApp("sync", "sync").next(contract.New(contract.Interrupted, "x"))
+	if len(next) != 1 || next[0].Why != "nothing is pending; run it again" {
+		t.Fatalf("sync: next = %+v", next)
+	}
+}
+
+// A person's replay names the pair, never a relative --repo: their
+// terminal may not be in this checkout.
+func TestAgainForAPersonReplacesARelativeRepo(t *testing.T) {
+	t.Parallel()
+	a := testApp("agents allow", "agents", "allow", "--repo", ".", "--non-interactive", "--json")
+	if got := a.again(true); !slices.Equal(got, []string{"ghostbranch", "agents", "allow", "--repo", "acme/widget"}) {
+		t.Fatalf("again(true) = %v", got)
+	}
+	if got := a.again(false); !slices.Equal(got, []string{"ghostbranch", "agents", "allow", "--repo", ".", "--non-interactive", "--json"}) {
+		t.Fatalf("again(false) = %v", got)
 	}
 }

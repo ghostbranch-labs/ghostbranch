@@ -17,6 +17,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/grant"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
+	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
 func nextOf(t *testing.T, env map[string]any) []map[string]any {
@@ -1185,5 +1186,54 @@ func TestSyncHumanNextNamesThePlaceholderOnce(t *testing.T) {
 	_, out, _ := te.run("sync")
 	if !strings.Contains(out, "ghostbranch feature start --repo acme/widget <name>\n") || strings.Contains(out, "<<name>>") {
 		t.Fatalf("stdout:\n%s", out)
+	}
+}
+
+// A sync whose push failed still surveyed the features: next keeps what
+// they need, and the human output says where shadow main was, not where it
+// is now.
+func TestNextForASyncPushFailureKeepsAttention(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	grantAgents(te)
+	te.forge.ClosePR("acme/widget", publishFeature(te, "feat-c"))
+	testutil.Commit(t, te.pubGit, "main", "next", map[string]string{"n.txt": "1\n"})
+	hooks := filepath.Join(te.forge.RepoDir("acme/widget-shadow"), "hooks")
+	if err := os.MkdirAll(hooks, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(hooks, "pre-receive"), []byte("#!/bin/sh\necho 'GH013: repository rule violations found' >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	code, env := te.runJSON("sync")
+	e, _ := env["error"].(map[string]any)
+	if code == 0 || e["code"] != "PUSH_REFUSED" {
+		t.Fatalf("exit %d %v", code, env)
+	}
+	n := nextOf(t, env)
+	if len(n) != 1 || !reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "feature", "close", "feat-c", "--repo", "acme/widget"}) ||
+		n[0]["needs_human"] != true {
+		t.Fatalf("next = %v", n)
+	}
+	_, out, errOut := te.run("sync")
+	if !strings.Contains(out, "Shadow main could not be pushed; it was at ") || !strings.Contains(out, " when sync read it.\n") ||
+		!strings.Contains(out+errOut, "ghostbranch feature close feat-c --repo acme/widget") {
+		t.Fatalf("human output:\nstdout: %s\nstderr: %s", out, errOut)
+	}
+}
+
+// An agent's run with --repo . hands a person a replay that names the pair.
+func TestNextForAPersonNamesThePairForARelativeRepo(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	te.env.CwdRemotes = func() []workspace.Remote {
+		return []workspace.Remote{{Name: "origin", URL: "https://github.com/acme/widget.git"}}
+	}
+	_, env := te.runJSON("agents", "allow", "--repo", ".", "--non-interactive")
+	n := nextOf(t, env)
+	if len(n) != 1 || !reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "agents", "allow", "--repo", "acme/widget"}) || n[0]["needs_human"] != true {
+		t.Fatalf("next = %v", n)
 	}
 }
