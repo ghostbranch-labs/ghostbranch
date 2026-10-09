@@ -389,3 +389,21 @@ func TestSubProject5d2Contract(t *testing.T) {
 		t.Errorf("ACTOR_UNKNOWN summary: %q", es[0].Summary)
 	}
 }
+
+// The cause texts say which guard files must be ignored, and that a squash
+// or curated default can scan only the final tree.
+func TestGuardUnsupportedAndWaiverUnknownTexts(t *testing.T) {
+	t.Parallel()
+	for code, want := range map[string]string{
+		"GUARD_UNSUPPORTED": "the guard's files there (pre-push and pre-push.ghostbranch-*) are not all git-ignored, so they could be committed",
+		"WAIVER_UNKNOWN":    "except that under a squash or curated default whose older commit has a broken marker it scans only the final tree",
+	} {
+		es, err := contract.Explain(code)
+		if err != nil || len(es) != 1 || !strings.Contains(strings.Join(es[0].Causes, "\n"), want) {
+			t.Errorf("%s causes lack %q: %+v %v", code, want, es, err)
+		}
+	}
+	if es, _ := contract.Explain("GUARD_UNSUPPORTED"); !strings.Contains(es[0].WhatToDo, "ignore pre-push and pre-push.ghostbranch-* in the hooks directory") {
+		t.Errorf("GUARD_UNSUPPORTED what to do: %q", es[0].WhatToDo)
+	}
+}
