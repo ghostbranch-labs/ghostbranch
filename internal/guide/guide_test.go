@@ -33,7 +33,8 @@ func TestRenderListsEveryCodeFromTheRegistry(t *testing.T) {
 	// 296: the SHADOW_BEHIND error row, data.checkout as argvs, and feature start refusing a stale shadow main (sub-project 5b).
 	// 314: the jobs section (+15), and the sub-project 5c error rows (JOB_STALE and the other new codes).
 	// 318: the jobs section's recovery lines (status names a pending job, an empty current_job, promote --detach's next step).
-	if n := strings.Count(out, "\n"); n > 318 {
+	// 332: 5d-1 (locks, guard, records, interrupted publish, config keys, cancels).
+	if n := strings.Count(out, "\n"); n > 332 {
 		t.Errorf("the guide is %d lines; keep it short (spec: about 150 plus the tables)", n)
 	}
 }
@@ -274,6 +275,39 @@ func TestGuideTeachesJobsAndWait(t *testing.T) {
 		"If the session dropped, `ghostbranch status --repo <public> --json` names a pending job (`gate.job`): wait on it.",
 		"`JOB_STALE`", "`error.details.current_job`", "if `current_job` is empty, gate again",
 		"`promote --detach` returns the job in `data.gate.job` and no plan; once `wait` passes, run the same promote without `--detach` (it reuses the green gate).",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the guide lacks %q", want)
+		}
+	}
+}
+
+// An agent that deletes a lock file, promotes again after an interrupt, or
+// writes over a record from a newer Ghostbranch does damage the CLI can't undo.
+func TestGuideTeachesHardening(t *testing.T) {
+	t.Parallel()
+	out := strings.Join(strings.Fields(guide.Render(contract.Registry())), " ")
+	for _, want := range []string{
+		// Locks.
+		"`LOCKED`: another ghostbranch command is running on this machine (`error.details.held_by`",
+		"never delete lock files",
+		// The pre-push guard.
+		"refuses any push that carries an unpublished feature commit, under any branch name",
+		"Commits rewritten out of the shadow repo can't be recognized",
+		// Config keys.
+		"An unknown key in `.ghostbranch.yml`, including under `sync:` or `ci:`",
+		"`error.details.unknown_key`",
+		// Newer records.
+		"`UPGRADE_NEEDED` with `error.details.record`",
+		"`RECORD_NEWER`",
+		"such a feature is never closed unattended",
+		// An interrupted publish.
+		"`INTERRUPTED` with `error.details.plan_id` after `promote`",
+		"`ghostbranch apply <plan_id> --repo <public>`, never `promote` again",
+		"`BRANCH_EXISTS` with `error.details.plan_id`",
+		// Verified cancels.
+		"`cancelled_runs` lists only runs confirmed cancelled",
+		"`CI_NOT_CANCELLED` names runs that kept going",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the guide lacks %q", want)

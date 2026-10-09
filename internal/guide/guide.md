@@ -65,6 +65,9 @@ main, green CI, and a leak scan of exactly what will be published.
   `current_job` is empty, gate again.
 - `promote --detach` returns the job in `data.gate.job` and no plan; once `wait` passes, run the same
   promote without `--detach` (it reuses the green gate).
+- `INTERRUPTED` with `error.details.plan_id` after `promote`: the plan is saved and the publish may have
+  started. Run `ghostbranch apply <plan_id> --repo <public>`, never `promote` again (it makes new commits).
+  `BRANCH_EXISTS` with `error.details.plan_id` means the same: apply that plan.
 
 ## Set up a repo
 
@@ -99,6 +102,9 @@ main, green CI, and a leak scan of exactly what will be published.
 - `ghostbranch feature abandon <name> --repo <public>` parks a feature and deletes nothing; `--undo`
   brings it back.
 - `ghostbranch log --repo <public>` shows the history.
+- `UPGRADE_NEEDED` with `error.details.record` (feature, plan, grants, waivers) means another machine
+  runs a newer Ghostbranch: upgrade before changing anything. `RECORD_NEWER` on `status`, `feature list`
+  or `feature show` means the same; reads still work, and such a feature is never closed unattended.
 - Never close or abandon a feature a person is still working on.
 
 ## Keeping up with public
@@ -107,8 +113,9 @@ main, green CI, and a leak scan of exactly what will be published.
   (fast-forward only; it never resolves a conflict). The gate always rebases on public main, so it is
   never affected. `feature start` refuses instead, with the error `SHADOW_BEHIND`: sync, then start again.
 - Sync's pushes start the shadow repo's push-triggered workflows, which re-test what public CI already
-  tested, so sync cancels those runs (`--no-cancel` skips that). `CI_NOT_CANCELLED` means it couldn't
-  (the token needs Actions write); the runs only cost minutes. To stop them for good, the person adds
+  tested, so sync cancels those runs (`--no-cancel` skips that). `cancelled_runs` lists only runs
+  confirmed cancelled. `CI_NOT_CANCELLED` names runs that kept going or couldn't be checked (the token
+  needs Actions write); the runs only cost minutes. To stop them for good, the person adds
   the guard from the audit's `PUSH_TRIGGERS_ON_SYNC` to each push-triggered job; a job that already
   has an `if:` combines them: `<existing> && (github.event_name != 'push' || github.repository == '<public>')`.
 - Scheduled sync is opt-in and costs Actions minutes (every 6 hours is about 120 a month). It is the
@@ -142,6 +149,10 @@ main, green CI, and a leak scan of exactly what will be published.
   grants or blocks anything.
 - Write the PR `--title` (and, for squash, `-m`; for curated, each group's message) yourself from the
   change: they go public. Show them to the person; use theirs if they give them.
+- `LOCKED`: another ghostbranch command is running on this machine (`error.details.held_by`: `pid`,
+  `op`, `since`). Wait and retry. A lock frees itself when its process ends; never delete lock files.
+- An unknown key in `.ghostbranch.yml`, including under `sync:` or `ci:`, is `UPGRADE_NEEDED` with
+  `error.details.unknown_key`: fix the typo, or upgrade if a newer Ghostbranch set the pair up.
 - Don't know a code? `ghostbranch explain <CODE> --json`.
 - Want to see what a command would do? Add `--plan` (or `--dry-run`): it returns the exact operations
   and changes nothing.
@@ -204,6 +215,9 @@ feature work to the public repo. Its limits:
 - It knows features from the local mirror. Feature work pushed under another branch name is caught
   only if the mirror has seen it, so run `ghostbranch sync --repo <public>` now and then. A branch named
   after a feature is always caught.
+- It refuses any push that carries an unpublished feature commit, under any branch name, and a pushed
+  ref that isn't a commit. Commits rewritten out of the shadow repo can't be recognized; publish only
+  with `promote`.
 - It covers only the checkout it is installed in, and `git push --no-verify` skips it.
 - It reads Ghostbranch's state from the default location unless `GHOSTBRANCH_HOME` is set where git
   runs the hook.
