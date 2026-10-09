@@ -154,7 +154,8 @@ func TestMatches(t *testing.T) {
 	}
 }
 
-// A waivers file from a newer Ghostbranch is refused, and Add leaves it be.
+// A waivers file from a newer Ghostbranch is refused, and nothing
+// overwrites it, not even revoke --all.
 func TestNewerWaiversFile(t *testing.T) {
 	t.Parallel()
 	s, dir := newStore(t)
@@ -168,8 +169,12 @@ func TestNewerWaiversFile(t *testing.T) {
 		ce.Details["record_version"] != "0.99" || ce.Details["supported"] != contract.SchemaVersion {
 		t.Fatalf("want UPGRADE_NEEDED for waivers, got %v", err)
 	}
-	if err := s.Add([]waiver.Waiver{mk("acme/widget", "f-000000000001", "fixture")}, now); contract.From(err).Code != contract.UpgradeNeeded {
+	upgrade := func(err error) bool { ce := contract.From(err); return ce != nil && ce.Code == contract.UpgradeNeeded }
+	if err := s.Add([]waiver.Waiver{mk("acme/widget", "f-000000000001", "fixture")}, now); !upgrade(err) {
 		t.Fatalf("add = %v", err)
+	}
+	if _, err := s.Revoke("", nil, true, now); !upgrade(err) {
+		t.Fatalf("revoke --all = %v", err)
 	}
 	if got, _ := os.ReadFile(path); string(got) != string(raw) {
 		t.Fatalf("the newer file was changed: %s", got)

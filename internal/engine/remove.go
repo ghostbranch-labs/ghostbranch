@@ -93,7 +93,7 @@ func (e *Engine) Remove(ctx context.Context, p workspace.Pair) (res *RemoveResul
 	}
 	byID, err := wstore.For(p.Public)
 	if err != nil {
-		return nil, nil, internalErr(err, "read waivers")
+		return nil, nil, grantErr(err, "read waivers")
 	}
 	ids := make([]string, 0, len(byID))
 	for id := range byID {

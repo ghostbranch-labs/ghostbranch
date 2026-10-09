@@ -129,7 +129,7 @@ func (s *Store) update(now time.Time, replaceCorrupt bool, fn func([]Waiver) []W
 	}
 	defer unlock()
 	ws, err := s.Load()
-	if err != nil && !replaceCorrupt {
+	if err != nil && !(replaceCorrupt && unparsable(err)) {
 		return err
 	}
 	return s.save(fn(ws))
@@ -151,4 +151,13 @@ func (s *Store) save(ws []Waiver) error {
 		return err
 	}
 	return os.Rename(tmp, s.path)
+}
+
+// unparsable reports a Load error from a file that isn't valid JSON, the
+// only error revoke --all may replace the file over: a file it couldn't
+// read, or one from a newer Ghostbranch, stays as it is.
+func unparsable(err error) bool {
+	var syn *json.SyntaxError
+	var typ *json.UnmarshalTypeError
+	return errors.As(err, &syn) || errors.As(err, &typ)
 }

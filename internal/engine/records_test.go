@@ -1,6 +1,7 @@
 package engine_test
 
 import (
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -93,7 +94,7 @@ func TestANewerRecordIsShownWithAWarning(t *testing.T) {
 
 // closeAtTheConsole checks that feat-x, whose record can't be read as a
 // whole, closes only at the console, and deletes every ref of it (with
-// the plan ref of planID, "" for none). The console's summary says says.
+// the plan ref of planID, "" for none). The console's summary must contain says.
 func closeAtTheConsole(t *testing.T, h *harness, state feature.State, planID, says string) {
 	t.Helper()
 	before := h.shadowRefs()
@@ -171,4 +172,28 @@ func TestConsoleClosesANewerRecord(t *testing.T) {
 		t.Fatalf("a newer record closes unattended: %+v", r)
 	}
 	closeAtTheConsole(t, h, feature.StateMerged, id, "written by a newer Ghostbranch")
+}
+
+// A grants or waivers file from a newer Ghostbranch stops promote and
+// remove with UPGRADE_NEEDED, not INTERNAL.
+func TestNewerStoresStopPromoteAndRemove(t *testing.T) {
+	t.Parallel()
+	h := gated(t)
+	if err := os.WriteFile(h.eng.WS.GrantsPath(), []byte(`{"schema_version":"0.99","grants":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "Add x", Yes: true})
+	if ce := contract.From(err); ce == nil || ce.Code != contract.UpgradeNeeded || ce.Details["record"] != "grants" {
+		t.Fatalf("promote with a newer grants file: %v", err)
+	}
+	if err := os.Remove(h.eng.WS.GrantsPath()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(h.eng.WS.WaiversPath(), []byte(`{"schema_version":"0.99","waivers":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = h.eng.Remove(h.ctx, h.pair)
+	if ce := contract.From(err); ce == nil || ce.Code != contract.UpgradeNeeded || ce.Details["record"] != "waivers" {
+		t.Fatalf("remove with a newer waivers file: %v", err)
+	}
 }
