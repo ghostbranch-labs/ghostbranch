@@ -30,24 +30,47 @@ func (brokenObjects) RevList(context.Context, ...string) ([]string, error) {
 	return nil, errors.New("git: exit status 128")
 }
 
-// brokenRevList is a checkout that resolves nothing and whose rev-list fails.
+// brokenBases is a checkout where the pushed commit peels, but resolving the
+// bases to exclude fails.
+type brokenBases struct{ brokenObjects }
+
+func (brokenBases) Resolve(_ context.Context, rev string) (string, bool, error) {
+	if strings.HasSuffix(rev, "^{commit}") {
+		return strings.TrimSuffix(rev, "^{commit}"), true, nil
+	}
+	return "", false, errors.New("git: exit status 128")
+}
+
+// brokenRevList is a checkout that resolves everything and whose rev-list fails.
 type brokenRevList struct{ brokenObjects }
 
-func (brokenRevList) Resolve(context.Context, string) (string, bool, error) { return "", false, nil }
+func (brokenRevList) Resolve(_ context.Context, rev string) (string, bool, error) {
+	return rev, true, nil
+}
 
 // A git error while reading the checkout must fail the check, never let the
 // push through as if the feature's commits were absent.
 func TestCheckFailsClosedOnGitErrors(t *testing.T) {
-	f := guard.Facts{Names: map[string]bool{"feat-x": true}, Heads: map[string]string{"feat-x": strings.Repeat("a", 40)}}
+	t.Parallel()
+	heads := guard.Facts{Names: map[string]bool{"feat-x": true}, Heads: map[string]string{"feat-x": strings.Repeat("a", 40)}}
+	commits := guard.Facts{Names: map[string]bool{}, Heads: map[string]string{}, Commits: map[string]string{strings.Repeat("a", 40): "feat-x"},
+		PublicMain: strings.Repeat("c", 40)}
 	line := guard.Line{LocalRef: "HEAD", LocalSHA: strings.Repeat("b", 40), RemoteRef: "refs/heads/main", RemoteSHA: zero}
-	blocks, err := guard.Check(context.Background(), brokenObjects{}, "origin", []guard.Line{line}, f)
-	if err == nil {
-		t.Fatalf("a git error must be an error, got blocks %v", blocks)
-	}
-	f = guard.Facts{Names: map[string]bool{}, Heads: map[string]string{}, Commits: map[string]string{strings.Repeat("a", 40): "feat-x"}}
-	blocks, err = guard.Check(context.Background(), brokenRevList{}, "origin", []guard.Line{line}, f)
-	if err == nil {
-		t.Fatalf("a rev-list error must be an error, got blocks %v", blocks)
+	for _, c := range []struct {
+		what string
+		objs guard.Objects
+		f    guard.Facts
+	}{
+		{"every git call fails", brokenObjects{}, heads},
+		{"peeling the pushed commit fails", brokenObjects{}, commits},
+		{"resolving a feature head fails", brokenBases{}, heads},
+		{"resolving a base fails", brokenBases{}, commits},
+		{"rev-list fails", brokenRevList{}, commits},
+	} {
+		blocks, err := guard.Check(context.Background(), c.objs, []guard.Line{line}, c.f)
+		if err == nil {
+			t.Errorf("%s: a git error must be an error, got blocks %v", c.what, blocks)
+		}
 	}
 }
 
@@ -93,6 +116,24 @@ func TestLoadFacts(t *testing.T) {
 	}
 }
 
+// A commit two features share always names the same one: the first by name.
+func TestLoadFactsNamesASharedCommitStably(t *testing.T) {
+	t.Parallel()
+	g, _, feat := mirror(t)
+	ctx := context.Background()
+	for _, r := range []string{"refs/shadow-meta/features/aaa", "refs/remotes/shadow/aaa", "refs/shadow-meta/features/zzz", "refs/remotes/shadow/zzz"} {
+		if err := g.UpdateRef(ctx, r, feat); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for range 10 {
+		f, err := guard.LoadFacts(ctx, g)
+		if err != nil || f.Commits[feat] != "aaa" {
+			t.Fatalf("shared commit names %q (%v), want aaa", f.Commits[feat], err)
+		}
+	}
+}
+
 func TestCheck(t *testing.T) {
 	g, main, feat := mirror(t)
 	ctx := context.Background()
@@ -119,7 +160,7 @@ func TestCheck(t *testing.T) {
 		{"a mixed push", []guard.Line{push("refs/heads/main", main, "refs/heads/main"), push("refs/heads/feat-x", feat, "refs/heads/feat-x")}, []string{"refs/heads/feat-x"}},
 	}
 	for _, c := range cases {
-		blocks, err := guard.Check(ctx, objects{g}, "origin", c.lines, f)
+		blocks, err := guard.Check(ctx, objects{g}, c.lines, f)
 		if err != nil {
 			t.Fatalf("%s: %v", c.name, err)
 		}
@@ -175,11 +216,12 @@ func staleClone(t *testing.T) (dir string, co *guard.Checkout, f guard.Facts, ma
 	return dir, co, f, main, b
 }
 
-// checkPush runs Check on one push of sha to refs/heads/<branch> at remote.
-func checkPush(t *testing.T, co *guard.Checkout, remote, branch, sha string, f guard.Facts) []guard.Block {
+// checkPush runs Check on one push of sha to refs/heads/<branch>, whose
+// remote branch is at remoteSHA (zero for a new branch).
+func checkPush(t *testing.T, co *guard.Checkout, branch, sha, remoteSHA string, f guard.Facts) []guard.Block {
 	t.Helper()
-	line := guard.Line{LocalRef: "refs/heads/" + branch, LocalSHA: sha, RemoteRef: "refs/heads/" + branch, RemoteSHA: zero}
-	blocks, err := guard.Check(context.Background(), co, remote, []guard.Line{line}, f)
+	line := guard.Line{LocalRef: "refs/heads/" + branch, LocalSHA: sha, RemoteRef: "refs/heads/" + branch, RemoteSHA: remoteSHA}
+	blocks, err := guard.Check(context.Background(), co, []guard.Line{line}, f)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,45 +235,77 @@ func wantBlockedFor(t *testing.T, what string, blocks []guard.Block, b string) {
 	}
 }
 
+// commitOn makes a new empty commit on a new branch at start, in the checkout.
+func commitOn(t *testing.T, dir, branch, start string) string {
+	t.Helper()
+	gitIn(t, dir, "switch", "-q", "-c", branch, start)
+	gitIn(t, dir, "commit", "-q", "--allow-empty", "-m", branch)
+	return gitIn(t, dir, "rev-parse", "HEAD")
+}
+
 // A stale clone holds an older feature commit than the mirror's head; the
 // head check cannot see it, but the commit itself is still unpublished.
 func TestCheckRefusesAnOlderFeatureCommitUnderAnotherName(t *testing.T) {
 	_, co, f, _, b := staleClone(t)
-	wantBlockedFor(t, "spike at b", checkPush(t, co, "origin", "spike", b, f), b)
+	wantBlockedFor(t, "spike at b", checkPush(t, co, "spike", b, zero, f), b)
 }
 
 func TestCheckRefusesABranchOffAMidFeatureCommit(t *testing.T) {
 	dir, co, f, _, b := staleClone(t)
-	gitIn(t, dir, "switch", "-q", "-c", "fix", b)
-	gitIn(t, dir, "commit", "-q", "--allow-empty", "-m", "d")
-	d := gitIn(t, dir, "rev-parse", "HEAD")
-	wantBlockedFor(t, "fix at d", checkPush(t, co, "origin", "fix", d, f), b)
+	d := commitOn(t, dir, "fix", b)
+	wantBlockedFor(t, "fix at d", checkPush(t, co, "fix", d, zero, f), b)
 }
 
 func TestCheckPassesPublishedAndUnrelatedCommits(t *testing.T) {
 	dir, co, f, main, _ := staleClone(t)
-	if blocks := checkPush(t, co, "origin", "release", main, f); len(blocks) != 0 {
+	if blocks := checkPush(t, co, "release", main, zero, f); len(blocks) != 0 {
 		t.Fatalf("a branch at public main: %+v", blocks)
 	}
-	gitIn(t, dir, "switch", "-q", "-c", "other", main)
-	gitIn(t, dir, "commit", "-q", "--allow-empty", "-m", "unrelated")
-	other := gitIn(t, dir, "rev-parse", "HEAD")
-	if blocks := checkPush(t, co, "origin", "other", other, f); len(blocks) != 0 {
+	other := commitOn(t, dir, "other", main)
+	if blocks := checkPush(t, co, "other", other, zero, f); len(blocks) != 0 {
 		t.Fatalf("new commits on public main: %+v", blocks)
 	}
 }
 
-// Review Focus 2: a push to a bare URL has no tracking refs to exclude, so
-// the feature's commits are still found, and unrelated work still passes.
-func TestCheckRefusesAFeatureCommitPushedToAURL(t *testing.T) {
+// Tracking refs are not trusted as public: a remote that fetches from the
+// shadow, or any fetch into refs/remotes, can hold feature commits there.
+func TestCheckRefusesAFeatureCommitHeldByATrackingRef(t *testing.T) {
+	dir, co, f, _, b := staleClone(t)
+	gitIn(t, dir, "update-ref", "refs/remotes/origin/feat-y", b)
+	gitIn(t, dir, "update-ref", "refs/remotes/origin/shadow/feat-y", b)
+	wantBlockedFor(t, "spike at b, with origin/feat-y at b", checkPush(t, co, "spike", b, zero, f), b)
+}
+
+// An update to an existing remote branch only lists what is new on top of
+// it: feature work on top is refused, unrelated work passes.
+func TestCheckUpdatesOfAnExistingRemoteBranch(t *testing.T) {
 	dir, co, f, main, b := staleClone(t)
-	const url = "https://github.com/o/r"
-	wantBlockedFor(t, "spike at b to a URL", checkPush(t, co, url, "spike", b, f), b)
-	gitIn(t, dir, "switch", "-q", "-c", "other", main)
-	gitIn(t, dir, "commit", "-q", "--allow-empty", "-m", "unrelated")
-	other := gitIn(t, dir, "rev-parse", "HEAD")
-	if blocks := checkPush(t, co, url, "other", other, f); len(blocks) != 0 {
-		t.Fatalf("unrelated work to a URL: %+v", blocks)
+	topic := commitOn(t, dir, "topic", main)
+	gitIn(t, dir, "update-ref", "refs/remotes/origin/topic", topic)
+	gitIn(t, dir, "merge", "-q", "--no-edit", b)
+	merged := gitIn(t, dir, "rev-parse", "HEAD")
+	wantBlockedFor(t, "feature work on topic", checkPush(t, co, "topic", merged, topic, f), b)
+	next := commitOn(t, dir, "next", topic)
+	if blocks := checkPush(t, co, "topic", next, topic, f); len(blocks) != 0 {
+		t.Fatalf("unrelated work on topic: %+v", blocks)
+	}
+}
+
+// A force push over a remote commit this clone never fetched is still
+// checked against public main.
+func TestCheckRefusesAForcePushOverAnUnknownCommit(t *testing.T) {
+	_, co, f, _, b := staleClone(t)
+	wantBlockedFor(t, "spike at b over an unknown commit", checkPush(t, co, "spike", b, "1234567890123456789012345678901234567890", f), b)
+}
+
+// A tree or blob lists no commits, so it can't be content-checked; it is
+// refused rather than waved through.
+func TestCheckRefusesARefThatIsNotACommit(t *testing.T) {
+	dir, co, f, _, b := staleClone(t)
+	tree := gitIn(t, dir, "rev-parse", b+"^{tree}")
+	blocks := checkPush(t, co, "files", tree, zero, f)
+	if len(blocks) != 1 || !strings.Contains(blocks[0].Reason, "does not point at a commit") {
+		t.Fatalf("a tree: %+v", blocks)
 	}
 }
 

@@ -55,8 +55,14 @@ func LoadFacts(ctx context.Context, mirror *gitx.Git) (Facts, error) {
 	if hasPM {
 		f.PublicMain = pm
 	}
+	// Sorted, and the first feature to claim a commit keeps it, so a commit
+	// shared by two features always names the same one.
+	all := make([]string, 0, len(metas))
 	for ref := range metas {
-		name := strings.TrimPrefix(ref, "refs/shadow-meta/features/")
+		all = append(all, strings.TrimPrefix(ref, "refs/shadow-meta/features/"))
+	}
+	sort.Strings(all)
+	for _, name := range all {
 		f.Names[name] = true
 		head, ok, err := mirror.Resolve(ctx, "refs/remotes/shadow/"+name)
 		if err != nil {
@@ -84,7 +90,9 @@ func LoadFacts(ctx context.Context, mirror *gitx.Git) (Facts, error) {
 			return f, err
 		}
 		for _, c := range strings.Fields(out) {
-			f.Commits[c] = name
+			if _, ok := f.Commits[c]; !ok {
+				f.Commits[c] = name
+			}
 		}
 	}
 	return f, nil
@@ -164,7 +172,7 @@ func (c *Checkout) RevList(ctx context.Context, args ...string) ([]string, error
 // Any git error fails the check: a guard that waves pushes through when git
 // breaks is worse than none. Commits force-pushed out of the mirror can't be
 // recognized by content; the name check still applies.
-func Check(ctx context.Context, checkout Objects, remote string, lines []Line, f Facts) ([]Block, error) {
+func Check(ctx context.Context, checkout Objects, lines []Line, f Facts) ([]Block, error) {
 	names := make([]string, 0, len(f.Heads))
 	for n := range f.Heads {
 		names = append(names, n)
@@ -178,6 +186,18 @@ func Check(ctx context.Context, checkout Objects, remote string, lines []Line, f
 		why := reserved(l.RemoteRef, f)
 		if why == "" {
 			why = reserved(l.LocalRef, f)
+		}
+		if why == "" && len(f.Commits) > 0 {
+			// A tree or blob lists no commits, so it would pass the content
+			// check whatever files it carries. With no unpublished feature
+			// commits there is nothing it could carry that the guard knows.
+			_, ok, err := checkout.Resolve(ctx, l.LocalSHA+"^{commit}")
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
+				why = "it does not point at a commit, so the guard can't check it"
+			}
 		}
 		for _, n := range names {
 			if why != "" {
@@ -211,11 +231,9 @@ func Check(ctx context.Context, checkout Objects, remote string, lines []Line, f
 					args = append(args, base)
 				}
 			}
-			// A named remote's tracking refs are already public; a push to a
-			// bare URL has none to exclude, so the list is just longer.
-			if remote != "" && !strings.ContainsAny(remote, ":/") {
-				args = append(args, "--remotes="+remote)
-			}
+			// Tracking refs aren't excluded: a remote that fetches from the
+			// shadow, or any fetch into refs/remotes, can hold unpublished
+			// feature commits there.
 			commits, err := checkout.RevList(ctx, args...)
 			if err != nil {
 				return nil, err

@@ -202,7 +202,7 @@ func (a *app) guardCheckCmd() *cobra.Command {
 			}
 			// The checkout reads its objects with plain git, so the user's
 			// config (safe.directory and the like) applies.
-			blocks, err := guard.Check(ctx, co, args[0], lines, facts)
+			blocks, err := guard.Check(ctx, co, lines, facts)
 			if err != nil {
 				return contract.Wrap(contract.PushBlocked, err, "check the push, so it is refused")
 			}
