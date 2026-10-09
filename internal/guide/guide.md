@@ -47,6 +47,21 @@ main, green CI, and a leak scan of exactly what will be published.
   `--mode curated` so it never ships. A leaking commit message: reword it, or use curated mode with
   new messages. Never waive a finding yourself; a person may waive a false positive at their console.
 
+## Long CI: jobs
+
+- `gate` waits for CI by default; that is the normal path. For CI that runs long, detach:
+  `ghostbranch gate <name> --detach --repo <public> --json` returns `data.job` once CI has started
+  (`data.checks` is `pending`). Do other work, then `ghostbranch wait <job> --repo <public> --json`.
+- `wait --json` prints one JSON object per line. **The last line is the result**, the same as
+  `gate --json`; the lines before it are progress events (`waiting`, `check`, `settled`, whose
+  `outcome` is `passed`, `failed`, `no_ci` or `timeout`). Read the last line only.
+- A finished job answers at once. `--timeout 10m` returns `checks: pending` (exit 0) if CI is still running;
+  run `wait` again later.
+- After Ctrl-C or a dropped session you get `INTERRUPTED`. With `error.details.job`, CI is still running:
+  run `ghostbranch wait <job>`, not `gate`. Without it nothing is pending: run the command again.
+- `JOB_STALE`: a newer gate replaced the job; `error.details.current_job` names the current one.
+- `promote --detach` does the same when promote needs a gate: it returns the job to `wait` on.
+
 ## Set up a repo
 
 1. Shadow repo already exists (another machine, or a fresh `GHOSTBRANCH_HOME`)? Run

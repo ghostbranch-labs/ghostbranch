@@ -152,6 +152,14 @@ func (w testWriter) Write(p []byte) (int, error) {
 // GHOSTBRANCH_HOME and returns the parsed JSON envelope, failing the test when
 // the exit code is not want. It also returns the home directory.
 func newRunner(t *testing.T, tok string) (func(want int, args ...string) map[string]any, string) {
+	run, _, home := newRunners(t, tok)
+	return run, home
+}
+
+// newRunners is newRunner plus runStream, which drives the CLI the same way
+// (same home, same env) but decodes stdout as a stream of JSON values, one per
+// line, as `wait --json` prints them, and returns them all.
+func newRunners(t *testing.T, tok string) (func(want int, args ...string) map[string]any, func(want int, args ...string) []map[string]any, string) {
 	home := t.TempDir()
 	vars := map[string]string{"GHOSTBRANCH_HOME": home, "GHOSTBRANCH_TOKEN": tok, "GHOSTBRANCH_ACTOR": "human:e2e"}
 	env := cli.DefaultEnv()
@@ -162,7 +170,7 @@ func newRunner(t *testing.T, tok string) (func(want int, args ...string) map[str
 		return os.Getenv(k)
 	}
 	env.ConsoleUsable = false
-	return func(want int, args ...string) map[string]any {
+	run := func(want int, args ...string) map[string]any {
 		t.Helper()
 		var out bytes.Buffer
 		e := env
@@ -176,7 +184,31 @@ func newRunner(t *testing.T, tok string) (func(want int, args ...string) map[str
 			t.Fatalf("%v: exit %d, want %d\n%s", args, code, want, out.String())
 		}
 		return m
-	}, home
+	}
+	runStream := func(want int, args ...string) []map[string]any {
+		t.Helper()
+		var out bytes.Buffer
+		e := env
+		e.Stdout, e.Stderr = &out, testWriter{t}
+		code := cli.Run(append(args, "--json"), e)
+		var vals []map[string]any
+		dec := json.NewDecoder(bytes.NewReader(out.Bytes()))
+		for dec.More() {
+			var m map[string]any
+			if err := dec.Decode(&m); err != nil {
+				t.Fatalf("%v: not a JSON stream: %v\n%s", args, err, out.String())
+			}
+			vals = append(vals, m)
+		}
+		if code != want {
+			t.Fatalf("%v: exit %d, want %d\n%s", args, code, want, out.String())
+		}
+		if len(vals) == 0 {
+			t.Fatalf("%v: no output\n%s", args, out.String())
+		}
+		return vals
+	}
+	return run, runStream, home
 }
 
 func TestSandboxLoop(t *testing.T) {
@@ -184,7 +216,7 @@ func TestSandboxLoop(t *testing.T) {
 	ctx := context.Background()
 	reset(t, tok)
 
-	run, home := newRunner(t, tok)
+	run, runStream, home := newRunners(t, tok)
 	commit := func(branch string, files map[string]string) string {
 		t.Helper()
 		g := authed(t, tok)
@@ -286,8 +318,46 @@ func TestSandboxLoop(t *testing.T) {
 	commit(hist, map[string]string{"a.txt": "a\n"})
 	commit(hist, map[string]string{".ghostbranch/notes.md": "more private notes\n"})
 	commit(hist, map[string]string{"b.txt": "b\n"})
-	run(0, "gate", hist)
+	// The gate is detached, then waited on: the job outlives the call that
+	// started it, and the wait streams NDJSON whose last value is the result.
+	detached := run(0, "gate", hist, "--detach")["data"].(map[string]any)
+	if detached["checks"] != "pending" {
+		t.Fatalf("a detached gate must report checks pending: %v", detached)
+	}
+	job, _ := detached["job"].(string)
+	if !strings.HasPrefix(job, "gate/"+hist+"/") {
+		t.Fatalf("a detached gate must name its job gate/%s/<id>: %v", hist, detached)
+	}
+	events := runStream(0, "wait", job)
+	var waiting int
+	var settled map[string]any
+	for _, v := range events[:len(events)-1] {
+		switch v["type"] {
+		case "waiting":
+			waiting++
+		case "settled":
+			settled = v
+		}
+	}
+	if waiting < 1 {
+		t.Errorf("wait must stream at least one waiting event: %v", events)
+	}
+	if settled == nil || settled["outcome"] != "passed" {
+		t.Errorf("wait must stream a settled event with outcome passed: %v", events)
+	}
+	if d, _ := events[len(events)-1]["data"].(map[string]any); d["checks"] != "passed" {
+		t.Fatalf("the last line of wait must be the result with checks passed: %v", events[len(events)-1])
+	}
+	// A finished job answers at once, with the envelope alone.
+	if again := runStream(0, "wait", job); len(again) != 1 {
+		t.Fatalf("waiting on a finished job must print exactly the envelope: %v", again)
+	} else if d, _ := again[0]["data"].(map[string]any); d["checks"] != "passed" {
+		t.Fatalf("waiting on a finished job: want checks passed: %v", again[0])
+	}
 	res = run(0, "promote", hist, "--title", "History for "+runID, "--plan")
+	if gate, _ := res["data"].(map[string]any)["gate"].(map[string]any); gate["reused"] != true {
+		t.Fatalf("promote must reuse the gate the wait settled: %v", res["data"])
+	}
 	planID = res["data"].(map[string]any)["plan"].(map[string]any)["id"].(string)
 	histPR := int(run(0, "apply", planID, "--yes")["data"].(map[string]any)["public_pr"].(float64))
 	fetchPublished := func(branch, local string) {
