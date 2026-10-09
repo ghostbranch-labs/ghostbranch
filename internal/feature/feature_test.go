@@ -11,8 +11,8 @@ import (
 )
 
 func TestValidateName(t *testing.T) {
-	ok := []string{"feat-x", "auth/login", "v2.1_fix", "A1"}
-	bad := []string{"", "-x", ".x", "x/", "x..y", "x//y", "x.lock", "x@{1}", "a b", "x/.y",
+	ok := []string{"feat-x", "auth/login", "v2.1_fix", "A1", "v1.lockstep/x"}
+	bad := []string{"", "-x", ".x", "x/", "x..y", "x//y", "x.lock", "x@{1}", "a b", "x/.y", "a.lock/b", "x/y.lock/z",
 		"ghostbranch", "ghostbranch/gate/x", "ghostbranch/x", "ghostbranch-gate/x", "main", "HEAD", strings.Repeat("a", 101)}
 	for _, n := range ok {
 		if err := feature.ValidateName(n, "name"); err != nil {

@@ -187,6 +187,10 @@ func ValidateName(name, field string) error {
 		return bad("must not end with '/', '.' or '.lock'")
 	case strings.Contains(name, "/."):
 		return bad("no path component may start with '.'")
+	case strings.Contains(name, ".lock/"):
+		return bad("no path component may end with '.lock'")
+	case strings.Contains(name, ".lock/"):
+		return bad("no path component may end with '.lock'")
 	case name == "main" || name == "HEAD" || name == "ghostbranch" || strings.HasPrefix(name, "ghostbranch/") || strings.HasPrefix(name, "ghostbranch-"):
 		return bad("this name is reserved")
 	}
