@@ -95,3 +95,26 @@ func TestDecodeOfAnOlderMetadataFileHasNoCommits(t *testing.T) {
 		t.Fatalf("decode 0.4: %+v %v", m, err)
 	}
 }
+
+func TestPendingGateRoundTrips(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
+	m := feature.Meta{SchemaVersion: feature.SchemaVersion, Name: "x", Branch: "x", Gate: &feature.Gate{Candidate: "c",
+		Checks: feature.ChecksPending, Leak: feature.LeakClean, ShadowPR: 7, StartedAt: at, At: at}}
+	got, err := feature.Decode(feature.Encode(m))
+	if err != nil || !got.Gate.Pending() || got.Gate.ShadowPR != 7 || !got.Gate.StartedAt.Equal(at) || got.Gate.Passed() {
+		t.Fatalf("round trip = %+v %v", got.Gate, err)
+	}
+	// A 0.6 record has none of the new fields, and they stay absent when re-encoded.
+	old, _ := feature.Decode([]byte(`{"gate":{"candidate":"c","checks":"passed","leak":"clean","at":"2026-10-05T12:00:00Z"}}`))
+	if old.Gate.Pending() || old.Gate.ShadowPR != 0 || !old.Gate.StartedAt.IsZero() {
+		t.Fatalf("old record = %+v", old.Gate)
+	}
+	if s := string(feature.Encode(old)); strings.Contains(s, "started_at") || strings.Contains(s, "shadow_pr") || strings.Contains(s, "failed_checks") {
+		t.Fatalf("empty new fields were written: %s", s)
+	}
+	var nilGate *feature.Gate
+	if nilGate.Pending() {
+		t.Fatal("a nil gate is pending")
+	}
+}

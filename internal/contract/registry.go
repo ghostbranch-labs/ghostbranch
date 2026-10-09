@@ -125,6 +125,12 @@ var errorDocs = map[Code]Doc{
 		WhatToDo: "Run ghostbranch feature show <name> to see the new state, then close it again if that's still wanted."},
 	ShadowBehindError: {Summary: "Shadow main is behind public main, so feature start refused to start a feature from it; nothing was created.",
 		WhatToDo: "Run ghostbranch sync, then start the feature again."},
+	Interrupted: {Summary: "The command was interrupted (Ctrl-C) before it finished.",
+		WhatToDo: "If error.details.job is set, the gate's CI is still running in the shadow repo: run ghostbranch wait <job> to finish it. Otherwise run the command again; what it did so far is safe to repeat."},
+	JobNotFound: {Summary: "The feature has no gate job to wait on: it was never gated, or its last gate stopped before CI (a leak or a conflict).",
+		WhatToDo: "Run ghostbranch gate <feature>, with --detach to get a job id."},
+	JobStale: {Summary: "A newer gate replaced this job: the feature, public main or the overlay changed, and the feature was gated again.",
+		WhatToDo: "Wait on the current job (error.details.current_job), or, if there is none, gate the feature again."},
 }
 
 var warningDocs = map[WarningCode]Doc{

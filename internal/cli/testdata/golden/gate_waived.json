@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.6",
+  "schema_version": "0.7",
   "command": "gate",
   "ok": true,
   "exit_code": 0,
