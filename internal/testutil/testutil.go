@@ -130,3 +130,13 @@ func (r *SeqReader) Read(p []byte) (int, error) {
 func FakeGitHubToken() string {
 	return "ghp_" + "Zx9Qw3Er7Ty1Ui5Op2" + "As8Df4Gh6Jk0LmNbVc"
 }
+
+// SleepCtx is Sleep for an engine: it returns ctx's error instead of
+// sleeping once ctx is done.
+func (c *Clock) SleepCtx(ctx context.Context, d time.Duration) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	c.Sleep(d)
+	return nil
+}

@@ -88,7 +88,7 @@ func newHarness(t *testing.T) *harness {
 		pair:  workspace.Pair{Public: publicName, Shadow: shadowName}}
 	h.eng = &engine.Engine{
 		Forge: f, WS: ws, Actor: "human:octo",
-		Now: h.clock.Now, Sleep: h.clock.Sleep, Rand: &testutil.SeqReader{}, Progress: io.Discard,
+		Now: h.clock.Now, Sleep: h.clock.SleepCtx, Rand: &testutil.SeqReader{}, Progress: io.Discard,
 		NewScanner:   func(r leak.Rules) (leak.Scanner, error) { return leak.NewGitleaks(r) },
 		PollInterval: time.Second, SettleWindow: 5 * time.Second,
 		OnPush: func(op, remote string, specs []string) {

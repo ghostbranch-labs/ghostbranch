@@ -401,7 +401,9 @@ func (e *Engine) cancelPushRuns(ctx context.Context, pc *pairCtx, pushed []pushe
 			if denied > 0 || (len(seen) > 0 && fresh == 0) || e.Now().Sub(start) >= e.CIAppearWindow {
 				break
 			}
-			e.Sleep(interval)
+			if err := e.Sleep(ctx, interval); err != nil {
+				break
+			}
 		}
 		if listDenied || denied > 0 || failure != nil {
 			break

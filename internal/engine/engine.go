@@ -5,6 +5,7 @@
 package engine
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
@@ -44,9 +45,10 @@ type Engine struct {
 	Actor string
 	Token string
 	// TokenSource names where Token came from, for error messages.
-	TokenSource  string
-	Now          func() time.Time
-	Sleep        func(time.Duration)
+	TokenSource string
+	Now         func() time.Time
+	// Sleep waits d, or returns ctx.Err() as soon as ctx is done.
+	Sleep        func(context.Context, time.Duration) error
 	Rand         io.Reader
 	Progress     io.Writer
 	Approver     approval.Approver

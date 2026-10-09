@@ -358,7 +358,7 @@ func (e *Engine) gate(ctx context.Context, pc *pairCtx, name, mode string) (*Gat
 	res.ShadowPR = &pr.Number
 
 	e.progressf("waiting for CI on %s (shadow PR #%d: %s)", short(C), pr.Number, pr.URL)
-	out, err := e.waitChecks(ctx, pc.pair.Shadow, C, cfg.Gate)
+	out, err := e.waitChecks(ctx, pc.pair.Shadow, C, cfg.Gate, waitOpts{})
 	if err != nil {
 		return res, warns, err
 	}

@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "One line of ghostbranch wait --json before the final envelope",
+  "type": "object",
+  "required": ["schema_version", "type", "job", "at"],
+  "properties": {
+    "schema_version": { "const": "0.7" },
+    "type": { "enum": ["waiting", "check", "settled"] },
+    "job": { "type": "string" },
+    "at": { "$ref": "common.schema.json#/$defs/time" }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "type": { "const": "waiting" },
+        "schema_version": true, "job": true, "at": true,
+        "candidate": { "$ref": "common.schema.json#/$defs/sha" },
+        "shadow_pr": { "type": "integer", "minimum": 1 },
+        "shadow_pr_url": { "type": "string" },
+        "ci_timeout": { "type": "string" }
+      },
+      "required": ["candidate", "shadow_pr", "ci_timeout"],
+      "additionalProperties": false
+    },
+    {
+      "properties": {
+        "type": { "const": "check" },
+        "schema_version": true, "job": true, "at": true,
+        "name": { "type": "string" },
+        "status": { "type": "string" },
+        "conclusion": { "type": "string" }
+      },
+      "required": ["name", "status"],
+      "additionalProperties": false
+    },
+    {
+      "properties": {
+        "type": { "const": "settled" },
+        "schema_version": true, "job": true, "at": true,
+        "outcome": { "enum": ["passed", "failed", "no_ci", "timeout"] },
+        "failed_checks": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["outcome"],
+      "additionalProperties": false
+    }
+  ]
+}

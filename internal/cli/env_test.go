@@ -52,7 +52,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		Getenv:       func(k string) string { return te.vars[k] },
 		UserHome:     func() (string, error) { return filepath.Join(root, "home-dir"), nil },
 		Now:          clock.Now,
-		Sleep:        clock.Sleep,
+		Sleep:        clock.SleepCtx,
 		Rand:         &testutil.SeqReader{},
 		NewForge:     func(string) (forge.Forge, error) { return f, nil },
 		GHToken:      func() (string, error) { return "", errors.New("gh is not logged in") },

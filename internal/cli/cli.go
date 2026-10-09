@@ -46,7 +46,7 @@ type Env struct {
 	// OpenConsole opens the console device for the approval code.
 	OpenConsole  func() (io.ReadWriteCloser, error)
 	Now          func() time.Time
-	Sleep        func(time.Duration)
+	Sleep        func(context.Context, time.Duration) error
 	Rand         io.Reader
 	NewForge     func(token string) (forge.Forge, error)
 	GHToken      func() (string, error)
@@ -78,7 +78,7 @@ func DefaultEnv() Env {
 	return Env{
 		Stdout: os.Stdout, Stderr: os.Stderr, Stdin: os.Stdin, Getenv: os.Getenv, UserHome: os.UserHomeDir,
 		ConsoleUsable: console.Usable(os.Stdin, os.Stderr), OpenConsole: console.Open,
-		Now: time.Now, Sleep: time.Sleep, Rand: rand.Reader,
+		Now: time.Now, Sleep: sleepCtx, Rand: rand.Reader,
 		NewForge:     func(token string) (forge.Forge, error) { return ghforge.New(token), nil },
 		GHToken:      auth.GHCLI,
 		CwdRemotes:   cwdRemotes,
@@ -309,4 +309,16 @@ func (a *app) pair(e *engine.Engine) (workspace.Pair, error) {
 		a.pairFull = p
 	}
 	return p, err
+}
+
+// sleepCtx sleeps d, or returns early with ctx's error.
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
 }
