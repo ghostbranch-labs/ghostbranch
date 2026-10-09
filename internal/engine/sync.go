@@ -402,6 +402,10 @@ func (e *Engine) cancelPushRuns(ctx context.Context, pc *pairCtx, pushed []pushe
 				break
 			}
 			if err := e.Sleep(ctx, interval); err != nil {
+				// Interrupted: runs may have started that it never saw.
+				if failure == nil {
+					failure = err
+				}
 				break
 			}
 		}
