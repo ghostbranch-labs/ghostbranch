@@ -204,10 +204,8 @@ func (e *Engine) Init(ctx context.Context, opt InitOptions) (res *InitResult, wa
 		}
 		res.DefaultBranchSet = true
 	}
-	if e.WS.AddPair(p) {
-		if err := e.WS.Save(); err != nil {
-			return res, warns, internalErr(err, "save the workspace")
-		}
+	if err := e.WS.Update(e.Now(), func(w *workspace.Workspace) bool { return w.AddPair(p) }); err != nil {
+		return res, warns, updateErr(err, "save the workspace")
 	}
 	auditIncomplete := func(err error) {
 		warns = append(warns, contract.Warning{Code: contract.AuditIncomplete,

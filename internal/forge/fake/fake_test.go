@@ -134,3 +134,61 @@ func TestFakePRMergedAndClose(t *testing.T) {
 		t.Fatalf("unknown PR: %v", err)
 	}
 }
+
+// The run flags script GitHub's cancel behaviours.
+func TestFakeCancelAndForceCancel(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	const repo = "acme/s"
+	f := fake.New(filepath.Join(t.TempDir(), "forge"))
+	f.Runs = map[string][]fake.Run{repo: {
+		{SHA: "a", Run: forge.Run{ID: 1, Status: "queued"}},
+		{SHA: "a", Run: forge.Run{ID: 2, Status: "in_progress"}, IgnoreCancel: true},
+		{SHA: "a", Run: forge.Run{ID: 3, Status: "in_progress"}, IgnoreCancel: true, IgnoreForceCancel: true},
+		{SHA: "a", Run: forge.Run{ID: 4, Status: "in_progress"}, Conflict: true},
+		{SHA: "b", Run: forge.Run{ID: 5, Status: "in_progress"}, FinishAfterPolls: 1},
+	}}
+	status := func(sha string) map[int64]string {
+		runs, err := f.PushRuns(ctx, repo, sha)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[int64]string{}
+		for _, r := range runs {
+			out[r.ID] = r.Status + "/" + r.Conclusion
+		}
+		return out
+	}
+	for id := int64(1); id <= 3; id++ {
+		if err := f.CancelRun(ctx, repo, id); err != nil {
+			t.Fatalf("cancel %d: %v", id, err)
+		}
+	}
+	if err := f.CancelRun(ctx, repo, 4); !errors.Is(err, forge.ErrConflict) {
+		t.Fatalf("cancel 4: %v", err)
+	}
+	if got := status("a"); got[1] != "completed/cancelled" || got[2] != "in_progress/" || got[3] != "in_progress/" || got[4] != "in_progress/" {
+		t.Fatalf("after cancel: %v", got)
+	}
+	for _, id := range []int64{2, 3, 4} {
+		if err := f.ForceCancelRun(ctx, repo, id); err != nil {
+			t.Fatalf("force-cancel %d: %v", id, err)
+		}
+	}
+	if got := status("a"); got[2] != "completed/cancelled" || got[3] != "in_progress/" || got[4] != "completed/cancelled" {
+		t.Fatalf("after force-cancel: %v", got)
+	}
+	if got := f.ForceCancelled[repo]; len(got) != 2 || got[0] != 2 || got[1] != 4 {
+		t.Fatalf("ForceCancelled = %v", f.ForceCancelled)
+	}
+	if got := status("b"); got[5] != "in_progress/" {
+		t.Fatalf("first poll: %v", got)
+	}
+	if got := status("b"); got[5] != "completed/success" {
+		t.Fatalf("second poll: %v", got)
+	}
+	f.ForceCancelForbidden = map[string]bool{repo: true}
+	if err := f.ForceCancelRun(ctx, repo, 3); !errors.Is(err, forge.ErrForbidden) {
+		t.Fatalf("forbidden: %v", err)
+	}
+}

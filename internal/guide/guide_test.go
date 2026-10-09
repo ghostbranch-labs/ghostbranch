@@ -33,7 +33,9 @@ func TestRenderListsEveryCodeFromTheRegistry(t *testing.T) {
 	// 296: the SHADOW_BEHIND error row, data.checkout as argvs, and feature start refusing a stale shadow main (sub-project 5b).
 	// 314: the jobs section (+15), and the sub-project 5c error rows (JOB_STALE and the other new codes).
 	// 318: the jobs section's recovery lines (status names a pending job, an empty current_job, promote --detach's next step).
-	if n := strings.Count(out, "\n"); n > 318 {
+	// 332: 5d-1 (locks, guard, records, interrupted publish, config keys, cancels).
+	// 333: the guard bullet says a branch named after a known feature is refused whatever it carries (5d-1 final review).
+	if n := strings.Count(out, "\n"); n > 333 {
 		t.Errorf("the guide is %d lines; keep it short (spec: about 150 plus the tables)", n)
 	}
 }
@@ -236,7 +238,7 @@ func TestGuideTeachesTheLifecycle(t *testing.T) {
 		"`ghostbranch sync --repo <public>` closes features whose public PR merged and whose branch hasn't moved",
 		"`ghostbranch feature close <name> --repo <public>` with `needs_human`",
 		"needs a person at the console unless the feature is merged and unmoved",
-		"`merged_moved`, `pr_closed` and an unmerged `branch_gone` are for a person to close",
+		"`merged_moved`, `pr_closed` and a `branch_gone` that is unmerged, or merged but gated past its publish, are for a person to close",
 		"an agent grant does not cover it, so don't ask for `agents allow` to unblock a close",
 		"`ghostbranch feature abandon <name> --repo <public>` parks a feature and deletes nothing",
 		"`ghostbranch log --repo <public>` shows the history",
@@ -270,10 +272,44 @@ func TestGuideTeachesJobsAndWait(t *testing.T) {
 		// The interrupt rule.
 		"After Ctrl-C you get `INTERRUPTED`.",
 		"With `error.details.job`, CI is still running: run `ghostbranch wait <job> --repo <public> --json`, not `gate`.",
-		"Without it nothing is pending: run the command again.",
+		"Without `job` or `plan_id` nothing is pending: run the command again.",
 		"If the session dropped, `ghostbranch status --repo <public> --json` names a pending job (`gate.job`): wait on it.",
 		"`JOB_STALE`", "`error.details.current_job`", "if `current_job` is empty, gate again",
 		"`promote --detach` returns the job in `data.gate.job` and no plan; once `wait` passes, run the same promote without `--detach` (it reuses the green gate).",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the guide lacks %q", want)
+		}
+	}
+}
+
+// An agent that deletes a lock file, promotes again after an interrupt, or
+// writes over a record from a newer Ghostbranch does damage the CLI can't undo.
+func TestGuideTeachesHardening(t *testing.T) {
+	t.Parallel()
+	out := strings.Join(strings.Fields(guide.Render(contract.Registry())), " ")
+	for _, want := range []string{
+		// Locks.
+		"`LOCKED`: another ghostbranch command is running on this machine (`error.details.held_by`",
+		"never delete lock files",
+		// The pre-push guard.
+		"refuses any push that carries an unpublished feature commit the mirror knows of, under any branch name",
+		"A branch named after a feature the mirror knows is refused whatever it carries, rewritten commits included.",
+		"Commits rewritten out of the shadow repo can't be recognized",
+		// Config keys.
+		"An unknown key in `.ghostbranch.yml`, including under `sync:` or `ci:`",
+		"`error.details.unknown_key`",
+		// Newer records.
+		"`UPGRADE_NEEDED` with `error.details.record`",
+		"`RECORD_NEWER`",
+		"such a feature is never closed unattended",
+		// An interrupted publish.
+		"`INTERRUPTED` with `error.details.plan_id` after `promote`",
+		"Resume with `ghostbranch apply <plan_id> --repo <public>` (as `next` says; with `needs_human` the person runs it), never `promote` again",
+		"`BRANCH_EXISTS` with `error.details.plan_id`",
+		// Verified cancels.
+		"`cancelled_runs` lists only runs confirmed cancelled",
+		"`CI_NOT_CANCELLED` means runs may still be going: the token couldn't cancel them (it needs Actions write), they kept going, or sync couldn't check; it names the runs it knows of, or counts them",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the guide lacks %q", want)

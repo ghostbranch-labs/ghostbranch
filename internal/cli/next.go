@@ -140,6 +140,10 @@ func (a *app) next(err error) []contract.Next {
 				return a.featureNexts(nil, r.Attention)
 			}
 		case contract.Interrupted:
+			// A promote stopped after saving its plan: apply resumes it.
+			if id, _ := ce.Details["plan_id"].(string); id != "" {
+				return []contract.Next{a.applyNext(id, true)}
+			}
 			if job, _ := ce.Details["job"].(string); job != "" {
 				out := []contract.Next{{Command: a.scoped("wait", job), Why: "the gate's CI is still running; finish the job"}}
 				if a.command == "promote" {
@@ -149,6 +153,11 @@ func (a *app) next(err error) []contract.Next {
 				return out
 			}
 			return []contract.Next{{Command: a.again(false), Why: "nothing is pending; run it again"}}
+		case contract.BranchExists:
+			// The public branch holds an earlier plan's commits: resume that publish.
+			if id, _ := ce.Details["plan_id"].(string); id != "" {
+				return []contract.Next{a.applyNext(id, true)}
+			}
 		case contract.JobStale:
 			if job, _ := ce.Details["current_job"].(string); job != "" {
 				return []contract.Next{{Command: a.scoped("wait", job), Why: "a newer gate replaced the job; wait on that one instead"}}

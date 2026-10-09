@@ -317,27 +317,54 @@ func TestRewriteRepoGuardsMode(t *testing.T) {
 }
 
 func TestIgnoredKeysWarnPerKey(t *testing.T) {
-	_, warns, err := parseWith(t, "agents:\n  allow: true\n")
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw := strings.Replace(string(config.Render("acme/widget", "acme/widget-shadow")), "rewrite_repo_guards: rewrite",
-		"rewrite_repo_guards: rewrite\n  runners: github-hosted\n  reuse_public_workflows: true", 1)
-	_, warns2, err := config.Parse([]byte(raw))
+	_, warns, err := parseWith(t, "agents:\n  default_tier: read\n  allow: true\n")
 	if err != nil {
 		t.Fatal(err)
 	}
 	var msgs []string
-	for _, w := range append(warns, warns2...) {
+	for _, w := range warns {
 		if w.Code != contract.ConfigKeyIgnored {
 			t.Fatalf("unexpected warning %+v", w)
 		}
 		msgs = append(msgs, w.Message)
 	}
 	want := []string{"agents.allow is not supported in this version and is ignored",
-		"ci.reuse_public_workflows is not supported in this version and is ignored",
-		"ci.runners is not supported in this version and is ignored"}
+		"agents.default_tier is not supported in this version and is ignored"}
 	if !reflect.DeepEqual(msgs, want) {
 		t.Fatalf("warnings = %q", msgs)
+	}
+}
+
+func TestUnknownSyncAndCIKeysAreErrors(t *testing.T) {
+	t.Parallel()
+	for y, key := range map[string]string{
+		"version: 1\npublic: o/r\nshadow: o/r-shadow\nci:\n  rewrite_repo_guard: warn\n": "ci.rewrite_repo_guard",
+		"version: 1\npublic: o/r\nshadow: o/r-shadow\nsync:\n  schedul: \"0 * * * *\"\n": "sync.schedul",
+		"version: 1\npublic: o/r\nshadow: o/r-shadow\nci:\n  runners: github-hosted\n":   "ci.runners",
+	} {
+		_, _, err := config.Parse([]byte(y))
+		ce := contract.From(err)
+		if ce == nil || ce.Code != contract.ConfigInvalid || ce.Details["unknown_key"] != key {
+			t.Errorf("%q: want CONFIG_INVALID with unknown_key %q, got %v", y, key, err)
+		}
+	}
+}
+
+func TestEmptySyncAndCIMapsAreFine(t *testing.T) {
+	t.Parallel()
+	base := "version: 1\npublic: o/r\nshadow: o/r-shadow\n"
+	for _, extra := range []string{
+		"sync: {}\nci: {}\n",
+		"sync:\nci:\n",
+		"ci:\n  # rewrite_repo_guards: warn\n",
+		"sync:\n  # schedule: off\n",
+	} {
+		cfg, warns, err := config.Parse([]byte(base + extra))
+		if err != nil || len(warns) != 0 {
+			t.Fatalf("%q: %v %+v", extra, err, warns)
+		}
+		if !reflect.DeepEqual(cfg.Sync, config.Default().Sync) || cfg.CI != config.Default().CI {
+			t.Fatalf("%q: empty section changed the defaults: %+v %+v", extra, cfg.Sync, cfg.CI)
+		}
 	}
 }

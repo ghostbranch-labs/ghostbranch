@@ -7,11 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
+	"strings"
 )
 
 // SchemaVersion versions the envelope and every data schema. It stays 0.x
 // until launch, and 0.x versions may break.
-const SchemaVersion = "0.7"
+const SchemaVersion = "0.8"
 
 // Exit codes. Agents branch on these, so they never change meaning.
 const (
@@ -259,13 +261,19 @@ const (
 	// local mirror's copy of a ref (or a local plan file) couldn't be
 	// updated; the next fetch corrects the mirror.
 	MirrorNotUpdated WarningCode = "MIRROR_NOT_UPDATED"
+	// RecordNewer means a record was written by a newer Ghostbranch; this
+	// binary shows what it can read and changes nothing in it.
+	RecordNewer WarningCode = "RECORD_NEWER"
+	// RecordUnreadable means a feature record couldn't be read; a person at
+	// the console closed the feature anyway.
+	RecordUnreadable WarningCode = "RECORD_UNREADABLE"
 )
 
 var warningCodes = []WarningCode{ConfigKeyIgnored, PublicNotPublic, GateNotRecorded, ChecksLimited, ActorUnknown,
 	WorkflowChanged, LargeFile, BinaryFile, WaiversUnreadable,
 	OverlayOutdated, RepoGuard, RepoGuardUnrewritable, SecretsUnlisted, SecretsMissing, PushTriggersOnSync,
 	ActionsMinutesBilled, ShadowBehind, AuditIncomplete, CINotCancelled, PRStateUnknown, DriftUnknown, FeatureNotClosed,
-	MirrorNotUpdated}
+	MirrorNotUpdated, RecordNewer, RecordUnreadable}
 
 // AllWarnings lists every warning code, sorted.
 func AllWarnings() []WarningCode {
@@ -279,4 +287,36 @@ type Warning struct {
 	Code    WarningCode    `json:"code"`
 	Message string         `json:"message"`
 	Details map[string]any `json:"details,omitempty"`
+}
+
+// Newer reports whether a record's schema version v (major.minor) is newer
+// than the one this binary writes. A malformed or empty v is not newer:
+// records from before versions existed stay readable.
+func Newer(v string) bool {
+	// Only ASCII digits: Atoi alone takes a sign, so "+1.0" would be newer
+	// and lock users out.
+	digits := func(s string) bool {
+		return s != "" && strings.Trim(s, "0123456789") == ""
+	}
+	parse := func(s string) (int, int, bool) {
+		a, b, ok := strings.Cut(s, ".")
+		if !ok || !digits(a) || !digits(b) {
+			return 0, 0, false
+		}
+		x, err1 := strconv.Atoi(a)
+		y, err2 := strconv.Atoi(b)
+		return x, y, err1 == nil && err2 == nil
+	}
+	x, y, ok := parse(v)
+	cx, cy, _ := parse(SchemaVersion)
+	return ok && (x > cx || (x == cx && y > cy))
+}
+
+// NewerRecord refuses to change a record written by a newer Ghostbranch.
+// kind names the record: feature, plan, grants or waivers.
+func NewerRecord(kind, version string) *Error {
+	return New(UpgradeNeeded,
+		"this %s record was written by a newer Ghostbranch (schema %s; this binary knows %s); upgrade ghostbranch before changing it",
+		kind, version, SchemaVersion).
+		WithDetails(map[string]any{"record": kind, "record_version": version, "supported": SchemaVersion})
 }

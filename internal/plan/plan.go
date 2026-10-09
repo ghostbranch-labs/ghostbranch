@@ -18,7 +18,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/workflow"
 )
 
-const SchemaVersion = "0.7"
+const SchemaVersion = "0.8"
 
 type Pair struct {
 	Public string `json:"public"`
@@ -206,6 +206,9 @@ func Load(dir, ref string) (Plan, string, error) {
 	var p Plan
 	if err := json.Unmarshal(b, &p); err != nil {
 		return Plan{}, "", contract.Wrap(contract.BadFlag, err, "plan %q is not valid JSON", ref).WithField("plan")
+	}
+	if contract.Newer(p.SchemaVersion) {
+		return Plan{}, "", contract.NewerRecord("plan", p.SchemaVersion)
 	}
 	// The file is unsigned, and its ID names a ref in the shadow repo.
 	if !ValidID(p.ID) {

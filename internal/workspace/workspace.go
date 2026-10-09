@@ -13,11 +13,12 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 )
 
-const SchemaVersion = "0.7"
+const SchemaVersion = "0.8"
 
 // Pair is a public repo and its shadow repo, as owner/name.
 type Pair struct {
@@ -113,6 +114,42 @@ func (w *Workspace) Save() error {
 	return os.Rename(tmp, filepath.Join(w.Dir, "workspace.json"))
 }
 
+// How often, and for how long, Update retries a busy workspace lock. Its
+// holds last milliseconds, so two runs registering at once just queue.
+const (
+	updateLockPoll = 25 * time.Millisecond
+	updateLockWait = 5 * time.Second
+)
+
+// Update changes workspace.json under its own lock: it re-reads the file,
+// applies fn, saves when fn reports a change, and leaves the fresh pairs
+// in w. Two runs registering pairs at once both keep theirs. A lock still
+// busy after updateLockWait is LOCKED.
+func (w *Workspace) Update(now time.Time, fn func(*Workspace) bool) error {
+	path := filepath.Join(w.Dir, "workspace.lock")
+	drop, err := Lock(path, now, "workspace")
+	busy := func(err error) bool { return err != nil && contract.From(err).Code == contract.Locked }
+	for deadline := time.Now().Add(updateLockWait); busy(err) && time.Now().Before(deadline); {
+		time.Sleep(updateLockPoll)
+		drop, err = Lock(path, now, "workspace")
+	}
+	if err != nil {
+		return err
+	}
+	defer drop()
+	fresh, err := Open(filepath.Dir(filepath.Dir(w.Dir)), w.Name)
+	if err != nil {
+		return err
+	}
+	if fn(fresh) {
+		if err := fresh.Save(); err != nil {
+			return err
+		}
+	}
+	w.Pairs = fresh.Pairs
+	return nil
+}
+
 // AddPair adds p unless a pair with the same public repo exists.
 func (w *Workspace) AddPair(p Pair) bool {
 	if _, ok := w.Find(p.Public); ok {
@@ -142,7 +179,7 @@ func (w *Workspace) Find(fullName string) (Pair, bool) {
 
 func (w *Workspace) PairDir(p Pair) string   { return filepath.Join(w.Dir, "pairs", p.Key()) }
 func (w *Workspace) MirrorDir(p Pair) string { return filepath.Join(w.PairDir(p), "mirror.git") }
-func (w *Workspace) LockPath(p Pair) string  { return filepath.Join(w.PairDir(p), "lock") }
+func (w *Workspace) LockPath(p Pair) string  { return filepath.Join(w.Dir, "locks", p.Key()+".lock") }
 func (w *Workspace) WorkDir(p Pair, opID string) string {
 	return filepath.Join(w.PairDir(p), "work", opID)
 }

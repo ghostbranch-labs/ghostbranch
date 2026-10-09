@@ -32,6 +32,12 @@ const (
 	DefaultCIAppearWindow = 30 * time.Second
 	// DefaultCIAppearPoll is how often sync looks within that window.
 	DefaultCIAppearPoll = 3 * time.Second
+	// DefaultCancelVerifyWindow is how long sync waits for the runs it
+	// cancelled to finish before it force-cancels the ones still going.
+	DefaultCancelVerifyWindow = 30 * time.Second
+	// DefaultForceCancelWindow is how long it then waits for the
+	// force-cancelled runs to finish.
+	DefaultForceCancelWindow = 15 * time.Second
 	// OverlayBranch holds the overlay and is the shadow repo's default branch.
 	OverlayBranch = "ghostbranch"
 )
@@ -120,6 +126,15 @@ func remoteErr(err error, what string) error {
 
 func internalErr(err error, what string) error {
 	return contract.Wrap(contract.Internal, err, "%s", what)
+}
+
+// updateErr passes on a LOCKED from workspace.Update as it is, with who
+// holds workspace.json, so the caller can retry; anything else is INTERNAL.
+func updateErr(err error, what string) error {
+	if contract.From(err).Code == contract.Locked {
+		return err
+	}
+	return internalErr(err, what)
 }
 
 func leakErr(feat string, findings []leak.Finding) error {

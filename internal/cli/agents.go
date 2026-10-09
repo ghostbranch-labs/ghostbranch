@@ -72,7 +72,7 @@ func (a *app) agentsRevokeCmd() *cobra.Command {
 			return done(a, res, w, err)
 		},
 	}
-	c.Flags().BoolVar(&all, "all", false, "revoke every grant in this workspace (also clears an unreadable grants.json); with --repo, every grant for that repo")
+	c.Flags().BoolVar(&all, "all", false, "revoke every grant in this workspace (also clears a grants.json that isn't valid JSON; a file from a newer Ghostbranch is kept); with --repo, every grant for that repo")
 	c.Flags().BoolVar(&a.dryRun, "plan", false, "preview what would be revoked")
 	return c
 }

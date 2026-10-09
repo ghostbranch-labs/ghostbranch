@@ -104,8 +104,9 @@ var honoured = map[string]bool{
 	"sync.schedule": true, "sync.branches": true, "ci.rewrite_repo_guards": true,
 }
 
-// ignoredRoots are product-spec keys that later sub-projects implement.
-var ignoredRoots = []string{"sync", "ci", "agents"}
+// ignoredRoots are keys that warn instead of failing. agents.* is read by the
+// agent guide, not by the engine.
+var ignoredRoots = []string{"agents"}
 
 var repoName = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 
@@ -132,6 +133,9 @@ func Parse(data []byte) (Config, []contract.Warning, error) {
 	cfg := Default()
 	var warns []contract.Warning
 	for _, k := range keys {
+		if (k == "sync" || k == "ci") && isEmptyMap(leaves[k]) {
+			continue // "sync: {}" means the defaults
+		}
 		switch root := ignoredRoot(k); {
 		case replaced[k] != "":
 			warns = append(warns, contract.Warning{Code: contract.ConfigKeyIgnored, Message: replaced[k]})
@@ -150,6 +154,16 @@ func Parse(data []byte) (Config, []contract.Warning, error) {
 		}
 	}
 	return cfg, warns, validate(cfg)
+}
+
+// isEmptyMap is true for "{}" and for a bare or comment-only section, which
+// yaml.v3 decodes to nil.
+func isEmptyMap(v any) bool {
+	if v == nil {
+		return true
+	}
+	m, ok := v.(map[string]any)
+	return ok && len(m) == 0
 }
 
 func flatten(prefix string, m map[string]any, out map[string]any) {

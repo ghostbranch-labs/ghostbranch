@@ -63,7 +63,7 @@ func TestSuccessEnvelopeShape(t *testing.T) {
 	if err := json.Unmarshal(b, &m); err != nil {
 		t.Fatal(err)
 	}
-	if m["schema_version"] != "0.7" || m["ok"] != true || m["exit_code"] != float64(0) ||
+	if m["schema_version"] != "0.8" || m["ok"] != true || m["exit_code"] != float64(0) ||
 		m["command"] != "sync" || m["error"] != nil {
 		t.Fatalf("bad envelope: %s", b)
 	}
@@ -134,7 +134,7 @@ func TestSubProject4CodesAreRegistered(t *testing.T) {
 	if err != nil || !es[0].NeedsHuman || !strings.Contains(es[0].WhatToDo, "--adopt") {
 		t.Fatalf("SHADOW_CREATE_DENIED doc: %+v %v", es, err)
 	}
-	if contract.SchemaVersion != "0.7" {
+	if contract.SchemaVersion != "0.8" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 }
@@ -157,7 +157,7 @@ func TestSubProject5aCodesAreRegistered(t *testing.T) {
 	if es, _ := contract.Explain("AUTHOR_UNMAPPED"); !es[0].NeedsHuman {
 		t.Fatal("AUTHOR_UNMAPPED needs a person: only they may edit the overlay config's author_map")
 	}
-	if contract.SchemaVersion != "0.7" {
+	if contract.SchemaVersion != "0.8" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 }
@@ -173,7 +173,7 @@ func TestSubProject5bCodesAreRegistered(t *testing.T) {
 			t.Fatalf("%s is not documented: %+v %v", c, es, err)
 		}
 	}
-	if contract.SchemaVersion != "0.7" {
+	if contract.SchemaVersion != "0.8" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 }
@@ -279,7 +279,69 @@ func TestSubProject5cCodesAreRegistered(t *testing.T) {
 			t.Fatalf("%s is not documented: %+v %v", c, es, err)
 		}
 	}
-	if contract.SchemaVersion != "0.7" {
+	if contract.SchemaVersion != "0.8" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
+	}
+}
+
+func TestSubProject5d1CodesAreRegistered(t *testing.T) {
+	t.Parallel()
+	for _, w := range []contract.WarningCode{contract.RecordNewer, contract.RecordUnreadable} {
+		if !slices.Contains(contract.AllWarnings(), w) {
+			t.Fatalf("%s is not in the warning list", w)
+		}
+		es, err := contract.Explain(string(w))
+		if err != nil || len(es) != 1 || es[0].Summary == "" || es[0].WhatToDo == "" {
+			t.Fatalf("%s is not documented: %+v %v", w, es, err)
+		}
+	}
+	if contract.SchemaVersion != "0.8" {
+		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
+	}
+	if es, _ := contract.Explain(string(contract.Locked)); !strings.Contains(es[0].WhatToDo, "nothing to delete") ||
+		strings.Contains(es[0].WhatToDo, "delete the lock") {
+		t.Fatalf("LOCKED must say there is nothing to delete: %q", es[0].WhatToDo)
+	}
+}
+
+// An interrupted or half-published promote is resumed with apply, never by
+// promoting again under another name: the explain text must say so.
+func TestExplainSteersAnInterruptedPublishToApply(t *testing.T) {
+	t.Parallel()
+	es, _ := contract.Explain(string(contract.Interrupted))
+	for _, want := range []string{"plan_id", "apply", "job", "wait"} {
+		if !strings.Contains(es[0].WhatToDo, want) {
+			t.Errorf("INTERRUPTED what-to-do lacks %q: %q", want, es[0].WhatToDo)
+		}
+	}
+	if strings.Contains(es[0].WhatToDo, "safe to repeat") {
+		t.Errorf("INTERRUPTED still says to repeat the command blindly: %q", es[0].WhatToDo)
+	}
+	es, _ = contract.Explain(string(contract.BranchExists))
+	for _, want := range []string{"plan_id", "apply"} {
+		if !strings.Contains(es[0].WhatToDo, want) {
+			t.Errorf("BRANCH_EXISTS what-to-do lacks %q: %q", want, es[0].WhatToDo)
+		}
+	}
+}
+
+func TestNewer(t *testing.T) {
+	t.Parallel()
+	for v, want := range map[string]bool{"0.8": false, "0.7": false, "0.10": true, "0.9": true, "1.0": true,
+		"": false, "x": false, "0.8.1": false, "0.4": false,
+		// A malformed version is never newer: it would lock users out.
+		"+1.0": false, "1.-5": false, "0.+9": false, " 0.9": false, "0.9 ": false, "1.": false, ".9": false} {
+		if got := contract.Newer(v); got != want {
+			t.Errorf("Newer(%q) = %v, want %v", v, got, want)
+		}
+	}
+}
+
+func TestNewerRecord(t *testing.T) {
+	t.Parallel()
+	ce := contract.NewerRecord("plan", "0.99")
+	if ce.Code != contract.UpgradeNeeded || ce.Details["record"] != "plan" || ce.Details["record_version"] != "0.99" ||
+		ce.Details["supported"] != contract.SchemaVersion || !strings.Contains(ce.Message, "plan record") {
+		t.Fatalf("NewerRecord = %+v", ce)
 	}
 }

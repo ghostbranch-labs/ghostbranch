@@ -99,7 +99,8 @@ func (e *Engine) FeatureAbandon(ctx context.Context, p workspace.Pair, name stri
 // survey saw, then closes its gate draft PR and cleans up this machine.
 // Only a published, merged and unmoved feature (or a merged one whose
 // branch is gone) closes without a person at a console; --plan asks no one
-// and changes nothing.
+// and changes nothing. A feature whose record can't be read (corrupt, or
+// from a newer Ghostbranch) closes too, but only at a console.
 func (e *Engine) FeatureClose(ctx context.Context, p workspace.Pair, name string) (res *FeatureCloseResult, warns []contract.Warning, err error) {
 	// The console's yes is recorded even when the close then fails.
 	var appr *ledger.Approval
@@ -134,7 +135,15 @@ func (e *Engine) FeatureClose(ctx context.Context, p workspace.Pair, name string
 	}
 	rs, sw, err := e.survey(ctx, pc, name)
 	warns = addWarnings(warns, sw...)
-	if err != nil {
+	var bad *unreadableRecord
+	if errors.As(err, &bad) && bad.feature == name {
+		// The record can't be read: close what the refs say, at the console.
+		r, err := e.unreadableReport(ctx, pc, name)
+		if err != nil {
+			return nil, warns, err
+		}
+		rs = []FeatureReport{r}
+	} else if err != nil {
 		return nil, warns, err
 	}
 	if len(rs) != 1 {
@@ -149,8 +158,11 @@ func (e *Engine) FeatureClose(ctx context.Context, p workspace.Pair, name string
 	// The console comes before anything changes.
 	if !e.DryRun && !ClosableWithoutConsole(r) {
 		if e.Approver == nil {
-			return nil, warns, noConsole("closing feature " + name + " (" + string(r.State) +
-				"; only a merged feature with no newer commits closes unattended)")
+			why := "only a merged feature with no newer commits closes unattended"
+			if r.unreadable != "" {
+				why = "its record couldn't be read as a whole: " + unreadableWhy(r)
+			}
+			return nil, warns, noConsole("closing feature " + name + " (" + string(r.State) + "; " + why + ")")
 		}
 		if err := e.confirm(ctx, "", closeSummary(pc, r, t)); err != nil {
 			return nil, warns, err
@@ -162,7 +174,37 @@ func (e *Engine) FeatureClose(ctx context.Context, p workspace.Pair, name string
 	if res != nil {
 		res.Approval = appr
 	}
+	if res != nil && res.Preview == nil && r.unreadable != "" {
+		warns = addWarnings(warns, contract.Warning{Code: contract.RecordUnreadable,
+			Message: fmt.Sprintf("feature %s's record couldn't be read as a whole (%s); its refs were deleted at the console, and the ledger lists them with their SHAs",
+				name, unreadableWhy(r)),
+			Details: map[string]any{"feature": name}})
+	}
 	return res, warns, err
+}
+
+// unreadableReport stands in for the survey of a feature whose record
+// doesn't parse: its branch is the feature's name (feature start's only
+// choice), and its head is whatever the mirror has.
+func (e *Engine) unreadableReport(ctx context.Context, pc *pairCtx, name string) (FeatureReport, error) {
+	r := FeatureReport{Name: name, Branch: name, State: feature.StateUnreadable, unreadable: unreadableCorrupt,
+		Drift: Drift{Status: driftUnknown, Files: []string{}}}
+	head, ok, err := pc.git.Resolve(ctx, shadowRef(name))
+	if err != nil {
+		return r, internalErr(err, "read feature branch "+name)
+	}
+	if ok {
+		r.Head = head
+	}
+	return r, nil
+}
+
+// unreadableWhy says why r's record couldn't be read as a whole.
+func unreadableWhy(r FeatureReport) string {
+	if r.unreadable == unreadableNewer {
+		return "it was written by a newer Ghostbranch"
+	}
+	return "it is corrupt"
 }
 
 // closeFeature deletes one surveyed feature. It asks no console: sync's
@@ -378,6 +420,12 @@ func movedErr(name, shadow string, err error) error {
 // closeSummary is what the person sees before typing the code.
 func closeSummary(pc *pairCtx, r FeatureReport, t closeTargets) string {
 	var b strings.Builder
+	switch r.unreadable {
+	case unreadableCorrupt:
+		fmt.Fprintf(&b, "Feature %s's record couldn't be read, so its state is unknown; its refs are found by name.\n", visible(r.Name))
+	case unreadableNewer:
+		fmt.Fprintf(&b, "Feature %s's record was written by a newer Ghostbranch; its state is what this binary could read of it.\n", visible(r.Name))
+	}
 	fmt.Fprintf(&b, "Close feature %s (state %s): delete these refs from %s:\n", visible(r.Name), r.State, visible(pc.pair.Shadow))
 	refs := t.sorted()
 	for _, ref := range refs {

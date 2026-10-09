@@ -16,6 +16,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/managed"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
+	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
 func TestInitCreatesShadowMirrorsAndOverlay(t *testing.T) {
@@ -53,6 +54,33 @@ func TestInitCreatesShadowMirrorsAndOverlay(t *testing.T) {
 	for _, p := range h.pushes {
 		if p.remote != "shadow" {
 			t.Fatalf("init pushed to %s", p.remote)
+		}
+	}
+}
+
+// Init registers its pair through workspace.Update: a pair another run
+// registered after this engine loaded workspace.json is kept.
+func TestInitKeepsAPairAnotherRunRegistered(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	other, err := workspace.Open(filepath.Dir(filepath.Dir(h.eng.WS.Dir)), h.eng.WS.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other.AddPair(workspace.Pair{Public: "acme/other", Shadow: "acme/other-shadow"})
+	if err := other.Save(); err != nil {
+		t.Fatal(err)
+	}
+	h.init()
+	fresh, err := workspace.Open(filepath.Dir(filepath.Dir(h.eng.WS.Dir)), h.eng.WS.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ws := range []*workspace.Workspace{fresh, h.eng.WS} {
+		_, okA := ws.Find(publicName)
+		_, okB := ws.Find("acme/other")
+		if !okA || !okB {
+			t.Fatalf("pairs = %+v", ws.Pairs)
 		}
 	}
 }

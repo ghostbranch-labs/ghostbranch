@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.7",
+  "schema_version": "0.8",
   "command": "waivers add",
   "ok": false,
   "exit_code": 5,

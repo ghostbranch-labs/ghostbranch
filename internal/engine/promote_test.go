@@ -15,6 +15,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
+	"github.com/ghostbranch-labs/ghostbranch/internal/forge/fake"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
 	"github.com/ghostbranch-labs/ghostbranch/internal/plan"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
@@ -598,5 +599,113 @@ func TestAnInterruptedPromoteIsInterrupted(t *testing.T) {
 	es := h.ledger()
 	if last := es[len(es)-1]; last.Op != "promote" || last.ErrorCode != string(contract.Interrupted) {
 		t.Fatalf("ledger = %+v", last)
+	}
+}
+
+// interruptAtThePublicPush cancels the context as feat-x's public branch
+// is pushed, so the push never happens.
+func interruptAtThePublicPush(h *harness, cancel context.CancelFunc) {
+	record := h.eng.OnPush
+	h.eng.OnPush = func(op, remote string, specs []string) {
+		record(op, remote, specs)
+		for _, s := range specs {
+			if remote == "public" && strings.HasSuffix(s, ":refs/heads/feat-x") {
+				cancel()
+			}
+		}
+	}
+}
+
+// A promote interrupted once its plan is saved points at apply <plan>:
+// promoting again would make new commits.
+func TestAnInterruptAfterThePlanIsSavedPointsAtApply(t *testing.T) {
+	t.Parallel()
+	h := gated(t)
+	ctx, cancel := context.WithCancel(h.ctx)
+	defer cancel()
+	interruptAtThePublicPush(h, cancel)
+	res, _, err := h.eng.Promote(ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Mode: "squash", Message: "Add feature"})
+	ce := wantCode(t, err, contract.Interrupted)
+	if res == nil || res.Plan == nil || ce.Details["plan_id"] != res.Plan.ID || ce.Details["feature"] != "feat-x" {
+		t.Fatalf("result = %+v, details = %+v", res, ce.Details)
+	}
+	if !strings.Contains(ce.Message, "ghostbranch apply "+res.Plan.ID) {
+		t.Fatalf("message = %q", ce.Message)
+	}
+	if _, ok := h.publicRefs()["refs/heads/feat-x"]; ok {
+		t.Fatal("the interrupted push reached the public repo")
+	}
+	es := h.ledger()
+	if last := es[len(es)-1]; last.Op != "promote" || last.ErrorCode != string(contract.Interrupted) {
+		t.Fatalf("ledger = %+v", last)
+	}
+}
+
+// cancelAtFindPR is the fake forge, but the first look for an open PR in
+// the public repo cancels the context and fails as a cancelled request
+// would: an interrupt after the public push, before the PR is opened.
+type cancelAtFindPR struct {
+	*fake.Forge
+	cancel context.CancelFunc
+	done   bool
+}
+
+func (f *cancelAtFindPR) FindOpenPR(ctx context.Context, full, head, base string) (*forge.PR, error) {
+	if full == publicName && !f.done {
+		f.done = true
+		f.cancel()
+		return nil, ctx.Err()
+	}
+	return f.Forge.FindOpenPR(ctx, full, head, base)
+}
+
+// Review Focus 5: apply <plan> after a promote interrupted between the
+// public push and the PR publishes once: the branch the push left, one PR,
+// no BRANCH_EXISTS.
+func TestApplyResumesAPromoteInterruptedAfterThePush(t *testing.T) {
+	t.Parallel()
+	h := gated(t)
+	ctx, cancel := context.WithCancel(h.ctx)
+	defer cancel()
+	h.eng.Forge = &cancelAtFindPR{Forge: h.forge, cancel: cancel}
+	res, _, err := h.eng.Promote(ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Mode: "squash", Message: "Add feature"})
+	ce := wantCode(t, err, contract.Interrupted)
+	if res == nil || res.Plan == nil || ce.Details["plan_id"] != res.Plan.ID {
+		t.Fatalf("result = %+v, details = %+v", res, ce.Details)
+	}
+	id, P := res.Plan.ID, res.Plan.Publish.Commit
+	if got := h.publicRefs()["refs/heads/feat-x"]; got != P || len(h.forge.PRs(publicName)) != 0 {
+		t.Fatalf("after the interrupt: branch at %s (plan %s), PRs %+v", got, P, h.forge.PRs(publicName))
+	}
+	// Nothing was published as a PR: the ledger says the plan was saved.
+	es := h.ledger()
+	if last := es[len(es)-1]; last.Op != "promote" || last.ErrorCode != string(contract.Interrupted) || last.Summary != "plan "+id+" saved" {
+		t.Fatalf("ledger = %+v", last)
+	}
+
+	h.eng.Forge = h.forge
+	ar, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: id})
+	if err != nil || ar.PublicPR != 1 || !ar.Resumed {
+		t.Fatalf("apply = %+v %v", ar, err)
+	}
+	if got := h.publicRefs()["refs/heads/feat-x"]; got != P {
+		t.Fatalf("public branch at %s, want the plan's commit %s", got, P)
+	}
+	if prs := h.forge.PRs(publicName); len(prs) != 1 || prs[0].Head != "feat-x" {
+		t.Fatalf("public PRs = %+v", prs)
+	}
+	pushes := 0
+	for _, p := range h.pushes {
+		for _, s := range p.refspecs {
+			if p.remote == "public" && strings.HasSuffix(s, ":refs/heads/feat-x") {
+				pushes++
+			}
+		}
+	}
+	if pushes != 1 {
+		t.Fatalf("%d pushes of the public branch, want 1", pushes)
+	}
+	if m := h.meta("feat-x"); m.Promoted == nil || m.Promoted.PlanID != id || m.Promoted.PublicPR != 1 {
+		t.Fatalf("record = %+v", m.Promoted)
 	}
 }

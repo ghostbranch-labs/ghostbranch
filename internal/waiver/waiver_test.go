@@ -106,7 +106,7 @@ func TestFileIsPrivateAtomicAndHoldsNoSecret(t *testing.T) {
 		Waivers       []map[string]any `json:"waivers"`
 	}
 	b, _ := os.ReadFile(s.Path())
-	if err := json.Unmarshal(b, &raw); err != nil || raw.SchemaVersion != "0.7" || len(raw.Waivers) != 1 {
+	if err := json.Unmarshal(b, &raw); err != nil || raw.SchemaVersion != "0.8" || len(raw.Waivers) != 1 {
 		t.Fatalf("%s %v", b, err)
 	}
 	var keys []string
@@ -122,7 +122,7 @@ func TestFileIsPrivateAtomicAndHoldsNoSecret(t *testing.T) {
 
 func TestLockedStore(t *testing.T) {
 	s, dir := newStore(t)
-	unlock, err := workspace.Lock(filepath.Join(dir, "waivers.lock"), now)
+	unlock, err := workspace.Lock(filepath.Join(dir, "waivers.lock"), now, "test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,5 +151,67 @@ func TestMatches(t *testing.T) {
 		if got := waiver.Matches(w, c.public, c.ids, c.all); got != c.want {
 			t.Errorf("Matches(%q, %v, %v) = %v", c.public, c.ids, c.all, got)
 		}
+	}
+}
+
+// A waivers file from a newer Ghostbranch is refused, and nothing
+// overwrites it, not even revoke --all.
+func TestNewerWaiversFile(t *testing.T) {
+	t.Parallel()
+	s, dir := newStore(t)
+	path := filepath.Join(dir, "waivers.json")
+	raw := []byte(`{"schema_version":"0.99","waivers":[]}`)
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := s.Load()
+	if ce := contract.From(err); ce == nil || ce.Code != contract.UpgradeNeeded || ce.Details["record"] != "waivers" ||
+		ce.Details["record_version"] != "0.99" || ce.Details["supported"] != contract.SchemaVersion {
+		t.Fatalf("want UPGRADE_NEEDED for waivers, got %v", err)
+	}
+	upgrade := func(err error) bool { ce := contract.From(err); return ce != nil && ce.Code == contract.UpgradeNeeded }
+	if err := s.Add([]waiver.Waiver{mk("acme/widget", "f-000000000001", "fixture")}, now); !upgrade(err) {
+		t.Fatalf("add = %v", err)
+	}
+	if _, err := s.Revoke("", nil, true, now); !upgrade(err) {
+		t.Fatalf("revoke --all = %v", err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != string(raw) {
+		t.Fatalf("the newer file was changed: %s", got)
+	}
+}
+
+// A well-formed file whose values don't decode (a bad time) is as corrupt as
+// one that isn't JSON: revoke --all clears it. A file that can't be read, or
+// one from a newer Ghostbranch, is never replaced.
+func TestRevokeAllClearsAFileWithABadValue(t *testing.T) {
+	t.Parallel()
+	s, _ := newStore(t)
+	raw := `{"schema_version":"0.8","waivers":[{"id":"f-000000000001","created_at":"nope"}]}`
+	if err := os.WriteFile(s.Path(), []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Load(); err == nil {
+		t.Fatal("a bad value must be a Load error")
+	}
+	if _, err := s.Revoke("", nil, true, now); err != nil {
+		t.Fatalf("revoke --all must clear it: %v", err)
+	}
+	if ws, err := s.Load(); err != nil || len(ws) != 0 {
+		t.Fatalf("after clearing: %v %v", ws, err)
+	}
+}
+
+func TestRevokeAllKeepsAnUnreadableWaiversFile(t *testing.T) {
+	t.Parallel()
+	s, _ := newStore(t)
+	if err := os.Mkdir(s.Path(), 0o755); err != nil { // reading a folder fails, and isn't a decode error
+		t.Fatal(err)
+	}
+	if _, err := s.Revoke("", nil, true, now); err == nil {
+		t.Fatal("revoke --all must not replace a file it couldn't read")
+	}
+	if fi, err := os.Stat(s.Path()); err != nil || !fi.IsDir() {
+		t.Fatalf("the unreadable path was replaced: %v %v", fi, err)
 	}
 }

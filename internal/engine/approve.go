@@ -50,7 +50,7 @@ func (e *Engine) grantFor(p workspace.Pair) (grant.Grant, bool, error) {
 	}
 	g, ok, err := e.Grants.Valid(p.Public, p.Shadow, e.now())
 	if err != nil {
-		return grant.Grant{}, false, internalErr(err, "read agent grants")
+		return grant.Grant{}, false, grantErr(err, "read agent grants")
 	}
 	return g, ok, nil
 }

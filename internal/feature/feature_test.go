@@ -118,3 +118,15 @@ func TestPendingGateRoundTrips(t *testing.T) {
 		t.Fatal("a nil gate is pending")
 	}
 }
+
+func TestAPendingRecordWithoutAShadowPRIsNoJob(t *testing.T) {
+	t.Parallel()
+	g := &feature.Gate{Candidate: "c", Checks: feature.ChecksPending} // an older binary rewrote it
+	if g.Pending() {
+		t.Fatal("a pending record without shadow_pr counts as a job")
+	}
+	g.ShadowPR = 7
+	if !g.Pending() {
+		t.Fatal("a pending record with its PR is not a job")
+	}
+}

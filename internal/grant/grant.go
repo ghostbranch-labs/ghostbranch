@@ -20,7 +20,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
-const SchemaVersion = "0.7"
+const SchemaVersion = "0.8"
 
 // DefaultFor is the grant length when --for is not given.
 const DefaultFor = "6h"
@@ -103,7 +103,10 @@ func (s *Store) Load() ([]Grant, error) {
 	}
 	var f file
 	if err := json.Unmarshal(b, &f); err != nil {
-		return nil, fmt.Errorf("%s is not valid JSON; fix it or run `ghostbranch agents revoke --all`: %w", s.path, err)
+		return nil, corruptFile{fmt.Errorf("%s is not valid JSON; fix it or run `ghostbranch agents revoke --all`: %w", s.path, err)}
+	}
+	if contract.Newer(f.SchemaVersion) {
+		return nil, contract.NewerRecord("grants", f.SchemaVersion)
 	}
 	return f.Grants, nil
 }
@@ -142,8 +145,9 @@ func (s *Store) Put(g Grant, now time.Time) (*Grant, error) {
 }
 
 // Revoke removes the grants whose public repo is public, or every grant when
-// all is set, and returns the ones that were in force. With all, an
-// unreadable file is replaced too, so a corrupt grants.json can be cleared.
+// all is set, and returns the ones that were in force. With all, a file that
+// isn't valid JSON or doesn't decode is replaced too, so a corrupt grants.json
+// can be cleared; one it couldn't read, or from a newer Ghostbranch, is kept.
 func (s *Store) Revoke(public string, all bool, now time.Time) ([]Grant, error) {
 	removed := []Grant{}
 	err := s.update(now, all, func(gs []Grant) []Grant {
@@ -161,13 +165,13 @@ func (s *Store) Revoke(public string, all bool, now time.Time) ([]Grant, error) 
 }
 
 func (s *Store) update(now time.Time, replaceCorrupt bool, fn func([]Grant) []Grant) error {
-	unlock, err := workspace.Lock(s.lock, now)
+	unlock, err := workspace.Lock(s.lock, now, "agents")
 	if err != nil {
 		return err
 	}
 	defer unlock()
 	gs, err := s.Load()
-	if err != nil && !replaceCorrupt {
+	if err != nil && (!replaceCorrupt || !unparsable(err)) {
 		return err
 	}
 	live := make([]Grant, 0, len(gs))
@@ -195,4 +199,19 @@ func (s *Store) save(gs []Grant) error {
 		return err
 	}
 	return os.Rename(tmp, s.path)
+}
+
+// corruptFile marks a Load error from a file whose bytes were read but didn't
+// decode: not JSON, or JSON with a value of the wrong kind or a bad time.
+type corruptFile struct{ err error }
+
+func (c corruptFile) Error() string { return c.err.Error() }
+func (c corruptFile) Unwrap() error { return c.err }
+
+// unparsable reports a Load error from a file that was read but didn't decode,
+// the only error revoke --all may replace the file over: a file it couldn't
+// read, or one from a newer Ghostbranch, stays as it is.
+func unparsable(err error) bool {
+	var c corruptFile
+	return errors.As(err, &c)
 }

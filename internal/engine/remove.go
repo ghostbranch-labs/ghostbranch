@@ -71,8 +71,10 @@ func (e *Engine) Remove(ctx context.Context, p workspace.Pair) (res *RemoveResul
 	}
 	if !e.DryRun {
 		// No other operation on the pair while its files go; waivers add
-		// takes this lock too.
-		unlock, err := workspace.Lock(e.WS.LockPath(p), e.Now())
+		// takes this lock too. The lock file sits in the workspace's locks
+		// folder, outside the pair folder removed below, so it stays, and
+		// the deferred unlock releases only this run's own hold.
+		unlock, err := workspace.Lock(e.WS.LockPath(p), e.Now(), "remove")
 		if err != nil {
 			return nil, nil, err
 		}
@@ -91,7 +93,7 @@ func (e *Engine) Remove(ctx context.Context, p workspace.Pair) (res *RemoveResul
 	}
 	byID, err := wstore.For(p.Public)
 	if err != nil {
-		return nil, nil, internalErr(err, "read waivers")
+		return nil, nil, grantErr(err, "read waivers")
 	}
 	ids := make([]string, 0, len(byID))
 	for id := range byID {
@@ -147,9 +149,8 @@ func (e *Engine) Remove(ctx context.Context, p workspace.Pair) (res *RemoveResul
 		return nil, nil, internalErr(err, "remove "+res.Dir)
 	}
 	// Last, so a remove that failed above can simply be run again.
-	e.WS.RemovePair(p.Public)
-	if err := e.WS.Save(); err != nil {
-		return nil, nil, internalErr(err, "save workspace.json")
+	if err := e.WS.Update(e.Now(), func(w *workspace.Workspace) bool { return w.RemovePair(p.Public) }); err != nil {
+		return nil, nil, updateErr(err, "save workspace.json")
 	}
 	return res, nil, nil
 }
@@ -185,12 +186,17 @@ func pairPlans(dir, public string) ([]string, error) {
 	return out, nil
 }
 
-// planFile is the part of a plan file that says whose it is.
+// planFile is the part of a plan file that says whose it is, and what it
+// publishes where.
 type planFile struct {
 	ID      string    `json:"id"`
 	Pair    plan.Pair `json:"pair"`
 	Feature string    `json:"feature"`
-	Path    string    `json:"-"`
+	Publish struct {
+		Commit       string `json:"commit"`
+		TargetBranch string `json:"target_branch"`
+	} `json:"publish"`
+	Path string `json:"-"`
 }
 
 // planFiles decodes every plan file in dir, in name order. A file that

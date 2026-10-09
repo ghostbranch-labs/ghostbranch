@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -100,21 +101,60 @@ func replanDetails(err error, pl plan.Plan) error {
 	return err
 }
 
+// earlierPlan names a saved plan of the same pair and feature that
+// publishes exactly sha to branch: a publish that was interrupted after its
+// push, which apply <that plan> resumes. It never names published, the plan
+// the feature record says was published: plan files outlive their apply,
+// and that publish is finished, not interrupted.
+func (e *Engine) earlierPlan(pair workspace.Pair, feature, branch, sha, published string) string {
+	files, err := planFiles(e.WS.PlansDir())
+	if err != nil {
+		return ""
+	}
+	for _, f := range files {
+		// The files are local and unsigned: name only an ID apply can load.
+		if !plan.ValidID(f.ID) || filepath.Base(f.Path) != f.ID+".json" || f.ID == published {
+			continue
+		}
+		if f.Feature == feature && strings.EqualFold(f.Pair.Public, pair.Public) &&
+			f.Publish.TargetBranch == branch && f.Publish.Commit == sha {
+			return f.ID
+		}
+	}
+	return ""
+}
+
 // branchExists refuses a publish to a public branch that is already at
-// another commit.
-func branchExists(branch, sha string) error {
+// another commit. When earlier is set, that commit is an earlier plan's
+// of the same feature, and the error names it.
+func branchExists(branch, sha, earlier string) error {
+	if earlier != "" {
+		return contract.New(contract.BranchExists,
+			"public branch %q already holds the commits of plan %s, an earlier promote of this feature; resume that publish with ghostbranch apply %s", branch, earlier, earlier).
+			WithField("branch").WithDetails(map[string]any{"branch": branch, "sha": sha, "plan_id": earlier})
+	}
 	return contract.New(contract.BranchExists,
 		"public branch %q already exists at another commit; promote under another name with --branch", branch).
 		WithField("branch").WithDetails(map[string]any{"branch": branch, "sha": sha})
 }
 
-// previewPublish adds the public steps a publish of P to branch still
-// needs: the push unless the branch is already at P, and the PR unless one
-// is open. A branch at another commit is refused, as the publish would be.
-func (e *Engine) previewPublish(ctx context.Context, pc *pairCtx, pv *preview.Preview, branch, P string) error {
+// publishedPlan is the plan m's record says was published, or "".
+func publishedPlan(m feature.Meta) string {
+	if m.Promoted == nil {
+		return ""
+	}
+	return m.Promoted.PlanID
+}
+
+// previewPublish adds the public steps a publish of feature's P to branch
+// still needs: the push unless the branch is already at P, and the PR
+// unless one is open. A branch at another commit is refused, as the
+// publish would be; published is the plan the feature's record says was
+// published (see earlierPlan).
+func (e *Engine) previewPublish(ctx context.Context, pc *pairCtx, pv *preview.Preview, feature, published, branch, P string) error {
 	existing, exists, _ := pc.git.Resolve(ctx, publicRef(branch))
 	if exists && existing != P {
-		return branchExists(branch, existing)
+		return branchExists(branch, existing, e.earlierPlan(pc.pair, feature, branch, existing, published))
 	}
 	if !exists {
 		pv.Add(preview.PushRef(pc.pair.Public, "refs/heads/"+branch, "", P))
@@ -300,11 +340,11 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 	res := &ApplyResult{PlanID: pl.ID, PublicBranch: branch, Waived: waived}
 	existing, exists, _ := g.Resolve(ctx, publicRef(branch))
 	if exists && existing != P {
-		return res, warns, branchExists(branch, existing)
+		return res, warns, branchExists(branch, existing, e.earlierPlan(pc.pair, pl.Feature, branch, existing, publishedPlan(m)))
 	}
 	if e.DryRun {
 		pv := preview.New(map[string]string{"public_main": pm, "feature_head": head, "overlay": O, "gate_candidate": gateC})
-		if err := e.previewPublish(ctx, pc, pv, branch, P); err != nil {
+		if err := e.previewPublish(ctx, pc, pv, pl.Feature, publishedPlan(m), branch, P); err != nil {
 			return res, warns, err
 		}
 		res.Preview = pv

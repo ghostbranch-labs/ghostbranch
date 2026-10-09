@@ -393,7 +393,7 @@ func TestPushRunsListsPushRunsForTheSHA(t *testing.T) {
 		}
 		if q.Get("page") == "2" {
 			writeJSON(w, map[string]any{"workflow_runs": []map[string]any{
-				{"id": 2, "name": "Lint", "status": "completed", "html_url": "https://github.com/acme/s/actions/runs/2"}}})
+				{"id": 2, "name": "Lint", "status": "completed", "conclusion": "cancelled", "html_url": "https://github.com/acme/s/actions/runs/2"}}})
 			return
 		}
 		w.Header().Set("Link", `<`+"http://"+r.Host+r.URL.Path+`?head_sha=abc&event=push&page=2>; rel="next"`)
@@ -411,7 +411,7 @@ func TestPushRunsListsPushRunsForTheSHA(t *testing.T) {
 	}
 	want := []forge.Run{
 		{ID: 1, Workflow: "CI", Status: "queued", URL: "https://github.com/acme/s/actions/runs/1"},
-		{ID: 2, Workflow: "Lint", Status: "completed", URL: "https://github.com/acme/s/actions/runs/2"},
+		{ID: 2, Workflow: "Lint", Status: "completed", Conclusion: "cancelled", URL: "https://github.com/acme/s/actions/runs/2"},
 	}
 	if len(runs) != len(want) || runs[0] != want[0] || runs[1] != want[1] {
 		t.Fatalf("runs = %+v", runs)
@@ -444,8 +444,8 @@ func TestCancelRun(t *testing.T) {
 	if err := c.CancelRun(ctx, "acme/s", 1); err != nil {
 		t.Fatalf("202: %v", err)
 	}
-	if err := c.CancelRun(ctx, "acme/s", 2); err != nil {
-		t.Fatalf("409 (already finished): %v", err)
+	if err := c.CancelRun(ctx, "acme/s", 2); !errors.Is(err, forge.ErrConflict) {
+		t.Fatalf("409: %v", err)
 	}
 	if err := c.CancelRun(ctx, "acme/s", 3); !errors.Is(err, forge.ErrForbidden) {
 		t.Fatalf("403: %v", err)
@@ -455,6 +455,44 @@ func TestCancelRun(t *testing.T) {
 	}
 	if strings.Join(cancelled, ",") != "1,2,3,4" {
 		t.Fatalf("cancelled = %v", cancelled)
+	}
+}
+
+func TestForceCancelRun(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	var forced []string
+	mux.HandleFunc("POST /repos/o/r/actions/runs/{id}/force-cancel", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		forced = append(forced, id)
+		switch id {
+		case "7":
+			w.WriteHeader(http.StatusAccepted)
+			writeJSON(w, map[string]any{})
+		case "8":
+			http.Error(w, `{"message":"Cannot force-cancel a workflow run that is completed."}`, http.StatusConflict)
+		case "9":
+			http.Error(w, `{"message":"Resource not accessible by personal access token"}`, http.StatusForbidden)
+		default:
+			http.Error(w, `{"message":"boom"}`, http.StatusInternalServerError)
+		}
+	})
+	c := newClient(t, mux)
+	ctx := context.Background()
+	if err := c.ForceCancelRun(ctx, "o/r", 7); err != nil {
+		t.Fatalf("202: %v", err)
+	}
+	if err := c.ForceCancelRun(ctx, "o/r", 8); !errors.Is(err, forge.ErrConflict) {
+		t.Fatalf("409: %v", err)
+	}
+	if err := c.ForceCancelRun(ctx, "o/r", 9); !errors.Is(err, forge.ErrForbidden) {
+		t.Fatalf("403: %v", err)
+	}
+	if err := c.ForceCancelRun(ctx, "o/r", 10); err == nil || errors.Is(err, forge.ErrForbidden) || errors.Is(err, forge.ErrConflict) {
+		t.Fatalf("500: %v", err)
+	}
+	if strings.Join(forced, ",") != "7,8,9,10" {
+		t.Fatalf("force-cancelled = %v", forced)
 	}
 }
 

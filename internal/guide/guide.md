@@ -58,13 +58,17 @@ main, green CI, and a leak scan of exactly what will be published.
 - A finished job answers at once. `wait --timeout 10m` returns `checks: pending` (exit 0) if CI is still
   running; run `wait` again later.
 - After Ctrl-C you get `INTERRUPTED`. With `error.details.job`, CI is still running: run
-  `ghostbranch wait <job> --repo <public> --json`, not `gate`. Without it nothing is pending: run the command
-  again. If the session dropped, `ghostbranch status --repo <public> --json` names a pending job
+  `ghostbranch wait <job> --repo <public> --json`, not `gate`. Without `job` or `plan_id` nothing is pending: run the
+  command again. If the session dropped, `ghostbranch status --repo <public> --json` names a pending job
   (`gate.job`): wait on it.
 - `JOB_STALE`: a newer gate replaced the job; `error.details.current_job` names the current one; if
   `current_job` is empty, gate again.
 - `promote --detach` returns the job in `data.gate.job` and no plan; once `wait` passes, run the same
   promote without `--detach` (it reuses the green gate).
+- `INTERRUPTED` with `error.details.plan_id` after `promote`: the plan is saved and the publish may have
+  started. Resume with `ghostbranch apply <plan_id> --repo <public>` (as `next` says; with `needs_human`
+  the person runs it), never `promote` again (it makes new commits). `BRANCH_EXISTS` with
+  `error.details.plan_id` means the same: apply that plan.
 
 ## Set up a repo
 
@@ -91,14 +95,17 @@ main, green CI, and a leak scan of exactly what will be published.
   give the same by feature.
 - `ghostbranch sync --repo <public>` closes features whose public PR merged and whose branch hasn't
   moved: it deletes their shadow branches and says so in `data.closed`. `--no-close` skips that.
-- `merged_moved`, `pr_closed` and an unmerged `branch_gone` are for a person to close (for
-  `merged_moved` you may instead promote the newer commits): `status` gives
-  `ghostbranch feature close <name> --repo <public>` with `needs_human`. A close deletes the feature's
-  shadow branches and needs a person at the console unless the feature is merged and unmoved; an agent
-  grant does not cover it, so don't ask for `agents allow` to unblock a close.
+- `merged_moved`, `pr_closed` and a `branch_gone` that is unmerged, or merged but gated past its
+  publish, are for a person to close (or promote a `merged_moved` feature's newer commits): `status`
+  gives `ghostbranch feature close <name> --repo <public>` with `needs_human`. A close deletes the
+  feature's shadow branches and needs a person at the console unless the feature is merged and
+  unmoved; an agent grant does not cover it, so don't ask for `agents allow` to unblock a close.
 - `ghostbranch feature abandon <name> --repo <public>` parks a feature and deletes nothing; `--undo`
   brings it back.
 - `ghostbranch log --repo <public>` shows the history.
+- `UPGRADE_NEEDED` with `error.details.record` (feature, plan, grants, waivers) means another machine
+  runs a newer Ghostbranch: upgrade before changing anything. `RECORD_NEWER` on `status`, `feature list`
+  or `feature show` means the same; reads still work, and such a feature is never closed unattended.
 - Never close or abandon a feature a person is still working on.
 
 ## Keeping up with public
@@ -107,8 +114,10 @@ main, green CI, and a leak scan of exactly what will be published.
   (fast-forward only; it never resolves a conflict). The gate always rebases on public main, so it is
   never affected. `feature start` refuses instead, with the error `SHADOW_BEHIND`: sync, then start again.
 - Sync's pushes start the shadow repo's push-triggered workflows, which re-test what public CI already
-  tested, so sync cancels those runs (`--no-cancel` skips that). `CI_NOT_CANCELLED` means it couldn't
-  (the token needs Actions write); the runs only cost minutes. To stop them for good, the person adds
+  tested, so sync cancels those runs (`--no-cancel` skips that). `cancelled_runs` lists only runs
+  confirmed cancelled. `CI_NOT_CANCELLED` means runs may still be going: the token couldn't
+  cancel them (it needs Actions write), they kept going, or sync couldn't check; it names the runs it
+  knows of, or counts them. They only cost minutes. To stop them for good, the person adds
   the guard from the audit's `PUSH_TRIGGERS_ON_SYNC` to each push-triggered job; a job that already
   has an `if:` combines them: `<existing> && (github.event_name != 'push' || github.repository == '<public>')`.
 - Scheduled sync is opt-in and costs Actions minutes (every 6 hours is about 120 a month). It is the
@@ -142,6 +151,10 @@ main, green CI, and a leak scan of exactly what will be published.
   grants or blocks anything.
 - Write the PR `--title` (and, for squash, `-m`; for curated, each group's message) yourself from the
   change: they go public. Show them to the person; use theirs if they give them.
+- `LOCKED`: another ghostbranch command is running on this machine (`error.details.held_by`: `pid`,
+  `op`, `since`). Wait and retry. A lock frees itself when its process ends; never delete lock files.
+- An unknown key in `.ghostbranch.yml`, including under `sync:` or `ci:`, is `UPGRADE_NEEDED` with
+  `error.details.unknown_key`: fix the typo, or upgrade if a newer Ghostbranch set the pair up.
 - Don't know a code? `ghostbranch explain <CODE> --json`.
 - Want to see what a command would do? Add `--plan` (or `--dry-run`): it returns the exact operations
   and changes nothing.
@@ -201,9 +214,11 @@ feature work to the public repo. Its limits:
   that decides what to do from its own file name may not run as before.
 - It recognizes GitHub remotes by URL; an SSH host alias (for example `git@github-work:…`) is not
   recognized.
-- It knows features from the local mirror. Feature work pushed under another branch name is caught
-  only if the mirror has seen it, so run `ghostbranch sync --repo <public>` now and then. A branch named
-  after a feature is always caught.
+- It knows features from the local mirror. It refuses any push that carries an unpublished feature
+  commit the mirror knows of, under any branch name, and a pushed ref that isn't a commit. A branch
+  named after a feature the mirror knows is refused whatever it carries, rewritten commits included.
+  Run `ghostbranch sync --repo <public>` now and then so the mirror has seen your features. Commits
+  rewritten out of the shadow repo can't be recognized under another name; publish only with `promote`.
 - It covers only the checkout it is installed in, and `git push --no-verify` skips it.
 - It reads Ghostbranch's state from the default location unless `GHOSTBRANCH_HOME` is set where git
   runs the hook.

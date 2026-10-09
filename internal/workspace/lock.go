@@ -1,42 +1,67 @@
 package workspace
 
 import (
+	"encoding/json"
 	"errors"
-	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 )
 
-// StaleAfter is how old a lock file must be before another run takes it over.
-const StaleAfter = 2 * time.Hour
-
-// Lock takes the per-pair lock, allowing one mutating operation per pair on
-// this machine. Safety across machines comes from leased pushes, not from
-// this lock.
-func Lock(path string, now time.Time) (func(), error) {
+// Lock takes the lock at path for op: one operation at a time on this
+// machine. It is an OS file lock (LockFileEx on Windows, flock elsewhere),
+// so it frees itself when its process ends, however it ends, and the file
+// is never deleted. Safety across machines comes from leased pushes.
+func Lock(path string, now time.Time, op string) (func(), error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
-	for attempt := 0; attempt < 2; attempt++ {
-		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
-		if err == nil {
-			_, _ = fmt.Fprintf(f, "%d %s\n", os.Getpid(), now.UTC().Format(time.RFC3339))
-			_ = f.Close()
-			return func() { _ = os.Remove(path) }, nil
-		}
-		if !errors.Is(err, fs.ErrExist) {
-			return nil, err
-		}
-		if info, serr := os.Stat(path); serr == nil && now.Sub(info.ModTime()) > StaleAfter {
-			_ = os.Remove(path)
-			continue
-		}
-		break
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, err
 	}
-	return nil, contract.New(contract.Locked,
-		"another ghostbranch operation holds %s; if none is running, delete that file", path)
+	if err := lockFile(f); err != nil {
+		_ = f.Close()
+		if errors.Is(err, errBusy) {
+			return nil, contract.New(contract.Locked, "another ghostbranch operation holds the lock %s", path).
+				WithDetails(map[string]any{"held_by": holder(path), "path": path})
+		}
+		return nil, err
+	}
+	b, _ := json.Marshal(map[string]any{"pid": os.Getpid(), "op": op, "since": now.UTC().Format(time.RFC3339)})
+	if f.Truncate(0) == nil {
+		_, _ = f.WriteAt(append(b, '\n'), 0)
+	}
+	return func() {
+		_ = unlockFile(f)
+		_ = f.Close()
+	}, nil
+}
+
+var errBusy = errors.New("lock busy")
+
+// holder reads who holds the lock, best effort: a 5c-format or empty file
+// gives what it can.
+func holder(path string) map[string]any {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return map[string]any{}
+	}
+	var h map[string]any
+	if json.Unmarshal(b, &h) == nil {
+		if pid, ok := h["pid"].(float64); ok {
+			h["pid"] = int(pid)
+		}
+		return h
+	}
+	if pid, since, ok := strings.Cut(strings.TrimSpace(string(b)), " "); ok {
+		if n, err := strconv.Atoi(pid); err == nil {
+			return map[string]any{"pid": n, "since": since}
+		}
+	}
+	return map[string]any{}
 }

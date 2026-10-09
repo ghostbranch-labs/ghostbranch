@@ -61,7 +61,7 @@ func (e *Engine) grants() (*grant.Store, error) {
 
 func grantErr(err error, what string) error {
 	if ce := contract.From(err); ce.Code != contract.Internal {
-		return ce // LOCKED
+		return ce // LOCKED, or UPGRADE_NEEDED for a file from a newer Ghostbranch
 	}
 	return internalErr(err, what)
 }

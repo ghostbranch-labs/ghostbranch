@@ -75,7 +75,7 @@ func (e *Engine) fetchMeta(ctx context.Context, g *gitx.Git) error {
 // still holds the lock only re-reads.
 func (e *Engine) relock(ctx context.Context, pc *pairCtx, job string) error {
 	for waited := time.Duration(0); !pc.held && pc.lockPath != ""; waited += finishLockPoll {
-		drop, err := workspace.Lock(pc.lockPath, e.Now())
+		drop, err := workspace.Lock(pc.lockPath, e.Now(), pc.op)
 		if err == nil {
 			pc.drop, pc.held = drop, true
 			break
@@ -181,6 +181,12 @@ func (e *Engine) recordFinish(ctx context.Context, pc *pairCtx, name string, res
 				WithDetails(map[string]any{"job": job})
 		case !ref.matches(m.Gate):
 			return nil, staleErr(name, job, m.Gate, "; its result was not recorded")
+		case m.Gate.Checks == feature.ChecksPending && m.Gate.ShadowPR == 0:
+			// An older binary rewrote the pending record and dropped its
+			// shadow PR: it is no job, and no other waiter finished it.
+			return nil, contract.New(contract.JobNotFound,
+				"feature %q's pending gate record has no shadow PR (an older ghostbranch rewrote it), so the job %s can't be recorded; gate it again", name, job).
+				WithDetails(map[string]any{"feature": name, "job": job})
 		case !m.Gate.Pending():
 			// Another waiter recorded this job first: its record stands.
 			res.Checks, res.FailedChecks = m.Gate.Checks, m.Gate.FailedChecks

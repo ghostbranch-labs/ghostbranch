@@ -52,8 +52,8 @@ chained="$(dirname "$0")/pre-push.ghostbranch-chained"
 
 norm() {
 	printf '%s' "$1" | tr 'A-Z' 'a-z' | sed -E -e 's#/*$##' -e 's#\.git$##' \
-		-e 's#^((ssh|https?)://[^/]*):[0-9]+/#\1/#' \
-		-e 's#^((ssh|https?)://([^/@]*@)?)ssh\.github\.com/#\1github.com/#'
+		-e 's#^((git\+ssh|ssh\+git|ssh|https?|git)://[^/]*):[0-9]+/#\1/#' \
+		-e 's#^((git\+ssh|ssh\+git|ssh|https?)://([^/@]*@)?)ssh\.github\.com/#\1github.com/#'
 }
 
 public=no
@@ -118,8 +118,8 @@ var (
 	// host. The scp form (git@github.com:owner/repo) is left alone, since a
 	// numeric owner there is not a port. The hook script's norm runs the
 	// same two expressions.
-	portPattern    = regexp.MustCompile(`^((ssh|https?)://[^/]*):[0-9]+/`)
-	sshHostPattern = regexp.MustCompile(`^((ssh|https?)://([^/@]*@)?)ssh\.github\.com/`)
+	portPattern    = regexp.MustCompile(`^((git\+ssh|ssh\+git|ssh|https?|git)://[^/]*):[0-9]+/`)
+	sshHostPattern = regexp.MustCompile(`^((git\+ssh|ssh\+git|ssh|https?)://([^/@]*@)?)ssh\.github\.com/`)
 )
 
 // Slug returns lowercase owner/repo for a GitHub URL in any common form. It

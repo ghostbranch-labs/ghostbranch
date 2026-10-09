@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.7",
+  "schema_version": "0.8",
   "command": "gate",
   "ok": true,
   "exit_code": 0,
@@ -56,7 +56,7 @@
           "repo": "acme/widget-shadow"
         },
         {
-          "from": "ed3d36aa6640c2f137b3cf61de90ac573e7dce78",
+          "from": "64a758a5b8ae8d158120c35d9f1ddf9660d17fef",
           "op": "push_ref",
           "ref": "refs/ghostbranch/features/feat-x",
           "repo": "acme/widget-shadow",
