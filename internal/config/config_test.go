@@ -317,7 +317,7 @@ func TestRewriteRepoGuardsMode(t *testing.T) {
 }
 
 func TestIgnoredKeysWarnPerKey(t *testing.T) {
-	_, warns, err := parseWith(t, "agents:\n  allow: true\n")
+	_, warns, err := parseWith(t, "agents:\n  default_tier: read\n  allow: true\n")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -328,7 +328,8 @@ func TestIgnoredKeysWarnPerKey(t *testing.T) {
 		}
 		msgs = append(msgs, w.Message)
 	}
-	want := []string{"agents.allow is not supported in this version and is ignored"}
+	want := []string{"agents.allow is not supported in this version and is ignored",
+		"agents.default_tier is not supported in this version and is ignored"}
 	if !reflect.DeepEqual(msgs, want) {
 		t.Fatalf("warnings = %q", msgs)
 	}
@@ -336,26 +337,34 @@ func TestIgnoredKeysWarnPerKey(t *testing.T) {
 
 func TestUnknownSyncAndCIKeysAreErrors(t *testing.T) {
 	t.Parallel()
-	for _, y := range []string{
-		"version: 1\npublic: o/r\nshadow: o/r-shadow\nci:\n  rewrite_repo_guard: warn\n",
-		"version: 1\npublic: o/r\nshadow: o/r-shadow\nsync:\n  schedul: \"0 * * * *\"\n",
-		"version: 1\npublic: o/r\nshadow: o/r-shadow\nci:\n  runners: github-hosted\n",
+	for y, key := range map[string]string{
+		"version: 1\npublic: o/r\nshadow: o/r-shadow\nci:\n  rewrite_repo_guard: warn\n": "ci.rewrite_repo_guard",
+		"version: 1\npublic: o/r\nshadow: o/r-shadow\nsync:\n  schedul: \"0 * * * *\"\n": "sync.schedul",
+		"version: 1\npublic: o/r\nshadow: o/r-shadow\nci:\n  runners: github-hosted\n":   "ci.runners",
 	} {
 		_, _, err := config.Parse([]byte(y))
 		ce := contract.From(err)
-		if ce == nil || ce.Code != contract.ConfigInvalid || ce.Details["unknown_key"] == nil {
-			t.Errorf("%q: want CONFIG_INVALID with unknown_key, got %v", y, err)
+		if ce == nil || ce.Code != contract.ConfigInvalid || ce.Details["unknown_key"] != key {
+			t.Errorf("%q: want CONFIG_INVALID with unknown_key %q, got %v", y, key, err)
 		}
 	}
 }
 
 func TestEmptySyncAndCIMapsAreFine(t *testing.T) {
 	t.Parallel()
-	cfg, warns, err := config.Parse([]byte("version: 1\npublic: o/r\nshadow: o/r-shadow\nsync: {}\nci: {}\n"))
-	if err != nil || len(warns) != 0 {
-		t.Fatalf("%v %+v", err, warns)
-	}
-	if !reflect.DeepEqual(cfg.Sync, config.Default().Sync) || cfg.CI != config.Default().CI {
-		t.Fatalf("empty maps changed the defaults: %+v %+v", cfg.Sync, cfg.CI)
+	base := "version: 1\npublic: o/r\nshadow: o/r-shadow\n"
+	for _, extra := range []string{
+		"sync: {}\nci: {}\n",
+		"sync:\nci:\n",
+		"ci:\n  # rewrite_repo_guards: warn\n",
+		"sync:\n  # schedule: off\n",
+	} {
+		cfg, warns, err := config.Parse([]byte(base + extra))
+		if err != nil || len(warns) != 0 {
+			t.Fatalf("%q: %v %+v", extra, err, warns)
+		}
+		if !reflect.DeepEqual(cfg.Sync, config.Default().Sync) || cfg.CI != config.Default().CI {
+			t.Fatalf("%q: empty section changed the defaults: %+v %+v", extra, cfg.Sync, cfg.CI)
+		}
 	}
 }

@@ -156,7 +156,12 @@ func Parse(data []byte) (Config, []contract.Warning, error) {
 	return cfg, warns, validate(cfg)
 }
 
+// isEmptyMap is true for "{}" and for a bare or comment-only section, which
+// yaml.v3 decodes to nil.
 func isEmptyMap(v any) bool {
+	if v == nil {
+		return true
+	}
 	m, ok := v.(map[string]any)
 	return ok && len(m) == 0
 }
