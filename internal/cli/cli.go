@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/signal"
 	"regexp"
@@ -129,7 +130,8 @@ func Run(args []string, env Env) int {
 	root.SetOut(env.Stdout)
 	root.SetErr(env.Stderr)
 	// Ctrl-C cancels the context: a gate waiting on CI leaves its job
-	// pending for wait, and the command reports INTERRUPTED.
+	// pending for wait, and every command reports INTERRUPTED
+	// (asInterrupted).
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	// After the first Ctrl-C, stop restores the default handling, so a
@@ -149,10 +151,42 @@ func Run(args []string, env Env) int {
 				err = contract.New(contract.BadFlag, "%s", err.Error())
 			}
 		}
+		if a.ran {
+			err = asInterrupted(ctx, err)
+		}
 	} else if !a.ran {
 		return contract.ExitOK // help output only
 	}
 	return a.render(err)
+}
+
+// asInterrupted makes an error that came back after Ctrl-C an INTERRUPTED,
+// so every command reports a cancel the same way. It keeps the error's
+// details and adds details.error_code, the code the cancel turned into.
+// gate, wait and promote return INTERRUPTED themselves (naming the job or
+// the plan), and a settled gate outcome is the answer whatever happened, so
+// both pass through. So do JOB_STALE and JOB_NOT_FOUND: they are settled
+// answers too, and an INTERRUPTED would have next offer wait on a dead job.
+// Running any other command again is safe: apply resumes, sync and feature
+// close are leased, and the rest only read or write leased records.
+func asInterrupted(ctx context.Context, err error) error {
+	if err == nil || ctx.Err() == nil {
+		return err
+	}
+	ce := contract.From(err)
+	switch {
+	case ce.Code == contract.Interrupted, ce.Code == contract.JobStale, ce.Code == contract.JobNotFound,
+		ce.Code.Exit() == contract.ExitGateFailed:
+		return err
+	}
+	details := maps.Clone(ce.Details)
+	if details == nil {
+		details = map[string]any{}
+	}
+	details["error_code"] = string(ce.Code)
+	out := contract.New(contract.Interrupted, "interrupted (Ctrl-C): %s", ce.Message).WithDetails(details)
+	out.Err = ce
+	return out
 }
 
 func commandName(cmd *cobra.Command) string {

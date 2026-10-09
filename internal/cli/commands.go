@@ -234,6 +234,10 @@ func (a *app) waitCmd() *cobra.Command {
 				a.ran = true
 				return contract.New(contract.BadFlag, "wait has no dry run: it only waits on CI and records the result; drop --dry-run").WithField("dry-run")
 			}
+			if timeout < 0 {
+				a.ran = true
+				return contract.New(contract.BadFlag, "--timeout must be 0 (wait until CI settles) or more, not %s", timeout).WithField("timeout")
+			}
 			e, err := a.engine(cmd.Context())
 			if err != nil {
 				return err
@@ -252,7 +256,7 @@ func (a *app) waitCmd() *cobra.Command {
 			return done(a, res, w, err)
 		},
 	}
-	c.Flags().DurationVar(&timeout, "timeout", 0, "stop waiting after this long and report pending; the job keeps running")
+	c.Flags().DurationVar(&timeout, "timeout", 0, "stop waiting after this long and report pending; the job keeps running (0, the default, waits until CI settles)")
 	return c
 }
 
