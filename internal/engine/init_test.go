@@ -2,7 +2,6 @@ package engine_test
 
 import (
 	"errors"
-	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -297,9 +296,21 @@ func TestAdoptAncestryFailureIsInternal(t *testing.T) {
 	pubMain := testutil.Commit(t, h.pubGit, "main", "second", map[string]string{"two.txt": "2"})
 	h.adoptable(old)
 	err := h.eng.AdoptCheckForTest(h.ctx, h.pair, func(mirror string) {
-		// A graft to a missing parent makes git fail walking public main.
-		graft := pubMain + " " + strings.Repeat("1", 40) + string(rune(10))
-		if err := os.WriteFile(filepath.Join(mirror, "info", "grafts"), []byte(graft), 0o644); err != nil {
+		// Replace public main with a commit whose parent doesn't exist, so
+		// git fails walking it. A replace ref, not info/grafts: git
+		// deprecated grafts and drops them in 3.0.
+		m := gitx.New(mirror)
+		tree, err := m.TreeOf(h.ctx, pubMain)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw := "tree " + tree + "\nparent " + strings.Repeat("1", 40) +
+			"\nauthor a <a@example.com> 1700000000 +0000\ncommitter a <a@example.com> 1700000000 +0000\n\nbroken\n"
+		broken, err := m.RunInput(h.ctx, strings.NewReader(raw), "hash-object", "-t", "commit", "-w", "--stdin")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := m.Run(h.ctx, "update-ref", "refs/replace/"+pubMain, broken); err != nil {
 			t.Fatal(err)
 		}
 	})
