@@ -7,7 +7,7 @@
   "properties": {
     "public": { "$ref": "common.schema.json#/$defs/repo" },
     "shadow": { "$ref": "common.schema.json#/$defs/repo" },
-    "action": { "enum": ["noop", "fast_forward", "diverged"] },
+    "action": { "enum": ["noop", "fast_forward", "diverged", "push_failed"] },
     "public_main": { "$ref": "common.schema.json#/$defs/sha" },
     "shadow_main_before": { "$ref": "common.schema.json#/$defs/shaOrEmpty" },
     "shadow_main_after": { "$ref": "common.schema.json#/$defs/shaOrEmpty" },
@@ -20,8 +20,8 @@
         "properties": {
           "name": { "type": "string", "minLength": 1 },
           "from": { "$ref": "common.schema.json#/$defs/shaOrEmpty" },
-          "to": { "$ref": "common.schema.json#/$defs/shaOrEmpty" },
-          "status": { "enum": ["up_to_date", "created", "fast_forwarded", "diverged"] }
+          "to": { "description": "in a dry run, the SHA the push would set", "$ref": "common.schema.json#/$defs/shaOrEmpty" },
+          "status": { "enum": ["up_to_date", "created", "fast_forwarded", "diverged", "push_failed"] }
         }
       }
     },
