@@ -466,3 +466,82 @@ func TestBranchExistsNamesTheEarlierPlan(t *testing.T) {
 		})
 	}
 }
+
+// A re-plan passes on only the texts a person typed; the rest are derived
+// again from the current commits or the new message.
+func TestPlanStaleCarriesOnlyTypedTexts(t *testing.T) {
+	t.Parallel()
+	h, pl := plannedHistory(t) // preserve, --title t; the body lists the subjects
+	if pl.Typed != (plan.Typed{Title: true}) {
+		t.Fatalf("typed = %+v", pl.Typed)
+	}
+	testutil.Commit(t, h.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
+	_, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: pl.ID, Yes: true})
+	ce := wantCode(t, err, contract.PlanStale)
+	if _, has := ce.Details["body"]; ce.Details["title"] != "t" || has {
+		t.Fatalf("details = %v", ce.Details)
+	}
+
+	h2, id := planned(t) // squash -m "Add feature": title and body both derived
+	testutil.Commit(t, h2.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
+	_, _, err = h2.eng.Apply(h2.ctx, engine.ApplyOptions{Plan: id, Yes: true})
+	ce = wantCode(t, err, contract.PlanStale)
+	_, hasTitle := ce.Details["title"]
+	_, hasBody := ce.Details["body"]
+	if hasTitle || hasBody {
+		t.Fatalf("derived texts were passed on: %v", ce.Details)
+	}
+}
+
+// A plan made before 0.9 is stale on its version and passes on both texts,
+// as it did then.
+func TestPlanStaleFromAnOlderPlanPassesBothTexts(t *testing.T) {
+	t.Parallel()
+	h, pl := plannedHistory(t)
+	path := filepath.Join(h.eng.WS.PlansDir(), pl.ID+".json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	delete(m, "typed")
+	m["schema_version"] = "0.8"
+	b, _ := json.Marshal(m)
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: pl.ID, Yes: true})
+	ce := wantCode(t, err, contract.PlanStale)
+	if !reflect.DeepEqual(ce.Details["moved"], []string{"schema_version"}) || ce.Details["title"] != "t" || ce.Details["body"] != pl.Publish.PR.Body {
+		t.Fatalf("details = %v", ce.Details)
+	}
+}
+
+// apply's LEAK_FOUND names the feature head, so next can tell a finding the
+// tip introduced from one only in older commits without a gate result.
+func TestApplyLeakNamesTheFeatureHead(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	head := h.startFeature("feat-x", fixture())
+	res, _, _ := h.eng.Gate(h.ctx, h.pair, "feat-x")
+	f := res.Findings[0]
+	h.waive(f, "test fixture")
+	if _, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x"); err != nil {
+		t.Fatal(err)
+	}
+	pr, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "Add feature", PlanOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.eng.Waivers.Revoke(publicName, []string{f.ID}, false, h.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: pr.Plan.ID})
+	if ce := wantCode(t, err, contract.LeakFound); ce.Details["feature_head"] != head {
+		t.Fatalf("details = %v, want feature_head %s", ce.Details, head)
+	}
+}

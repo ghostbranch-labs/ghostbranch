@@ -131,7 +131,7 @@ func TestNextReplansForThePlansBranch(t *testing.T) {
 	testutil.Commit(t, te.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
 	_, env := te.runJSON("apply", te.lastPlanID())
 	n := nextOf(t, env)
-	if len(n) != 1 || !reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "promote", "feat-x", "--mode", "squash", "--plan", "--repo", "acme/widget", "--branch", "public-name", "--title", "Add feature"}) ||
+	if len(n) != 1 || !reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "promote", "feat-x", "--mode", "squash", "--plan", "--repo", "acme/widget", "--branch", "public-name"}) ||
 		!reflect.DeepEqual(n[0]["needs_input"], []any{"--message"}) {
 		t.Fatalf("next = %v", n)
 	}

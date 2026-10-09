@@ -75,11 +75,17 @@ func (e *Engine) Apply(ctx context.Context, opt ApplyOptions) (res *ApplyResult,
 }
 
 // stale is the PLAN_STALE details: what moved, plus the feature, public
-// repo, public branch, mode and PR texts so the re-plan command can be
-// named exactly.
+// repo, public branch and mode, and the PR texts the person typed, so the
+// re-plan command can be named exactly and derives the other texts again.
 func stale(pl plan.Plan, moved []string) map[string]any {
-	return map[string]any{"moved": moved, "feature": pl.Feature, "public": pl.Pair.Public, "branch": pl.Publish.TargetBranch,
-		"mode": pl.Mode, "title": pl.Publish.PR.Title, "body": pl.Publish.PR.Body}
+	d := map[string]any{"moved": moved, "feature": pl.Feature, "public": pl.Pair.Public, "branch": pl.Publish.TargetBranch, "mode": pl.Mode}
+	if pl.Typed.Title {
+		d["title"] = pl.Publish.PR.Title
+	}
+	if pl.Typed.Body {
+		d["body"] = pl.Publish.PR.Body
+	}
+	return d
 }
 
 // replanDetails adds to a MARKER_INVALID, CURATE_CONFLICT or
@@ -333,6 +339,7 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 	if len(blocking) > 0 {
 		ce := contract.From(leakErr(pl.Feature, blocking))
 		ce.Details["mode"], ce.Details["public"], ce.Details["branch"] = pl.Mode, pl.Pair.Public, pl.Publish.TargetBranch
+		ce.Details["feature_head"] = pl.Fingerprint.FeatureHead // verified equal to the live head
 		return nil, warns, ce
 	}
 

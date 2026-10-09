@@ -90,6 +90,10 @@
         ],
         "dropped_empty": []
       },
+      "typed": {
+        "title": false,
+        "body": false
+      },
       "leak": {
         "findings": [],
         "waived": [],

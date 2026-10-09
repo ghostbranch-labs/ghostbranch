@@ -137,3 +137,27 @@ func TestLoadTellsBadJSONFromABadValue(t *testing.T) {
 		}
 	}
 }
+
+// A plan from before 0.9 has no typed: both texts count as typed, as they
+// did then. A plan that has it keeps it.
+func TestLoadTreatsAMissingTypedAsTyped(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	const id = "20261009T120000Z-abcdef"
+	path := filepath.Join(dir, id+".json")
+	for _, c := range []struct {
+		raw  string
+		want plan.Typed
+	}{
+		{`{"schema_version":"0.8","id":"` + id + `"}`, plan.Typed{Title: true, Body: true}},
+		{`{"schema_version":"0.9","id":"` + id + `","typed":{"title":true,"body":false}}`, plan.Typed{Title: true}},
+	} {
+		if err := os.WriteFile(path, []byte(c.raw), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		p, _, err := plan.Load(dir, id)
+		if err != nil || p.Typed != c.want {
+			t.Errorf("%s: typed = %+v %v, want %+v", c.raw, p.Typed, err, c.want)
+		}
+	}
+}

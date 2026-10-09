@@ -15,9 +15,7 @@
         "squash",
         "--plan",
         "--repo",
-        "acme/widget",
-        "--title",
-        "Add feature"
+        "acme/widget"
       ],
       "why": "the repos moved since the plan was made; make a new plan",
       "needs_human": false,
@@ -32,15 +30,13 @@
     "field": null,
     "retryable": false,
     "details": {
-      "body": "",
       "branch": "feat-x",
       "feature": "feat-x",
       "mode": "squash",
       "moved": [
         "public_main"
       ],
-      "public": "acme/widget",
-      "title": "Add feature"
+      "public": "acme/widget"
     }
   }
 }

@@ -28,9 +28,12 @@
     "findings": { "type": "array", "items": { "$ref": "finding.schema.json" } },
     "waived": { "type": "array", "items": { "$ref": "waived.schema.json" } },
     "repo_guards": { "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/guardReport" }] },
-    "shadow_pr": { "type": ["integer", "null"], "minimum": 0 },
+    "shadow_pr": {
+      "description": "the gate PR in the shadow repo; null when none was opened (the gate failed before CI, a dry run, or a reused gate this promote didn't wait on)",
+      "type": ["integer", "null"], "minimum": 0
+    },
     "job": {
-      "description": "the gate's CI wait, for wait: gate/<feature>/<12 hex>; null when no candidate was pushed (a leak, a conflict, a dry run, or a reused gate)",
+      "description": "the gate's CI wait, for wait: gate/<feature>/<12 hex>; null when no candidate was pushed (a leak, a conflict, a dry run, or a reused gate this promote didn't wait on)",
       "type": ["string", "null"]
     },
     "reused": { "type": "boolean" },

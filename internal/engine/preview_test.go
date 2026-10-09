@@ -97,10 +97,13 @@ func TestPromoteAndApplyPreviewsWithAFreshGate(t *testing.T) {
 	h.eng.DryRun = true
 	res, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "m"})
 	h.eng.DryRun = false
-	if err != nil || res.Plan == nil || !reflect.DeepEqual(opNames(res.Preview), []string{"push_ref", "push_ref", "open_pr"}) {
+	if err != nil || res.Plan == nil || !reflect.DeepEqual(opNames(res.Preview), []string{"push_ref", "write_file", "push_ref", "open_pr"}) {
 		t.Fatalf("promote preview: %+v %v", res, err)
 	}
-	if got := res.Preview.Ops[1]; got["repo"] != publicName || got["to"] != res.Plan.Publish.Commit {
+	if path, _ := res.Preview.Ops[1]["path"].(string); !strings.HasSuffix(path, res.Plan.ID+".json") {
+		t.Fatalf("write_file op = %v", res.Preview.Ops[1])
+	}
+	if got := res.Preview.Ops[2]; got["repo"] != publicName || got["to"] != res.Plan.Publish.Commit {
 		t.Fatalf("public push op = %v", got)
 	}
 	if len(h.pushes) != pushes {
@@ -189,7 +192,7 @@ func TestPromotePreviewAfterPublishOmitsDoneSteps(t *testing.T) {
 	if err != nil || res.Plan == nil || res.Plan.Publish.Commit != saved.Plan.Publish.Commit {
 		t.Fatalf("the preview must rebuild the published commit: %+v %v", res, err)
 	}
-	if got := opNames(res.Preview); !reflect.DeepEqual(got, []string{"push_ref"}) || res.Preview.Ops[0]["repo"] != shadowName {
+	if got := opNames(res.Preview); !reflect.DeepEqual(got, []string{"push_ref", "write_file"}) || res.Preview.Ops[0]["repo"] != shadowName {
 		t.Fatalf("ops = %v", res.Preview.Ops)
 	}
 }

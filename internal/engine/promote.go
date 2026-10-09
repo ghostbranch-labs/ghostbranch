@@ -116,8 +116,19 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	if mode != config.ModeSquash && strings.TrimSpace(opt.Message) != "" {
 		return res, warns, messageNotSquash(mode)
 	}
+	if len(cfg.Promote.AuthorMap) > 0 && cfg.Promote.AuthorEmail != config.AuthorMap {
+		warns = addWarnings(warns, contract.Warning{Code: contract.ConfigKeyIgnored,
+			Message: fmt.Sprintf("promote.author_map is set but not used: promote.author_email is %s; set author_email: map to use it, or remove the map",
+				cfg.Promote.AuthorEmail),
+			Details: map[string]any{"key": "promote.author_map"}})
+	}
 	if err := curateFlags(mode, opt.Curate); err != nil {
 		return res, warns, err
+	}
+	if mode == config.ModeCurated && opt.Groups == nil {
+		if opt.Groups, err = LoadCurate(opt.Curate); err != nil {
+			return res, warns, err
+		}
 	}
 	var msg string
 	if mode == config.ModeSquash {
@@ -169,6 +180,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	// A pending gate job for exactly these inputs is waited on, not gated
 	// again; --detach returns it at once. A dry run never reuses one:
 	// finishing it would wait on CI and write.
+	var waited *GateResult
 	if !fresh && !e.DryRun {
 		pg, err := e.pendingFor(ctx, pc, opt.Feature, mode)
 		if err != nil {
@@ -189,6 +201,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 				res.Gate = gr
 				return res, warns, err
 			}
+			waited = gr
 			// The finish wrote the outcome: re-read it, and reuse a green gate
 			// through the fresh case, which recomputes the guard report.
 			if m, _, err = e.readMeta(ctx, pc, opt.Feature); err != nil {
@@ -207,6 +220,10 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 			Candidate: m.Gate.Candidate, PublishedTree: m.Gate.PublishedTree, ScannedAs: m.Gate.ScannedAs, Commits: infos, Checks: m.Gate.Checks,
 			FailedChecks: []string{}, Leak: m.Gate.Leak, Findings: []leak.Finding{}, Waived: []WaivedFinding{},
 			RepoGuards: &guardRep, Reused: true}
+		if waited != nil {
+			// This promote waited on the gate job: keep its shadow PR and id.
+			res.Gate.ShadowPR, res.Gate.Job = waited.ShadowPR, waited.Job
+		}
 		commits = m.Gate.Commits
 	case e.DryRun:
 		// Running the gate would push; say so and stop, rather than return
@@ -253,6 +270,10 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	links, dropped, err := deriveChain(ctx, g, cfg, chainInput{mode: mode, pm: pm, T: T, tEntries: entries, commits: commits, message: msg, groups: groups},
 		func(cs []string, onto string) ([]string, error) { return e.replay(ctx, pc, cs, onto) })
 	if err != nil {
+		if ce := contract.From(err); ce.Code == contract.MarkerInvalid {
+			err = namedMarkerErr(err, opt.Feature)
+			contract.From(err).Details["mode"] = mode
+		}
 		return res, warns, err
 	}
 	u, err := e.Forge.CurrentUser(ctx)
@@ -327,15 +348,16 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 		Fingerprint: plan.Fingerprint{PublicMain: pm, FeatureHead: head, Overlay: O, GateCandidate: C},
 		Publish: plan.Publish{Commit: P, Tree: T, Parent: pm, TargetBranch: branch, PR: plan.PR{Title: title, Body: body},
 			Commits: chain, DroppedEmpty: dropped},
-		Leak: plan.Leak{Findings: []map[string]any{}, Waived: planWaived(waived), Warnings: append([]contract.Warning{}, rep.Warnings...), ScannerVersion: version},
-		CI:   plan.CI{RepoGuards: guardRep}}
+		Typed: plan.Typed{Title: strings.TrimSpace(opt.Title) != "", Body: strings.TrimSpace(opt.Body) != ""},
+		Leak:  plan.Leak{Findings: []map[string]any{}, Waived: planWaived(waived), Warnings: append([]contract.Warning{}, rep.Warnings...), ScannerVersion: version},
+		CI:    plan.CI{RepoGuards: guardRep}}
 	res.Plan = &pl
 	if e.DryRun {
 		pv := preview.New(map[string]string{"public_main": pm, "feature_head": head, "overlay": O, "gate_candidate": C})
-		pv.Add(preview.PushRef(p.Shadow, remotePlanRef(planID), "", P))
+		pv.Add(preview.PushRef(p.Shadow, remotePlanRef(planID), "", P),
+			preview.WriteFile(filepath.Join(e.WS.PlansDir(), planID+".json")))
 		if opt.PlanOnly {
 			// promote --plan stores the plan and stops; nothing public.
-			pv.Add(preview.WriteFile(filepath.Join(e.WS.PlansDir(), planID+".json")))
 			res.Preview = pv
 			return res, warns, nil
 		}
@@ -415,7 +437,10 @@ func ValidatePromoteOptions(opt *PromoteOptions) error {
 			return err
 		}
 	}
-	if opt.Curate != "" {
+	// The file is read only once the mode is known to be curated. With no
+	// --mode, promote.default_mode decides, and Promote reads the file after
+	// the config.
+	if opt.Mode == config.ModeCurated && opt.Groups == nil {
 		gs, err := LoadCurate(opt.Curate)
 		if err != nil {
 			return err

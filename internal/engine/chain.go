@@ -60,6 +60,8 @@ func deriveChain(ctx context.Context, g *gitx.Git, cfg config.Config, in chainIn
 	case config.ModeSquash:
 		if in.T != base {
 			links = []link{{sources: sourcesOf(in.commits), tree: in.T, entries: in.tEntries, message: in.message}}
+		} else {
+			dropped = sourcesOf(in.commits) // the squash publishes nothing: every commit is empty
 		}
 	case config.ModePreserve:
 		prev := base

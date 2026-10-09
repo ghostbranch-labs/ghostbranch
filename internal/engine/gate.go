@@ -37,10 +37,12 @@ type GateResult struct {
 	// guards in C; nil when no candidate was built.
 	RepoGuards *workflow.GuardReport `json:"repo_guards"`
 	// ShadowPR is the gate PR in the shadow repo; nil when none was opened
-	// (the gate failed before CI, or it was a dry run or a reused gate).
+	// (the gate failed before CI, a dry run, or a reused gate this promote
+	// didn't wait on).
 	ShadowPR *int `json:"shadow_pr"`
 	// Job names the gate's CI wait, for wait; nil when no candidate was
-	// pushed (a leak, a conflict, a dry run, or a reused gate).
+	// pushed (a leak, a conflict, a dry run, or a reused gate this promote
+	// didn't wait on).
 	Job *string `json:"job"`
 	// Reused is set by promote when it reuses a fresh green gate instead of re-running it.
 	Reused  bool             `json:"reused"`

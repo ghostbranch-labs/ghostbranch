@@ -83,8 +83,9 @@ func TestDeriveChainNothingToPublish(t *testing.T) {
 	for _, mode := range []string{config.ModePreserve, config.ModeSquash} {
 		_, _, err := deriveChain(context.Background(), g, config.Default(),
 			chainInput{mode: mode, pm: pm, T: T, tEntries: es, commits: cs, message: "m"}, nil)
-		if ce := contract.From(err); ce == nil || ce.Code != contract.NothingToPublish {
-			t.Fatalf("%s: want NOTHING_TO_PUBLISH, got %v", mode, err)
+		if ce := contract.From(err); ce == nil || ce.Code != contract.NothingToPublish ||
+			!reflect.DeepEqual(ce.Details["dropped_empty"], []string{cs[0].Source}) {
+			t.Fatalf("%s: want NOTHING_TO_PUBLISH listing every source, got %v", mode, err)
 		}
 	}
 }
