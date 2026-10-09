@@ -30,7 +30,8 @@
       "repo_guards": {
         "mode": "rewrite",
         "rewritten": [],
-        "unrewritable": []
+        "unrewritable": [],
+        "skipped": []
       },
       "shadow_pr": 1,
       "job": "gate/feat-x/ad7c1d975251",

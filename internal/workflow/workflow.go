@@ -32,6 +32,10 @@ type GuardReport struct {
 	Mode         string  `json:"mode"`
 	Rewritten    []Guard `json:"rewritten"`
 	Unrewritable []Guard `json:"unrewritable"`
+	// Skipped are rewritable guards left as they are because
+	// ci.rewrite_repo_guards is warn, so their jobs skip in the shadow repo
+	// too. Nil in a plan written before 0.9.
+	Skipped []Guard `json:"skipped"`
 }
 
 // File is what the CI audit needs from one workflow file.

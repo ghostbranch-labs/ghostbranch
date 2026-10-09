@@ -30,7 +30,8 @@
       "repo_guards": {
         "mode": "rewrite",
         "rewritten": [],
-        "unrewritable": []
+        "unrewritable": [],
+        "skipped": []
       },
       "shadow_pr": null,
       "job": null,
@@ -97,7 +98,8 @@
         "repo_guards": {
           "mode": "rewrite",
           "rewritten": [],
-          "unrewritable": []
+          "unrewritable": [],
+          "skipped": []
         }
       }
     },
