@@ -91,21 +91,28 @@ main, green CI, and a leak scan of exactly what will be published.
 
 - `ghostbranch status --repo <public> --json` shows the pair's health and every feature's state:
   `draft`, `in_review`, `gate_passed`, `published`, `merged`, `merged_moved`, `pr_closed`,
-  `branch_gone`, `abandoned`. `feature list --repo <public>` and `feature show <name> --repo <public>`
+  `branch_gone`, `abandoned`, and `unreadable` (a record that can't be read; only a person at the
+  console closes it, and the other features still show). `feature list --repo <public>` and `feature show <name> --repo <public>`
   give the same by feature.
 - `ghostbranch sync --repo <public>` closes features whose public PR merged and whose branch hasn't
   moved: it deletes their shadow branches and says so in `data.closed`. `--no-close` skips that.
-- `merged_moved`, `pr_closed` and a `branch_gone` that is unmerged, or merged but gated past its
-  publish, are for a person to close (or promote a `merged_moved` feature's newer commits): `status`
+- `merged_moved`, `pr_closed` and any `branch_gone` that `sync` leaves (unmerged; or merged, but gated
+  again after the publish, with its gate branch moved, or with a record too old to say what was
+  published) are for a person to close (or promote a `merged_moved` feature's newer commits): `status`
   gives `ghostbranch feature close <name> --repo <public>` with `needs_human`. A close deletes the
   feature's shadow branches and needs a person at the console unless the feature is merged and
   unmoved; an agent grant does not cover it, so don't ask for `agents allow` to unblock a close.
 - `ghostbranch feature abandon <name> --repo <public>` parks a feature and deletes nothing; `--undo`
   brings it back.
-- `ghostbranch log --repo <public>` shows the history.
+- `ghostbranch log --repo <public>` shows the history. `--feature <name>` also lists the entries of an
+  earlier feature with the same name: tell them apart by time.
+- `LEDGER_NOT_WRITTEN`: keep `details.refs`; after a close it is the only record of the deleted SHAs.
+  `PLAN_FILE_UNREADABLE`: fix or delete the file at `details.path`. `remove` needs no GitHub token.
 - `UPGRADE_NEEDED` with `error.details.record` (feature, plan, grants, waivers) means another machine
   runs a newer Ghostbranch: upgrade before changing anything. `RECORD_NEWER` on `status`, `feature list`
-  or `feature show` means the same; reads still work, and such a feature is never closed unattended.
+  or `feature show` means the same; reads still work, and such a feature is never closed unattended. A
+  merged feature whose record is newer still counts as active and shows only through `RECORD_NEWER`:
+  once this machine is upgraded, `sync` closes it.
 - Never close or abandon a feature a person is still working on.
 
 ## Keeping up with public
@@ -267,7 +274,8 @@ Fine-grained tokens, per command:
 
 The console code, grants and the guard stop mistakes. They do not stop a determined agent: an agent
 running as your OS user could fake a terminal, edit local files, or push with git directly. The real
-boundary is the token.
+boundary is the token. Plan files, grants, waivers and the ledger are mode 0600 on macOS and Linux:
+other OS users can't read them, but an agent running as you can.
 
 1. Create a fine-grained token scoped to **the shadow repo only**: Contents, Pull requests and
    Workflows read and write; Actions and Commit statuses read. Actions write is optional: it lets

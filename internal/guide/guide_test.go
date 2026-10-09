@@ -35,7 +35,8 @@ func TestRenderListsEveryCodeFromTheRegistry(t *testing.T) {
 	// 318: the jobs section's recovery lines (status names a pending job, an empty current_job, promote --detach's next step).
 	// 332: 5d-1 (locks, guard, records, interrupted publish, config keys, cancels).
 	// 333: the guard bullet says a branch named after a known feature is refused whatever it carries (5d-1 final review).
-	if n := strings.Count(out, "\n"); n > 333 {
+	// 341: 5d-2 (newer merged features, every branch_gone a person closes, the ledger's name filter, file modes, the new warnings and the unreadable state).
+	if n := strings.Count(out, "\n"); n > 341 {
 		t.Errorf("the guide is %d lines; keep it short (spec: about 150 plus the tables)", n)
 	}
 }
@@ -238,7 +239,7 @@ func TestGuideTeachesTheLifecycle(t *testing.T) {
 		"`ghostbranch sync --repo <public>` closes features whose public PR merged and whose branch hasn't moved",
 		"`ghostbranch feature close <name> --repo <public>` with `needs_human`",
 		"needs a person at the console unless the feature is merged and unmoved",
-		"`merged_moved`, `pr_closed` and a `branch_gone` that is unmerged, or merged but gated past its publish, are for a person to close",
+		"`merged_moved`, `pr_closed` and any `branch_gone` that `sync` leaves",
 		"an agent grant does not cover it, so don't ask for `agents allow` to unblock a close",
 		"`ghostbranch feature abandon <name> --repo <public>` parks a feature and deletes nothing",
 		"`ghostbranch log --repo <public>` shows the history",
@@ -310,6 +311,28 @@ func TestGuideTeachesHardening(t *testing.T) {
 		// Verified cancels.
 		"`cancelled_runs` lists only runs confirmed cancelled",
 		"`CI_NOT_CANCELLED` means runs may still be going: the token couldn't cancel them (it needs Actions write), they kept going, or sync couldn't check; it names the runs it knows of, or counts them",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the guide lacks %q", want)
+		}
+	}
+}
+
+// What 5d-2 taught: newer merged features, every branch_gone a person
+// closes, the ledger's name filter, file modes, and the new warnings and state.
+func TestGuideTeachesPolish(t *testing.T) {
+	t.Parallel()
+	out := strings.Join(strings.Fields(guide.Render(contract.Registry())), " ")
+	for _, want := range []string{
+		"A merged feature whose record is newer still counts as active and shows only through `RECORD_NEWER`",
+		"once this machine is upgraded, `sync` closes it",
+		"gated again after the publish, with its gate branch moved, or with a record too old to say what was published",
+		"`--feature <name>` also lists the entries of an earlier feature with the same name",
+		"Plan files, grants, waivers and the ledger are mode 0600",
+		"`LEDGER_NOT_WRITTEN`: keep `details.refs`",
+		"`PLAN_FILE_UNREADABLE`: fix or delete the file at `details.path`",
+		"and `unreadable` (a record that can't be read; only a person at the console closes it",
+		"`remove` needs no GitHub token",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the guide lacks %q", want)
