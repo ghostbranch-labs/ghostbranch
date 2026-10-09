@@ -117,7 +117,7 @@ main, green CI, and a leak scan of exactly what will be published.
   tested, so sync cancels those runs (`--no-cancel` skips that). `cancelled_runs` lists only runs
   confirmed cancelled. `CI_NOT_CANCELLED` means runs may still be going: the token couldn't
   cancel them (it needs Actions write), they kept going, or sync couldn't check; it names the runs it
-  knows of. They only cost minutes. To stop them for good, the person adds
+  knows of, or counts them. They only cost minutes. To stop them for good, the person adds
   the guard from the audit's `PUSH_TRIGGERS_ON_SYNC` to each push-triggered job; a job that already
   has an `if:` combines them: `<existing> && (github.event_name != 'push' || github.repository == '<public>')`.
 - Scheduled sync is opt-in and costs Actions minutes (every 6 hours is about 120 a month). It is the
@@ -215,9 +215,10 @@ feature work to the public repo. Its limits:
 - It recognizes GitHub remotes by URL; an SSH host alias (for example `git@github-work:…`) is not
   recognized.
 - It knows features from the local mirror. It refuses any push that carries an unpublished feature
-  commit the mirror knows of, under any branch name, and a pushed ref that isn't a commit. Run
-  `ghostbranch sync --repo <public>` now and then so the mirror has seen your features. Commits
-  rewritten out of the shadow repo can't be recognized; publish only with `promote`.
+  commit the mirror knows of, under any branch name, and a pushed ref that isn't a commit. A branch
+  named after a feature the mirror knows is refused whatever it carries, rewritten commits included.
+  Run `ghostbranch sync --repo <public>` now and then so the mirror has seen your features. Commits
+  rewritten out of the shadow repo can't be recognized under another name; publish only with `promote`.
 - It covers only the checkout it is installed in, and `git push --no-verify` skips it.
 - It reads Ghostbranch's state from the default location unless `GHOSTBRANCH_HOME` is set where git
   runs the hook.

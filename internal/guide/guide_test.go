@@ -34,7 +34,8 @@ func TestRenderListsEveryCodeFromTheRegistry(t *testing.T) {
 	// 314: the jobs section (+15), and the sub-project 5c error rows (JOB_STALE and the other new codes).
 	// 318: the jobs section's recovery lines (status names a pending job, an empty current_job, promote --detach's next step).
 	// 332: 5d-1 (locks, guard, records, interrupted publish, config keys, cancels).
-	if n := strings.Count(out, "\n"); n > 332 {
+	// 333: the guard bullet says a branch named after a known feature is refused whatever it carries (5d-1 final review).
+	if n := strings.Count(out, "\n"); n > 333 {
 		t.Errorf("the guide is %d lines; keep it short (spec: about 150 plus the tables)", n)
 	}
 }
@@ -293,6 +294,7 @@ func TestGuideTeachesHardening(t *testing.T) {
 		"never delete lock files",
 		// The pre-push guard.
 		"refuses any push that carries an unpublished feature commit the mirror knows of, under any branch name",
+		"A branch named after a feature the mirror knows is refused whatever it carries, rewritten commits included.",
 		"Commits rewritten out of the shadow repo can't be recognized",
 		// Config keys.
 		"An unknown key in `.ghostbranch.yml`, including under `sync:` or `ci:`",
@@ -307,7 +309,7 @@ func TestGuideTeachesHardening(t *testing.T) {
 		"`BRANCH_EXISTS` with `error.details.plan_id`",
 		// Verified cancels.
 		"`cancelled_runs` lists only runs confirmed cancelled",
-		"`CI_NOT_CANCELLED` means runs may still be going: the token couldn't cancel them (it needs Actions write), they kept going, or sync couldn't check; it names the runs it knows of",
+		"`CI_NOT_CANCELLED` means runs may still be going: the token couldn't cancel them (it needs Actions write), they kept going, or sync couldn't check; it names the runs it knows of, or counts them",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the guide lacks %q", want)
