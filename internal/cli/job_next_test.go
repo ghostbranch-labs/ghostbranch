@@ -13,7 +13,7 @@ func TestWithoutSwitch(t *testing.T) {
 	for _, tc := range []struct{ in, want []string }{
 		{[]string{"promote", "feat-x", "--detach", "--plan"}, []string{"promote", "feat-x", "--plan"}},
 		{[]string{"promote", "feat-x", "--detach=true", "--plan"}, []string{"promote", "feat-x", "--plan"}},
-		{[]string{"promote", "feat-x", "--detached", "-m", "--detach"}, []string{"promote", "feat-x", "--detached", "-m"}},
+		{[]string{"promote", "feat-x", "--detached", "--detach"}, []string{"promote", "feat-x", "--detached"}},
 	} {
 		if got := withoutSwitch(tc.in, "--detach"); !slices.Equal(got, tc.want) {
 			t.Errorf("withoutSwitch(%v) = %v, want %v", tc.in, got, tc.want)
@@ -51,5 +51,15 @@ func TestNextForJobErrors(t *testing.T) {
 	a := &app{env: Env{Getenv: func(string) string { return "" }}}
 	if next := a.next(contract.New(contract.Locked, "x")); len(next) != 0 {
 		t.Errorf("a plain LOCKED offers nothing new: %+v", next)
+	}
+	// An interrupted promote --detach: wait on the job, then promote again
+	// without --detach, which reuses the green gate.
+	a = &app{env: Env{Getenv: func(string) string { return "" }}, command: "promote",
+		args:     []string{"promote", "feat-x", "--detach", "--plan", "--json"},
+		pairFull: workspace.Pair{Public: "acme/widget", Shadow: "acme/widget-shadow"}}
+	next := a.next(contract.New(contract.Interrupted, "x").WithDetails(map[string]any{"job": job}))
+	if len(next) != 2 || !slices.Equal(next[0].Command, wait) ||
+		!slices.Equal(next[1].Command, []string{"ghostbranch", "promote", "feat-x", "--plan", "--json"}) {
+		t.Errorf("interrupted promote: next = %+v", next)
 	}
 }

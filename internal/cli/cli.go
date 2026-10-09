@@ -132,6 +132,9 @@ func Run(args []string, env Env) int {
 	// pending for wait, and the command reports INTERRUPTED.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+	// After the first Ctrl-C, stop restores the default handling, so a
+	// second Ctrl-C kills the process if the command is slow to wind down.
+	context.AfterFunc(ctx, stop)
 	cmd, err := root.ExecuteContextC(ctx)
 	a.command = commandName(cmd)
 	if a.command == "wait" {

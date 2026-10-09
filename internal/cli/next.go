@@ -141,7 +141,12 @@ func (a *app) next(err error) []contract.Next {
 			}
 		case contract.Interrupted:
 			if job, _ := ce.Details["job"].(string); job != "" {
-				return []contract.Next{{Command: a.scoped("wait", job), Why: "the gate's CI is still running; finish the job"}}
+				out := []contract.Next{{Command: a.scoped("wait", job), Why: "the gate's CI is still running; finish the job"}}
+				if a.command == "promote" {
+					out = append(out, contract.Next{Command: withoutSwitch(a.again(false), "--detach"),
+						Why: "once the job has passed, promote again; it reuses the green gate"})
+				}
+				return out
 			}
 			return []contract.Next{{Command: a.again(false), Why: "nothing is pending; run it again"}}
 		case contract.JobStale:
