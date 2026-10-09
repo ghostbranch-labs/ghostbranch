@@ -10,6 +10,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
+	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
 )
 
 // newerMeta makes a feature's record look written by a newer Ghostbranch.
@@ -248,5 +249,5 @@ func TestAnOldGateWithoutCommitsStillMatchesTheFeatureSchema(t *testing.T) {
 	if !strings.Contains(string(raw), `"commits": null`) {
 		t.Fatalf("expected a null commits in %s", raw)
 	}
-	validateSchema(t, "feature.schema.json", raw)
+	testutil.ValidateSchema(t, "feature.schema.json", raw)
 }

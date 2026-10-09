@@ -228,7 +228,7 @@ func TestCloseMergedNeedsNoConsole(t *testing.T) {
 		t.Fatalf("ledger = %+v", last)
 	}
 	raw, _ := json.Marshal(last)
-	validateSchema(t, "ledger-entry.schema.json", raw)
+	testutil.ValidateSchema(t, "ledger-entry.schema.json", raw)
 	if rs, _ := h.survey(); len(rs) != 0 {
 		t.Fatalf("the survey still finds %+v", rs)
 	}

@@ -55,7 +55,7 @@ func TestWaitFinishesADetachedGate(t *testing.T) {
 		t.Fatalf("ledger = %+v", last)
 	}
 	raw, _ := json.Marshal(last)
-	validateSchema(t, "ledger-entry.schema.json", raw)
+	testutil.ValidateSchema(t, "ledger-entry.schema.json", raw)
 }
 
 func TestWaitReplaysAFailedOutcome(t *testing.T) {

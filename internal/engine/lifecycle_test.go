@@ -20,7 +20,7 @@ func validateResult(t *testing.T, name string, v any) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	validateSchema(t, name, raw)
+	testutil.ValidateSchema(t, name, raw)
 }
 
 // status runs Status, checks its result against the schema, and fails

@@ -10,6 +10,7 @@ import (
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/ledger"
+	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
@@ -31,7 +32,7 @@ func TestLogNeedsNoToken(t *testing.T) {
 		}
 		var env struct{ Data json.RawMessage }
 		_ = json.Unmarshal([]byte(out), &env)
-		validate(t, "log.schema.json", env.Data)
+		testutil.ValidateSchema(t, "log.schema.json", env.Data)
 		var d struct{ Entries []any }
 		_ = json.Unmarshal(env.Data, &d)
 		return d.Entries

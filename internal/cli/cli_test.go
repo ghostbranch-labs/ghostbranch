@@ -183,7 +183,7 @@ func TestGuideNeedsNoTokenAndMatchesItsSchema(t *testing.T) {
 	}
 	var env struct{ Data json.RawMessage }
 	_ = json.Unmarshal([]byte(out), &env)
-	validate(t, "guide.schema.json", env.Data)
+	testutil.ValidateSchema(t, "guide.schema.json", env.Data)
 	code, human, _ := te.run("guide")
 	if code != 0 || !strings.HasPrefix(human, "# Ghostbranch: guide for coding agents") {
 		t.Fatalf("%d %q", code, human[:60])

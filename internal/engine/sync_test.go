@@ -847,7 +847,7 @@ func TestSyncClosesMergedFeatures(t *testing.T) {
 		t.Fatalf("feature close entries = %+v", closes)
 	}
 	raw, _ := json.Marshal(closes[0])
-	validateSchema(t, "ledger-entry.schema.json", raw)
+	testutil.ValidateSchema(t, "ledger-entry.schema.json", raw)
 	es := h.ledger()
 	if last := es[len(es)-1]; last.Op != "sync" || !strings.Contains(last.Summary, "closed 1 merged feature(s)") {
 		t.Fatalf("sync ledger = %+v", last)

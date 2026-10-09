@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
 )
 
 // hermeticGit uses t.Setenv: its callers must stay serial (no t.Parallel).
@@ -40,7 +42,7 @@ func validData(t *testing.T, env map[string]any) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	validate(t, "guard.schema.json", raw)
+	testutil.ValidateSchema(t, "guard.schema.json", raw)
 }
 
 func TestGuardCommands(t *testing.T) {

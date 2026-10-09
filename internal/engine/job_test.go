@@ -99,7 +99,7 @@ func TestGateDetachedRecordsAPendingJob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	validateSchema(t, "feature.schema.json", raw)
+	testutil.ValidateSchema(t, "feature.schema.json", raw)
 	unlock, err := workspace.Lock(h.eng.WS.LockPath(h.pair), h.clock.Now(), "test")
 	if err != nil {
 		t.Fatalf("the pair lock is still held: %v", err)

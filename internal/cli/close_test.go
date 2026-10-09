@@ -94,7 +94,7 @@ func TestStatusShowsAnUnreadableFeature(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &env); err != nil || code != 0 {
 		t.Fatalf("status: %d %v\n%s\n%s", code, err, out, errOut)
 	}
-	validate(t, "status.schema.json", env.Data)
+	testutil.ValidateSchema(t, "status.schema.json", env.Data)
 	var d struct {
 		Features []struct{ Name, State, Error string }
 	}

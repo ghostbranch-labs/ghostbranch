@@ -1,10 +1,8 @@
 package engine_test
 
 import (
-	"bytes"
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -13,7 +11,6 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
-	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 // leakyID gates a feature holding the fake token and returns its finding id.
@@ -237,7 +234,7 @@ func TestWaiversAddCoversAFindingInAnOldCommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	validateSchema(t, "gate.schema.json", raw)
+	testutil.ValidateSchema(t, "gate.schema.json", raw)
 }
 
 // Under a squash default, a finding only in an older commit is invisible to
@@ -351,26 +348,4 @@ func TestWaiversRevokeAllPlanOnACorruptFile(t *testing.T) {
 	_, _, err = h.eng.WaiversRevoke(h.ctx, nil, nil, true)
 	h.eng.DryRun = false
 	_ = wantCode(t, err, contract.UpgradeNeeded)
-}
-
-// validateSchema checks raw against schemas/v0/<name>.
-func validateSchema(t *testing.T, name string, raw []byte) {
-	t.Helper()
-	path, err := filepath.Abs(filepath.Join("..", "..", "schemas", "v0", name))
-	if err != nil {
-		t.Fatal(err)
-	}
-	c := jsonschema.NewCompiler()
-	c.AssertFormat()
-	s, err := c.Compile(path)
-	if err != nil {
-		t.Fatalf("compile %s: %v", name, err)
-	}
-	inst, err := jsonschema.UnmarshalJSON(bytes.NewReader(raw))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := s.Validate(inst); err != nil {
-		t.Fatalf("the result does not match %s:\n%v\n%s", name, err, raw)
-	}
 }
