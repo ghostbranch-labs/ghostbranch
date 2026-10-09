@@ -372,9 +372,12 @@ func (e *Engine) gate(ctx context.Context, pc *pairCtx, name, mode string, how g
 		if pr == nil {
 			pv.Add(preview.OpenPR(pc.pair.Shadow, gateBranch(name), "main", true))
 		}
-		// The pending record, the wait, then the final record over it.
-		pv.Add(preview.PushRef(pc.pair.Shadow, remoteMetaRef(name), metaSHA, ""), preview.WaitChecks(pc.pair.Shadow, C),
-			preview.PushRef(pc.pair.Shadow, remoteMetaRef(name), "", ""))
+		// The pending record; unless detached, the wait, then the final
+		// record over it.
+		pv.Add(preview.PushRef(pc.pair.Shadow, remoteMetaRef(name), metaSHA, ""))
+		if !how.detach {
+			pv.Add(preview.WaitChecks(pc.pair.Shadow, C), preview.PushRef(pc.pair.Shadow, remoteMetaRef(name), "", ""))
+		}
 		res.Preview = pv
 		return res, warns, nil
 	}

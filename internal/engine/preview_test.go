@@ -71,6 +71,25 @@ func TestPreviewsWriteNothing(t *testing.T) {
 	}
 }
 
+// gate --detach --dry-run previews only what it does: the candidate, the
+// PR and the pending record; no CI wait and no final record.
+func TestGateDetachedPreviewHasNoWait(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.startFeature("feat-x", map[string]string{"feature.txt": "new\n"})
+	pushes := len(h.pushes)
+	h.eng.DryRun = true
+	res, _, err := h.eng.GateDetached(h.ctx, h.pair, "feat-x")
+	h.eng.DryRun = false
+	if err != nil || !reflect.DeepEqual(opNames(res.Preview), []string{"push_ref", "open_pr", "push_ref"}) {
+		t.Fatalf("gate --detach preview: %+v %v", res, err)
+	}
+	if len(h.pushes) != pushes {
+		t.Fatal("gate --detach --dry-run pushed")
+	}
+}
+
 func TestPromoteAndApplyPreviewsWithAFreshGate(t *testing.T) {
 	t.Parallel()
 	h := gated(t)
