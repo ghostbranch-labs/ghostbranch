@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -95,6 +96,7 @@ func DefaultEnv() Env {
 type app struct {
 	env            Env
 	jsonOut        bool
+	ndjson         bool // wait --json: events stream first, so the envelope is one line too
 	nonInteractive bool
 	dryRun         bool
 	repo           string
@@ -126,8 +128,15 @@ func Run(args []string, env Env) int {
 	root.SetArgs(args)
 	root.SetOut(env.Stdout)
 	root.SetErr(env.Stderr)
-	cmd, err := root.ExecuteContextC(context.Background())
+	// Ctrl-C cancels the context: a gate waiting on CI leaves its job
+	// pending for wait, and the command reports INTERRUPTED.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	cmd, err := root.ExecuteContextC(ctx)
 	a.command = commandName(cmd)
+	if a.command == "wait" {
+		a.ndjson = a.jsonOut // a usage error before RunE is one line too
+	}
 	if err != nil {
 		var ce *contract.Error
 		if !errors.As(err, &ce) {
@@ -156,7 +165,9 @@ func (a *app) render(err error) int {
 	if a.jsonOut {
 		enc := json.NewEncoder(a.env.Stdout)
 		enc.SetEscapeHTML(false)
-		enc.SetIndent("", "  ")
+		if !a.ndjson {
+			enc.SetIndent("", "  ")
+		}
 		_ = enc.Encode(env)
 		return env.ExitCode
 	}

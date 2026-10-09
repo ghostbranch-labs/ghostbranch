@@ -139,6 +139,23 @@ func (a *app) next(err error) []contract.Next {
 			if r, ok := a.result.(*engine.SyncResult); ok {
 				return a.featureNexts(nil, r.Attention)
 			}
+		case contract.Interrupted:
+			if job, _ := ce.Details["job"].(string); job != "" {
+				return []contract.Next{{Command: a.scoped("wait", job), Why: "the gate's CI is still running; finish the job"}}
+			}
+			return []contract.Next{{Command: a.again(false), Why: "nothing is pending; run it again"}}
+		case contract.JobStale:
+			if job, _ := ce.Details["current_job"].(string); job != "" {
+				return []contract.Next{{Command: a.scoped("wait", job), Why: "a newer gate replaced the job; wait on that one instead"}}
+			}
+			return a.gateAgain(ce, "a newer gate replaced the job and nothing is pending now; gate the feature again")
+		case contract.JobNotFound:
+			return a.gateAgain(ce, "the feature has no gate job to wait on; gate it")
+		case contract.Locked:
+			if job, _ := ce.Details["job"].(string); job != "" {
+				return []contract.Next{{Command: a.scoped("wait", job),
+					Why: "another ghostbranch command held the lock when the result was ready; wait records it"}}
+			}
 		case contract.FeatureMoved:
 			if f, _ := ce.Details["feature"].(string); f != "" {
 				return []contract.Next{{Command: a.scoped("feature", "show", f),
@@ -222,10 +239,16 @@ func (a *app) next(err error) []contract.Next {
 			}
 			out = append(out, contract.Next{Command: a.scoped("promote", r.Feature, "--mode", mode, "--plan"),
 				Why: "the gate passed; plan the publish", NeedsInput: need})
+		} else if r.Checks == feature.ChecksPending && r.Job != nil {
+			out = append(out, a.waitNext(*r.Job))
 		}
 	case *engine.PromoteResult:
-		if r.Preview == nil && r.Applied == nil && r.Plan != nil && r.PlanPath != "" {
+		switch {
+		case r.Preview == nil && r.Applied == nil && r.Plan != nil && r.PlanPath != "":
 			out = append(out, a.applyNext(r.Plan.ID, true))
+		case r.Gate != nil && r.Gate.Checks == feature.ChecksPending && r.Gate.Job != nil:
+			out = append(out, a.waitNext(*r.Gate.Job),
+				contract.Next{Command: withoutSwitch(a.again(false), "--detach"), Why: "once the job has passed, promote again; it reuses the green gate"})
 		}
 	case *engine.FeatureCloseResult:
 		if r.Preview != nil {
@@ -266,6 +289,27 @@ func (a *app) next(err error) []contract.Next {
 		}
 	}
 	return append(out, a.upgradeNext()...)
+}
+
+// waitNext finishes the pending gate job.
+func (a *app) waitNext(job string) contract.Next {
+	return contract.Next{Command: a.scoped("wait", job),
+		Why: "CI is running on the gate candidate; wait finishes the job and records the result (with --json it streams progress)"}
+}
+
+// gateAgain gates again the feature a job error is about: details.feature,
+// else the feature in details.job's id. It is nil when neither names one.
+func (a *app) gateAgain(ce *contract.Error, why string) []contract.Next {
+	f, _ := ce.Details["feature"].(string)
+	if f == "" {
+		job, _ := ce.Details["job"].(string)
+		ref, err := engine.ParseJob(job)
+		if err != nil {
+			return nil
+		}
+		f = ref.Feature
+	}
+	return []contract.Next{{Command: a.scoped("gate", f), Why: why}}
 }
 
 // startAgain is feature start for the name this run was given, scoped like
@@ -309,6 +353,10 @@ func (a *app) featureNexts(out []contract.Next, rs []engine.FeatureReport) []con
 		case feature.StateMergedMoved:
 			rest = append(rest, contract.Next{Command: closeCmd, NeedsHuman: true,
 				Why: "its PR merged but there are newer commits; promote them or a person closes it"})
+			if r.Gate != nil && r.Gate.Job != nil {
+				rest = append(rest, contract.Next{Command: a.scoped("wait", *r.Gate.Job),
+					Why: "its gate is waiting on CI; finish it (wait streams progress with --json)"})
+			}
 		case feature.StatePRClosed:
 			rest = append(rest, contract.Next{Command: closeCmd, NeedsHuman: true,
 				Why: "its PR was closed without merging"})
@@ -551,6 +599,18 @@ func withoutFlags(argv []string, flags ...string) []string {
 		case hasValue && strings.HasPrefix(arg, "--") && named[name]:
 		case named["-m"] && strings.HasPrefix(arg, "-m") && !strings.HasPrefix(arg, "--"):
 		default:
+			out = append(out, arg)
+		}
+	}
+	return out
+}
+
+// withoutSwitch drops the boolean flag name from argv, as the exact token
+// or as name=value; unlike withoutFlags it never takes the next argument.
+func withoutSwitch(argv []string, name string) []string {
+	out := make([]string, 0, len(argv))
+	for _, arg := range argv {
+		if arg != name && !strings.HasPrefix(arg, name+"=") {
 			out = append(out, arg)
 		}
 	}

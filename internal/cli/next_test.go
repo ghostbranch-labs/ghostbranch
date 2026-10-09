@@ -1075,3 +1075,78 @@ func TestAbandonThatChangesNothingSaysSo(t *testing.T) {
 		t.Fatalf("exit %d %q", code, out)
 	}
 }
+
+// A detached promote that started a gate offers wait, then the same promote
+// without --detach, which reuses the green gate.
+func TestNextAfterADetachedPromote(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	withFeature(te)
+	code, env := te.runJSON("promote", "feat-x", "--detach", "--plan")
+	next := nextOf(t, env)
+	if code != 0 || len(next) < 2 {
+		t.Fatalf("%d %v", code, env)
+	}
+	if want := []string{"ghostbranch", "wait", te.job("feat-x"), "--repo", "acme/widget"}; !slices.Equal(argv(next[0]), want) {
+		t.Fatalf("next[0] = %v, want %v", argv(next[0]), want)
+	}
+	if want := []string{"ghostbranch", "promote", "feat-x", "--plan", "--json"}; !slices.Equal(argv(next[1]), want) {
+		t.Fatalf("next[1] = %v, want %v", argv(next[1]), want)
+	}
+	code, out, _ := te.run("promote", "feat-x", "--detach=true", "--plan")
+	if code != 0 || !strings.Contains(out, "No plan yet: wait for the job, then promote again.\n") ||
+		!strings.Contains(out, "\n  ghostbranch promote feat-x --plan\n") {
+		t.Fatalf("%d %q", code, out)
+	}
+}
+
+// A stale job's next is the job that replaced it.
+func TestNextForAStaleJobIsTheCurrentJob(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	withFeature(te)
+	te.mustRun("gate", "feat-x", "--detach")
+	old := te.job("feat-x")
+	te.shadowCommit("feat-x", map[string]string{"two.txt": "2\n"})
+	te.mustRun("gate", "feat-x", "--detach")
+	code, env := te.runJSON("wait", old)
+	next := nextOf(t, env)
+	if want := []string{"ghostbranch", "wait", te.job("feat-x"), "--repo", "acme/widget"}; code != 4 || len(next) != 1 || !slices.Equal(argv(next[0]), want) {
+		t.Fatalf("%d %v", code, env)
+	}
+}
+
+// Waiting on a feature that was never gated says to gate it.
+func TestNextForAMissingJobIsGate(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	withFeature(te)
+	code, env := te.runJSON("wait", "gate/feat-x/0123456789ab")
+	next := nextOf(t, env)
+	if want := []string{"ghostbranch", "gate", "feat-x", "--repo", "acme/widget"}; code != 2 || len(next) != 1 || !slices.Equal(argv(next[0]), want) {
+		t.Fatalf("%d %v", code, env)
+	}
+}
+
+// A merged feature with newer commits whose gate is pending offers wait
+// after the close, and show marks a job for an outdated candidate stale.
+func TestNextForAPendingGateOnAMergedMovedFeature(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	grantAgents(te)
+	te.forge.SetPRMerged("acme/widget", publishFeature(te, "feat-b"))
+	te.shadowCommit("feat-b", map[string]string{"later.txt": "later\n"})
+	te.mustRun("gate", "feat-b", "--detach")
+	job := te.job("feat-b")
+	code, env := te.runJSON("status")
+	n := nextOf(t, env)
+	if code != 0 || len(n) != 2 || argv(n[0])[2] != "close" ||
+		!slices.Equal(argv(n[1]), []string{"ghostbranch", "wait", job, "--repo", "acme/widget"}) {
+		t.Fatalf("exit %d, next = %v", code, n)
+	}
+	te.shadowCommit("feat-b", map[string]string{"later.txt": "later still\n"})
+	if code, out, _ := te.run("feature", "show", "feat-b"); code != 0 || !strings.Contains(out, "  gate: pending (job "+job+"), stale\n") {
+		t.Fatalf("feature show: %d %q", code, out)
+	}
+}

@@ -1,6 +1,9 @@
 package cli
 
 import (
+	"encoding/json"
+	"time"
+
 	"github.com/spf13/cobra"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
@@ -34,7 +37,7 @@ Coding agents: run "ghostbranch guide" first.`,
 	})
 	feature := &cobra.Command{Use: "feature", Short: "Work with features (private branches in the shadow repo)"}
 	feature.AddCommand(a.featureStartCmd(), a.featureListCmd(), a.featureShowCmd(), a.featureAbandonCmd(), a.featureCloseCmd())
-	root.AddCommand(a.initCmd(), a.syncCmd(), a.statusCmd(), a.auditCmd(), a.upgradeCmd(), feature, a.gateCmd(), a.promoteCmd(), a.applyCmd(), a.agentsCmd(), a.waiversCmd(), a.explainCmd(), a.guideCmd(), a.guardCmd(), a.removeCmd(), a.logCmd())
+	root.AddCommand(a.initCmd(), a.syncCmd(), a.statusCmd(), a.auditCmd(), a.upgradeCmd(), feature, a.gateCmd(), a.waitCmd(), a.promoteCmd(), a.applyCmd(), a.agentsCmd(), a.waiversCmd(), a.explainCmd(), a.guideCmd(), a.guardCmd(), a.removeCmd(), a.logCmd())
 	return root
 }
 
@@ -185,12 +188,14 @@ func (a *app) featureStartCmd() *cobra.Command {
 }
 
 func (a *app) gateCmd() *cobra.Command {
+	var detach bool
 	c := &cobra.Command{
 		Use:   "gate <feature>",
 		Short: "Rebase on public main, scan for leaks, and run CI; report only",
 		Long: `gate rebases the feature onto public main, scans exactly what would be published for leaks,
 pushes a CI candidate (the feature plus the overlay) to a draft PR in the shadow repo, and waits for
-every check. It records the result and never touches the public repo. Exit 3 means the gate failed.`,
+every check. It records the result and never touches the public repo. Exit 3 means the gate failed.
+With --detach it returns a job id once CI has started; ghostbranch wait <job> finishes it, from this machine or another. Without --detach, Ctrl-C leaves the job pending for wait.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			e, err := a.engine(cmd.Context())
@@ -202,11 +207,51 @@ every check. It records the result and never touches the public repo. Exit 3 mea
 				return err
 			}
 			a.noteShadowRemote(p)
-			res, w, err := e.Gate(cmd.Context(), p, args[0])
+			gate := e.Gate
+			if detach {
+				gate = e.GateDetached
+			}
+			res, w, err := gate(cmd.Context(), p, args[0])
 			return done(a, res, w, err)
 		},
 	}
 	c.Flags().BoolVar(&a.dryRun, "plan", false, "preview exactly what would change, and change nothing (same as --dry-run)")
+	c.Flags().BoolVar(&detach, "detach", false, "push the candidate, record the job and return without waiting for CI; finish it with ghostbranch wait <job>")
+	return c
+}
+
+func (a *app) waitCmd() *cobra.Command {
+	var timeout time.Duration
+	c := &cobra.Command{
+		Use:   "wait <job>",
+		Short: "Wait for a gate job's CI and record its result",
+		Long:  `wait finishes a gate started with --detach (or interrupted): it waits for the candidate's CI, records the result, and prints what gate would have. A finished job answers at once. With --json it streams one JSON event per line on stdout, and the last line is the result envelope.`,
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if a.dryRun {
+				// It would wait on CI and then be refused the write.
+				a.ran = true
+				return contract.New(contract.BadFlag, "wait has no dry run: it only waits on CI and records the result; drop --dry-run").WithField("dry-run")
+			}
+			e, err := a.engine(cmd.Context())
+			if err != nil {
+				return err
+			}
+			p, err := a.pair(e)
+			if err != nil {
+				return err
+			}
+			var events func(engine.JobEvent)
+			if a.jsonOut {
+				enc := json.NewEncoder(a.env.Stdout)
+				enc.SetEscapeHTML(false)
+				events = func(ev engine.JobEvent) { _ = enc.Encode(ev) }
+			}
+			res, w, err := e.Wait(cmd.Context(), p, args[0], engine.WaitOptions{Timeout: timeout, Events: events})
+			return done(a, res, w, err)
+		},
+	}
+	c.Flags().DurationVar(&timeout, "timeout", 0, "stop waiting after this long and report pending; the job keeps running")
 	return c
 }
 
@@ -251,6 +296,7 @@ With --plan it stops there. Otherwise a person confirms by typing a code shown o
 	f.StringVar(&o.Branch, "branch", "", "public branch name (default: the feature name)")
 	f.BoolVar(&o.PlanOnly, "plan", false, "save and print the plan without publishing")
 	f.BoolVar(&o.Yes, "yes", false, "publish under an agent grant (ghostbranch agents allow); on its own it never skips the console")
+	f.BoolVar(&o.Detach, "detach", false, "if a gate is needed, start it and return its job instead of waiting")
 	return c
 }
 

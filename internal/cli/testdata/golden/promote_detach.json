@@ -1,0 +1,79 @@
+{
+  "schema_version": "0.7",
+  "command": "promote",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "gate": {
+      "feature": "feat-x",
+      "feature_head": "d7407485ce685c126afcfc258f0a9eeb0092d776",
+      "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+      "overlay": "a1ef151295bf2b53d15b18523ab0184d02178bbd",
+      "candidate": "ad7c1d9752519d03b74752a472ecf072aacd2fb7",
+      "published_tree": "ef9061717144a4bf03a0230d8f8926d019f2adeb",
+      "scanned_as": "squash",
+      "commits": [
+        {
+          "source": "d7407485ce685c126afcfc258f0a9eeb0092d776",
+          "subject": "work",
+          "author": "Test Author <author@example.com>",
+          "files": [
+            "feature.txt"
+          ]
+        }
+      ],
+      "checks": "pending",
+      "failed_checks": [],
+      "leak": "clean",
+      "findings": [],
+      "waived": [],
+      "repo_guards": {
+        "mode": "rewrite",
+        "rewritten": [],
+        "unrewritable": []
+      },
+      "shadow_pr": 1,
+      "job": "gate/feat-x/ad7c1d975251",
+      "reused": false,
+      "preview": null
+    },
+    "plan": null,
+    "plan_path": "",
+    "findings": [],
+    "waived": [],
+    "applied": null,
+    "preview": null
+  },
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "wait",
+        "gate/feat-x/ad7c1d975251",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "CI is running on the gate candidate; wait finishes the job and records the result (with --json it streams progress)",
+      "needs_human": false,
+      "needs_input": []
+    },
+    {
+      "command": [
+        "ghostbranch",
+        "promote",
+        "feat-x",
+        "--mode",
+        "squash",
+        "-m",
+        "Add feature",
+        "--plan",
+        "--json"
+      ],
+      "why": "once the job has passed, promote again; it reuses the green gate",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
+  "error": null
+}

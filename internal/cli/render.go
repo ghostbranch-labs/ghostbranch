@@ -175,6 +175,12 @@ func human(r any) string {
 		}
 		fmt.Fprintf(&b, "Started feature %s from shadow main %s.\nCheck it out with: %s\n", v.Name, short(v.Base), v.CheckoutHint)
 	case *engine.GateResult:
+		if pendingJob(v) {
+			b.WriteString(pendingLine(v))
+			fmt.Fprintf(&b, "  %d commit(s), scanned as %s\n", len(v.Commits), v.ScannedAs)
+			waivedLines(&b, v.Waived)
+			break
+		}
 		fmt.Fprintf(&b, "Gate for %s: checks %s, leak scan %s.\n", v.Feature, v.Checks, v.Leak)
 		if v.Preview != nil {
 			previewText(&b, v.Preview)
@@ -202,6 +208,9 @@ func human(r any) string {
 				fmt.Fprintf(&b, ", %d dropped as empty", n)
 			}
 			fmt.Fprintf(&b, "\nPublish it with: ghostbranch apply %s\n", v.Plan.ID)
+		case v.Gate != nil && pendingJob(v.Gate):
+			b.WriteString(pendingLine(v.Gate))
+			b.WriteString("No plan yet: wait for the job, then promote again.\n")
 		}
 		findings(&b, v.Findings)
 		waivedLines(&b, v.Waived)
@@ -342,6 +351,17 @@ func human(r any) string {
 	return b.String()
 }
 
+// pendingJob is whether a gate result is a job still waiting on CI.
+func pendingJob(g *engine.GateResult) bool {
+	return g.Checks == feature.ChecksPending && g.Job != nil && g.ShadowPR != nil
+}
+
+// pendingLine is a pending gate job in a line: what CI runs on, and the
+// job's id for wait.
+func pendingLine(g *engine.GateResult) string {
+	return fmt.Sprintf("Gate for %s: CI running on candidate %s (shadow PR #%d); job %s.\n", g.Feature, short(g.Candidate), *g.ShadowPR, *g.Job)
+}
+
 // oneLine escapes what a terminal would act on rather than show (control
 // characters, bidi controls, invalid UTF-8), so a ledger field an agent
 // wrote stays on its own line and can't rewrite the screen.
@@ -419,10 +439,13 @@ func featureTable(b *strings.Builder, rs []engine.FeatureReport) {
 
 // gateCell is a feature's last gate in a word: passed, a failed check
 // status, or leak; "-" when never gated, "(stale)" when the feature or the
-// repos moved since.
+// repos moved since; a pending gate names its job.
 func gateCell(g *engine.GateSummary) string {
 	if g == nil {
 		return "-"
+	}
+	if g.Job != nil {
+		return oneLine("pending (job " + *g.Job + ")")
 	}
 	out := g.Checks
 	switch {
@@ -471,7 +494,11 @@ func featureShowText(b *strings.Builder, v *engine.FeatureShowResult) {
 	if g := r.Gate; g == nil {
 		b.WriteString("  gate: never run\n")
 	} else if g.Job != nil {
-		fmt.Fprintf(b, "  gate: pending (job %s)\n", oneLine(*g.Job))
+		stale := ""
+		if !g.Fresh {
+			stale = ", stale" // the job is for an outdated candidate
+		}
+		fmt.Fprintf(b, "  gate: pending (job %s)%s\n", oneLine(*g.Job), stale)
 	} else {
 		fresh := "fresh"
 		if !g.Fresh {

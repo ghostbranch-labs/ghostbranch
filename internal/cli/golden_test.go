@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -31,6 +32,7 @@ var dataSchemas = map[string]string{
 	"remove": "remove.schema.json", "log": "log.schema.json",
 	"status": "status.schema.json", "feature list": "feature-list.schema.json", "feature show": "feature-show.schema.json",
 	"feature abandon": "feature-abandon.schema.json", "feature close": "feature-close.schema.json",
+	"wait": "gate.schema.json",
 }
 
 func schema(t *testing.T, name string) *jsonschema.Schema {
@@ -204,6 +206,18 @@ jobs:
 		}, []string{"feature", "close", "feat-x"}, 0},
 		{"feature_close_needs_human", withFeature, []string{"feature", "close", "feat-x"}, 5},
 		{"feature_close_plan", gatedFeature, []string{"feature", "close", "feat-x", "--plan"}, 0},
+		{"gate_detach", withFeature, []string{"gate", "feat-x", "--detach"}, 0},
+		{"wait", func(te *testEnv) { withFeature(te); te.mustRun("gate", "feat-x", "--detach") }, []string{"wait", "<JOB>"}, 0},
+		{"wait_finished", func(te *testEnv) { withFeature(te); te.mustRun("gate", "feat-x") }, []string{"wait", "<JOB>"}, 0},
+		{"wait_stale", func(te *testEnv) {
+			withFeature(te)
+			te.mustRun("gate", "feat-x", "--detach")
+			te.oldJob = te.job("feat-x")
+			te.shadowCommit("feat-x", map[string]string{"two.txt": "2\n"})
+			te.mustRun("gate", "feat-x", "--detach")
+		}, []string{"wait", "<OLD_JOB>"}, 4},
+		{"wait_bad_job", initOnly, []string{"wait", "nope"}, 2},
+		{"promote_detach", withFeature, []string{"promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--plan", "--detach"}, 0},
 	}
 	for _, s := range scenarios {
 		t.Run(s.name, func(t *testing.T) {
@@ -223,17 +237,27 @@ jobs:
 				if a == "<CURATE>" || a == "<CURATE_BAD>" {
 					args[i] = te.curateFile(a == "<CURATE_BAD>")
 				}
+				if a == "<JOB>" {
+					args[i] = te.job("feat-x")
+				}
+				if a == "<OLD_JOB>" {
+					args[i] = te.oldJob
+				}
 			}
 			code, out, errOut := te.run(append(args, "--json")...)
 			if code != s.exit {
 				t.Fatalf("exit %d, want %d\nstdout: %s\nstderr: %s", code, s.exit, out, errOut)
 			}
-			validate(t, "envelope.schema.json", []byte(out))
+			last := []byte(out)
+			if args[0] == "wait" {
+				last = waitStream(t, out)
+			}
+			validate(t, "envelope.schema.json", last)
 			var env struct {
 				Command string          `json:"command"`
 				Data    json.RawMessage `json:"data"`
 			}
-			_ = json.Unmarshal([]byte(out), &env)
+			_ = json.Unmarshal(last, &env)
 			if string(env.Data) != "{}" {
 				validate(t, dataSchemas[env.Command], env.Data)
 			}
@@ -255,6 +279,39 @@ jobs:
 			}
 		})
 	}
+}
+
+// waitStream checks wait --json's stdout: NDJSON, one complete JSON value
+// per line, every value but the last a job event. It returns the last
+// value, the envelope.
+func waitStream(t *testing.T, out string) []byte {
+	t.Helper()
+	dec := json.NewDecoder(strings.NewReader(out))
+	var values []json.RawMessage
+	for {
+		var v json.RawMessage
+		err := dec.Decode(&v)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("stdout is not a JSON stream: %v\n%s", err, out)
+		}
+		values = append(values, v)
+	}
+	lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
+	if len(values) == 0 || len(lines) != len(values) {
+		t.Fatalf("want one JSON value per line, got %d value(s) on %d line(s):\n%s", len(values), len(lines), out)
+	}
+	for i, line := range lines {
+		if !json.Valid([]byte(line)) {
+			t.Fatalf("line %d is not one complete JSON value: %s", i+1, line)
+		}
+	}
+	for _, v := range values[:len(values)-1] {
+		validate(t, "wait-event.schema.json", v)
+	}
+	return values[len(values)-1]
 }
 
 // curateFile writes a --curate file under te.root: one group holding
