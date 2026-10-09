@@ -277,7 +277,7 @@ func TestPromoteKeepsTheLockThroughItsGate(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			var lockErr error = errors.New("checks were never listed")
+			lockErr := errors.New("checks were never listed")
 			h.forge.Checks = func(r, s string) []forge.Check {
 				unlock, err := workspace.Lock(h.eng.WS.LockPath(h.pair), h.clock.Now())
 				if lockErr = err; err == nil {
@@ -315,7 +315,7 @@ func TestFinishOnAClosedFeatureIsFeatureNotFound(t *testing.T) {
 		return passing(r, s)
 	}
 	_, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
-	wantCode(t, err, contract.FeatureNotFound)
+	_ = wantCode(t, err, contract.FeatureNotFound)
 	if _, ok, err := h.shadowGit().Resolve(h.ctx, ref); ok || err != nil {
 		t.Fatalf("the metadata ref came back (%v)", err)
 	}
