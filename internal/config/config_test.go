@@ -279,6 +279,8 @@ func TestSyncBranches(t *testing.T) {
 		{`[main, "-x"]`, false},
 		{`[main, "a..b"]`, false},
 		{`[main, "x.lock"]`, false},
+		{`[main, "a.lock/b"]`, false}, // git refuses a component ending in .lock
+		{`[main, "v1.lockstep/x"]`, true},
 		{`[main, "a/.b"]`, false},
 	} {
 		raw := strings.Replace(string(config.Render("acme/widget", "acme/widget-shadow")), "branches: [main]", "branches: "+tc.in, 1)
@@ -365,6 +367,41 @@ func TestEmptySyncAndCIMapsAreFine(t *testing.T) {
 		}
 		if !reflect.DeepEqual(cfg.Sync, config.Default().Sync) || cfg.CI != config.Default().CI {
 			t.Fatalf("%q: empty section changed the defaults: %+v %+v", extra, cfg.Sync, cfg.CI)
+		}
+	}
+}
+
+func TestParseReturnsNoConfigWithAnError(t *testing.T) {
+	t.Parallel()
+	for name, y := range map[string]string{
+		"bad version": "version: 2\npublic: a/b\nshadow: a/b-shadow\n",
+		"bad mode":    "version: 1\npublic: a/b\nshadow: a/b-shadow\npromote:\n  default_mode: rebase\n",
+	} {
+		cfg, _, err := config.Parse([]byte(y))
+		if err == nil || !reflect.DeepEqual(cfg, config.Config{}) {
+			t.Errorf("%s: Parse = %+v, %v; want no config with the error", name, cfg, err)
+		}
+	}
+}
+
+// A scalar where a section belongs is a plain CONFIG_INVALID that says
+// what to write instead, never an unknown key (which reads as "upgrade").
+func TestAScalarSyncOrCIIsAClearError(t *testing.T) {
+	t.Parallel()
+	const (
+		syncMsg = "sync must be a section; to turn scheduled sync off, remove sync.schedule"
+		ciMsg   = "ci must be a section; remove it, or put its keys under ci:"
+	)
+	base := "version: 1\npublic: o/r\nshadow: o/r-shadow\n"
+	for extra, want := range map[string]struct{ field, msg string }{
+		"sync: off\n":    {"sync", syncMsg},
+		"sync: [main]\n": {"sync", syncMsg},
+		"ci: rewrite\n":  {"ci", ciMsg},
+	} {
+		_, _, err := config.Parse([]byte(base + extra))
+		ce := contract.From(err)
+		if ce == nil || ce.Code != contract.ConfigInvalid || ce.Field != want.field || ce.Message != want.msg || ce.Details["unknown_key"] != nil {
+			t.Errorf("%q: got %+v", extra, ce)
 		}
 	}
 }
