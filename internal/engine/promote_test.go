@@ -535,3 +535,41 @@ func TestPromoteLeavesNoPlanWhenItsRefCannotBePushed(t *testing.T) {
 		t.Fatalf("a plan whose ref never reached the shadow repo must not be left behind: %v", ents)
 	}
 }
+
+func TestPromoteDetachedReturnsTheGateJob(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.startFeature("feat-x", map[string]string{"feature.txt": "x\n"})
+	res, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Mode: "squash", Message: "Add x", PlanOnly: true, Detach: true})
+	if err != nil || res.Gate == nil || res.Gate.Checks != feature.ChecksPending || res.Gate.Job == nil || res.Plan != nil {
+		t.Fatalf("detached promote = %+v %v", res, err)
+	}
+	// Again while pending: the same job, no new candidate.
+	again, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Mode: "squash", Message: "Add x", PlanOnly: true, Detach: true})
+	if err != nil || *again.Gate.Job != *res.Gate.Job {
+		t.Fatalf("second detached promote = %+v %v", again, err)
+	}
+}
+
+func TestPromoteWaitsOnAMatchingJob(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.startFeature("feat-x", map[string]string{"feature.txt": "x\n"})
+	if _, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Mode: "squash", Message: "Add x", PlanOnly: true, Detach: true}); err != nil {
+		t.Fatal(err)
+	}
+	candidates := 0
+	h.eng.OnPush = func(_, _ string, specs []string) {
+		for _, s := range specs {
+			if strings.HasSuffix(s, ":refs/heads/ghostbranch-gate/feat-x") {
+				candidates++
+			}
+		}
+	}
+	res, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Mode: "squash", Message: "Add x", PlanOnly: true})
+	if err != nil || res.Plan == nil || !res.Gate.Reused || candidates != 0 {
+		t.Fatalf("promote = %+v %v (%d candidate pushes)", res, err, candidates)
+	}
+}
