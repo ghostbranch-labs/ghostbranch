@@ -163,7 +163,8 @@ func TestRemoveIsLocalAndNeedsAConsole(t *testing.T) {
 }
 
 // Remove never deletes the pair's lock file or frees a hold it does not
-// own: another run holding the lock still holds it after a remove.
+// own: another run holding the lock still holds it after a refused remove,
+// and after a remove that ran the file is still there, free.
 func TestRemoveLeavesAnotherRunsLockAlone(t *testing.T) {
 	t.Parallel()
 	h := removeFixture(t)
@@ -172,7 +173,7 @@ func TestRemoveLeavesAnotherRunsLockAlone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer drop()
+	t.Cleanup(drop) // on a failure before the drop below; a second drop is harmless
 	_, _, err = h.eng.Remove(h.ctx, h.pair)
 	wantCode(t, err, contract.Locked)
 	if _, err := os.Stat(path); err != nil {
@@ -182,6 +183,20 @@ func TestRemoveLeavesAnotherRunsLockAlone(t *testing.T) {
 	if ce := contract.From(err); ce == nil || ce.Code != contract.Locked {
 		t.Fatalf("the held lock was released: %v", err)
 	}
+
+	// Once free, a remove that runs leaves the lock file in place, and free.
+	drop()
+	if _, _, err := h.eng.Remove(h.ctx, h.pair); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("remove deleted the lock file: %v", err)
+	}
+	again, err := workspace.Lock(path, h.clock.Now(), "test")
+	if err != nil {
+		t.Fatalf("remove left the lock held: %v", err)
+	}
+	again()
 }
 
 // A workspace.json entry whose folder would not sit inside pairs/ is

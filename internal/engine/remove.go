@@ -150,9 +150,18 @@ func (e *Engine) Remove(ctx context.Context, p workspace.Pair) (res *RemoveResul
 	}
 	// Last, so a remove that failed above can simply be run again.
 	if err := e.WS.Update(e.Now(), func(w *workspace.Workspace) bool { return w.RemovePair(p.Public) }); err != nil {
-		return nil, nil, internalErr(err, "save workspace.json")
+		return nil, nil, updateErr(err, "save workspace.json")
 	}
 	return res, nil, nil
+}
+
+// updateErr passes on a LOCKED from workspace.Update as it is, with who
+// holds workspace.json, so the caller can retry; anything else is INTERNAL.
+func updateErr(err error, what string) error {
+	if contract.From(err).Code == contract.Locked {
+		return err
+	}
+	return internalErr(err, what)
 }
 
 // checkPairDir refuses a pair whose folder would not be a direct child of

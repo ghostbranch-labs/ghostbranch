@@ -40,11 +40,20 @@ func holdInChild(t *testing.T, path string, exit bool) (*exec.Cmd, io.WriteClose
 	if exit {
 		cmd.Env = append(cmd.Env, "GB_LOCK_EXIT=1")
 	}
-	in, _ := cmd.StdinPipe()
-	out, _ := cmd.StdoutPipe()
+	in, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
+	// A failing test must not leave a child holding the lock (and its
+	// file open, which breaks TempDir's cleanup on Windows).
+	t.Cleanup(func() { _ = in.Close(); _ = cmd.Wait() })
 	line, _ := bufio.NewReader(out).ReadString('\n')
 	if strings.TrimSpace(line) != "held" {
 		t.Fatalf("child: %q", line)
@@ -55,7 +64,7 @@ func holdInChild(t *testing.T, path string, exit bool) (*exec.Cmd, io.WriteClose
 func TestALockHeldByAnotherProcessIsLocked(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "locks", "p.lock")
-	cmd, in := holdInChild(t, path, false)
+	cmd, _ := holdInChild(t, path, false)
 	_, err := workspace.Lock(path, time.Now(), "gate")
 	ce := contract.From(err)
 	if ce == nil || ce.Code != contract.Locked {
@@ -65,8 +74,6 @@ func TestALockHeldByAnotherProcessIsLocked(t *testing.T) {
 	if held["op"] != "helper" || held["pid"] != cmd.Process.Pid {
 		t.Fatalf("held_by = %+v", ce.Details)
 	}
-	_ = in.Close()
-	_ = cmd.Wait()
 }
 
 // Review Focus 1.
@@ -142,5 +149,79 @@ func TestUpdateKeepsConcurrentRegistrations(t *testing.T) {
 	fresh, _ := workspace.Open(home, "default")
 	if len(fresh.Pairs) != 2 || len(b.Pairs) != 2 {
 		t.Fatalf("pairs = %+v (b sees %+v)", fresh.Pairs, b.Pairs)
+	}
+}
+
+// Two runs registering at the same moment: the second waits for the
+// first's hold on workspace.lock rather than failing LOCKED.
+func TestUpdatesAtOnceBothKeepTheirPair(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	for _, name := range []string{"o/a", "o/b"} {
+		w, err := workspace.Open(home, "default")
+		if err != nil {
+			t.Fatal(err)
+		}
+		go func() {
+			<-start
+			errs <- w.Update(time.Now(), func(w *workspace.Workspace) bool {
+				time.Sleep(200 * time.Millisecond) // hold the lock while the other tries
+				return w.AddPair(workspace.Pair{Public: name, Shadow: name + "-shadow"})
+			})
+		}()
+	}
+	close(start)
+	for range 2 {
+		if err := <-errs; err != nil {
+			t.Fatalf("update: %v", err)
+		}
+	}
+	fresh, _ := workspace.Open(home, "default")
+	if len(fresh.Pairs) != 2 {
+		t.Fatalf("pairs = %+v", fresh.Pairs)
+	}
+}
+
+// fn reporting no change: workspace.json is not rewritten, but w still
+// gets the pairs on disk.
+func TestUpdateWithoutAChangeOnlyRefreshes(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	w, _ := workspace.Open(home, "default")
+	other, _ := workspace.Open(home, "default")
+	other.AddPair(workspace.Pair{Public: "o/a", Shadow: "o/a-shadow"})
+	if err := other.Save(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(w.Dir, "workspace.json")
+	old := time.Now().Add(-time.Hour).Truncate(time.Second)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(path)
+	if err := w.Update(time.Now(), func(*workspace.Workspace) bool { return false }); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := os.ReadFile(path)
+	info, err := os.Stat(path)
+	if err != nil || !info.ModTime().Equal(old) || string(after) != string(before) {
+		t.Fatalf("workspace.json was rewritten: %v %v", info.ModTime(), err)
+	}
+	if len(w.Pairs) != 1 || w.Pairs[0].Public != "o/a" {
+		t.Fatalf("w.Pairs = %+v", w.Pairs)
+	}
+}
+
+// The pair lock lives outside the pair folder, so removing the pair's
+// files never deletes it.
+func TestThePairLockIsOutsideThePairFolder(t *testing.T) {
+	t.Parallel()
+	w, _ := workspace.Open(t.TempDir(), "default")
+	p := workspace.Pair{Public: "acme/widget", Shadow: "acme/widget-shadow"}
+	rel, err := filepath.Rel(w.PairDir(p), w.LockPath(p))
+	if err != nil || !strings.HasPrefix(rel, "..") {
+		t.Fatalf("LockPath %s is inside PairDir %s", w.LockPath(p), w.PairDir(p))
 	}
 }

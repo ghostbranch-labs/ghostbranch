@@ -114,11 +114,25 @@ func (w *Workspace) Save() error {
 	return os.Rename(tmp, filepath.Join(w.Dir, "workspace.json"))
 }
 
+// How often, and for how long, Update retries a busy workspace lock. Its
+// holds last milliseconds, so two runs registering at once just queue.
+const (
+	updateLockPoll = 25 * time.Millisecond
+	updateLockWait = 5 * time.Second
+)
+
 // Update changes workspace.json under its own lock: it re-reads the file,
 // applies fn, saves when fn reports a change, and leaves the fresh pairs
-// in w. Two runs registering pairs at once both keep theirs.
+// in w. Two runs registering pairs at once both keep theirs. A lock still
+// busy after updateLockWait is LOCKED.
 func (w *Workspace) Update(now time.Time, fn func(*Workspace) bool) error {
-	drop, err := Lock(filepath.Join(w.Dir, "workspace.lock"), now, "workspace")
+	path := filepath.Join(w.Dir, "workspace.lock")
+	drop, err := Lock(path, now, "workspace")
+	busy := func(err error) bool { return err != nil && contract.From(err).Code == contract.Locked }
+	for deadline := time.Now().Add(updateLockWait); busy(err) && time.Now().Before(deadline); {
+		time.Sleep(updateLockPoll)
+		drop, err = Lock(path, now, "workspace")
+	}
 	if err != nil {
 		return err
 	}

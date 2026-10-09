@@ -41,7 +41,8 @@ type pairCtx struct {
 	// unlock releases the lock at the end of the operation; it is release.
 	unlock func()
 	// lockPath is the pair lock's file; empty in a dry run. held reports
-	// whether this operation holds it now, and drop removes it.
+	// whether this operation holds it now, and drop releases the hold (the
+	// file stays).
 	lockPath string
 	held     bool
 	drop     func()
