@@ -321,23 +321,41 @@ func TestIgnoredKeysWarnPerKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw := strings.Replace(string(config.Render("acme/widget", "acme/widget-shadow")), "rewrite_repo_guards: rewrite",
-		"rewrite_repo_guards: rewrite\n  runners: github-hosted\n  reuse_public_workflows: true", 1)
-	_, warns2, err := config.Parse([]byte(raw))
-	if err != nil {
-		t.Fatal(err)
-	}
 	var msgs []string
-	for _, w := range append(warns, warns2...) {
+	for _, w := range warns {
 		if w.Code != contract.ConfigKeyIgnored {
 			t.Fatalf("unexpected warning %+v", w)
 		}
 		msgs = append(msgs, w.Message)
 	}
-	want := []string{"agents.allow is not supported in this version and is ignored",
-		"ci.reuse_public_workflows is not supported in this version and is ignored",
-		"ci.runners is not supported in this version and is ignored"}
+	want := []string{"agents.allow is not supported in this version and is ignored"}
 	if !reflect.DeepEqual(msgs, want) {
 		t.Fatalf("warnings = %q", msgs)
+	}
+}
+
+func TestUnknownSyncAndCIKeysAreErrors(t *testing.T) {
+	t.Parallel()
+	for _, y := range []string{
+		"version: 1\npublic: o/r\nshadow: o/r-shadow\nci:\n  rewrite_repo_guard: warn\n",
+		"version: 1\npublic: o/r\nshadow: o/r-shadow\nsync:\n  schedul: \"0 * * * *\"\n",
+		"version: 1\npublic: o/r\nshadow: o/r-shadow\nci:\n  runners: github-hosted\n",
+	} {
+		_, _, err := config.Parse([]byte(y))
+		ce := contract.From(err)
+		if ce == nil || ce.Code != contract.ConfigInvalid || ce.Details["unknown_key"] == nil {
+			t.Errorf("%q: want CONFIG_INVALID with unknown_key, got %v", y, err)
+		}
+	}
+}
+
+func TestEmptySyncAndCIMapsAreFine(t *testing.T) {
+	t.Parallel()
+	cfg, warns, err := config.Parse([]byte("version: 1\npublic: o/r\nshadow: o/r-shadow\nsync: {}\nci: {}\n"))
+	if err != nil || len(warns) != 0 {
+		t.Fatalf("%v %+v", err, warns)
+	}
+	if !reflect.DeepEqual(cfg.Sync, config.Default().Sync) || cfg.CI != config.Default().CI {
+		t.Fatalf("empty maps changed the defaults: %+v %+v", cfg.Sync, cfg.CI)
 	}
 }
