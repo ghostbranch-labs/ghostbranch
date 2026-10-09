@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
 )
 
@@ -228,5 +229,50 @@ func TestGuardOutsideAPairCheckout(t *testing.T) {
 	code, env := te.runJSON("guard", "install")
 	if e, _ := env["error"].(map[string]any); code != 2 || e["code"] != "NOT_A_PAIR_CHECKOUT" {
 		t.Fatalf("%d %v", code, env)
+	}
+}
+
+// When git's URL names no registered public repo, the guard can't tell
+// which of the remote's URLs the push goes to: it checks the push against
+// every registered public repo among them and refuses it if any would. Here
+// url is acme/widget and pushurl is acme/gadget, whose feature feat-b
+// widget's facts know nothing about.
+func TestGuardChecksEveryPublicOfAnUnplacedRemote(t *testing.T) {
+	hermeticGit(t)
+	te := newTestEnv(t)
+	initOnly(te)
+	gadget, err := te.forge.AddRepo("acme/gadget", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	testutil.Commit(t, gitx.New(gadget), "main", "initial", map[string]string{"README.md": "# gadget\n"})
+	te.mustRun("init", "acme/gadget")
+	mirror := filepath.Join(te.vars["GHOSTBRANCH_HOME"], "workspaces", "default", "pairs", "acme__gadget", "mirror.git")
+	sha, err := exec.Command("git", "-C", mirror, "rev-parse", "refs/remotes/public/main").Output()
+	if err != nil {
+		t.Fatalf("gadget's mirror: %v", err)
+	}
+	if out, err := exec.Command("git", "-C", mirror, "update-ref", "refs/shadow-meta/features/feat-b", strings.TrimSpace(string(sha))).CombinedOutput(); err != nil {
+		t.Fatalf("%v %s", err, out)
+	}
+	dir := pairCheckout(te)
+	for _, args := range [][]string{
+		{"-C", dir, "remote", "add", "both", "https://github.com/acme/widget.git"},
+		{"-C", dir, "config", "remote.both.pushurl", "https://github.com/acme/gadget.git"},
+	} {
+		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	te.env.Stdin = strings.NewReader("refs/heads/feat-b 1111111111111111111111111111111111111111 refs/heads/feat-b 0000000000000000000000000000000000000000\n")
+	code, env := te.runJSON("guard", "check", "both", "/some/rewritten/path")
+	e, _ := env["error"].(map[string]any)
+	if code != 1 || e["code"] != "PUSH_BLOCKED" || !strings.Contains(e["message"].(string), "acme/gadget") {
+		t.Fatalf("a push that may go to acme/gadget must be checked against gadget's features: %d %v", code, env)
+	}
+	// git's URL names the pair: only that pair is checked.
+	te.env.Stdin = strings.NewReader("refs/heads/feat-b 1111111111111111111111111111111111111111 refs/heads/feat-b 0000000000000000000000000000000000000000\n")
+	if code, env := te.runJSON("guard", "check", "both", "https://github.com/acme/widget.git"); code != 0 {
+		t.Fatalf("a push git names as acme/widget is checked against widget only: %d %v", code, env)
 	}
 }

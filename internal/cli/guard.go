@@ -209,50 +209,79 @@ func (a *app) guardCheckCmd() *cobra.Command {
 			if err != nil {
 				return contract.Wrap(contract.PushBlocked, err, "the guard could not read git's pre-push input, so the push is refused")
 			}
-			// The push is public when any URL it could go to is a registered
-			// public repo: the URL git hands the hook (after insteadOf), the
-			// remote argument when it is a URL, then every url and pushurl
-			// configured for the remote.
-			cands := []string{args[1], args[0]}
-			// fails closed: no URL, no match
-			if rs, err := co.RemoteURLs(ctx); err == nil {
-				cands = append(cands, rs[args[0]]...)
+			// The push goes to the URL git hands the hook (after insteadOf),
+			// or the remote argument when it is a URL: when either names a
+			// registered public repo, that pair alone is checked. Otherwise
+			// the guard can't tell which of the remote's urls and pushurls
+			// the push goes to, so it checks the push against every
+			// registered public repo among them and refuses it if any would.
+			// No match at all fails closed.
+			pairs := registeredPairs(ws, args[1])
+			if len(pairs) == 0 {
+				pairs = registeredPairs(ws, args[0])
 			}
-			var p workspace.Pair
-			found := false
-			for _, u := range cands {
-				slug, ok := guard.Slug(u)
-				if !ok {
-					continue
+			if len(pairs) == 0 {
+				rs, err := co.RemoteURLs(ctx)
+				if err != nil {
+					return contract.Wrap(contract.PushBlocked, err, "the guard could not read the remotes of this checkout, so the push is refused")
 				}
-				if q, ok := ws.Find(slug); ok && strings.EqualFold(q.Public, slug) {
-					p, found = q, true
-					break
-				}
+				pairs = registeredPairs(ws, rs[args[0]]...)
 			}
-			if !found {
+			if len(pairs) == 0 {
 				return contract.New(contract.PushBlocked, "the guard cannot tell which public repo %q is, so the push is refused; reinstall it with ghostbranch guard install, or remove the guard with ghostbranch guard uninstall", args[0])
 			}
-			facts, err := mirrorFacts(ctx, ws.MirrorDir(p))
-			if err != nil {
-				return contract.Wrap(contract.PushBlocked, err, "the guard could not read the features of %s, so the push is refused", p.Public)
-			}
-			// The checkout reads its objects with plain git, so the user's
-			// config (safe.directory and the like) applies.
-			blocks, err := guard.Check(ctx, co, lines, facts)
-			if err != nil {
-				return contract.Wrap(contract.PushBlocked, err, "check the push, so it is refused")
+			var blocks []guard.Block
+			var blockedBy []string
+			for _, p := range pairs {
+				facts, err := mirrorFacts(ctx, ws.MirrorDir(p))
+				if err != nil {
+					return contract.Wrap(contract.PushBlocked, err, "the guard could not read the features of %s, so the push is refused", p.Public)
+				}
+				// The checkout reads its objects with plain git, so the
+				// user's config (safe.directory and the like) applies.
+				bs, err := guard.Check(ctx, co, lines, facts)
+				if err != nil {
+					return contract.Wrap(contract.PushBlocked, err, "check the push to %s, so it is refused", p.Public)
+				}
+				if len(bs) > 0 {
+					blocks = append(blocks, bs...)
+					blockedBy = append(blockedBy, p.Public)
+				}
 			}
 			if len(blocks) > 0 {
 				var b strings.Builder
-				fmt.Fprintf(&b, "pushing Ghostbranch feature work to the public repo %s is blocked:", p.Public)
+				if len(blockedBy) == 1 {
+					fmt.Fprintf(&b, "pushing Ghostbranch feature work to the public repo %s is blocked:", blockedBy[0])
+				} else {
+					fmt.Fprintf(&b, "pushing Ghostbranch feature work to the public repos %s is blocked:", strings.Join(blockedBy, ", "))
+				}
 				for _, bl := range blocks {
 					fmt.Fprintf(&b, "\n  %s: %s", bl.Ref, bl.Reason)
 				}
 				b.WriteString("\npublish features only with: ghostbranch promote <feature>")
-				return contract.New(contract.PushBlocked, "%s", b.String()).WithDetails(map[string]any{"public": p.Public, "blocked": blocks})
+				return contract.New(contract.PushBlocked, "%s", b.String()).WithDetails(map[string]any{"public": strings.Join(blockedBy, ", "), "blocked": blocks})
 			}
 			return done(a, &guard.CheckResult{Checked: len(lines)}, nil, nil)
 		},
 	}
+}
+
+// registeredPairs is the distinct registered pairs whose public repo one of
+// urls names, in the order the urls give them.
+func registeredPairs(ws *workspace.Workspace, urls ...string) []workspace.Pair {
+	var out []workspace.Pair
+	seen := map[string]bool{}
+	for _, u := range urls {
+		slug, ok := guard.Slug(u)
+		if !ok {
+			continue
+		}
+		p, ok := ws.Find(slug)
+		if !ok || !strings.EqualFold(p.Public, slug) || seen[strings.ToLower(p.Public)] {
+			continue
+		}
+		seen[strings.ToLower(p.Public)] = true
+		out = append(out, p)
+	}
+	return out
 }
