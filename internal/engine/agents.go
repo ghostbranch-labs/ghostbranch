@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/approval"
+	"github.com/ghostbranch-labs/ghostbranch/internal/auth"
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
-	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/grant"
 	"github.com/ghostbranch-labs/ghostbranch/internal/ledger"
 	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
@@ -45,6 +45,7 @@ type AgentsStatusResult struct {
 	Pair            string        `json:"pair"`
 	Grants          []GrantStatus `json:"grants"`
 	TokenCanPublish string        `json:"token_can_publish"`
+	TokenKind       string        `json:"token_kind"`
 	Token           TokenCheck    `json:"token"`
 }
 
@@ -194,7 +195,7 @@ func (e *Engine) AgentsStatus(ctx context.Context, p *workspace.Pair) (*AgentsSt
 		return nil, nil, grantErr(err, "read agent grants")
 	}
 	now := e.now()
-	res := &AgentsStatusResult{Grants: []GrantStatus{}, TokenCanPublish: "unknown", Token: TokenCheck{Source: e.TokenSource}}
+	res := &AgentsStatusResult{Grants: []GrantStatus{}, TokenCanPublish: "unknown", TokenKind: auth.Kind(e.Token), Token: TokenCheck{Source: e.TokenSource}}
 	for _, g := range gs {
 		if p != nil && !g.For(p.Public, p.Shadow) {
 			continue
@@ -208,10 +209,12 @@ func (e *Engine) AgentsStatus(ctx context.Context, p *workspace.Pair) (*AgentsSt
 	}
 	if p != nil {
 		res.Pair = p.Public
-		if pr, ok := e.Forge.(forge.PushProber); ok {
-			a := pr.PushAccess(ctx, p.Public)
-			res.TokenCanPublish, res.Token.HTTPStatus = a.Can, a.HTTPStatus
-		}
+		a := e.canPublish(ctx, p.Public)
+		res.TokenCanPublish, res.Token.HTTPStatus = a.Can, a.HTTPStatus
 	}
-	return res, nil, nil
+	var warns []contract.Warning
+	if likelyAgentOnLogin(e) {
+		warns = append(warns, contract.Warning{Code: contract.AgentOnPersonLogin, Message: agentOnLoginMessage})
+	}
+	return res, warns, nil
 }

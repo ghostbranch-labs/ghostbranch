@@ -1,6 +1,7 @@
 package engine_test
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -195,4 +196,23 @@ func TestAgentsRevokeAllPlanOnACorruptFile(t *testing.T) {
 	// agents status reads the same file and says the same.
 	_, _, err = h.eng.AgentsStatus(h.ctx, nil)
 	_ = wantCode(t, err, contract.UpgradeNeeded)
+}
+
+func TestAgentsStatusNamesTheTokenKindAndAnAgentOnALogin(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.eng.Token, h.eng.TokenSource = "github_pat_test", "GHOSTBRANCH_TOKEN"
+	st, warns, err := h.eng.AgentsStatus(h.ctx, &h.pair)
+	if err != nil || st.TokenKind != "fine-grained" || st.TokenCanPublish != "true" || len(warns) != 0 {
+		t.Fatalf("%+v %v %v", st, warns, err)
+	}
+	h.eng.Token, h.eng.TokenSource, h.eng.LooksLikeAgent = "ghu_test", "login", true
+	st, warns, err = h.eng.AgentsStatus(h.ctx, &h.pair)
+	if err != nil || st.TokenKind != "app" || warning(warns, contract.AgentOnPersonLogin) == nil {
+		t.Fatalf("%+v %v %v", st, warns, err)
+	}
+	if strings.Contains(fmt.Sprint(st, warns), "ghu_test") {
+		t.Fatal("agents status shows the token")
+	}
 }

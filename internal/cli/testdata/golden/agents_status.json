@@ -18,6 +18,7 @@
       }
     ],
     "token_can_publish": "true",
+    "token_kind": "unknown",
     "token": {
       "source": "GHOSTBRANCH_TOKEN",
       "http_status": 200

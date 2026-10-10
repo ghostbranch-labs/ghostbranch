@@ -242,6 +242,21 @@ func TestSandboxLoop(t *testing.T) {
 	run(0, "init", publicRepo, "--shadow", shadowRepo, "--adopt")
 	run(0, "sync")
 
+	// The setup check on the sandbox pair: nothing fails. Warnings are
+	// fine: a fine-grained token's write permissions are unknown, and this
+	// directory isn't a clone of the sandbox repo, so the guard check skips.
+	doc := run(0, "doctor", "--repo", publicRepo)["data"].(map[string]any)
+	docChecks, _ := doc["checks"].([]any)
+	if len(docChecks) != 6 {
+		t.Fatalf("doctor: %v", doc)
+	}
+	for _, c := range docChecks {
+		ch := c.(map[string]any)
+		if ch["status"] == "fail" || (ch["id"] == "pair" && ch["status"] != "ok") {
+			t.Fatalf("doctor %s: %s: %v", ch["id"], ch["status"], ch["message"])
+		}
+	}
+
 	feat := "e2e-" + runID
 	run(0, "feature", "start", feat)
 	commit(feat, map[string]string{"hello.txt": "hello from " + runID + "\n", ".ghostbranch/notes.md": "private notes\n",

@@ -438,7 +438,7 @@ func human(r any) string {
 			}
 		}
 		if v.Pair != "" {
-			fmt.Fprintf(&b, "The token from %s can publish to %s: %s\n", v.Token.Source, v.Pair, v.TokenCanPublish)
+			fmt.Fprintf(&b, "The %s token from %s can publish to %s: %s\n", v.TokenKind, v.Token.Source, v.Pair, v.TokenCanPublish)
 		}
 	}
 	return b.String()

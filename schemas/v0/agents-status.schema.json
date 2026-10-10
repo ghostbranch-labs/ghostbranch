@@ -3,7 +3,7 @@
   "title": "agents status data",
   "type": "object",
   "additionalProperties": false,
-  "required": ["pair", "grants", "token_can_publish", "token"],
+  "required": ["pair", "grants", "token_can_publish", "token", "token_kind"],
   "properties": {
     "pair": { "type": "string" },
     "grants": {
