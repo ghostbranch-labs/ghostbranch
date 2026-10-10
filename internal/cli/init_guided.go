@@ -211,6 +211,8 @@ func askShadow(ctx context.Context, ask prompt.Asker, f forge.Forge, o engine.In
 		var yes bool
 		var aerr error
 		switch {
+		case err == nil && sh.Fork:
+			ask.Say(name + " is a fork; a shadow repo can't be one.")
 		case err == nil && !sh.Private:
 			ask.Say(name + " is public; a shadow repo must be private.")
 		case err == nil:
@@ -226,7 +228,9 @@ func askShadow(ctx context.Context, ask prompt.Asker, f forge.Forge, o engine.In
 				return o, nil
 			}
 		default:
-			return o, contract.Wrap(contract.ForgeError, err, "look up %s", name)
+			ce := contract.Wrap(contract.ForgeError, err, "look up %s", name)
+			ce.Retryable = errors.Is(err, forge.ErrTransient)
+			return o, ce
 		}
 		if aerr != nil {
 			return o, aerr
@@ -251,7 +255,8 @@ func newRepoURL(full string) string {
 
 // createByHand is the way on when GitHub won't let the login create the
 // shadow repo: the person creates it, presses Enter, and init adopts it
-// once it exists and is private.
+// once it exists, is private and isn't a fork. A lookup GitHub didn't answer
+// waits for Enter again.
 func createByHand(ctx context.Context, ask prompt.Asker, f forge.Forge, o engine.InitOptions) (engine.InitOptions, error) {
 	shadow := shadowOf(o)
 	ask.Say("GitHub didn't let your login create " + shadow + ". Create it yourself:")
@@ -265,8 +270,13 @@ func createByHand(ctx context.Context, ask prompt.Asker, f forge.Forge, o engine
 		switch {
 		case errors.Is(err, forge.ErrNotFound):
 			ask.Say(shadow + " isn't there yet, or your login can't see it.")
+		case errors.Is(err, forge.ErrTransient):
+			ask.Say("couldn't reach GitHub; press Enter to try again")
 		case err != nil:
+			// Not transient (that case waits again), so not retryable.
 			return o, contract.Wrap(contract.ForgeError, err, "look up %s", shadow)
+		case sh.Fork:
+			ask.Say(shadow + " is a fork; a shadow repo can't be one.")
 		case !sh.Private:
 			ask.Say(shadow + " is public; make it private in its settings.")
 		default:

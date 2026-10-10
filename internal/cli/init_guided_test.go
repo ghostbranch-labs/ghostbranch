@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/auth"
@@ -356,6 +357,131 @@ func TestGuidedInitLogsInFirst(t *testing.T) {
 		t.Fatalf("stored login %v %v", l, err)
 	}
 	if pairs := registered(te); len(pairs) != 1 || !shadowExists(te) {
+		t.Fatalf("pairs %+v", pairs)
+	}
+}
+
+// saidHas reports whether p said a line containing want.
+func saidHas(p *person, want string) bool {
+	return slices.ContainsFunc(p.said, func(s string) bool { return strings.Contains(s, want) })
+}
+
+// Creating the shadow repo by hand: init waits until it exists and is
+// private, saying what is wrong at each Enter, and adopts it only then.
+func TestGuidedInitWaitsForAPrivateHandMadeShadowRepo(t *testing.T) {
+	t.Parallel()
+	const shadow = "acme/widget-shadow"
+	for _, tc := range []struct {
+		name, line string
+		first      func(te *testEnv) // at the first Enter
+		second     func(te *testEnv) // at the second
+	}{
+		{"created public, then made private", shadow + " is public; make it private in its settings.",
+			func(te *testEnv) { _, _ = te.forge.AddRepo(shadow, false) },
+			func(te *testEnv) { te.forge.SetPrivate(shadow, true) }},
+		{"not created yet, then created", shadow + " isn't there yet, or your login can't see it.",
+			func(*testEnv) {},
+			func(te *testEnv) { _, _ = te.forge.AddRepo(shadow, true) }},
+		{"a fork, then replaced", shadow + " is a fork; a shadow repo can't be one.",
+			func(te *testEnv) { _, _ = te.forge.AddRepo(shadow, true); te.forge.SetFork(shadow, true) },
+			func(te *testEnv) { te.forge.SetFork(shadow, false) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			te := newTestEnv(t)
+			te.forge.CreateForbidden = true
+			p := atTerminal(te, "", "", "", "", "")
+			waits := 0
+			p.onWait = func() {
+				waits++
+				switch waits {
+				case 1:
+					tc.first(te)
+				case 2:
+					if len(registered(te)) != 0 {
+						t.Error("adopted before the second Enter")
+					}
+					tc.second(te)
+				}
+			}
+			code, out, errOut := te.run("init", "acme/widget")
+			if code != 0 {
+				t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
+			}
+			hasPrefixes(t, p.asked, "Create private repo acme/widget-shadow?", "Turn on scheduled sync?", "Proceed?",
+				"Press Enter once acme/widget-shadow exists.", "Press Enter once acme/widget-shadow exists.")
+			if !saidHas(p, tc.line) {
+				t.Fatalf("never said %q: %q", tc.line, p.said)
+			}
+			if pairs := registered(te); len(pairs) != 1 || pairs[0].Shadow != shadow {
+				t.Fatalf("pairs %+v", pairs)
+			}
+		})
+	}
+}
+
+// flakyForge fails the next GetRepo of one repo as GitHub being unreachable.
+type flakyForge struct {
+	forge.Forge
+	repo string
+	fail *atomic.Bool
+}
+
+func (f flakyForge) GetRepo(ctx context.Context, full string) (forge.Repo, error) {
+	if full == f.repo && f.fail.CompareAndSwap(true, false) {
+		return forge.Repo{}, fmt.Errorf("get %s: %w", full, forge.ErrTransient)
+	}
+	return f.Forge.GetRepo(ctx, full)
+}
+
+// A network blip while waiting for a hand-made shadow repo asks for Enter
+// again instead of ending init.
+func TestGuidedInitRetriesAHandMadeShadowRepoLookup(t *testing.T) {
+	t.Parallel()
+	const shadow = "acme/widget-shadow"
+	te := newTestEnv(t)
+	te.forge.CreateForbidden = true
+	var fail atomic.Bool
+	te.env.NewForge = func(string) (forge.Forge, error) { return flakyForge{te.forge, shadow, &fail}, nil }
+	p := atTerminal(te, "", "", "", "", "")
+	waits := 0
+	p.onWait = func() {
+		waits++
+		if waits == 1 {
+			_, _ = te.forge.AddRepo(shadow, true)
+			fail.Store(true)
+		}
+	}
+	code, out, errOut := te.run("init", "acme/widget")
+	if code != 0 {
+		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
+	}
+	if waits != 2 || !saidHas(p, "couldn't reach GitHub; press Enter to try again") {
+		t.Fatalf("%d waits, said %q", waits, p.said)
+	}
+	if pairs := registered(te); len(pairs) != 1 || pairs[0].Shadow != shadow {
+		t.Fatalf("pairs %+v", pairs)
+	}
+}
+
+// A fork can't be a shadow repo: askShadow says so and asks for another.
+func TestGuidedInitRefusesAForkAsTheShadowRepo(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	if _, err := te.forge.AddRepo("acme/widget-shadow", true); err != nil {
+		t.Fatal(err)
+	}
+	te.forge.SetFork("acme/widget-shadow", true)
+	p := atTerminal(te, "acme/other-shadow", "", "", "")
+	code, out, errOut := te.run("init", "acme/widget")
+	if code != 0 {
+		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
+	}
+	hasPrefixes(t, p.asked, "Shadow repo to use instead", "Create private repo acme/other-shadow?", "Turn on scheduled sync?", "Proceed?")
+	if !saidHas(p, "acme/widget-shadow is a fork; a shadow repo can't be one.") {
+		t.Fatalf("said %q", p.said)
+	}
+	if pairs := registered(te); len(pairs) != 1 || pairs[0].Shadow != "acme/other-shadow" {
 		t.Fatalf("pairs %+v", pairs)
 	}
 }
