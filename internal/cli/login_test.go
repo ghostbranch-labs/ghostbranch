@@ -16,6 +16,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/auth"
 	"github.com/ghostbranch-labs/ghostbranch/internal/auth/authtest"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
+	"github.com/ghostbranch-labs/ghostbranch/internal/keychain"
 )
 
 // consoleLog is a console device that records what is shown on it; login
@@ -321,4 +322,38 @@ func TestLoginOutputsNeverShowTheToken(t *testing.T) {
 		}
 		return nil
 	})
+}
+
+// auth status shows the stored login as it is after Resolve, so a refresh's
+// new expiry shows; a keychain that can't be read is a problem, never
+// "Stored login: none".
+func TestAuthStatusShowsTheStoredLoginAfterResolve(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	te.forge.User = forge.User{Login: "octo", ID: 1}
+	srv := authtest.New(t, authtest.Options{RefreshToken: "ghr_test_seed"})
+	te.env.ClientID, te.env.OAuthBaseURL, te.env.HTTPClient = srv.ClientID, srv.URL, srv.Client()
+	delete(te.vars, "GHOSTBRANCH_TOKEN")
+	storeLogin(te, "ghu_test_old", "ghr_test_seed", 2*time.Minute)
+	code, env := te.runJSON("auth", "status")
+	data, _ := env["data"].(map[string]any)
+	stored, _ := data["stored_login"].(map[string]any)
+	if want := cliNow.Add(8 * time.Hour).Format(time.RFC3339); code != 0 || srv.Refreshes() != 1 || stored["expires"] != want {
+		t.Fatalf("refreshed: %d %v (want expires %s)", code, env, want)
+	}
+
+	locked := newTestEnv(t)
+	delete(locked.vars, "GHOSTBRANCH_TOKEN")
+	kc := keychain.NewFake()
+	kc.GetErr = errors.New("keychain: locked")
+	locked.env.Keychain = kc
+	code, env = locked.runJSON("auth", "status")
+	data, _ = env["data"].(map[string]any)
+	if code != 0 || data["problem"] != "LOGIN_UNAVAILABLE" || data["stored_login_checked"] != true || data["stored_login"] != nil {
+		t.Fatalf("locked: %d %v", code, env)
+	}
+	_, out, _ := locked.run("auth", "status")
+	if !strings.Contains(out, "Stored login: can't be read (see the problem above)") || strings.Contains(out, "Stored login: none") {
+		t.Fatalf("locked, human:\n%s", out)
+	}
 }

@@ -10,6 +10,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 	"github.com/ghostbranch-labs/ghostbranch/internal/guard"
@@ -418,6 +419,8 @@ func human(r any) string {
 				fmt.Fprintf(&b, ", token expires %s, refreshable until %s", when(s.Expires), when(s.RefreshExpires))
 			}
 			b.WriteString("\n")
+		case v.StoredLoginChecked && (v.Problem == string(contract.LoginUnavailable) || v.Problem == string(contract.UpgradeNeeded)):
+			b.WriteString("Stored login: can't be read (see the problem above)\n")
 		case v.StoredLoginChecked:
 			b.WriteString("Stored login: none\n")
 		default:

@@ -13,6 +13,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/auth"
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
+	"github.com/ghostbranch-labs/ghostbranch/internal/keychain"
 	"github.com/ghostbranch-labs/ghostbranch/internal/prompt"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
@@ -311,18 +312,30 @@ func storedStatus(l *auth.Login) *StoredLogin {
 func (a *app) authStatus(ctx context.Context) (*AuthStatusResult, []contract.Warning) {
 	res := &AuthStatusResult{Valid: "unknown", CanPublish: "unknown"}
 	var warns []contract.Warning
-	var stored *auth.Login
-	if a.env.Keychain != nil && strings.TrimSpace(a.env.Getenv("GHOSTBRANCH_TOKEN")) == "" {
-		res.StoredLoginChecked = true
-		if l, err := auth.LoadLogin(a.env.Keychain); err == nil && l != nil {
-			stored, res.StoredLogin = l, storedStatus(l)
-		}
-	}
 	tok, src, err := auth.Resolve(ctx, a.authSource())
 	if err != nil {
 		if ce := contract.From(err); ce.Code != contract.AuthMissing {
 			res.Problem = string(ce.Code)
 		}
+	}
+	// The stored login is read after Resolve, so a refresh's new expiry
+	// shows. A keychain that can't be read is a problem, not "no login";
+	// a machine with no keychain at all just has none.
+	var stored *auth.Login
+	if a.env.Keychain != nil && strings.TrimSpace(a.env.Getenv("GHOSTBRANCH_TOKEN")) == "" {
+		res.StoredLoginChecked = true
+		l, lerr := auth.LoadLogin(a.env.Keychain)
+		switch {
+		case errors.Is(lerr, keychain.ErrUnavailable):
+		case lerr != nil:
+			if res.Problem == "" {
+				res.Problem = string(contract.From(lerr).Code)
+			}
+		case l != nil:
+			stored, res.StoredLogin = l, storedStatus(l)
+		}
+	}
+	if err != nil {
 		return res, warns
 	}
 	res.Source, res.TokenKind = src, auth.Kind(tok)
