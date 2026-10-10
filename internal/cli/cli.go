@@ -81,7 +81,13 @@ func DefaultEnv() Env {
 		Stdout: os.Stdout, Stderr: os.Stderr, Stdin: os.Stdin, Getenv: os.Getenv, UserHome: os.UserHomeDir,
 		ConsoleUsable: console.Usable(os.Stdin, os.Stderr), OpenConsole: console.Open,
 		Now: time.Now, Sleep: sleepCtx, Rand: rand.Reader,
-		NewForge:     func(token string) (forge.Forge, error) { return ghforge.New(token) },
+		NewForge: func(token string) (forge.Forge, error) {
+			c, err := ghforge.New(token)
+			if err != nil {
+				return nil, err // never a non-nil Forge holding a nil *Client
+			}
+			return c, nil
+		},
 		GHToken:      auth.GHCLI,
 		CwdRemotes:   cwdRemotes,
 		NewScanner:   func(r leak.Rules) (leak.Scanner, error) { return leak.NewGitleaks(r) },
@@ -234,6 +240,9 @@ func (a *app) render(err error) int {
 // command's error passes through exactly once, and render is the only place
 // that knows the command's name. Codes the engine chose on purpose from a
 // refusal (SHADOW_CREATE_DENIED, TOKEN_CANNOT_PUBLISH, ...) are left alone.
+// It converts only errors the engine left generic: one the engine shaped on
+// purpose (feature close's "close it by hand") drops the PermissionError from
+// its chain and keeps its own code.
 func (a *app) permissionMissing(err error) error {
 	ce := contract.From(err)
 	if ce == nil || (ce.Code != contract.ForgeError && ce.Code != contract.Internal) {
