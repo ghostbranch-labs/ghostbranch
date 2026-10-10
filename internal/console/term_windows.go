@@ -66,6 +66,8 @@ func Open() (io.ReadWriteCloser, error) {
 // ColorCapable reports whether f is a console that now accepts ANSI escape
 // codes: it is a real console handle and enabling virtual-terminal
 // processing on it succeeded. A failure means no colour for that stream.
+// Virtual-terminal processing is turned on for the output handles and
+// deliberately left on when the process exits (common practice, harmless).
 func ColorCapable(f *os.File) bool {
 	if !isTerminal(f) {
 		return false

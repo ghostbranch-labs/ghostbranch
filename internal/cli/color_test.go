@@ -101,8 +101,13 @@ func TestNoEscapeWhenColorIsOff(t *testing.T) {
 			t.Errorf("%s: ESC in output:\n%q\n%q", name, out, errOut)
 		}
 	}
+	// --no-color even when flag parsing fails before it.
+	_, out, errOut := te.runColor(true, "doctor", "--bogus", "--no-color")
+	if strings.Contains(out+errOut, "") {
+		t.Errorf("no-color usage error: ESC in output: %q %q", out, errOut)
+	}
 	// --json even when flag parsing fails.
-	_, out, errOut := te.runColor(true, "doctor", "--json", "--bogus")
+	_, out, errOut = te.runColor(true, "doctor", "--json", "--bogus")
 	if strings.Contains(out+errOut, "\x1b") {
 		t.Errorf("json usage error: ESC in output: %q %q", out, errOut)
 	}
@@ -147,5 +152,23 @@ func TestColorAllowed(t *testing.T) {
 		if got := cli.TrueColorTerm(get(map[string]string{"COLORTERM": v})); got != want {
 			t.Errorf("COLORTERM=%q: %v, want %v", v, got, want)
 		}
+	}
+}
+
+func TestColorIsDecidedPerStream(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	delete(te.vars, "GHOSTBRANCH_TOKEN")
+	var out, errb bytes.Buffer
+	env := te.env
+	env.Stdout, env.Stderr = &out, &errb
+	env.StdoutColor, env.StderrColor = true, false
+	cli.Run([]string{"doctor", "--repo", "acme/widget"}, env)
+	if !strings.Contains(out.String(), "\x1b[91m✗\x1b[0m") {
+		t.Errorf("stdout not styled: %q", out.String())
+	}
+	if strings.Contains(errb.String(), "\x1b") || !strings.Contains(errb.String(), "error: ") {
+		t.Errorf("stderr should be plain: %q", errb.String())
 	}
 }

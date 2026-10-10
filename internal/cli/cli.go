@@ -188,6 +188,13 @@ func Run(args []string, env Env) int {
 				a.jsonOut = b
 			}
 		}
+		if arg == "--no-color" {
+			a.noColor = true // likewise
+		} else if v, ok := strings.CutPrefix(arg, "--no-color="); ok {
+			if b, err := strconv.ParseBool(v); err == nil && b {
+				a.noColor = true
+			}
+		}
 	}
 	root := a.root()
 	root.SetArgs(args)
