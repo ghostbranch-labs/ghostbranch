@@ -27,12 +27,14 @@ import (
 type person struct {
 	inner       prompt.Asker
 	asked, said []string
+	log         []string // every question ("? q") and line said ("! m"), in order
 	interruptAt int
 	onWait      func()
 }
 
 func (p *person) ask(q string) error {
 	p.asked = append(p.asked, q)
+	p.log = append(p.log, "? "+q)
 	if len(p.asked) == p.interruptAt {
 		return contract.New(contract.Interrupted, "interrupted (Ctrl-C)")
 	}
@@ -63,7 +65,11 @@ func (p *person) Wait(ctx context.Context, m string) error {
 	return p.inner.Wait(ctx, m)
 }
 
-func (p *person) Say(m string) { p.said = append(p.said, m); p.inner.Say(m) }
+func (p *person) Say(m string) {
+	p.said = append(p.said, m)
+	p.log = append(p.log, "! "+m)
+	p.inner.Say(m)
+}
 
 // atTerminal makes te a person's terminal in a checkout whose origin is
 // acme/widget (not a clone on disk: GuardState says so), answering with
@@ -123,8 +129,8 @@ func TestGuidedInitWalksAPersonThrough(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
 	}
-	hasPrefixes(t, p.asked, "Public repo (owner/repo)", "Create private repo acme/widget-shadow?",
-		"Install the push guard in this checkout?", "Turn on scheduled sync?", "Proceed?")
+	hasPrefixes(t, p.asked, "Which public repo should get private branches? (owner/repo)", "Create the private repo acme/widget-shadow to hold your private branches (the shadow repo)?",
+		"Install the push guard in this checkout?", "Turn on scheduled sync?", "Make these changes now?")
 	for _, want := range []string{"Shadow repo acme/widget-shadow is ready for acme/widget.", "the push guard is installed in this checkout",
 		"Doctor: ", ", 0 failed,", "ghostbranch feature start <name>", "ghostbranch gate <name>", "ghostbranch promote <name>",
 		"GHOSTBRANCH_TOKEN"} {
@@ -154,7 +160,7 @@ func TestGuidedInitAdoptsAShadowRepoGitHubWouldNotCreate(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
 	}
-	hasPrefixes(t, p.asked, "Create private repo acme/widget-shadow?", "Turn on scheduled sync?", "Proceed?",
+	hasPrefixes(t, p.asked, "Create the private repo acme/widget-shadow to hold your private branches (the shadow repo)?", "Turn on scheduled sync?", "Make these changes now?",
 		"Press Enter once acme/widget-shadow exists.")
 	if !slices.ContainsFunc(p.said, func(s string) bool {
 		return strings.Contains(s, "https://github.com/new?owner=acme&name=widget-shadow&visibility=private")
@@ -188,7 +194,7 @@ func TestGuidedInitOutsideACloneHasNoGuardQuestion(t *testing.T) {
 	if code, out, errOut := te.run("init"); code != 0 {
 		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
 	}
-	hasPrefixes(t, p.asked, "Public repo (owner/repo)", "Create private repo acme/widget-shadow?", "Turn on scheduled sync?", "Proceed?")
+	hasPrefixes(t, p.asked, "Which public repo should get private branches? (owner/repo)", "Create the private repo acme/widget-shadow to hold your private branches (the shadow repo)?", "Turn on scheduled sync?", "Make these changes now?")
 }
 
 func TestGuidedInitFlagsPreAnswer(t *testing.T) {
@@ -199,8 +205,8 @@ func TestGuidedInitFlagsPreAnswer(t *testing.T) {
 		asked []string
 	}{
 		{"every answer as a flag asks nothing", []string{"init", "acme/widget", "--shadow", "acme/widget-shadow", "--no-guard", "--no-sync"}, nil},
-		{"--no-guard and --sync", []string{"init", "acme/widget", "--no-guard", "--sync"}, []string{"Create private repo acme/widget-shadow?", "Proceed?"}},
-		{"--adopt answers the shadow question", []string{"init", "acme/widget", "--adopt", "--no-sync"}, []string{"Proceed?"}},
+		{"--no-guard and --sync", []string{"init", "acme/widget", "--no-guard", "--sync"}, []string{"Create the private repo acme/widget-shadow to hold your private branches (the shadow repo)?", "Make these changes now?"}},
+		{"--adopt answers the shadow question", []string{"init", "acme/widget", "--adopt", "--no-sync"}, []string{"Make these changes now?"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -234,7 +240,7 @@ func TestGuidedInitResumes(t *testing.T) {
 	if code, out, errOut := te.run("init", "acme/widget"); code != 0 {
 		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
 	}
-	hasPrefixes(t, p.asked, "Proceed?")
+	hasPrefixes(t, p.asked, "Make these changes now?")
 	if !slices.ContainsFunc(p.said, func(s string) bool { return strings.HasPrefix(s, "Resuming the setup of acme/widget") }) {
 		t.Fatalf("said %q", p.said)
 	}
@@ -346,8 +352,8 @@ func TestGuidedInitLogsInFirst(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
 	}
-	hasPrefixes(t, p.asked, "No GitHub login found. Log in with GitHub now?", "Create private repo acme/widget-shadow?",
-		"Turn on scheduled sync?", "Proceed?")
+	hasPrefixes(t, p.asked, "No GitHub login found. Log in with GitHub now?", "Create the private repo acme/widget-shadow to hold your private branches (the shadow repo)?",
+		"Turn on scheduled sync?", "Make these changes now?")
 	if !slices.ContainsFunc(p.said, func(s string) bool { return strings.Contains(s, authtest.UserCode) }) {
 		t.Fatalf("no device code said: %q", p.said)
 	}
@@ -409,7 +415,7 @@ func TestGuidedInitWaitsForAPrivateHandMadeShadowRepo(t *testing.T) {
 			if code != 0 {
 				t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
 			}
-			hasPrefixes(t, p.asked, "Create private repo acme/widget-shadow?", "Turn on scheduled sync?", "Proceed?",
+			hasPrefixes(t, p.asked, "Create the private repo acme/widget-shadow to hold your private branches (the shadow repo)?", "Turn on scheduled sync?", "Make these changes now?",
 				"Press Enter once acme/widget-shadow exists.", "Press Enter once acme/widget-shadow exists.")
 			if !saidHas(p, tc.line) {
 				t.Fatalf("never said %q: %q", tc.line, p.said)
@@ -478,7 +484,7 @@ func TestGuidedInitRefusesAForkAsTheShadowRepo(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
 	}
-	hasPrefixes(t, p.asked, "Shadow repo to use instead", "Create private repo acme/other-shadow?", "Turn on scheduled sync?", "Proceed?")
+	hasPrefixes(t, p.asked, "Which repo should be the private shadow repo instead?", "Create the private repo acme/other-shadow to hold your private branches (the shadow repo)?", "Turn on scheduled sync?", "Make these changes now?")
 	if !saidHas(p, "acme/widget-shadow is a fork; a shadow repo can't be one.") {
 		t.Fatalf("said %q", p.said)
 	}
@@ -526,7 +532,7 @@ func wantPair(t *testing.T, te *testEnv, shadow string) {
 	}
 }
 
-const whereQ = "Choose 1, 2 or 3"
+const whereQ = "Which one? (1, 2 or 3)"
 
 func TestGuidedInitAsksWhereAnOrgsShadowLives(t *testing.T) {
 	t.Parallel()
@@ -535,7 +541,7 @@ func TestGuidedInitAsksWhereAnOrgsShadowLives(t *testing.T) {
 	if code, out, errOut := te.run("init", "acme/widget"); code != 0 {
 		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
 	}
-	hasPrefixes(t, p.asked, whereQ, "Create private repo acme/widget-shadow?", "Turn on scheduled sync?", "Proceed?")
+	hasPrefixes(t, p.asked, whereQ, "Create the private repo acme/widget-shadow to hold your private branches (the shadow repo)?", "Turn on scheduled sync?", "Make these changes now?")
 	for _, want := range []string{"Where should the private shadow repo live?",
 		"  1. acme/widget-shadow   (the org; teammates can use it)   [default]",
 		"  2. octo/widget-shadow   (your account; only you)",
@@ -557,7 +563,7 @@ func TestGuidedInitPutsTheShadowOnThePersonsAccount(t *testing.T) {
 	if code, out, errOut := te.run("init", "acme/widget"); code != 0 {
 		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
 	}
-	hasPrefixes(t, p.asked, whereQ, whereQ, "Create private repo octo/widget-shadow?", "Turn on scheduled sync?", "Proceed?")
+	hasPrefixes(t, p.asked, whereQ, whereQ, "Create the private repo octo/widget-shadow to hold your private branches (the shadow repo)?", "Turn on scheduled sync?", "Make these changes now?")
 	if !saidHas(p, "Answer 1, 2 or 3.") {
 		t.Fatalf("said %q", p.said)
 	}
@@ -577,7 +583,7 @@ func TestGuidedInitAdoptsANamedShadowRepo(t *testing.T) {
 	if code, out, errOut := te.run("init", "acme/widget"); code != 0 {
 		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
 	}
-	hasPrefixes(t, p.asked, whereQ, "Shadow repo (owner/repo", "octo/private-mirror already exists. Adopt it", "Turn on scheduled sync?", "Proceed?")
+	hasPrefixes(t, p.asked, whereQ, "Which repo should be the private shadow repo? (owner/repo", "octo/private-mirror already exists. Adopt it", "Turn on scheduled sync?", "Make these changes now?")
 	wantPair(t, te, "octo/private-mirror")
 }
 
@@ -591,8 +597,8 @@ func TestGuidedInitRefusesAPublicNamedShadowRepo(t *testing.T) {
 	if code, out, errOut := te.run("init", "acme/widget"); code != 0 {
 		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
 	}
-	hasPrefixes(t, p.asked, whereQ, "Shadow repo (owner/repo", "Shadow repo to use instead", "Create private repo octo/closed?",
-		"Turn on scheduled sync?", "Proceed?")
+	hasPrefixes(t, p.asked, whereQ, "Which repo should be the private shadow repo? (owner/repo", "Which repo should be the private shadow repo instead?", "Create the private repo octo/closed to hold your private branches (the shadow repo)?",
+		"Turn on scheduled sync?", "Make these changes now?")
 	if !saidHas(p, "octo/open is public; a shadow repo must be private.") {
 		t.Fatalf("said %q", p.said)
 	}
@@ -609,7 +615,7 @@ func TestGuidedInitAsksWhereOnlyForAnOrgWithoutShadow(t *testing.T) {
 		if code, out, errOut := te.run("init", "acme/widget"); code != 0 {
 			t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
 		}
-		hasPrefixes(t, p.asked, "Create private repo acme/widget-shadow?", "Turn on scheduled sync?", "Proceed?")
+		hasPrefixes(t, p.asked, "Create the private repo acme/widget-shadow to hold your private branches (the shadow repo)?", "Turn on scheduled sync?", "Make these changes now?")
 		if saidHas(p, "Where should the private shadow repo live?") {
 			t.Fatalf("said %q", p.said)
 		}
@@ -621,7 +627,7 @@ func TestGuidedInitAsksWhereOnlyForAnOrgWithoutShadow(t *testing.T) {
 		if code, out, errOut := te.run("init", "acme/widget", "--shadow", "octo/widget-shadow"); code != 0 {
 			t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
 		}
-		hasPrefixes(t, p.asked, "Turn on scheduled sync?", "Proceed?")
+		hasPrefixes(t, p.asked, "Turn on scheduled sync?", "Make these changes now?")
 		if !saidHas(p, "octo/widget-shadow") {
 			t.Fatalf("the summary doesn't name the shadow: %q", p.said)
 		}
@@ -637,7 +643,7 @@ func TestGuidedInitOffersThePersonalAccountWhenTheOrgRefuses(t *testing.T) {
 	if code, out, errOut := te.run("init", "acme/widget"); code != 0 {
 		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
 	}
-	hasPrefixes(t, p.asked, whereQ, "Create private repo acme/widget-shadow?", "Turn on scheduled sync?", "Proceed?",
+	hasPrefixes(t, p.asked, whereQ, "Create the private repo acme/widget-shadow to hold your private branches (the shadow repo)?", "Turn on scheduled sync?", "Make these changes now?",
 		"Use octo/widget-shadow instead?")
 	wantPair(t, te, "octo/widget-shadow")
 	if shadowExists(te) {
@@ -654,7 +660,7 @@ func TestGuidedInitDeclinedPersonalAccountMakesTheOrgsByHand(t *testing.T) {
 	if code, out, errOut := te.run("init", "acme/widget"); code != 0 {
 		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
 	}
-	hasPrefixes(t, p.asked, whereQ, "Create private repo acme/widget-shadow?", "Turn on scheduled sync?", "Proceed?",
+	hasPrefixes(t, p.asked, whereQ, "Create the private repo acme/widget-shadow to hold your private branches (the shadow repo)?", "Turn on scheduled sync?", "Make these changes now?",
 		"Use octo/widget-shadow instead?", "Press Enter once acme/widget-shadow exists.")
 	wantPair(t, te, "acme/widget-shadow")
 }
@@ -677,7 +683,7 @@ func TestGuidedInitPersonalAccountRefusedToo(t *testing.T) {
 			if code, out, errOut := te.run("init", "acme/widget"); code != 0 {
 				t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
 			}
-			hasPrefixes(t, p.asked, whereQ, "Create private repo acme/widget-shadow?", "Turn on scheduled sync?", "Proceed?",
+			hasPrefixes(t, p.asked, whereQ, "Create the private repo acme/widget-shadow to hold your private branches (the shadow repo)?", "Turn on scheduled sync?", "Make these changes now?",
 				"Use octo/widget-shadow instead?", "Press Enter once octo/widget-shadow exists.")
 			if !slices.Contains(p.said, `GitHub refused to create octo/widget-shadow on octo. GitHub said: "`+notInstalledMsg+`"`) {
 				t.Fatalf("never said the personal account refused: %q", p.said)
@@ -835,8 +841,8 @@ func TestGuidedInitRefusesThePublicRepoAsTheShadow(t *testing.T) {
 	if code, out, errOut := te.run("init", "acme/widget"); code != 0 {
 		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
 	}
-	hasPrefixes(t, p.asked, whereQ, "Shadow repo (owner/repo", "Shadow repo (owner/repo", "Create private repo octo/other?",
-		"Turn on scheduled sync?", "Proceed?")
+	hasPrefixes(t, p.asked, whereQ, "Which repo should be the private shadow repo? (owner/repo", "Which repo should be the private shadow repo? (owner/repo", "Create the private repo octo/other to hold your private branches (the shadow repo)?",
+		"Turn on scheduled sync?", "Make these changes now?")
 	if !slices.Contains(p.said, "ACME/widget is the public repo; the shadow repo must be a different repo from the public one.") {
 		t.Fatalf("said %q", p.said)
 	}
@@ -852,8 +858,8 @@ func TestGuidedInitOffersNoOtherAccountForANamedShadow(t *testing.T) {
 		args  []string
 		asked []string
 	}{
-		{"--shadow", []string{"--shadow", "acme/widget-shadow"}, []string{"Turn on scheduled sync?", "Proceed?", "Press Enter once acme/widget-shadow exists."}},
-		{"registered pair", nil, []string{"Proceed?", "Press Enter once acme/widget-shadow exists."}},
+		{"--shadow", []string{"--shadow", "acme/widget-shadow"}, []string{"Turn on scheduled sync?", "Make these changes now?", "Press Enter once acme/widget-shadow exists."}},
+		{"registered pair", nil, []string{"Make these changes now?", "Press Enter once acme/widget-shadow exists."}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -894,10 +900,38 @@ func TestGuidedInitAdoptsAnExistingPersonalShadowAfterARefusal(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
 	}
-	hasPrefixes(t, p.asked, whereQ, "Create private repo acme/widget-shadow?", "Turn on scheduled sync?", "Proceed?",
+	hasPrefixes(t, p.asked, whereQ, "Create the private repo acme/widget-shadow to hold your private branches (the shadow repo)?", "Turn on scheduled sync?", "Make these changes now?",
 		"Use octo/widget-shadow instead?", "octo/widget-shadow already exists. Adopt it")
 	wantPair(t, te, "octo/widget-shadow")
 	if shadowExists(te) {
 		t.Fatal("the org's shadow exists")
+	}
+}
+
+// Guided init opens with what it does and how defaults work, once, before
+// its first question, whether or not the public repo is asked for.
+func TestGuidedInitIntroducesItselfOnce(t *testing.T) {
+	t.Parallel()
+	intro := []string{
+		"! Ghostbranch will set up private branches for a public GitHub repo.",
+		"! It asks a few questions. Press Enter to accept the suggestion in [brackets].",
+	}
+	for _, args := range [][]string{{"init"}, {"init", "acme/widget"}, {"init", "acme/widget", "--shadow", "acme/widget-shadow", "--no-sync"}} {
+		te := newTestEnv(t)
+		p := atTerminal(te, "", "", "", "")
+		if code, out, errOut := te.run(args...); code != 0 {
+			t.Fatalf("%v: exit %d\n%s\n%s", args, code, out, errOut)
+		}
+		if len(p.log) < 3 || p.log[0] != intro[0] || p.log[1] != intro[1] {
+			t.Fatalf("%v: the run doesn't open with the intro: %q", args, p.log)
+		}
+		for _, l := range intro {
+			if n := slices.Index(p.log[2:], l); n >= 0 {
+				t.Fatalf("%v: %q said again: %q", args, l, p.log)
+			}
+		}
+		if len(args) == 1 && p.asked[0] != "Which public repo should get private branches? (owner/repo)" {
+			t.Fatalf("first question %q", p.asked[0])
+		}
 	}
 }

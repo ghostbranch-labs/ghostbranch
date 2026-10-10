@@ -118,6 +118,15 @@ func originSlug(remotes func() []workspace.Remote) string {
 	return ""
 }
 
+// publicQ asks for the public repo; intro opens every guided run, before the
+// first question.
+const publicQ = "Which public repo should get private branches? (owner/repo)"
+
+var intro = []string{
+	"Ghostbranch will set up private branches for a public GitHub repo.",
+	"It asks a few questions. Press Enter to accept the suggestion in [brackets].",
+}
+
 // askRepo asks for owner/repo until it gets one; a pasted GitHub URL works too.
 func askRepo(ctx context.Context, ask prompt.Asker, question, def string) (string, error) {
 	for {
@@ -190,7 +199,7 @@ func checkPublic(ctx context.Context, ask prompt.Asker, f forge.Forge, public st
 			return "", forge.Repo{}, ce
 		}
 		var aerr error
-		if public, aerr = askRepo(ctx, ask, "Public repo (owner/repo)", ""); aerr != nil {
+		if public, aerr = askRepo(ctx, ask, publicQ, ""); aerr != nil {
 			return "", forge.Repo{}, aerr
 		}
 	}
@@ -219,7 +228,7 @@ func askShadow(ctx context.Context, ask prompt.Asker, f forge.Forge, o engine.In
 	for {
 		if isPublic(ask, o, name) {
 			var aerr error
-			if name, aerr = askRepo(ctx, ask, "Shadow repo to use instead (owner/repo; an existing repo is adopted)", ""); aerr != nil {
+			if name, aerr = askRepo(ctx, ask, "Which repo should be the private shadow repo instead? (owner/repo; an existing one is adopted)", ""); aerr != nil {
 				return o, aerr
 			}
 			continue
@@ -239,7 +248,7 @@ func askShadow(ctx context.Context, ask prompt.Asker, f forge.Forge, o engine.In
 				return o, nil
 			}
 		case errors.Is(err, forge.ErrNotFound):
-			yes, aerr = ask.YesNo(ctx, "Create private repo "+name+"?", true)
+			yes, aerr = ask.YesNo(ctx, "Create the private repo "+name+" to hold your private branches (the shadow repo)?", true)
 			if aerr == nil && yes {
 				o.Shadow = name
 				return o, nil
@@ -252,7 +261,7 @@ func askShadow(ctx context.Context, ask prompt.Asker, f forge.Forge, o engine.In
 		if aerr != nil {
 			return o, aerr
 		}
-		if name, aerr = askRepo(ctx, ask, "Shadow repo to use instead (owner/repo; an existing repo is adopted)", ""); aerr != nil {
+		if name, aerr = askRepo(ctx, ask, "Which repo should be the private shadow repo instead? (owner/repo; an existing one is adopted)", ""); aerr != nil {
 			return o, aerr
 		}
 	}
@@ -319,7 +328,7 @@ func chooseShadow(ctx context.Context, ask prompt.Asker, f forge.Forge, o engine
 	}
 	ask.Say("  3. another repo name, or an existing repo to adopt")
 	for {
-		c, err := ask.Text(ctx, "Choose 1, 2 or 3", "1")
+		c, err := ask.Text(ctx, "Which one? (1, 2 or 3)", "1")
 		if err != nil {
 			return o, err
 		}
@@ -330,7 +339,7 @@ func chooseShadow(ctx context.Context, ask prompt.Asker, f forge.Forge, o engine
 			return askShadow(ctx, ask, f, o, personal)
 		case "3":
 			for {
-				name, err := askRepo(ctx, ask, "Shadow repo (owner/repo; an existing repo is adopted)", "")
+				name, err := askRepo(ctx, ask, "Which repo should be the private shadow repo? (owner/repo; an existing one is adopted)", "")
 				if err != nil {
 					return o, err
 				}
@@ -495,7 +504,8 @@ func createRefused(ctx context.Context, ask prompt.Asker, e *engine.Engine, o en
 
 // guidedInit is spec § 4: ask what is missing, preview, run init, guard
 // install and doctor, and end with the first-feature walkthrough. Nothing
-// changes before "Proceed?", so Ctrl-C at any question leaves no trace.
+// changes before "Make these changes now?", so Ctrl-C at any question
+// leaves no trace.
 func (a *app) guidedInit(ctx context.Context, args []string, f initFlags) error {
 	a.ran = true
 	ask, err := a.env.Asker()
@@ -503,10 +513,13 @@ func (a *app) guidedInit(ctx context.Context, args []string, f initFlags) error 
 		return contract.Wrap(contract.MissingInput, err,
 			"init has questions and the console can't be opened; answer them with flags: <owner/repo>, --shadow or --adopt, --guard or --no-guard, --sync or --no-sync")
 	}
+	for _, l := range intro {
+		ask.Say(l)
+	}
 	public := ""
 	if len(args) == 1 {
 		public = args[0]
-	} else if public, err = askRepo(ctx, ask, "Public repo (owner/repo)", originSlug(a.env.CwdRemotes)); err != nil {
+	} else if public, err = askRepo(ctx, ask, publicQ, originSlug(a.env.CwdRemotes)); err != nil {
 		return err
 	}
 	if err := a.ensureLogin(ctx, ask); err != nil {
@@ -579,7 +592,7 @@ func (a *app) guidedInit(ctx context.Context, args []string, f initFlags) error 
 	if a.dryRun {
 		return done(a, pv, nil, nil)
 	}
-	if ok, err := ask.YesNo(ctx, "Proceed?", true); err != nil {
+	if ok, err := ask.YesNo(ctx, "Make these changes now?", true); err != nil {
 		return err
 	} else if !ok {
 		return contract.New(contract.Interrupted, "init stopped at the summary; nothing was changed")
