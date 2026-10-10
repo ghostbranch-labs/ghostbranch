@@ -197,3 +197,37 @@ func TestAStackPlanRoundTrips(t *testing.T) {
 		t.Fatalf("loaded %+v %v", got, err)
 	}
 }
+
+// An update plan keeps how it updates the PR; a first publish writes none
+// of it, so it reads the same as before 0.12.
+func TestAnUpdatePlanRoundTrips(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	head := strings.Repeat("a", 40)
+	p := plan.Plan{SchemaVersion: plan.SchemaVersion, ID: "20261010T120000Z-abcdef", Kind: "promote", Feature: "a",
+		Publish: plan.Publish{Update: true, Style: plan.StyleReplace, ReplaceReason: plan.ReasonRestack, ExpectedHead: head, Restores: []string{head}},
+		PRs:     []plan.StackPR{{Feature: "a", Base: "main", Number: 14, URL: "u", Update: true, Style: plan.StyleReplace}}}
+	if _, err := plan.Save(dir, p); err != nil {
+		t.Fatal(err)
+	}
+	got, _, err := plan.Load(dir, p.ID)
+	if err != nil || !got.Publish.Update || got.Publish.Style != "replace" || got.Publish.ReplaceReason != "restack" ||
+		got.Publish.ExpectedHead != head || len(got.Publish.Restores) != 1 || !got.PRs[0].Update || got.PRs[0].Style != "replace" {
+		t.Fatalf("loaded %+v %+v %v", got.Publish, got.PRs, err)
+	}
+	first := plan.Plan{SchemaVersion: plan.SchemaVersion, ID: "20261010T120001Z-abcdef", Kind: "promote", Feature: "b",
+		PRs: []plan.StackPR{{Feature: "b", Base: "main"}}}
+	path, err := plan.Save(dir, first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{`"update"`, `"style"`, `"replace_reason"`, `"expected_head"`, `"restores"`} {
+		if strings.Contains(string(b), k) {
+			t.Errorf("a first publish wrote %s:\n%s", k, b)
+		}
+	}
+}

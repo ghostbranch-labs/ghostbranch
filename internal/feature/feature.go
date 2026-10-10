@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	SchemaVersion = "0.11"
+	SchemaVersion = "0.12"
 	MetaFile      = "feature.json"
 )
 
@@ -75,6 +75,11 @@ type Gate struct {
 	// Below lists every feature under this one with the head the gate
 	// built on, bottom first; nil when unstacked.
 	Below []StackHead `json:"below,omitempty"`
+	// Update is how the gate built the update of the feature's open PR;
+	// nil for a first publish and in a gate recorded before 0.12. An append
+	// gate's Base is the PR's head H, and its Commits map the new feature
+	// commits to the public commits appended on H.
+	Update *GateUpdate `json:"update,omitempty"`
 }
 
 // StackHead is one feature below a stacked feature, at the head its gate
@@ -82,6 +87,16 @@ type Gate struct {
 type StackHead struct {
 	Feature string `json:"feature"`
 	Head    string `json:"head"`
+}
+
+// GateUpdate is how a gate built the update of a feature's open PR: on its
+// head H, by appending the new commits or replacing the branch.
+type GateUpdate struct {
+	PR     int    `json:"pr"`
+	Head   string `json:"head"`
+	Base   string `json:"base"`
+	Style  string `json:"style"` // append | replace
+	Reason string `json:"replace_reason,omitempty"`
 }
 
 // Pending reports a gate whose CI wait hasn't finished: a job. A pending

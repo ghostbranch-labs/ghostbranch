@@ -18,7 +18,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/workflow"
 )
 
-const SchemaVersion = "0.11"
+const SchemaVersion = "0.12"
 
 type Pair struct {
 	Public string `json:"public"`
@@ -90,7 +90,39 @@ type Publish struct {
 	PR           PR       `json:"pr"`
 	Commits      []Commit `json:"commits"`       // the public commits, oldest first; the last is Commit
 	DroppedEmpty []string `json:"dropped_empty"` // feature commits that publish nothing
+	// Update is true when the plan updates the feature's open PR instead
+	// of opening one. Style says how (StyleAppend or StyleReplace), and
+	// ReplaceReason why a replace (a Reason constant; "" for append).
+	// ExpectedHead is the PR branch's head when the plan was made: apply
+	// pushes only while it is still there (the lease). Restores lists the
+	// commits a replace re-adds that the PR's branch holds. All are absent
+	// in a first publish and in plans from before 0.12.
+	Update        bool     `json:"update,omitempty"`
+	Style         string   `json:"style,omitempty"`
+	ReplaceReason string   `json:"replace_reason,omitempty"`
+	ExpectedHead  string   `json:"expected_head,omitempty"`
+	Restores      []string `json:"restores,omitempty"`
 }
+
+// How an update plan updates an open PR's branch.
+const (
+	// StyleAppend fast-forwards the branch: the new commits on top of the
+	// PR's head, with no force-push.
+	StyleAppend = "append"
+	// StyleReplace force-pushes the whole branch, leased on ExpectedHead.
+	StyleReplace = "replace"
+)
+
+// Why an update replaces the PR's branch rather than appending to it.
+const (
+	ReasonRestack     = "restack"      // the feature was restacked onto a moved parent
+	ReasonRebase      = "rebase"       // the feature's history was rewritten
+	ReasonSquash      = "squash"       // squash mode: one new commit every time
+	ReasonCurated     = "curated"      // curated mode: the groups are rebuilt every time
+	ReasonBaseChanged = "base_changed" // the PR's base branch changed
+	ReasonConflict    = "conflict"     // the new commits don't apply cleanly on the PR's head
+	ReasonReworded    = "reworded"     // a published commit's message changed
+)
 
 // Waived is a finding the plan was approved with because a person waived it.
 type Waived struct {
@@ -158,6 +190,10 @@ type StackPR struct {
 	Base    string `json:"base"`
 	Number  int    `json:"number"`
 	URL     string `json:"url"`
+	// Update is true when the PR is open and the plan updates it; Style is
+	// then StyleAppend or StyleReplace. Absent for a PR the plan opens.
+	Update bool   `json:"update,omitempty"`
+	Style  string `json:"style,omitempty"`
 }
 
 // Entry is one branch of a stack plan: what its PR publishes. Its Publish

@@ -119,9 +119,10 @@ var errorDocs = map[Code]Doc{
 			"the finding is in the commit message, branch or PR text, which is never waivable", "a typo",
 			"for waivers revoke: the waiver was already revoked, or is for another repo"},
 		WhatToDo: "For waivers add, gate again and use the ids in error.details.waivable. For waivers revoke, run ghostbranch waivers list --repo <public> and revoke the ids it shows; error.details.ids lists the ids with no waiver."},
-	RebaseConflict:   {Summary: "The feature does not rebase cleanly onto public main.", WhatToDo: "Rebase the feature branch onto public main yourself, resolve the files in details.files (the commit in details.commit stopped), push, and gate again."},
-	SyncDiverged:     {Summary: "A shadow branch has commits that the public branch does not.", WhatToDo: "A person investigates the branches in details.branches; Ghostbranch never force-pushes a shadow branch.", NeedsHuman: true},
-	BranchExists:     {Summary: "The name is already taken in the shadow or public repo.", WhatToDo: "With error.details.plan_id the branch holds an earlier, interrupted publish of this feature: resume it with ghostbranch apply <plan_id> rather than promoting under another name. Otherwise use another feature name, or promote with --branch <other-name>."},
+	RebaseConflict: {Summary: "The feature does not rebase cleanly onto public main.", WhatToDo: "Rebase the feature branch onto public main yourself, resolve the files in details.files (the commit in details.commit stopped), push, and gate again."},
+	SyncDiverged:   {Summary: "A shadow branch has commits that the public branch does not.", WhatToDo: "A person investigates the branches in details.branches; Ghostbranch never force-pushes a shadow branch.", NeedsHuman: true},
+	BranchExists: {Summary: "The name is taken: by a shadow branch, by a public branch Ghostbranch didn't publish for this feature, or by the branch of this feature's closed PR.",
+		WhatToDo: "With error.details.plan_id the branch holds an earlier, interrupted publish of this feature: resume it with ghostbranch apply <plan_id> rather than promoting under another name. Otherwise use another feature name, or promote with --branch <other-name>. A feature whose own PR is open is never refused with this: promote updates that PR."},
 	OverlayCollision: {Summary: "Public main already has paths Ghostbranch reserves for the overlay.", WhatToDo: "A person moves those paths out of public main.", NeedsHuman: true},
 	ShadowNotEmpty:   {Summary: "The repo given to init --adopt has unrelated content.", WhatToDo: "A person picks an empty repo or a pure mirror of the public repo.", NeedsHuman: true},
 	RefMoved:         {Summary: "A ref changed on the remote while the command ran.", WhatToDo: "Run the command again."},
@@ -178,10 +179,20 @@ var errorDocs = map[Code]Doc{
 			"parent_merged: the bottom's published parent merged; run sync",
 			"parent_moved: the bottom's published parent changed since it was published",
 			"stale_gate: a listed feature has no fresh, green gate; a gate goes stale when its own branch or any branch below it moves",
+			"open_above: two open PRs on one branch; promote each line from its bottom",
+			"parent_stale: a branch above wasn't restacked after the branch below moved; restack, gate up, promote",
 		},
 		WhatToDo: "Run ghostbranch status to see the stack. List the features bottom first, starting from one whose parent is main or already published, with none left out. Gate each one that needs it (ghostbranch gate <feature>, bottom up), then run promote again."},
 	ParentRewritten: {Summary: "The feature's parent no longer contains the commit the feature was branched from (forked_at): the parent was rebased, amended or force-pushed.",
 		WhatToDo: "Run ghostbranch feature restack <parent> to replay the feature's own commits onto the parent's new tip (it stops with git steps on a conflict), or ghostbranch feature restack <feature> --onto main to move it off the parent. Then run the command again. error.details.parent and error.details.forked_at name them."},
+	PRChangedOnGitHub: {Summary: "The open PR's public branch holds commits Ghostbranch didn't publish (error.details.foreign), so the PR was not updated: the update would drop them.",
+		Causes: []string{
+			"someone pushed a commit to the PR's branch",
+			"a review suggestion was committed on GitHub",
+			"Update branch on GitHub merged main into the PR's branch",
+			"the branch was force-pushed outside Ghostbranch",
+		},
+		WhatToDo: "Bring them into the feature with ghostbranch feature pull <feature>, then gate and promote again; the gate scans them like any other change. If feature pull can't replay them cleanly, it stops with the git steps to merge them in yourself. Ghostbranch never resolves conflicts, and never overwrites commits made on GitHub. error.details.foreign lists each commit's sha, author and subject."},
 }
 
 var warningDocs = map[WarningCode]Doc{
@@ -237,8 +248,8 @@ var warningDocs = map[WarningCode]Doc{
 		WhatToDo: "Look at details.path: fix its permissions or delete it. If it belonged to a feature that was just closed, that feature's plan ref may remain in the shadow repo; it is harmless."},
 	AgentOnPersonLogin: {Summary: "This run looks like an agent or a script, and it is using a person's stored login, which can publish.",
 		WhatToDo: "Give the agent its own shadow-only token in GHOSTBRANCH_TOKEN (see ghostbranch guide § Tokens). The person's login still needs the console code to publish."},
-	PublicBranchChanged: {Summary: "A stacked feature's public branch holds commits Ghostbranch didn't publish, so sync didn't adopt them.",
-		WhatToDo: "Look at the PR on GitHub: someone pushed to its branch. Ghostbranch never adopts a change it didn't scan; re-gate and promote again, or remove the foreign commits."},
+	PublicBranchChanged: {Summary: "A published feature's public branch holds commits Ghostbranch didn't publish, so sync didn't adopt them.",
+		WhatToDo: "Look at the PR on GitHub: someone pushed to its branch. Bring the commits in with ghostbranch feature pull <feature> (details.feature), then gate and promote; until then promote refuses to update the PR. Ghostbranch never adopts a change it didn't scan."},
 }
 
 func intp(n int) *int { return &n }

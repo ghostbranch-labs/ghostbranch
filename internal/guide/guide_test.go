@@ -43,8 +43,8 @@ func TestRenderListsEveryCodeFromTheRegistry(t *testing.T) {
 	// 378: guided init asks where an org's shadow repo lives, and --shadow sets it (6.1 Task 10).
 	// 379: one line on terminal colour, --no-color and NO_COLOR.
 	// 383: the four sub-project 6.1a error rows (FOLD_NEEDS_REBASE, HAS_CHILDREN, NOT_A_STACK, PARENT_REWRITTEN).
-	// 405: the Stacks section (sub-project 6.1a, 22 lines).
-	if n := strings.Count(out, "\n"); n > 405 {
+	// 406: the PUBLIC_BRANCH_CHANGED error row (sub-project 6.1a-2).
+	if n := strings.Count(out, "\n"); n > 406 {
 		t.Errorf("the guide is %d lines; keep it short (spec: about 150 plus the tables)", n)
 	}
 }

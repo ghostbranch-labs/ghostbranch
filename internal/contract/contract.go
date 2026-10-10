@@ -13,7 +13,7 @@ import (
 
 // SchemaVersion versions the envelope and every data schema. It stays 0.x
 // until launch, and 0.x versions may break.
-const SchemaVersion = "0.11"
+const SchemaVersion = "0.12"
 
 // Exit codes. Agents branch on these, so they never change meaning.
 const (
@@ -138,13 +138,20 @@ const (
 	HasChildren Code = "HAS_CHILDREN"
 	// NotAStack means promote's features aren't a stack it can publish
 	// together. details.reason is duplicate, order, gap, parent_not_public,
-	// parent_merged, parent_moved or stale_gate; details.feature names the
+	// parent_merged, parent_moved, stale_gate, open_above or parent_stale; details.feature names the
 	// feature it is about.
 	NotAStack Code = "NOT_A_STACK"
 	// ParentRewritten means a feature's parent no longer contains forked_at,
 	// the commit the feature was branched from. details: feature, parent,
 	// forked_at.
 	ParentRewritten Code = "PARENT_REWRITTEN"
+	// PRChangedOnGitHub means promote refused to update an open PR because
+	// its public branch holds commits Ghostbranch didn't publish: updating
+	// would drop them. It shares its string with the PublicBranchChanged
+	// warning: one is an error.code, the other a warnings[].code.
+	// details.foreign lists each commit as {sha, author, subject};
+	// details.feature and details.branch name where.
+	PRChangedOnGitHub Code = "PUBLIC_BRANCH_CHANGED"
 )
 
 var exitCodes = map[Code]int{
@@ -176,6 +183,7 @@ var exitCodes = map[Code]int{
 	HasChildren:            ExitConflict,
 	NotAStack:              ExitUsage,
 	ParentRewritten:        ExitConflict,
+	PRChangedOnGitHub:      ExitConflict,
 }
 
 // Exit is the process exit code for c.
@@ -322,8 +330,7 @@ const (
 	// AgentOnPersonLogin means a run that looks like an agent or a script is
 	// using a person's stored login instead of a token of its own.
 	AgentOnPersonLogin WarningCode = "AGENT_ON_PERSON_LOGIN"
-	// PublicBranchChanged means a stacked feature's public branch holds
-	// commits Ghostbranch didn't publish, so sync didn't adopt them.
+	// PublicBranchChanged means a published feature's public branch holds commits Ghostbranch didn't publish, so sync didn't adopt them; feature pull brings them in.
 	PublicBranchChanged WarningCode = "PUBLIC_BRANCH_CHANGED"
 )
 

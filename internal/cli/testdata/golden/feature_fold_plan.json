@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.11",
+  "schema_version": "0.12",
   "command": "feature fold",
   "ok": true,
   "exit_code": 0,
@@ -20,7 +20,7 @@
           "op": "delete_ref",
           "ref": "refs/ghostbranch/features/feat-y",
           "repo": "acme/widget-shadow",
-          "sha": "525e8cd485c8e67d520a36934f253cecf1f6219d"
+          "sha": "8097b21cdef7dd382a1296fe9af4faf12db6523b"
         },
         {
           "op": "delete_ref",

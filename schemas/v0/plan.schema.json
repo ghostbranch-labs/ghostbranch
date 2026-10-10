@@ -8,7 +8,7 @@
   "properties": {
     "prs": { "description": "the chain's PRs, bottom first", "type": "array", "items": { "$ref": "common.schema.json#/$defs/stackPR" } },
     "stack_number": { "$ref": "common.schema.json#/$defs/stackNumber" },
-    "schema_version": { "const": "0.11" },
+    "schema_version": { "const": "0.12" },
     "id": { "$ref": "common.schema.json#/$defs/planId" },
     "kind": { "const": "promote" },
     "actor": { "$ref": "common.schema.json#/$defs/actor" },
@@ -36,6 +36,15 @@
     "publish": {
       "type": "object", "additionalProperties": false,
       "required": ["commit", "tree", "parent", "target_branch", "pr", "commits", "dropped_empty"],
+      "dependentRequired": { "style": ["update"], "expected_head": ["update"], "replace_reason": ["style"], "restores": ["style"] },
+      "allOf": [
+        { "if": { "properties": { "update": { "const": true } }, "required": ["update"] },
+          "then": { "required": ["style", "expected_head"] },
+          "else": { "properties": { "pr": { "properties": { "title": { "minLength": 1 } } } } } },
+        { "if": { "properties": { "style": { "const": "replace" } }, "required": ["style"] },
+          "then": { "required": ["replace_reason"], "properties": { "replace_reason": { "minLength": 1 } } },
+          "else": { "properties": { "replace_reason": { "const": "" }, "restores": { "maxItems": 0 } } } }
+      ],
       "properties": {
         "commit": { "$ref": "common.schema.json#/$defs/sha" },
         "tree": { "$ref": "common.schema.json#/$defs/sha" },
@@ -56,8 +65,13 @@
         "target_branch": { "type": "string" },
         "pr": {
           "type": "object", "additionalProperties": false, "required": ["title", "body"],
-          "properties": { "title": { "type": "string", "minLength": 1 }, "body": { "type": "string" } }
-        }
+          "properties": { "title": { "description": "never empty in a first publish; an update may leave it empty, because it doesn't retitle the open PR", "type": "string" }, "body": { "type": "string" } }
+        },
+        "update": { "description": "true when the plan updates the feature's open PR; absent in a first publish", "type": "boolean" },
+        "style": { "description": "how the PR's branch is updated: append (a fast-forward with the new commits) or replace (a force-push leased on expected_head)", "enum": ["append", "replace"] },
+        "replace_reason": { "description": "why the branch is replaced rather than appended to; absent or empty for append", "enum": ["restack", "rebase", "squash", "curated", "base_changed", "conflict", "reworded", ""] },
+        "expected_head": { "description": "the PR branch's head when the plan was made; apply pushes only while it is still there", "$ref": "common.schema.json#/$defs/sha" },
+        "restores": { "description": "commits on the PR's branch that a replace puts back; only with style replace", "type": "array", "items": { "$ref": "common.schema.json#/$defs/sha" } }
       }
     },
     "typed": {

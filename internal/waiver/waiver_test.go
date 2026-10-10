@@ -109,7 +109,7 @@ func TestFileIsPrivateAtomicAndHoldsNoSecret(t *testing.T) {
 		Waivers       []map[string]any `json:"waivers"`
 	}
 	b, _ := os.ReadFile(s.Path())
-	if err := json.Unmarshal(b, &raw); err != nil || raw.SchemaVersion != "0.11" || len(raw.Waivers) != 1 {
+	if err := json.Unmarshal(b, &raw); err != nil || raw.SchemaVersion != "0.12" || len(raw.Waivers) != 1 {
 		t.Fatalf("%s %v", b, err)
 	}
 	var keys []string
