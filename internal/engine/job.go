@@ -274,7 +274,7 @@ func (e *Engine) resultFromRecord(ctx context.Context, pc *pairCtx, name string,
 	res := &GateResult{Feature: name, FeatureHead: g.FeatureHead, PublicMain: g.PublicMain, Parent: g.Parent, Base: from, Overlay: g.Overlay,
 		Candidate: g.Candidate, PublishedTree: g.PublishedTree, ScannedAs: g.ScannedAs, Commits: infos,
 		Checks: g.Checks, FailedChecks: failed, Leak: g.Leak, Findings: []leak.Finding{}, Waived: []WaivedFinding{},
-		mapping: g.Commits}
+		mapping: g.Commits, Update: g.Update}
 	if g.ShadowPR != 0 {
 		pr, job := g.ShadowPR, jobID(name, g.Candidate)
 		res.ShadowPR, res.Job = &pr, &job
@@ -318,6 +318,13 @@ func (e *Engine) pendingFor(ctx context.Context, pc *pairCtx, name, mode string)
 		mode = cfg.Promote.DefaultMode
 	}
 	if m.Gate.FreshFor(head, pm, O) && m.Gate.ScannedAs == mode && tip == m.Gate.Candidate {
+		// An update job is this gate only while the PR's branch is still at
+		// the head it built on.
+		if u := m.Gate.Update; u != nil {
+			if h, _, err := g.Resolve(ctx, publicRef(publishedBranch(m))); err != nil || h != u.Head {
+				return nil, nil
+			}
+		}
 		// A job built on a stack that has moved since is not this gate.
 		st, err := e.stackState(ctx, pc, name, m)
 		if err != nil {

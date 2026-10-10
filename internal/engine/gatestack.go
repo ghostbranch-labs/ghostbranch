@@ -15,6 +15,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
+	"github.com/ghostbranch-labs/ghostbranch/internal/plan"
 )
 
 // forkOf is m's fork point when it is stacked, "" when its parent is main.
@@ -167,7 +168,10 @@ func ownSources(ctx context.Context, g *gitx.Git, name string, m feature.Meta, h
 // depends only on what was replayed.
 func reusableR(ctx context.Context, g *gitx.Git, lv stackLevel, parent, forkedAt string, below map[string]string, pm, O string) (string, string, bool) {
 	gt := lv.meta.Gate
-	if gt == nil || gt.Commits == nil || gt.PublishedTree == "" || !gt.FreshFor(lv.head, pm, O) || !gt.StackFreshFor(parent, forkedAt, below) {
+	if gt == nil || gt.Commits == nil || gt.PublishedTree == "" || !gt.FreshFor(lv.head, pm, O) || !gt.StackFreshFor(parent, forkedAt, below) ||
+		(gt.Update != nil && gt.Update.Style == plan.StyleAppend) {
+		// An append gate's chain is public commits on its PR's head: a
+		// feature above replays this one privately instead.
 		return "", "", false
 	}
 	R := gt.Base

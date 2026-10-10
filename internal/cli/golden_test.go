@@ -93,6 +93,11 @@ func TestGoldenContract(t *testing.T) {
 			te.forge.MissingPermission = map[string]string{"CreatePR": "Pull requests: write"}
 		}, []string{"gate", "feat-x"}, 1},
 		{"gate_stacked", withStack, []string{"gate", "feat-y"}, 0},
+		{"gate_update_append", func(te *testEnv) {
+			publishable(te)
+			te.mustRun("promote", "feat-x", "--yes")
+			te.shadowCommit("feat-x", map[string]string{"more.txt": "more\n"})
+		}, []string{"gate", "feat-x"}, 0},
 		{"gate_parent_rewritten", func(te *testEnv) {
 			withStack(te)
 			sh := gitx.New(te.forge.RepoDir("acme/widget-shadow"))

@@ -66,7 +66,8 @@ type Gate struct {
 	// commits from; empty when unstacked.
 	ForkedAt string `json:"forked_at,omitempty"`
 	// Base is the commit the feature's own commits were replayed onto: R,
-	// the rebased tip of the features below; empty when unstacked (public
+	// the rebased tip of the features below, or, for an append to the
+	// feature's open PR (Update), that PR's head H; empty otherwise (public
 	// main).
 	Base string `json:"base,omitempty"`
 	// BaseTree is Base's published tree: what the leak scan compared the
