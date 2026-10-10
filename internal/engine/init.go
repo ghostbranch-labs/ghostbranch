@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -337,7 +338,8 @@ func (e *Engine) checkAdoptable(ctx context.Context, pc *pairCtx) error {
 	return nil
 }
 
-// checkPublicBranches refuses a public repo with a branch named ghostbranch
+// checkPublicBranches refuses a public repo without a main branch (an empty
+// repo: there is nothing to mirror), or with a branch named ghostbranch
 // (or under ghostbranch/): mirroring it would collide with the overlay
 // branch. It reads the public repo's branches with ls-remote, before
 // anything is created or pushed.
@@ -357,14 +359,29 @@ func (e *Engine) checkPublicBranches(ctx context.Context, p workspace.Pair, pub 
 	if err != nil {
 		return remoteErr(err, "list the public repo's branches")
 	}
+	var branches []string
 	for _, line := range strings.Split(out, "\n") {
 		_, ref, ok := strings.Cut(strings.TrimSpace(line), "\t")
+		if !ok {
+			continue
+		}
 		b := strings.TrimPrefix(ref, "refs/heads/")
-		if ok && (b == OverlayBranch || strings.HasPrefix(b, OverlayBranch+"/")) {
+		if b == OverlayBranch || strings.HasPrefix(b, OverlayBranch+"/") {
 			return contract.New(contract.NameInvalid,
 				"public repo %s has a branch %q, but Ghostbranch reserves that name for the shadow repo's overlay branch, so it can't mirror it; rename or delete that branch in the public repo, then run init again",
 				p.Public, b).WithField("public").WithDetails(map[string]any{"public": p.Public, "branch": b})
 		}
+		branches = append(branches, b)
+	}
+	switch {
+	case len(branches) == 0:
+		return contract.New(contract.BadFlag,
+			"%s has no commits on main yet: push a first commit (a README is enough), then run ghostbranch init again", p.Public).
+			WithField("public").WithDetails(map[string]any{"public": p.Public, "branch": "main"})
+	case !slices.Contains(branches, "main"):
+		return contract.New(contract.BadFlag,
+			"%s has no main branch (it has %s): Ghostbranch mirrors main, so create it in the public repo, then run ghostbranch init again",
+			p.Public, strings.Join(branches, ", ")).WithField("public").WithDetails(map[string]any{"public": p.Public, "branch": "main"})
 	}
 	return nil
 }

@@ -935,3 +935,48 @@ func TestGuidedInitIntroducesItselfOnce(t *testing.T) {
 		}
 	}
 }
+
+// An empty public repo is refused by the summary's preview, before the
+// confirm question: nothing is created, and next suggests nothing.
+func TestGuidedInitRefusesAnEmptyPublicRepoBeforeTheConfirm(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	if _, err := te.forge.AddRepo("acme/empty", false); err != nil {
+		t.Fatal(err)
+	}
+	p := atTerminal(te, "", "", "")
+	code, _, errOut := te.run("init", "acme/empty")
+	if code != 2 || !strings.Contains(errOut, "acme/empty has no commits on main yet: push a first commit (a README is enough), then run ghostbranch init again") ||
+		!strings.Contains(errOut, "[BAD_FLAG]") {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	hasPrefixes(t, p.asked, "Create the private repo acme/empty-shadow", "Turn on scheduled sync?")
+	if _, err := te.forge.GetRepo(context.Background(), "acme/empty-shadow"); !errors.Is(err, forge.ErrNotFound) || len(registered(te)) != 0 {
+		t.Fatalf("shadow %v, pairs %v", err, registered(te))
+	}
+	te2 := newTestEnv(t)
+	if _, err := te2.forge.AddRepo("acme/empty", false); err != nil {
+		t.Fatal(err)
+	}
+	code, env := te2.runJSON("init", "acme/empty")
+	e, _ := env["error"].(map[string]any)
+	if next, _ := env["next"].([]any); code != 2 || e["code"] != "BAD_FLAG" || e["field"] != "public" || e["retryable"] == true || len(next) != 0 {
+		t.Fatalf("exit %d %v", code, env)
+	}
+}
+
+// A run that left an empty private <public>-shadow behind, unregistered, is
+// picked up again: guided init offers to adopt it.
+func TestGuidedInitAdoptsALeftoverEmptyShadow(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	if _, err := te.forge.AddRepo("acme/widget-shadow", true); err != nil {
+		t.Fatal(err)
+	}
+	p := atTerminal(te, "", "", "")
+	if code, out, errOut := te.run("init", "acme/widget"); code != 0 {
+		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
+	}
+	hasPrefixes(t, p.asked, "acme/widget-shadow already exists. Adopt it", "Turn on scheduled sync?", "Make these changes now?")
+	wantPair(t, te, "acme/widget-shadow")
+}
