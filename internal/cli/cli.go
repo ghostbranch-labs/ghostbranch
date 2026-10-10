@@ -11,8 +11,10 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -28,6 +30,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	ghforge "github.com/ghostbranch-labs/ghostbranch/internal/forge/github"
 	"github.com/ghostbranch-labs/ghostbranch/internal/grant"
+	"github.com/ghostbranch-labs/ghostbranch/internal/keychain"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
 	"github.com/ghostbranch-labs/ghostbranch/internal/waiver"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
@@ -46,12 +49,21 @@ type Env struct {
 	// are real terminals, so a person could be asked at the console.
 	ConsoleUsable bool
 	// OpenConsole opens the console device for the approval code.
-	OpenConsole  func() (io.ReadWriteCloser, error)
-	Now          func() time.Time
-	Sleep        func(context.Context, time.Duration) error
-	Rand         io.Reader
-	NewForge     func(token string) (forge.Forge, error)
-	GHToken      func() (string, error)
+	OpenConsole func() (io.ReadWriteCloser, error)
+	Now         func() time.Time
+	Sleep       func(context.Context, time.Duration) error
+	Rand        io.Reader
+	NewForge    func(token string) (forge.Forge, error)
+	GHToken     func() (string, error)
+	// Keychain holds the stored login. nil means no login is consulted or
+	// stored; tests use keychain.NewFake().
+	Keychain keychain.Store
+	// ClientID is the GitHub App's client ID (auth.ClientID). OAuthBaseURL
+	// is GitHub's web origin for the device flow and refresh, and
+	// HTTPClient the client those calls use.
+	ClientID     string
+	OAuthBaseURL string
+	HTTPClient   *http.Client
 	CwdRemotes   func() []workspace.Remote
 	NewScanner   func(leak.Rules) (leak.Scanner, error)
 	PollInterval time.Duration
@@ -88,7 +100,9 @@ func DefaultEnv() Env {
 			}
 			return c, nil
 		},
-		GHToken:      auth.GHCLI,
+		GHToken:  auth.GHCLI,
+		Keychain: keychain.OS(), ClientID: auth.ClientID, OAuthBaseURL: "https://github.com",
+		HTTPClient:   &http.Client{Timeout: 30 * time.Second},
 		CwdRemotes:   cwdRemotes,
 		NewScanner:   func(r leak.Rules) (leak.Scanner, error) { return leak.NewGitleaks(r) },
 		PollInterval: engine.DefaultPollInterval,
@@ -353,13 +367,46 @@ func (a *app) workspaceName() string {
 	return name
 }
 
+// oauthBase is GitHub's web origin for login and refresh.
+func (a *app) oauthBase() string {
+	if a.env.OAuthBaseURL == "" {
+		return "https://github.com"
+	}
+	return strings.TrimRight(a.env.OAuthBaseURL, "/")
+}
+
+// deviceFlow is the GitHub App device flow; its waits end early on Ctrl-C.
+func (a *app) deviceFlow(ctx context.Context) auth.DeviceFlow {
+	return auth.DeviceFlow{ClientID: a.env.ClientID, BaseURL: a.oauthBase(), HTTP: a.env.HTTPClient, Now: a.env.Now,
+		Sleep: func(d time.Duration) { _ = a.env.Sleep(ctx, d) }}
+}
+
+// authSource is where this run's token comes from. A refresh takes
+// <GHOSTBRANCH_HOME>/locks/auth.lock: the stored login is one per OS user,
+// shared by every workspace, so the lock is too.
+func (a *app) authSource() auth.Source {
+	return auth.Source{
+		Getenv: a.env.Getenv, GH: a.env.GHToken, Store: a.env.Keychain, Now: a.env.Now,
+		Refresh: func(ctx context.Context, l auth.Login) (auth.Login, error) {
+			return a.deviceFlow(ctx).Refresh(ctx, l.RefreshToken)
+		},
+		Lock: func() (func(), error) {
+			home, err := workspace.HomeDir(a.env.Getenv, runtime.GOOS, os.UserHomeDir)
+			if err != nil {
+				return nil, contract.Wrap(contract.Internal, err, "find the state directory")
+			}
+			return auth.FileLock(filepath.Join(home, "locks", "auth.lock"), a.env.Now, auth.LockWait)()
+		},
+	}
+}
+
 func (a *app) engine(ctx context.Context) (*engine.Engine, error) {
 	a.ran = true
 	actor, err := a.actor()
 	if err != nil {
 		return nil, err
 	}
-	token, source, err := auth.Resolve(a.env.Getenv, a.env.GHToken)
+	token, source, err := auth.Resolve(ctx, a.authSource())
 	if err != nil {
 		return nil, err
 	}
