@@ -6,7 +6,9 @@
   "required": ["schema_version", "id", "kind", "actor", "created_at", "pair", "feature", "mode", "fingerprint",
                "curate", "publish", "typed", "leak", "ci"],
   "properties": {
-    "schema_version": { "const": "0.10" },
+    "prs": { "description": "the chain's PRs, bottom first", "type": "array", "items": { "$ref": "common.schema.json#/$defs/stackPR" } },
+    "stack_number": { "$ref": "common.schema.json#/$defs/stackNumber" },
+    "schema_version": { "const": "0.11" },
     "id": { "$ref": "common.schema.json#/$defs/planId" },
     "kind": { "const": "promote" },
     "actor": { "$ref": "common.schema.json#/$defs/actor" },
@@ -78,6 +80,22 @@
     "ci": {
       "type": "object", "additionalProperties": false, "required": ["repo_guards"],
       "properties": { "repo_guards": { "$ref": "common.schema.json#/$defs/guardReport" } }
+    },
+    "chain": {
+      "description": "a stack plan's branches, bottom first; feature, mode, fingerprint, publish, typed and ci above are the first entry's",
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["feature", "mode", "fingerprint", "publish", "typed", "ci"],
+        "properties": {
+          "feature": { "type": "string" },
+          "mode": { "enum": ["squash", "preserve", "curated"] },
+          "fingerprint": { "$ref": "#/properties/fingerprint" },
+          "publish": { "$ref": "#/properties/publish" },
+          "typed": { "$ref": "#/properties/typed" },
+          "ci": { "$ref": "#/properties/ci" }
+        }
+      }
     }
   }
 }

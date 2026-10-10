@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	SchemaVersion = "0.10"
+	SchemaVersion = "0.11"
 	MetaFile      = "feature.json"
 )
 
@@ -59,6 +59,29 @@ type Gate struct {
 	// count from it, so a wait in another process keeps the same budget.
 	// Zero before 0.7.
 	StartedAt time.Time `json:"started_at,omitzero"`
+	// Parent is the feature the gate stacked on; empty when it built on
+	// public main.
+	Parent string `json:"parent,omitempty"`
+	// ForkedAt is the fork point the gate replayed the feature's own
+	// commits from; empty when unstacked.
+	ForkedAt string `json:"forked_at,omitempty"`
+	// Base is the commit the feature's own commits were replayed onto: R,
+	// the rebased tip of the features below; empty when unstacked (public
+	// main).
+	Base string `json:"base,omitempty"`
+	// BaseTree is Base's published tree: what the leak scan compared the
+	// feature's own commits with. Empty when unstacked.
+	BaseTree string `json:"base_tree,omitempty"`
+	// Below lists every feature under this one with the head the gate
+	// built on, bottom first; nil when unstacked.
+	Below []StackHead `json:"below,omitempty"`
+}
+
+// StackHead is one feature below a stacked feature, at the head its gate
+// built on.
+type StackHead struct {
+	Feature string `json:"feature"`
+	Head    string `json:"head"`
 }
 
 // Pending reports a gate whose CI wait hasn't finished: a job. A pending
@@ -76,6 +99,23 @@ func (g *Gate) FreshFor(head, publicMain, overlay string) bool {
 	return g != nil && g.FeatureHead == head && g.PublicMain == publicMain && g.Overlay == overlay
 }
 
+// StackFreshFor reports whether the gate built on the stack as it is now:
+// the same parent ("" for main) and fork point ("" when unstacked), and
+// every feature below (below maps each to its head now) at the head it
+// recorded. An unstacked gate of an unstacked feature is fresh; FreshFor
+// checks the feature's own inputs.
+func (g *Gate) StackFreshFor(parent, forkedAt string, below map[string]string) bool {
+	if g == nil || g.Parent != parent || g.ForkedAt != forkedAt || len(g.Below) != len(below) {
+		return false
+	}
+	for _, b := range g.Below {
+		if h, ok := below[b.Feature]; !ok || h != b.Head {
+			return false
+		}
+	}
+	return true
+}
+
 // Promoted records the public PR a feature was published as.
 type Promoted struct {
 	PublicPR int    `json:"public_pr"`
@@ -84,6 +124,24 @@ type Promoted struct {
 	// record written before 0.6. A feature has moved when its branch head
 	// is no longer FeatureHead.
 	FeatureHead string `json:"feature_head,omitempty"`
+	// Branch is the public branch it was published to; empty in a record
+	// written before 0.11 (the feature's name then, unless --branch named one).
+	Branch string `json:"branch,omitempty"`
+	// Base is its PR's base branch: main, or the public branch of the
+	// feature below it in a stack. Sync records GitHub's retargeting.
+	Base string `json:"base,omitempty"`
+	// PublishedHead is the public branch's head as Ghostbranch last knew it:
+	// the plan's tip at publish, and GitHub's restack of it once sync saw
+	// one with the same patch-ids.
+	PublishedHead string `json:"published_head,omitempty"`
+	// PatchIDs are the published commits' stable patch-ids, oldest first.
+	PatchIDs []string `json:"patch_ids,omitempty"`
+	// Stack is the native GitHub stack its PR is in; 0 when none.
+	Stack int `json:"stack,omitempty"`
+	// NeedsUpdate: the PR below it merged by squash or rebase while the PRs
+	// were plain chained PRs (no native stack), so its open public PR still
+	// carries that parent's old commits. Republishing it is 6.1a-2.
+	NeedsUpdate bool `json:"needs_update,omitempty"`
 }
 
 // Meta is feature.json.
@@ -97,6 +155,13 @@ type Meta struct {
 	Abandoned     bool      `json:"abandoned"`
 	Gate          *Gate     `json:"gate"`
 	Promoted      *Promoted `json:"promoted"`
+	// Parent is the feature this one is stacked on; "" means main, as in
+	// every record before 0.11. ParentName reads it.
+	Parent string `json:"parent,omitempty"`
+	// ForkedAt is the parent's commit the feature was branched from or last
+	// restacked onto: the feature's own commits are ForkedAt..head. Empty
+	// for a feature started from main.
+	ForkedAt string `json:"forked_at,omitempty"`
 }
 
 // Encode serializes m as indented JSON with a trailing newline.
@@ -111,6 +176,20 @@ func Decode(b []byte) (Meta, error) {
 	err := json.Unmarshal(b, &m)
 	return m, err
 }
+
+// MainParent is the parent of a feature that isn't stacked on another.
+const MainParent = "main"
+
+// ParentName is the feature's parent: a feature name, or "main".
+func (m Meta) ParentName() string {
+	if m.Parent == "" {
+		return MainParent
+	}
+	return m.Parent
+}
+
+// Stacked reports whether the feature is stacked on another feature.
+func (m Meta) Stacked() bool { return m.ParentName() != MainParent }
 
 // State is a feature's computed lifecycle state.
 type State string
@@ -128,6 +207,14 @@ const (
 	// StateUnreadable is a feature whose record couldn't be read: the survey
 	// reports it with an error, and only a console close removes it.
 	StateUnreadable State = "unreadable"
+	// StateParentStale is a stacked feature where a feature below moved
+	// since the feature above it forked from it, or is gone; feature
+	// restack on the lowest one fixes it.
+	StateParentStale State = "parent_stale"
+	// StatePublicPRNeedsUpdate is a feature published as a plain chained PR
+	// (not a native stack) whose PR below was squash- or rebase-merged: its
+	// public branch still carries the old parent commits.
+	StatePublicPRNeedsUpdate State = "public_pr_needs_update"
 )
 
 // StateInput is everything state depends on.
@@ -142,6 +229,12 @@ type StateInput struct {
 	PRState string
 	// Moved reports that the branch has moved since it was published.
 	Moved bool
+	// ParentMoved reports that a feature below moved since the feature
+	// above it forked from it, or is gone; false when unstacked.
+	ParentMoved bool
+	// StackStale reports that the gate built on a stack that has changed
+	// since (Gate.StackFreshFor is false); false when unstacked.
+	StackStale bool
 }
 
 // StateOf computes state. The first matching rule wins.
@@ -158,9 +251,13 @@ func StateOf(in StateInput) State {
 		return StateMergedMoved
 	case m.Promoted != nil && in.PRState == "closed":
 		return StatePRClosed
+	case m.Promoted != nil && m.Promoted.NeedsUpdate:
+		return StatePublicPRNeedsUpdate
 	case m.Promoted != nil:
 		return StatePublished
-	case m.Gate.Passed() && m.Gate.FreshFor(in.Head, in.PublicMain, in.Overlay):
+	case in.ParentMoved:
+		return StateParentStale
+	case m.Gate.Passed() && m.Gate.FreshFor(in.Head, in.PublicMain, in.Overlay) && !in.StackStale:
 		return StateGatePassed
 	case m.Gate != nil:
 		return StateInReview

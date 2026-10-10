@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.10",
+  "schema_version": "0.11",
   "command": "feature close",
   "ok": true,
   "exit_code": 0,
@@ -10,6 +10,7 @@
     "gate_pr": null,
     "needs_console": true,
     "approval": null,
+    "reparented": [],
     "preview": {
       "fingerprint": {
         "feature_head": "d7407485ce685c126afcfc258f0a9eeb0092d776"
@@ -19,7 +20,7 @@
           "op": "delete_ref",
           "ref": "refs/ghostbranch/features/feat-x",
           "repo": "acme/widget-shadow",
-          "sha": "385bde185450354d0a411ff9444632c31e8efd54"
+          "sha": "bf27baab2ad4466d747e887c6acd19d8fe5c2de8"
         },
         {
           "op": "delete_ref",

@@ -136,3 +136,112 @@ func TestAPendingRecordWithoutAShadowPRIsNoJob(t *testing.T) {
 		t.Fatal("a pending record with its PR is not a job")
 	}
 }
+
+// A record from before 0.11 has no parent: it is stacked on main.
+func TestAnOlderRecordDecodesWithParentMain(t *testing.T) {
+	t.Parallel()
+	raw := `{"schema_version":"0.10","name":"feat-x","branch":"feat-x","created_by":"human:octo","created_at":"2026-10-05T12:00:00Z",` +
+		`"base":"007a3f6399026b4d9b9af3c155edf5ad99c6baa7","abandoned":false,"gate":null,"promoted":null}`
+	m, err := feature.Decode([]byte(raw))
+	if err != nil || m.Parent != "" || m.ForkedAt != "" || m.ParentName() != feature.MainParent || m.Stacked() {
+		t.Fatalf("older record = %+v %v", m, err)
+	}
+}
+
+// A stacked record round-trips with its parent and fork point and matches
+// the schema. An unstacked one is written without either key.
+func TestStackedRecordsRoundTrip(t *testing.T) {
+	t.Parallel()
+	const sha = "007a3f6399026b4d9b9af3c155edf5ad99c6baa7"
+	m := feature.Meta{SchemaVersion: feature.SchemaVersion, Name: "b", Branch: "b", CreatedBy: "human:octo",
+		CreatedAt: time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC), Base: sha, Parent: "a", ForkedAt: sha}
+	raw := feature.Encode(m)
+	testutil.ValidateSchema(t, "feature.schema.json", raw)
+	got, err := feature.Decode(raw)
+	if err != nil || !reflect.DeepEqual(got, m) || got.ParentName() != "a" || !got.Stacked() {
+		t.Fatalf("round trip = %+v %v", got, err)
+	}
+	m.Parent, m.ForkedAt = "", ""
+	raw = feature.Encode(m)
+	testutil.ValidateSchema(t, "feature.schema.json", raw)
+	if strings.Contains(string(raw), "parent") || strings.Contains(string(raw), "forked_at") {
+		t.Fatalf("an unstacked record names a parent:\n%s", raw)
+	}
+}
+
+func TestStackFreshFor(t *testing.T) {
+	t.Parallel()
+	var none *feature.Gate
+	if none.StackFreshFor("", "", nil) {
+		t.Fatal("a nil gate is fresh")
+	}
+	single := &feature.Gate{}
+	if !single.StackFreshFor("", "", map[string]string{}) {
+		t.Fatal("an unstacked gate of an unstacked feature is stale")
+	}
+	g := &feature.Gate{Parent: "b", ForkedAt: "f1", Below: []feature.StackHead{{Feature: "a", Head: "h1"}, {Feature: "b", Head: "h2"}}}
+	for _, c := range []struct {
+		parent, fork string
+		heads        map[string]string
+		want         bool
+	}{
+		{"b", "f1", map[string]string{"a": "h1", "b": "h2"}, true},
+		{"b", "f1", map[string]string{"a": "h9", "b": "h2"}, false}, // a lower branch moved
+		{"b", "f2", map[string]string{"a": "h1", "b": "h2"}, false}, // restacked: a new fork point
+		{"", "", map[string]string{}, false},                        // re-parented onto main
+		{"b", "f1", map[string]string{"b": "h2"}, false},            // the stack below changed shape
+	} {
+		if got := g.StackFreshFor(c.parent, c.fork, c.heads); got != c.want {
+			t.Fatalf("StackFreshFor(%q, %q, %v) = %v", c.parent, c.fork, c.heads, got)
+		}
+	}
+}
+
+func TestStateOfParentStale(t *testing.T) {
+	t.Parallel()
+	gate := &feature.Gate{FeatureHead: "h", PublicMain: "p", Overlay: "o", Checks: feature.ChecksPassed, Leak: feature.LeakClean}
+	in := feature.StateInput{Meta: feature.Meta{Gate: gate}, BranchExists: true, Head: "h", PublicMain: "p", Overlay: "o"}
+	if s := feature.StateOf(in); s != feature.StateGatePassed {
+		t.Fatalf("state = %s", s)
+	}
+	in.StackStale = true
+	if s := feature.StateOf(in); s != feature.StateInReview {
+		t.Fatalf("a gate on a moved stack: %s", s)
+	}
+	in.ParentMoved = true
+	if s := feature.StateOf(in); s != feature.StateParentStale {
+		t.Fatalf("a moved parent: %s", s)
+	}
+	in.Meta.Abandoned = true
+	if s := feature.StateOf(in); s != feature.StateAbandoned {
+		t.Fatalf("abandoned wins: %s", s)
+	}
+}
+
+func TestPromotedKeepsWhatWasPublished(t *testing.T) {
+	t.Parallel()
+	m := feature.Meta{Name: "b", Promoted: &feature.Promoted{PublicPR: 2, PlanID: "p", Branch: "b", Base: "a",
+		PublishedHead: "abc", PatchIDs: []string{"p1"}, Stack: 4}}
+	got, err := feature.Decode(feature.Encode(m))
+	if err != nil || !reflect.DeepEqual(got.Promoted, m.Promoted) {
+		t.Fatalf("decoded %+v %v", got.Promoted, err)
+	}
+	// A record written before 0.11 has none of it.
+	old, err := feature.Decode([]byte(`{"name":"x","promoted":{"public_pr":1,"plan_id":"p"}}`))
+	if err != nil || old.Promoted.Branch != "" || old.Promoted.PatchIDs != nil || old.Promoted.Stack != 0 {
+		t.Fatalf("old record = %+v %v", old.Promoted, err)
+	}
+}
+
+func TestAPlainChainedChildNeedsItsPRUpdated(t *testing.T) {
+	t.Parallel()
+	m := feature.Meta{Name: "b", Promoted: &feature.Promoted{PublicPR: 2, PlanID: "p", NeedsUpdate: true}}
+	in := feature.StateInput{Meta: m, BranchExists: true, Head: "h", PRState: "open"}
+	if got := feature.StateOf(in); got != feature.StatePublicPRNeedsUpdate {
+		t.Fatalf("state = %s, want public_pr_needs_update", got)
+	}
+	in.PRState = "merged"
+	if got := feature.StateOf(in); got != feature.StateMerged {
+		t.Fatalf("a merged PR is merged whatever else: %s", got)
+	}
+}

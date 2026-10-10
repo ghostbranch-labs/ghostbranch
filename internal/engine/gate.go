@@ -20,9 +20,16 @@ import (
 )
 
 type GateResult struct {
-	Feature       string          `json:"feature"`
-	FeatureHead   string          `json:"feature_head"`
-	PublicMain    string          `json:"public_main"`
+	Feature     string `json:"feature"`
+	FeatureHead string `json:"feature_head"`
+	PublicMain  string `json:"public_main"`
+	// Parent is the feature the gate stacked on; "" when it built on
+	// public main.
+	Parent string `json:"parent"`
+	// Base is the commit the feature's own commits were replayed onto:
+	// public main, or R, the rebased tip of the features below it; "" when
+	// a stacked gate stopped before the features below it were built.
+	Base          string          `json:"base"`
 	Overlay       string          `json:"overlay"`
 	Candidate     string          `json:"candidate"`
 	PublishedTree string          `json:"published_tree"`
@@ -45,11 +52,22 @@ type GateResult struct {
 	// didn't wait on).
 	Job *string `json:"job"`
 	// Reused is set by promote when it reuses a fresh green gate instead of re-running it.
-	Reused  bool             `json:"reused"`
-	Preview *preview.Preview `json:"preview"`
+	Reused bool `json:"reused"`
+	// Children and Chain place a stacked feature, with Parent: the features
+	// stacked directly on it, and the unpublished stack from its bottom up
+	// to it, which a promote of the stack lists. Both are empty, and Parent
+	// is "", for a feature with neither a parent nor children; a bottom
+	// feature with children has Parent "main" (stackView).
+	Children []string         `json:"children,omitempty"`
+	Chain    []string         `json:"chain,omitempty"`
+	Preview  *preview.Preview `json:"preview"`
 
 	// mapping is the gate's rebased chain, for promote to publish from.
 	mapping []feature.GateCommit `json:"-"`
+	// stack is what a stacked gate built on, and forkedAt the fork point it
+	// replayed the feature's own commits from; nil and "" when unstacked.
+	stack    *stackBase `json:"-"`
+	forkedAt string     `json:"-"`
 }
 
 // CommitInfo is one feature commit as the gate replayed it, for an agent
@@ -141,6 +159,11 @@ func (e *Engine) runGate(ctx context.Context, p workspace.Pair, name string, det
 		return nil, nil, err
 	}
 	defer pc.unlock()
+	defer func() {
+		if res != nil {
+			e.stackView(ctx, pc, res)
+		}
+	}()
 	// A pending job for exactly these inputs is reused, not gated again. A
 	// dry run never reuses one: finishing it would wait on CI and write.
 	var pending *feature.Gate
@@ -186,6 +209,11 @@ type built struct {
 	scannedAs string
 	// infos describe commits; nil until the replay succeeds.
 	infos []CommitInfo
+	// parent is the feature below a stacked one ("" on main), forkedAt its
+	// fork point, base what its own commits replay onto (public main, or
+	// R below), and stack what was built below it (nil when unstacked).
+	parent, forkedAt, base string
+	stack                  *stackBase
 }
 
 // build resolves the feature and public main, rebases, strips and scans as
@@ -222,29 +250,56 @@ func (e *Engine) build(ctx context.Context, pc *pairCtx, name, mode string, waiv
 	if mode == "" {
 		mode = cfg.Promote.DefaultMode
 	}
-	b := &built{cfg: cfg, meta: m, metaSHA: metaSHA, head: head, pm: pm, O: O, scannedAs: mode}
-	e.progressf("replaying %s onto public main %s", name, short(pm))
-	sources, err := g.SourceCommits(ctx, pm, head)
-	if err != nil {
-		return b, warns, internalErr(err, "list the feature's commits")
+	// parent is set before the stack is walked, so a gate that stops there
+	// (PARENT_REWRITTEN) still names the feature below it; base stays ""
+	// until what it replays onto (the stack below) is built.
+	b := &built{cfg: cfg, meta: m, metaSHA: metaSHA, head: head, pm: pm, O: O, scannedAs: mode, parent: parentFeature(m)}
+	if b.parent == "" {
+		b.base = pm
 	}
-	rebased, err := e.replay(ctx, pc, sources, pm)
+	levels, err := e.stackBelow(ctx, pc, name, m, head)
+	if err != nil {
+		return b, warns, err
+	}
+	if len(levels) == 0 {
+		b.base = pm
+		e.progressf("replaying %s onto public main %s", name, short(pm))
+	} else {
+		below := levels[len(levels)-1].name
+		sb, err := e.stackBase(ctx, pc, cfg, levels, pm, O)
+		if err != nil {
+			return b, warns, err
+		}
+		b.parent, b.forkedAt, b.stack, b.base = below, m.ForkedAt, &sb, sb.R
+		e.progressf("replaying %s's own commits onto %s's rebased tip %s", name, below, short(sb.R))
+	}
+	// forked_at..head when the feature records a fork point (stacked, or
+	// moved onto main off a parent), else every commit not on public main.
+	sources, err := ownSources(ctx, g, name, m, head, pm)
+	if err != nil {
+		return b, warns, err
+	}
+	rebased, err := e.replay(ctx, pc, sources, b.base)
 	if err != nil {
 		var ce *gitx.ConflictError
 		if errors.As(err, &ce) {
+			onto := "public main"
+			if b.parent != "" {
+				onto = b.parent + " (rebased onto public main)"
+			}
 			return b, warns, contract.New(contract.RebaseConflict,
-				"the feature does not rebase cleanly onto public main; commit %s stopped on conflicts in: %s", short(ce.Commit), strings.Join(ce.Files, ", ")).
+				"the feature does not rebase cleanly onto %s; commit %s stopped on conflicts in: %s", onto, short(ce.Commit), strings.Join(ce.Files, ", ")).
 				WithDetails(map[string]any{"files": ce.Files, "commit": ce.Commit})
 		}
 		return b, warns, contract.From(err)
 	}
 	b.commits = make([]feature.GateCommit, len(sources))
-	b.R = pm
+	b.R = b.base
 	for i := range sources {
 		b.commits[i] = feature.GateCommit{Source: sources[i], Rebased: rebased[i]}
 		b.R = rebased[i]
 	}
-	infos, err := gateCommitInfos(ctx, g, cfg, pm, b.commits)
+	infos, err := gateCommitInfos(ctx, g, cfg, b.base, b.commits)
 	if err != nil {
 		return b, warns, err
 	}
@@ -257,8 +312,12 @@ func (e *Engine) build(ctx context.Context, pc *pairCtx, name, mode string, waiv
 		// Stripping each older commit can hit a broken marker the tip no
 		// longer has.
 		b.report, err = e.scanHistory(ctx, g, cfg, b, !waiving)
-	} else {
+	} else if b.stack == nil {
 		b.report, _, err = e.scan(ctx, g, cfg, b.entries, pm, nil)
+	} else {
+		// A stacked feature's scan covers only what it adds over the
+		// published tree below it.
+		b.report, err = e.scanOwn(ctx, g, cfg, b.entries, b.stack.T)
 	}
 	if err != nil {
 		return b, warns, namedMarkerErr(err, name)
@@ -285,7 +344,14 @@ func namedMarkerErr(err error, name string) error {
 // runs it; squash and curated gates scan the final tree, and promote scans
 // whatever chain it builds.
 func (e *Engine) scanHistory(ctx context.Context, g *gitx.Git, cfg config.Config, b *built, withAuthors bool) (leak.Report, error) {
-	links, _, err := deriveChain(ctx, g, cfg, chainInput{mode: config.ModePreserve, pm: b.pm, T: b.T, tEntries: b.entries, commits: b.commits}, nil)
+	in := chainInput{mode: config.ModePreserve, pm: b.base, T: b.T, tEntries: b.entries, commits: b.commits}
+	baseline, firstFull := b.pm, true
+	if b.stack != nil {
+		// A stacked feature's history is scanned from the published tree
+		// below it, which the gates below scanned.
+		in.baseTree, baseline, firstFull = b.stack.T, b.stack.T, false
+	}
+	links, _, err := deriveChain(ctx, g, cfg, in, nil)
 	if err != nil && contract.From(err).Code == contract.NothingToPublish {
 		return leak.Report{Findings: []leak.Finding{}, Warnings: []contract.Warning{}}, nil
 	}
@@ -306,7 +372,7 @@ func (e *Engine) scanHistory(ctx context.Context, g *gitx.Git, cfg config.Config
 		}
 		steps[i] = scanStep{sources: l.sources, entries: l.entries, texts: texts}
 	}
-	rep, _, err := e.scanChain(ctx, g, cfg, b.pm, steps, nil)
+	rep, _, err := e.scanChainFrom(ctx, g, cfg, baseline, firstFull, steps, nil)
 	return rep, err
 }
 
@@ -331,6 +397,7 @@ func (e *Engine) gate(ctx context.Context, pc *pairCtx, name, mode string, how g
 	}
 	res := &GateResult{Feature: name, FeatureHead: head, PublicMain: pm, Overlay: O, ScannedAs: b.scannedAs, Commits: infos,
 		Checks: feature.ChecksNotRun, FailedChecks: []string{}, Leak: feature.LeakNotRun, Findings: []leak.Finding{}, Waived: []WaivedFinding{}}
+	res.Parent, res.Base, res.stack, res.forkedAt = b.parent, b.base, b.stack, b.forkedAt
 	if err != nil {
 		return res, warns, err
 	}
@@ -440,18 +507,57 @@ func guardNames(pc *pairCtx) workflow.Names {
 	return n
 }
 
+// stackView fills res's Parent, Children and Chain from the feature records
+// in the mirror: the feature below it ("main" for a bottom one), the live
+// features stacked directly on it, and the unpublished stack from its
+// bottom up to it. A feature with neither a parent nor children gets none.
+// It only reads, and when the records can't be read it leaves the fields
+// as they are.
+func (e *Engine) stackView(ctx context.Context, pc *pairCtx, res *GateResult) {
+	recs, err := e.records(ctx, pc)
+	if err != nil {
+		return
+	}
+	r, ok := recs[res.Feature]
+	if !ok {
+		return
+	}
+	parent := stackParent(r.meta)
+	kids := childrenOf(recs, res.Feature, false)
+	if parent == feature.MainParent && len(kids) == 0 {
+		return
+	}
+	chain := []string{res.Feature}
+	seen := map[string]bool{res.Feature: true}
+	for p := parent; p != feature.MainParent && !seen[p]; {
+		pr, ok := recs[p]
+		if !ok || pr.meta.Promoted != nil {
+			break
+		}
+		seen[p] = true
+		chain = append([]string{p}, chain...)
+		p = stackParent(pr.meta)
+	}
+	res.Parent, res.Children, res.Chain = parent, kids, chain
+}
+
 // gateRecord is the metadata record of res's gate, stamped now.
 func (e *Engine) gateRecord(res *GateResult, commits []feature.GateCommit) feature.Gate {
-	return feature.Gate{FeatureHead: res.FeatureHead, PublicMain: res.PublicMain, Overlay: res.Overlay,
+	g := feature.Gate{FeatureHead: res.FeatureHead, PublicMain: res.PublicMain, Overlay: res.Overlay,
 		Candidate: res.Candidate, PublishedTree: res.PublishedTree, ScannedAs: res.ScannedAs, Commits: commits,
 		Checks: res.Checks, FailedChecks: res.FailedChecks, Leak: res.Leak, At: e.now()}
+	if s := res.stack; s != nil {
+		g.Parent, g.ForkedAt, g.Base, g.BaseTree, g.Below = res.Parent, res.forkedAt, s.R, s.T, s.below
+	}
+	return g
 }
 
 // writeGate records g as the feature's gate, leased on metaSHA.
 func (e *Engine) writeGate(ctx context.Context, pc *pairCtx, m feature.Meta, metaSHA string, g feature.Gate) ([]contract.Warning, error) {
 	m.SchemaVersion = feature.SchemaVersion
 	m.Gate = &g
-	return e.updateMeta(ctx, pc, m, metaSHA)
+	_, mw, err := e.updateMeta(ctx, pc, m, metaSHA)
+	return mw, err
 }
 
 // replay cherry-picks commits onto onto in a throwaway worktree and returns

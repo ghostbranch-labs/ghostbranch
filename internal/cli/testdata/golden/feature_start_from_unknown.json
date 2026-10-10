@@ -1,0 +1,30 @@
+{
+  "schema_version": "0.11",
+  "command": "feature start",
+  "ok": false,
+  "exit_code": 2,
+  "data": {},
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "feature",
+        "list",
+        "--all",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "no feature by that name here; list every feature, abandoned ones included, to find it",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
+  "error": {
+    "code": "FEATURE_NOT_FOUND",
+    "message": "no open feature \"nope\" to start from in acme/widget-shadow; ghostbranch feature list shows the open features",
+    "field": "from",
+    "retryable": false,
+    "details": {}
+  }
+}

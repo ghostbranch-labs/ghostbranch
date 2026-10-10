@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/auth/authtest"
+	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
@@ -32,7 +33,7 @@ var dataSchemas = map[string]string{
 	"status": "status.schema.json", "feature list": "feature-list.schema.json", "feature show": "feature-show.schema.json",
 	"feature abandon": "feature-abandon.schema.json", "feature close": "feature-close.schema.json",
 	"wait": "gate.schema.json", "login": "login.schema.json", "logout": "logout.schema.json", "auth status": "auth-status.schema.json",
-	"doctor": "doctor.schema.json",
+	"doctor": "doctor.schema.json", "feature fold": "feature-fold.schema.json", "feature restack": "feature-restack.schema.json",
 }
 
 var rootPath = regexp.MustCompile(`<ROOT>[^"]*`)
@@ -77,6 +78,13 @@ func TestGoldenContract(t *testing.T) {
 			testutil.Commit(te.t, te.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
 		}, []string{"feature", "start", "feat-x"}, 4},
 		{"feature_start_exists", withFeature, []string{"feature", "start", "feat-x"}, 4},
+		{"feature_start_from", withFeature, []string{"feature", "start", "feat-y", "--from", "feat-x"}, 0},
+		{"feature_start_from_plan", withFeature, []string{"feature", "start", "feat-y", "--from", "feat-x", "--plan"}, 0},
+		{"feature_start_from_unknown", initOnly, []string{"feature", "start", "feat-y", "--from", "nope"}, 2},
+		{"feature_start_from_behind", func(te *testEnv) {
+			withFeature(te)
+			testutil.Commit(te.t, te.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
+		}, []string{"feature", "start", "feat-y", "--from", "feat-x"}, 4},
 		{"gate", withFeature, []string{"gate", "feat-x"}, 0},
 		{"gate_checks_failed", func(te *testEnv) { withFeature(te); te.forge.Checks = failing }, []string{"gate", "feat-x"}, 3},
 		{"gate_leak", withLeakyFeature, []string{"gate", "feat-x"}, 3},
@@ -84,7 +92,38 @@ func TestGoldenContract(t *testing.T) {
 			withFeature(te)
 			te.forge.MissingPermission = map[string]string{"CreatePR": "Pull requests: write"}
 		}, []string{"gate", "feat-x"}, 1},
+		{"gate_stacked", withStack, []string{"gate", "feat-y"}, 0},
+		{"gate_parent_rewritten", func(te *testEnv) {
+			withStack(te)
+			sh := gitx.New(te.forge.RepoDir("acme/widget-shadow"))
+			main, err := sh.MustResolve(te.t.Context(), "refs/heads/main")
+			if err != nil {
+				te.t.Fatal(err)
+			}
+			if err := sh.UpdateRef(te.t.Context(), "refs/heads/feat-x", main); err != nil {
+				te.t.Fatal(err)
+			}
+			te.shadowCommit("feat-x", map[string]string{"feature.txt": "rewritten\n"})
+		}, []string{"gate", "feat-y"}, contract.ParentRewritten.Exit()},
 		{"promote_plan", gatedFeature, []string{"promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--plan"}, 0},
+		{"promote_stack_plan", withGatedStack, []string{"promote", "feat-a", "feat-b", "--mode", "squash", "--plan"}, 0},
+		{"promote_not_a_stack", withGatedStack, []string{"promote", "feat-b", "--plan"}, contract.NotAStack.Exit()},
+		{"gate_stack_bottom", func(te *testEnv) {
+			initOnly(te)
+			te.mustRun("feature", "start", "feat-a")
+			te.shadowCommit("feat-a", map[string]string{"a.txt": "a\n"})
+			te.mustRun("feature", "start", "feat-b", "--from", "feat-a")
+			te.shadowCommit("feat-b", map[string]string{"b.txt": "b\n"})
+		}, []string{"gate", "feat-a"}, 0},
+		{"gate_stack_top", func(te *testEnv) {
+			initOnly(te)
+			te.mustRun("feature", "start", "feat-a")
+			te.shadowCommit("feat-a", map[string]string{"a.txt": "a\n"})
+			te.mustRun("feature", "start", "feat-b", "--from", "feat-a")
+			te.shadowCommit("feat-b", map[string]string{"b.txt": "b\n"})
+			te.mustRun("gate", "feat-a")
+		}, []string{"gate", "feat-b"}, 0},
+		{"status_stack", withGatedStack, []string{"status"}, 0},
 		{"promote_needs_human", func(te *testEnv) { gatedFeature(te); te.vars["GHOSTBRANCH_ACTOR"] = "agent:claude-code" },
 			[]string{"promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--yes"}, 5},
 		{"promote_plan_under_grant", publishable, []string{"promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--plan"}, 0},
@@ -185,6 +224,20 @@ jobs:
 		}, []string{"feature", "close", "feat-x"}, 0},
 		{"feature_close_needs_human", withFeature, []string{"feature", "close", "feat-x"}, 5},
 		{"feature_close_plan", gatedFeature, []string{"feature", "close", "feat-x", "--plan"}, 0},
+		{"feature_fold", withStack, []string{"feature", "fold", "feat-y"}, 0},
+		{"feature_fold_plan", withStack, []string{"feature", "fold", "feat-y", "--plan"}, 0},
+		{"feature_fold_needs_rebase", func(te *testEnv) {
+			withStack(te)
+			te.shadowCommit("feat-x", map[string]string{"later.txt": "later\n"})
+		}, []string{"feature", "fold", "feat-y"}, contract.FoldNeedsRebase.Exit()},
+		{"feature_restack", func(te *testEnv) {
+			withStack(te)
+			te.shadowCommit("feat-x", map[string]string{"later.txt": "later\n"})
+		}, []string{"feature", "restack", "feat-x"}, 0},
+		{"feature_restack_onto_main", withStack, []string{"feature", "restack", "feat-y", "--onto", "main"}, 0},
+		{"feature_restack_conflict", withConflictingStack, []string{"feature", "restack", "feat-x"}, contract.RebaseConflict.Exit()},
+		{"feature_abandon_has_children", withStack, []string{"feature", "abandon", "feat-x"}, contract.HasChildren.Exit()},
+		{"feature_close_has_children", withStack, []string{"feature", "close", "feat-x"}, contract.HasChildren.Exit()},
 		{"gate_detach", withFeature, []string{"gate", "feat-x", "--detach"}, 0},
 		{"wait", func(te *testEnv) { withFeature(te); te.mustRun("gate", "feat-x", "--detach") }, []string{"wait", "<JOB>"}, 0},
 		{"wait_finished", func(te *testEnv) { withFeature(te); te.mustRun("gate", "feat-x") }, []string{"wait", "<JOB>"}, 0},
@@ -426,4 +479,16 @@ func TestWaiverArtifactsMatchTheirSchemas(t *testing.T) {
 	if err := sc.Err(); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// withGatedStack is feat-a on main and feat-b on feat-a, one commit each,
+// both gated.
+func withGatedStack(te *testEnv) {
+	initOnly(te)
+	te.mustRun("feature", "start", "feat-a")
+	te.shadowCommit("feat-a", map[string]string{"a.txt": "a\n"})
+	te.mustRun("feature", "start", "feat-b", "--from", "feat-a")
+	te.shadowCommit("feat-b", map[string]string{"b.txt": "b\n"})
+	te.mustRun("gate", "feat-a")
+	te.mustRun("gate", "feat-b")
 }

@@ -203,6 +203,10 @@ func human(r any, st style.Styler) string {
 			previewText(&b, v.Preview)
 			break
 		}
+		if v.Parent != "" && v.Parent != feature.MainParent {
+			fmt.Fprintf(&b, "Started feature %s on %s, at its tip %s.\nCheck it out with: %s\n", v.Name, v.Parent, short(v.Base), v.CheckoutHint)
+			break
+		}
 		fmt.Fprintf(&b, "Started feature %s from shadow main %s.\nCheck it out with: %s\n", v.Name, short(v.Base), v.CheckoutHint)
 	case *engine.GateResult:
 		if pendingJob(v) {
@@ -340,6 +344,38 @@ func human(r any, st style.Styler) string {
 			fmt.Fprintf(&b, "Abandoned %s (its branch is kept; undo with --undo).\n", oneLine(v.Feature))
 		default:
 			fmt.Fprintf(&b, "Restored %s; it is an active feature again.\n", oneLine(v.Feature))
+		}
+	case *engine.FoldResult:
+		if v.Preview != nil {
+			previewText(&b, v.Preview)
+			break
+		}
+		fmt.Fprintf(&b, "Folded %s into %s: %s moved %s -> %s, and %s is closed (%d ref(s) deleted).\n",
+			oneLine(v.Feature), oneLine(v.Parent), oneLine(v.Parent), short(v.From), short(v.To), oneLine(v.Feature), len(v.Deleted))
+		if len(v.Reparented) > 0 {
+			fmt.Fprintf(&b, "Now stacked on %s: %s.\n", oneLine(v.Parent), oneLine(strings.Join(v.Reparented, ", ")))
+		}
+		b.WriteString("The ledger keeps each deleted ref's SHA (ghostbranch log).\n")
+	case *engine.RestackResult:
+		if v.Preview != nil {
+			previewText(&b, v.Preview)
+			break
+		}
+		if len(v.Restacked) == 0 && len(v.Pending) == 0 {
+			fmt.Fprintf(&b, "Nothing to restack: every feature above %s is on its parent's tip.\n", oneLine(v.Feature))
+		}
+		for _, r := range v.Restacked {
+			if r.From == r.To {
+				fmt.Fprintf(&b, "  %s: on %s already; record updated\n", oneLine(r.Feature), oneLine(r.Parent))
+				continue
+			}
+			fmt.Fprintf(&b, "  %s onto %s: %s -> %s\n", oneLine(r.Feature), oneLine(r.Parent), short(r.From), short(r.To))
+		}
+		if len(v.Pending) > 0 {
+			fmt.Fprintf(&b, "Stopped at %s.\n", oneLine(strings.Join(v.Pending, ", ")))
+		}
+		if len(v.Restacked) > 0 {
+			b.WriteString("These branches were rewritten in the shadow repo: in each checkout, git fetch, then git reset --keep <remote>/<branch>.\n")
 		}
 	case *engine.FeatureCloseResult:
 		if v.Preview != nil {
@@ -528,8 +564,13 @@ func featureTable(b *strings.Builder, rs []engine.FeatureReport) {
 	}
 	tw := tabwriter.NewWriter(b, 0, 0, 2, ' ', 0)
 	_, _ = fmt.Fprintln(tw, "NAME\tSTATE\tDRIFT\tGATE\tPR")
-	for _, r := range rs {
-		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", oneLine(r.Name), r.State, oneLine(r.Drift.Status), gateCell(r.Gate), prCell(r))
+	for _, row := range treeOrder(rs) {
+		r := rs[row.i]
+		name := oneLine(r.Name)
+		if row.depth > 0 {
+			name = strings.Repeat("  ", row.depth-1) + "└─ " + name
+		}
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", name, r.State, oneLine(r.Drift.Status), gateCell(r.Gate), prCell(r))
 	}
 	_ = tw.Flush()
 	for _, r := range rs {
@@ -537,6 +578,50 @@ func featureTable(b *strings.Builder, rs []engine.FeatureReport) {
 			fmt.Fprintf(b, "%s couldn't be read: %s\n", oneLine(r.Name), oneLine(r.Error))
 		}
 	}
+}
+
+// treeRow is a feature's line in featureTable: its index in the reports
+// and its depth below main.
+type treeRow struct{ i, depth int }
+
+// treeOrder lists rs as trees, in rs's (name) order: each feature whose
+// parent is main, or isn't among rs, then its children under it, depth
+// first. Records whose parents loop (a corrupt pair) have no root; they
+// are listed flat at the end.
+func treeOrder(rs []engine.FeatureReport) []treeRow {
+	idx := map[string]int{}
+	for i, r := range rs {
+		idx[r.Name] = i
+	}
+	kids := map[string][]int{}
+	var roots []int
+	for i, r := range rs {
+		if _, in := idx[r.Parent]; in && r.Parent != r.Name {
+			kids[r.Parent] = append(kids[r.Parent], i)
+		} else {
+			roots = append(roots, i)
+		}
+	}
+	var out []treeRow
+	seen := map[int]bool{}
+	var walk func(i, depth int)
+	walk = func(i, depth int) {
+		if seen[i] {
+			return
+		}
+		seen[i] = true
+		out = append(out, treeRow{i, depth})
+		for _, k := range kids[rs[i].Name] {
+			walk(k, depth+1)
+		}
+	}
+	for _, i := range roots {
+		walk(i, 0)
+	}
+	for i := range rs {
+		walk(i, 0)
+	}
+	return out
 }
 
 // gateCell is a feature's last gate in a word: passed, a failed check
@@ -562,14 +647,18 @@ func gateCell(g *engine.GateSummary) string {
 	return oneLine(out)
 }
 
-// prCell is a feature's public PR and its state, or "-".
+// prCell is a feature's public PR and its state, or "-", then the native
+// GitHub stack the PR is in, if any.
 func prCell(r engine.FeatureReport) string {
-	if r.PublicPR == nil {
-		return "-"
+	out := "-"
+	if r.PublicPR != nil {
+		out = fmt.Sprintf("#%d", *r.PublicPR)
+		if r.PRState != "" {
+			out += " " + oneLine(r.PRState)
+		}
 	}
-	out := fmt.Sprintf("#%d", *r.PublicPR)
-	if r.PRState != "" {
-		out += " " + oneLine(r.PRState)
+	if r.Stack != nil {
+		out += fmt.Sprintf(" stack #%d", *r.Stack)
 	}
 	return out
 }
@@ -583,6 +672,17 @@ func featureShowText(b *strings.Builder, v *engine.FeatureShowResult) {
 		fmt.Fprintf(b, "  branch: %s (deleted), based on %s\n", oneLine(r.Branch), short(r.Base))
 	} else {
 		fmt.Fprintf(b, "  branch: %s at %s, based on %s\n", oneLine(r.Branch), short(r.Head), short(r.Base))
+	}
+	if (r.Parent != "" && r.Parent != feature.MainParent) || len(r.Children) > 0 {
+		kids := "none"
+		if len(r.Children) > 0 {
+			kids = oneLine(strings.Join(r.Children, ", "))
+		}
+		parent := r.Parent
+		if parent == "" {
+			parent = "unknown" // the record couldn't be read
+		}
+		fmt.Fprintf(b, "  stack: on %s; branches on it: %s\n", oneLine(parent), kids)
 	}
 	if len(r.Drift.Files) > 0 {
 		files := make([]string, len(r.Drift.Files))

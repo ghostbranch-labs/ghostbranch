@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "feature restack data",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["feature", "onto", "restacked", "pending", "preview"],
+  "properties": {
+    "feature": { "type": "string" },
+    "onto": { "description": "\"main\" or the feature the feature was moved onto; \"\" when the features above it were restacked", "type": "string" },
+    "restacked": {
+      "description": "each branch moved (or whose record moved), in the order pushed; under --plan, what would be",
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["feature", "parent", "from", "to", "forked_at"],
+        "properties": {
+          "feature": { "type": "string" },
+          "parent": { "description": "\"main\" or the feature it is stacked on now", "type": "string" },
+          "from": { "$ref": "common.schema.json#/$defs/sha" },
+          "to": { "description": "its head now; equal to from when only its record moved", "$ref": "common.schema.json#/$defs/sha" },
+          "forked_at": { "description": "its fork point now; empty on main", "$ref": "common.schema.json#/$defs/shaOrEmpty" }
+        }
+      }
+    },
+    "pending": { "description": "the features not restacked because it stopped, the one it stopped at first; empty when it finished", "type": "array", "items": { "type": "string" } },
+    "preview": { "oneOf": [{ "type": "null" }, { "$ref": "preview.schema.json" }] }
+  }
+}

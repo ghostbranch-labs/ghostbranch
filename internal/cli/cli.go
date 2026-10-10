@@ -175,6 +175,7 @@ type app struct {
 	pairFull       workspace.Pair
 	shadowRemote   string
 	startName      string // feature start's name argument, for next
+	startFrom      string // feature start's --from, for next
 }
 
 // Run executes one command and returns the process exit code.

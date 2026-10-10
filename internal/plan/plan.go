@@ -18,7 +18,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/workflow"
 )
 
-const SchemaVersion = "0.10"
+const SchemaVersion = "0.11"
 
 type Pair struct {
 	Public string `json:"public"`
@@ -139,6 +139,37 @@ type Plan struct {
 	Typed         Typed       `json:"typed"`
 	Leak          Leak        `json:"leak"`
 	CI            CI          `json:"ci"`
+	// Chain is a stack plan's branches, bottom first; nil for a plan of one
+	// feature on main. Feature, Mode, Fingerprint, Publish, Typed and CI
+	// above are Chain[0]'s, so a reader of one-feature plans sees the bottom.
+	Chain []Entry `json:"chain,omitempty"`
+	// PRs is every PR the plan opens, bottom first; apply fills in the
+	// numbers and URLs and records them in the plan file.
+	PRs []StackPR `json:"prs"`
+	// StackNumber is the native GitHub stack apply registered; null when none.
+	StackNumber *int `json:"stack_number"`
+}
+
+// StackPR is one PR a plan opens: the feature, the branch its PR is based
+// on (main, or the public branch of the feature below it), and, once apply
+// opened it, its number and URL (0 and "" until then).
+type StackPR struct {
+	Feature string `json:"feature"`
+	Base    string `json:"base"`
+	Number  int    `json:"number"`
+	URL     string `json:"url"`
+}
+
+// Entry is one branch of a stack plan: what its PR publishes. Its Publish
+// sits on the public commit below it: public main, the published head of
+// the bottom's public parent, or the tip of the entry before it.
+type Entry struct {
+	Feature     string      `json:"feature"`
+	Mode        string      `json:"mode"`
+	Fingerprint Fingerprint `json:"fingerprint"`
+	Publish     Publish     `json:"publish"`
+	Typed       Typed       `json:"typed"`
+	CI          CI          `json:"ci"`
 }
 
 // NewID returns a time-sortable plan ID such as 20261005T123000Z-abcdef.

@@ -14,18 +14,24 @@ import (
 
 // FeatureReport is one feature as the survey sees it.
 type FeatureReport struct {
-	Name      string        `json:"name"`
-	State     feature.State `json:"state"`
-	Branch    string        `json:"branch"`
-	Head      string        `json:"head"` // "" when the branch is gone
-	Base      string        `json:"base"`
-	Drift     Drift         `json:"drift"`
-	Gate      *GateSummary  `json:"gate"`      // nil when never gated
-	PublicPR  *int          `json:"public_pr"` // nil when never published
-	PRState   string        `json:"pr_state"`  // "", open, merged, closed, unknown
-	PlanID    string        `json:"plan_id"`
-	Moved     bool          `json:"moved"` // since publish; false when unpublished; meaningless when the branch is gone (branch_gone reads only PRState)
-	Abandoned bool          `json:"abandoned"`
+	Name   string        `json:"name"`
+	State  feature.State `json:"state"`
+	Branch string        `json:"branch"`
+	Head   string        `json:"head"` // "" when the branch is gone
+	Base   string        `json:"base"`
+	// Parent is the feature it is stacked on, or "main"; "" when the record
+	// couldn't be read. Children are the live features stacked directly on
+	// it, by name, never null. Stack is the native GitHub stack its PR is in.
+	Parent    string       `json:"parent"`
+	Children  []string     `json:"children"`
+	Stack     *int         `json:"stack"`
+	Drift     Drift        `json:"drift"`
+	Gate      *GateSummary `json:"gate"`      // nil when never gated
+	PublicPR  *int         `json:"public_pr"` // nil when never published
+	PRState   string       `json:"pr_state"`  // "", open, merged, closed, unknown
+	PlanID    string       `json:"plan_id"`
+	Moved     bool         `json:"moved"` // since publish; false when unpublished; meaningless when the branch is gone (branch_gone reads only PRState)
+	Abandoned bool         `json:"abandoned"`
 	// Error is why the feature couldn't be surveyed; set only with state
 	// unreadable. feature show returns it as its error.
 	Error string `json:"error,omitempty"`
@@ -43,6 +49,17 @@ type FeatureReport struct {
 	// only for a merged branch_gone feature, the one case
 	// ClosableWithoutConsole reads it.
 	gateForPublished bool
+	// meta is the record as read (nil when it couldn't be), and metaSHA its
+	// metadata commit: sync re-parents a closing feature's children from
+	// them, leased on that commit.
+	meta    *feature.Meta
+	metaSHA string
+	// flagged: sync found its public branch holding changes Ghostbranch
+	// didn't publish (PUBLIC_BRANCH_CHANGED).
+	flagged bool
+	// prBase is the base branch of its public PR as the survey read it; ""
+	// when that couldn't be read or nothing was published.
+	prBase string
 }
 
 // Drift is whether a feature still merges cleanly onto public main.
@@ -131,12 +148,24 @@ func (e *Engine) survey(ctx context.Context, pc *pairCtx, names ...string) ([]Fe
 		out = append(out, r)
 		warns = addWarnings(warns, ws...)
 	}
+	// Children come from every record, not only the surveyed ones, so that
+	// feature show a still names the features stacked on a.
+	recs, err := e.records(ctx, pc)
+	if err != nil && ctx.Err() != nil {
+		return nil, warns, err
+	}
+	for i := range out {
+		out[i].Children = []string{}
+		if err == nil {
+			out[i].Children = childrenOf(recs, out[i].Name, false)
+		}
+	}
 	return out, warns, nil
 }
 
 func (e *Engine) surveyOne(ctx context.Context, pc *pairCtx, name, pm, O string) (FeatureReport, []contract.Warning, error) {
 	var warns []contract.Warning
-	m, _, newer, err := e.readMetaAny(ctx, pc, name)
+	m, metaSHA, newer, err := e.readMetaAny(ctx, pc, name)
 	if err != nil {
 		return FeatureReport{}, nil, err
 	}
@@ -155,6 +184,12 @@ func (e *Engine) surveyOne(ctx context.Context, pc *pairCtx, name, pm, O string)
 	}
 	r := FeatureReport{Name: name, Branch: m.Branch, Head: head, Base: m.Base, Abandoned: m.Abandoned,
 		Drift: Drift{Status: driftNA, Files: []string{}}}
+	r.meta, r.metaSHA = &m, metaSHA
+	r.Parent, r.Children = stackParent(m), []string{}
+	if m.Promoted != nil && m.Promoted.Stack != 0 {
+		n := m.Promoted.Stack
+		r.Stack = &n
+	}
 	if newer {
 		r.unreadable = unreadableNewer
 	}
@@ -165,6 +200,14 @@ func (e *Engine) surveyOne(ctx context.Context, pc *pairCtx, name, pm, O string)
 			job := jobID(name, g.Candidate)
 			r.Gate.Job = &job
 		}
+	}
+	st, err := e.stackState(ctx, pc, name, m)
+	if err != nil {
+		return FeatureReport{}, nil, err
+	}
+	stackStale := m.Gate != nil && (st.broken || !m.Gate.StackFreshFor(parentFeature(m), forkOf(m), st.heads))
+	if r.Gate != nil && stackStale {
+		r.Gate.Fresh = false
 	}
 	if m.Promoted != nil {
 		n := m.Promoted.PublicPR
@@ -177,7 +220,7 @@ func (e *Engine) surveyOne(ctx context.Context, pc *pairCtx, name, pm, O string)
 				Message: fmt.Sprintf("couldn't read public PR #%d of feature %s: %v", n, name, err),
 				Details: map[string]any{"feature": name, "public_pr": n}})
 		case pr.Merged:
-			r.PRState = prMerged
+			r.PRState, r.prBase = prMerged, pr.Base
 		case pr.State == prClosed:
 			r.PRState = prClosed
 		default:
@@ -201,7 +244,7 @@ func (e *Engine) surveyOne(ctx context.Context, pc *pairCtx, name, pm, O string)
 		}
 	}
 	r.State = feature.StateOf(feature.StateInput{Meta: m, BranchExists: exists, Head: head, PublicMain: pm,
-		Overlay: O, PRState: r.PRState, Moved: r.Moved})
+		Overlay: O, PRState: r.PRState, Moved: r.Moved, ParentMoved: st.parentMoved, StackStale: stackStale})
 	// Only a merged branch_gone feature needs to know whether its gate is
 	// for what was published (ClosableWithoutConsole), so only it reads the
 	// gate branch.

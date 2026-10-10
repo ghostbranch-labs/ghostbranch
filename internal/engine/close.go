@@ -33,7 +33,10 @@ type FeatureCloseResult struct {
 	GatePR       *int              `json:"gate_pr"`       // the draft PR closed (by us, or by GitHub as its branch went), nil when none was open
 	NeedsConsole bool              `json:"needs_console"` // closing takes a person at a console (not ClosableWithoutConsole); set under --plan too
 	Approval     *ledger.Approval  `json:"approval"`      // console; nil under --plan, and when none was needed
-	Preview      *preview.Preview  `json:"preview"`
+	// Reparented are the children moved onto main in the push that closed
+	// this feature; never null.
+	Reparented []string         `json:"reparented"`
+	Preview    *preview.Preview `json:"preview"`
 	// GatePRLeftOpen is the gate PR the close couldn't close, 0 when none;
 	// for human output only.
 	GatePRLeftOpen int `json:"-"`
@@ -75,6 +78,17 @@ func (e *Engine) FeatureAbandon(ctx context.Context, p workspace.Pair, name stri
 	if err != nil {
 		return nil, warns, err
 	}
+	// Parking a feature with live children would leave them stacked on a
+	// feature nobody works on: refuse, before --plan too.
+	if !undo && !m.Abandoned {
+		recs, err := e.records(ctx, pc)
+		if err != nil {
+			return nil, warns, err
+		}
+		if kids := childrenOf(recs, name, false); len(kids) > 0 {
+			return nil, warns, hasChildren(name, kids, "abandon")
+		}
+	}
 	changed = m.Abandoned != !undo
 	res = &FeatureAbandonResult{Feature: name, Abandoned: !undo, Changed: changed}
 	if e.DryRun {
@@ -89,7 +103,7 @@ func (e *Engine) FeatureAbandon(ctx context.Context, p workspace.Pair, name stri
 	}
 	m.SchemaVersion = feature.SchemaVersion
 	m.Abandoned = !undo
-	mw, err := e.updateMeta(ctx, pc, m, metaSHA)
+	_, mw, err := e.updateMeta(ctx, pc, m, metaSHA)
 	warns = addWarnings(warns, mw...)
 	if err != nil {
 		return nil, warns, err
@@ -157,6 +171,16 @@ func (e *Engine) FeatureClose(ctx context.Context, p workspace.Pair, name string
 			return nil, warns, err
 		}
 	}
+	// Closing deletes the branch the features stacked on it are built on,
+	// abandoned ones too (Review Focus 2). Another feature whose record
+	// can't be read may be one of them, so that refuses too.
+	recs, err := e.readableRecords(ctx, pc, name, "close")
+	if err != nil {
+		return nil, warns, err
+	}
+	if kids := childrenOf(recs, name, true); len(kids) > 0 {
+		return nil, warns, hasChildren(name, kids, "close")
+	}
 	t, tw, err := e.closeTargets(ctx, pc, r)
 	warns = addWarnings(warns, tw...)
 	if err != nil {
@@ -176,7 +200,7 @@ func (e *Engine) FeatureClose(ctx context.Context, p workspace.Pair, name string
 		}
 		appr = &ledger.Approval{Kind: "console"}
 	}
-	res, cw, err := e.closeWith(ctx, pc, r, t)
+	res, cw, err := e.closeWith(ctx, pc, r, t, closeOpts{})
 	warns = addWarnings(warns, cw...)
 	if res != nil {
 		res.Approval = appr
@@ -195,7 +219,7 @@ func (e *Engine) FeatureClose(ctx context.Context, p workspace.Pair, name string
 // choice), and its head is whatever the mirror has.
 func (e *Engine) unreadableReport(ctx context.Context, pc *pairCtx, name string) (FeatureReport, error) {
 	r := FeatureReport{Name: name, Branch: name, State: feature.StateUnreadable, unreadable: unreadableCorrupt,
-		Drift: Drift{Status: driftUnknown, Files: []string{}}}
+		Drift: Drift{Status: driftUnknown, Files: []string{}}, Children: []string{}}
 	head, ok, err := pc.git.Resolve(ctx, shadowRef(name))
 	if err != nil {
 		return r, internalErr(err, "read feature branch "+name)
@@ -229,17 +253,38 @@ func unreadableWhy(r FeatureReport) string {
 }
 
 // closeFeature deletes one surveyed feature. It asks no console: sync's
-// auto-close calls it only for ClosableWithoutConsole reports. The caller
+// auto-close calls it only for ClosableWithoutConsole reports. kids are
+// the features stacked on it: their records are rewritten onto main
+// (reparentChildren) and pushed in the same atomic push as the deletes, so
+// the close and the re-parenting land together or not at all. The caller
 // records the ledger entry, with Refs = res.Deleted. A non-nil res with an
-// error means the refs were deleted but the gate PR couldn't be closed.
-// The warnings are PLAN_FILE_UNREADABLE from listing the plan files and
-// MIRROR_NOT_UPDATED from the local cleanup.
-func (e *Engine) closeFeature(ctx context.Context, pc *pairCtx, r FeatureReport) (*FeatureCloseResult, []contract.Warning, error) {
+// error means the refs were deleted (and the children moved) but the gate
+// PR couldn't be closed. The warnings are PLAN_FILE_UNREADABLE from listing
+// the plan files and MIRROR_NOT_UPDATED from the local cleanup.
+func (e *Engine) closeFeature(ctx context.Context, pc *pairCtx, r FeatureReport, kids []FeatureReport) (*FeatureCloseResult, []contract.Warning, error) {
 	t, tw, err := e.closeTargets(ctx, pc, r)
 	if err != nil {
 		return nil, tw, err
 	}
-	res, cw, err := e.closeWith(ctx, pc, r, t)
+	rps, err := e.reparentChildren(ctx, pc, r, kids)
+	if err != nil {
+		return nil, tw, err
+	}
+	var o closeOpts
+	names := make([]string, 0, len(rps))
+	for _, rp := range rps {
+		o.also = append(o.also, refUpdate{Ref: remoteMetaRef(rp.name), From: rp.old, To: rp.new, Local: metaRef(rp.name)})
+		names = append(names, rp.name)
+	}
+	if len(rps) > 0 && !e.DryRun {
+		e.progressf("moving %s onto main in the same push that closes %s", strings.Join(names, ", "), r.Name)
+	}
+	res, cw, err := e.closeWith(ctx, pc, r, t, o)
+	// The push landed once res is non-nil outside a dry run, even when the
+	// gate PR then wouldn't close.
+	if res != nil && res.Preview == nil {
+		res.Reparented = append(res.Reparented, names...)
+	}
 	return res, addWarnings(tw, cw...), err
 }
 
@@ -323,13 +368,29 @@ func (e *Engine) closeTargets(ctx context.Context, pc *pairCtx, r FeatureReport)
 	return t, warns, nil
 }
 
-// closeWith deletes t. The deletes go first, in one atomic push: if any ref
-// moved, nothing is deleted and the gate PR stays open. Only then is the
-// gate PR closed and this machine cleaned up; a local cleanup that fails is
-// a MIRROR_NOT_UPDATED warning.
-func (e *Engine) closeWith(ctx context.Context, pc *pairCtx, r FeatureReport, t closeTargets) (*FeatureCloseResult, []contract.Warning, error) {
+// refUpdate is one more ref a close's atomic push moves: To is pushed to
+// Ref, leased on From ("" means the ref must not exist). Local is the
+// mirror's copy, moved to To after the push. To is "" under --plan, where
+// a record is not written.
+type refUpdate struct{ Ref, From, To, Local string }
+
+// closeOpts are what fold and sync add to a close. verb words the
+// moved-ref error ("closed" when empty); also are refs updated in the same
+// atomic push as the deletes, so the close and they land together or not
+// at all.
+type closeOpts struct {
+	verb string
+	also []refUpdate
+}
+
+// closeWith deletes t, and moves o.also, in one atomic push first: if any
+// ref moved, nothing is deleted or moved and the gate PR stays open. Only
+// then is the gate PR closed and this machine cleaned up; a local cleanup
+// that fails is a MIRROR_NOT_UPDATED warning.
+func (e *Engine) closeWith(ctx context.Context, pc *pairCtx, r FeatureReport, t closeTargets, o closeOpts) (*FeatureCloseResult, []contract.Warning, error) {
 	sh := pc.pair.Shadow
-	res := &FeatureCloseResult{Feature: r.Name, State: r.State, Deleted: map[string]string{}, NeedsConsole: !ClosableWithoutConsole(r)}
+	res := &FeatureCloseResult{Feature: r.Name, State: r.State, Deleted: map[string]string{}, NeedsConsole: !ClosableWithoutConsole(r),
+		Reparented: []string{}}
 	pr, err := e.Forge.FindOpenPR(ctx, sh, gateBranch(r.Name), "main")
 	if err != nil {
 		return nil, nil, forgeErr(err, "find the gate PR of feature %s", r.Name)
@@ -344,6 +405,9 @@ func (e *Engine) closeWith(ctx context.Context, pc *pairCtx, r FeatureReport, t 
 		for _, ref := range refs {
 			res.Preview.Add(preview.DeleteRef(sh, ref, t.refs[ref]))
 		}
+		for _, u := range o.also {
+			res.Preview.Add(preview.PushRef(sh, u.Ref, u.From, u.To))
+		}
 		if pr != nil {
 			res.Preview.Add(preview.ClosePR(sh, pr.Number))
 		}
@@ -354,15 +418,23 @@ func (e *Engine) closeWith(ctx context.Context, pc *pairCtx, r FeatureReport, t 
 	}
 
 	opt := gitx.PushOptions{Atomic: true}
-	specs := make([]string, 0, len(refs))
+	specs := make([]string, 0, len(refs)+len(o.also))
 	for _, ref := range refs {
 		opt.Leases = append(opt.Leases, gitx.Lease{Ref: ref, Expect: t.refs[ref]})
 		specs = append(specs, ":"+ref)
 	}
+	for _, u := range o.also {
+		opt.Leases = append(opt.Leases, gitx.Lease{Ref: u.Ref, Expect: u.From})
+		specs = append(specs, u.To+":"+u.Ref)
+	}
+	verb := o.verb
+	if verb == "" {
+		verb = "closed"
+	}
 	if len(specs) > 0 {
-		e.progressf("deleting %d ref(s) of feature %s from %s", len(specs), r.Name, sh)
+		e.progressf("deleting %d ref(s) of feature %s from %s", len(refs), r.Name, sh)
 		if err := e.push(ctx, pc, remoteShadow, opt, specs...); err != nil {
-			return nil, nil, movedErr(r.Name, sh, err)
+			return nil, nil, movedErr(r.Name, sh, verb, err)
 		}
 	}
 	for _, ref := range refs {
@@ -374,6 +446,9 @@ func (e *Engine) closeWith(ctx context.Context, pc *pairCtx, r FeatureReport, t 
 	var warns []contract.Warning
 	for _, local := range t.local {
 		warns = addWarnings(warns, e.deleteMirror(ctx, pc.git, local)...)
+	}
+	for _, u := range o.also {
+		warns = addWarnings(warns, e.updateMirror(ctx, pc.git, u.Local, u.To)...)
 	}
 	for _, path := range t.plans {
 		warns = addWarnings(warns, removeLocal(path)...)
@@ -432,7 +507,8 @@ func afterDeletes(err error) error {
 
 // movedErr turns a lost lease on the delete push into FEATURE_MOVED. Other
 // push errors pass through: the push is atomic, so none deleted anything.
-func movedErr(name, shadow string, err error) error {
+// verb words what was happening to the feature ("closed", "folded into x").
+func movedErr(name, shadow, verb string, err error) error {
 	if contract.From(err).Code != contract.RefMoved {
 		return err
 	}
@@ -451,8 +527,8 @@ func movedErr(name, shadow string, err error) error {
 		what = ref
 	}
 	ce := contract.New(contract.FeatureMoved,
-		"%s changed in %s while feature %s was being closed, so nothing was deleted; look again with ghostbranch feature show %s",
-		what, shadow, name, name).WithField("feature").WithDetails(details)
+		"%s changed in %s while feature %s was being %s, so nothing was deleted; look again with ghostbranch feature show %s",
+		what, shadow, name, verb, name).WithField("feature").WithDetails(details)
 	ce.Err = err
 	return ce
 }
@@ -492,6 +568,9 @@ func closeLedgerSummary(res *FeatureCloseResult) string {
 	s := fmt.Sprintf("closed %s (%s): deleted %d ref(s)", res.Feature, res.State, len(res.Deleted))
 	if res.GatePR != nil {
 		s += fmt.Sprintf("; closed gate PR #%d", *res.GatePR)
+	}
+	if len(res.Reparented) > 0 {
+		s += fmt.Sprintf("; moved %s onto main", strings.Join(res.Reparented, ", "))
 	}
 	return s
 }

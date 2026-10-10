@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.10",
+  "schema_version": "0.11",
   "command": "feature start",
   "ok": true,
   "exit_code": 0,
@@ -7,6 +7,7 @@
     "name": "feat-x",
     "branch": "feat-x",
     "base": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+    "parent": "main",
     "checkout": [
       [
         "git",

@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.10",
+  "schema_version": "0.11",
   "command": "promote",
   "ok": true,
   "exit_code": 0,
@@ -8,6 +8,8 @@
       "feature": "feat-x",
       "feature_head": "d7407485ce685c126afcfc258f0a9eeb0092d776",
       "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+      "parent": "",
+      "base": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
       "overlay": "a1ef151295bf2b53d15b18523ab0184d02178bbd",
       "candidate": "ad7c1d9752519d03b74752a472ecf072aacd2fb7",
       "published_tree": "ef9061717144a4bf03a0230d8f8926d019f2adeb",
@@ -39,7 +41,7 @@
       "preview": null
     },
     "plan": {
-      "schema_version": "0.10",
+      "schema_version": "0.11",
       "id": "20261005T120005Z-0c0d0e",
       "kind": "promote",
       "actor": "human:octo",
@@ -108,13 +110,31 @@
           "unrewritable": [],
           "skipped": []
         }
-      }
+      },
+      "prs": [
+        {
+          "feature": "feat-x",
+          "base": "main",
+          "number": 0,
+          "url": ""
+        }
+      ],
+      "stack_number": null
     },
     "plan_path": "<ROOT>/home/workspaces/default/plans/20261005T120005Z-0c0d0e.json",
     "findings": [],
     "waived": [],
     "applied": null,
-    "preview": null
+    "preview": null,
+    "prs": [
+      {
+        "feature": "feat-x",
+        "base": "main",
+        "number": 0,
+        "url": ""
+      }
+    ],
+    "stack_number": null
   },
   "warnings": [],
   "next": [

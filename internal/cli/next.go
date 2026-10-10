@@ -164,6 +164,12 @@ func (a *app) steps(err error) []contract.Next {
 			return []contract.Next{{Command: a.gb(args...), NeedsHuman: true,
 				Why: "a person first creates the empty private repo and adds it to the token (error.details.steps 1 and 2); then run this to adopt it"}}
 		case contract.PlanStale:
+			if fs := stringList(ce.Details["features"]); len(fs) > 1 {
+				if pub, _ := ce.Details["public"].(string); pub != "" {
+					return []contract.Next{{Command: a.gb(append(append([]string{"promote"}, fs...), "--plan", "--repo", pub)...),
+						Why: "the stack moved since the plan was made; make a new plan for the whole stack, passing again any --mode, --mode-for and --title-for the old plan was made with (this command doesn't carry them)"}}
+				}
+			}
 			f, _ := ce.Details["feature"].(string)
 			pub, _ := ce.Details["public"].(string)
 			mode, _ := ce.Details["mode"].(string)
@@ -183,7 +189,7 @@ func (a *app) steps(err error) []contract.Next {
 		case contract.ShadowBehindError:
 			return []contract.Next{
 				{Command: a.scoped("sync"), Why: "shadow main is behind public main; sync it (fast-forward only)"},
-				{Command: a.startAgain(), Why: "then start the feature again, from the synced shadow main"},
+				{Command: a.startAgain(), Why: startAgainWhy(a.startFrom)},
 			}
 		case contract.SyncDiverged:
 			// A person sorts out the diverged branch (error.what_to_do), but
@@ -228,14 +234,21 @@ func (a *app) steps(err error) []contract.Next {
 			}
 		case contract.FeatureMoved:
 			if f, _ := ce.Details["feature"].(string); f != "" {
-				return []contract.Next{{Command: a.scoped("feature", "show", f),
-					Why: "the feature changed while it was being closed and nothing was deleted; look at it again before closing it"}}
+				why := "the feature changed while it was being closed and nothing was deleted; look at it again before closing it"
+				if a.command == "feature fold" {
+					why = "the feature or its parent changed while it was being folded, and nothing changed; look at it again before folding it"
+				}
+				return []contract.Next{{Command: a.scoped("feature", "show", f), Why: why}}
 			}
 		case contract.ForgeError:
-			// feature close deleted the refs, then couldn't close the gate PR.
+			// feature close or fold deleted the refs, then couldn't close the gate PR.
 			if r, ok := a.result.(*engine.FeatureCloseResult); ok && len(r.Deleted) > 0 {
 				return []contract.Next{{Command: a.scoped("log", "--feature", r.Feature, "--op", "feature close"), NeedsHuman: true,
 					Why: "the feature's refs are deleted and the ledger lists them with their SHAs; a person closes its gate draft PR in the shadow repo on GitHub (error.message names it)"}}
+			}
+			if r, ok := a.result.(*engine.FoldResult); ok && len(r.Deleted) > 0 {
+				return []contract.Next{{Command: a.scoped("log", "--feature", r.Feature, "--op", "feature fold"), NeedsHuman: true,
+					Why: "the fold landed: " + r.Parent + " holds the feature's commits, and the ledger lists its deleted refs with their SHAs; a person closes its gate draft PR in the shadow repo on GitHub (error.message names it)"}}
 			}
 		case contract.CurateInvalid, contract.CurateConflict, contract.CurateTreeMismatch:
 			why := map[contract.Code]string{
@@ -273,6 +286,90 @@ func (a *app) steps(err error) []contract.Next {
 			case "message":
 				return []contract.Next{{Command: withoutFlags(a.again(false), "-m", "--message"), NeedsInput: []string{"--message"},
 					Why: "write the squash commit's message"}}
+			}
+		case contract.FoldNeedsRebase:
+			f, _ := ce.Details["feature"].(string)
+			parent, _ := ce.Details["parent"].(string)
+			forked, _ := ce.Details["forked_at"].(string)
+			if f != "" && parent != "" {
+				return a.rebaseNexts(f, parent, forked, a.scoped("feature", "fold", f), "then fold it again: "+parent+" fast-forwards to it")
+			}
+		case contract.RebaseConflict:
+			// A restack's stop names the command that carries on; a gate's
+			// conflict has no next here.
+			if again, ok := ce.Details["again"].([]string); ok {
+				f, _ := ce.Details["feature"].(string)
+				parent, _ := ce.Details["parent"].(string)
+				up, _ := ce.Details["upstream"].(string)
+				return a.rebaseNexts(f, parent, up, a.scoped(again...),
+					"then run the restack again: it records "+f+" where you put it and goes on with the features above it")
+			}
+		case contract.HasChildren:
+			// close or fold refused beside a record that can't be read.
+			if bad, ok := ce.Details["unreadable"].([]string); ok && len(bad) > 0 {
+				var out []contract.Next
+				for _, b := range bad {
+					out = append(out, contract.Next{Command: a.scoped("feature", "close", b), NeedsHuman: true,
+						Why: "feature " + b + "'s record can't be read, so it may be stacked on this one: a person closes it at the console, or fixes its record"})
+				}
+				if f, _ := ce.Details["feature"].(string); f != "" {
+					op, _ := ce.Details["op"].(string)
+					out = append(out, contract.Next{Command: a.scoped("feature", op, f), Why: "then " + op + " " + f + " again"})
+				}
+				return out
+			}
+			kids, _ := ce.Details["children"].([]string)
+			op, _ := ce.Details["op"].(string)
+			var out []contract.Next
+			for _, k := range kids {
+				out = append(out,
+					contract.Next{Command: a.scoped("feature", "fold", k), Why: "fold " + k + " into its parent: the parent fast-forwards to it and " + k + " closes"},
+					contract.Next{Command: a.scoped("feature", op, k), NeedsHuman: op == "close", Why: "or " + op + " " + k + " too"},
+					contract.Next{Command: a.scoped("feature", "restack", k, "--onto", "main"), Why: "or move " + k + " onto main, dropping its parent's commits"})
+			}
+			return out
+		case contract.ParentRewritten:
+			f, _ := ce.Details["feature"].(string)
+			parent, _ := ce.Details["parent"].(string)
+			if reason, _ := ce.Details["reason"].(string); reason == "parent_gone" && f != "" {
+				return []contract.Next{{Command: a.scoped("feature", "restack", f, "--onto", "main"),
+					Why: "its parent is gone; move it onto main, keeping only its own commits"}}
+			}
+			if parent == "main" && f != "" {
+				// A feature moved onto main that was rebased by hand past
+				// its old fork point.
+				return []contract.Next{{Command: a.scoped("feature", "restack", f, "--onto", "main"),
+					Why: "once " + f + " sits on main's tip, record it there, dropping its old fork point"}}
+			}
+			if parent != "" {
+				return []contract.Next{
+					{Command: a.scoped("feature", "restack", parent), Why: "restack the features above " + parent + " onto its tip, in the shadow repo; a conflict stops it with git steps"},
+					{Command: a.again(false), Why: "then run this again"},
+				}
+			}
+		case contract.NotAStack:
+			// The bottom's published parent merged or moved: gating or
+			// promoting again can't help until sync has recorded it. Never
+			// "promote again", which would refuse the same way.
+			reason, _ := ce.Details["reason"].(string)
+			parent, _ := ce.Details["parent"].(string)
+			switch {
+			case reason == "parent_moved" && ce.Details["public_main_moved"] == true && parent != "":
+				return []contract.Next{{Command: a.scoped("sync"),
+					Why: "once " + parent + "'s public PR merges, sync closes " + parent + " and moves its children onto main; gate and promote them then"}}
+			case reason == "parent_merged", reason == "parent_moved":
+				return []contract.Next{{Command: a.scoped("sync"), Why: "sync records what changed on the public side; then restack and gate what moved"}}
+			case reason == "stale_gate":
+				if f, _ := ce.Details["feature"].(string); f != "" {
+					return []contract.Next{{Command: a.scoped("gate", f),
+						Why: "its gate is missing or stale; gate it, then each branch above it, then promote the stack again"}}
+				}
+			}
+			// The list could be a stack in another order, or with the
+			// branches it left out: promote that one.
+			if want := stringList(ce.Details["want"]); len(want) > 0 {
+				return []contract.Next{{Command: a.scoped(append(append([]string{"promote"}, want...), "--plan")...),
+					Why: "promote the stack from its bottom, each branch right after its parent"}}
 			}
 		case contract.BadFlag:
 			switch ce.Field {
@@ -316,13 +413,27 @@ func (a *app) steps(err error) []contract.Next {
 		}
 	case *engine.GateResult:
 		if r.Preview == nil && r.Checks == feature.ChecksPassed && r.Leak == feature.LeakClean {
-			mode := r.ScannedAs
-			need := modeInputs(mode)
-			if mode != config.ModeSquash && len(r.Commits) > 1 {
-				need = append(need, "--title")
+			switch {
+			case len(r.Children) > 0:
+				// Up the stack: each branch above builds on this gate.
+				for _, c := range r.Children {
+					out = append(out, contract.Next{Command: a.scoped("gate", c),
+						Why: "the gate passed; gate " + c + " next: it is stacked on this one, and its gate builds on this gate"})
+				}
+			case len(r.Chain) > 1:
+				args := append(append([]string{"promote"}, r.Chain...), "--mode", r.ScannedAs, "--plan")
+				out = append(out, contract.Next{Command: a.scoped(args...),
+					Why: "the gate passed; plan the publish of the stack up to here: one PR per branch, each on the branch below, one approval for all. A branch below whose gate is missing or stale stops it with NOT_A_STACK, and next names that branch. A branch with more than one commit needs --title-for <feature>=<title>"})
+			default:
+				// A feature on its own, or one on a published parent.
+				mode := r.ScannedAs
+				need := modeInputs(mode)
+				if mode != config.ModeSquash && len(r.Commits) > 1 {
+					need = append(need, "--title")
+				}
+				out = append(out, contract.Next{Command: a.scoped("promote", r.Feature, "--mode", mode, "--plan"),
+					Why: "the gate passed; plan the publish", NeedsInput: need})
 			}
-			out = append(out, contract.Next{Command: a.scoped("promote", r.Feature, "--mode", mode, "--plan"),
-				Why: "the gate passed; plan the publish", NeedsInput: need})
 		} else if r.Checks == feature.ChecksPending && r.Job != nil {
 			out = append(out, a.waitNext(*r.Job))
 		}
@@ -333,6 +444,24 @@ func (a *app) steps(err error) []contract.Next {
 		case r.Gate != nil && r.Gate.Checks == feature.ChecksPending && r.Gate.Job != nil:
 			out = append(out, a.waitNext(*r.Gate.Job),
 				contract.Next{Command: withoutSwitch(a.again(false), "--detach"), Why: "once the job has passed, promote again; it reuses the green gate"})
+		}
+	case *engine.FoldResult:
+		if r.Preview != nil {
+			out = append(out, contract.Next{Command: a.scoped("feature", "fold", r.Feature), Why: "the preview lists what folding changes; run it to fold"})
+		} else {
+			out = append(out, contract.Next{Command: a.scoped("gate", r.Parent), Why: r.Parent + " now holds " + r.Feature + "'s commits; gate it"})
+		}
+	case *engine.RestackResult:
+		args := []string{"feature", "restack", r.Feature}
+		if r.Onto != "" {
+			args = append(args, "--onto", r.Onto)
+		}
+		switch {
+		case r.Preview != nil:
+			out = append(out, contract.Next{Command: a.scoped(args...), Why: "the preview lists the branches restacking rewrites; run it to restack"})
+		case len(r.Restacked) > 0:
+			out = append(out, contract.Next{Command: a.scoped("gate", r.Restacked[0].Feature),
+				Why: "the restacked branches were rewritten; gate them again from the bottom (and in each checkout: git fetch, then git reset --keep <remote>/<branch>)"})
 		}
 	case *engine.FeatureCloseResult:
 		if r.Preview != nil {
@@ -400,10 +529,21 @@ func (a *app) gateAgain(ce *contract.Error, why string) []contract.Next {
 // the sync before it, with --plan when this run had it.
 func (a *app) startAgain() []string {
 	args := []string{"feature", "start", a.startName}
+	if a.startFrom != "" {
+		args = append(args, "--from", a.startFrom)
+	}
 	if a.dryRun {
 		args = append(args, "--plan")
 	}
 	return a.scoped(args...)
+}
+
+// startAgainWhy is the reason for starting the feature again after a sync.
+func startAgainWhy(from string) string {
+	if from == "" || from == feature.MainParent {
+		return "then start the feature again, from the synced shadow main"
+	}
+	return "then start the feature again on " + from
 }
 
 // syncNext leads next when shadow main is behind public main. Syncing moves
@@ -420,16 +560,23 @@ func (a *app) syncNext() []contract.Next {
 // (which leads with syncNext's sync when shadow main is behind). Sync
 // closes merged, unmoved features, so they share one sync step, folded into
 // that leading sync when there is one; then, by name, the features a person
-// must close and the ones to gate again. Abandoned features need nothing.
+// must close, the ones to gate again, and the stacks to restack (one
+// restack per moved parent). Abandoned features need nothing.
 func (a *app) featureNexts(out []contract.Next, rs []engine.FeatureReport) []contract.Next {
-	newer := a.newerRecords()
+	newer, intoParent := a.newerRecords(), a.mergedIntoParent()
 	var merged []string
 	var rest []contract.Next
+	restacks := map[string]bool{}
 	for _, r := range rs {
 		closeCmd := a.scoped("feature", "close", r.Name)
 		if newer[r.Name] && (r.State == feature.StateMerged || (r.State == feature.StateBranchGone && r.PRState == "merged")) {
 			rest = append(rest, contract.Next{Command: closeCmd, NeedsHuman: true,
 				Why: "its PR merged, but a newer Ghostbranch wrote its record, so this binary won't close it unattended: upgrade ghostbranch on this machine and sync, or a person closes it at the console"})
+			continue
+		}
+		if base, ok := intoParent[r.Name]; ok {
+			rest = append(rest, contract.Next{Command: closeCmd, NeedsHuman: true,
+				Why: "its PR merged into " + base + "'s public branch, not main, so sync left it open: a person checks that branch holds its changes, then closes it"})
 			continue
 		}
 		if engine.ClosableWithoutConsole(r) {
@@ -461,6 +608,21 @@ func (a *app) featureNexts(out []contract.Next, rs []engine.FeatureReport) []con
 				rest = append(rest, contract.Next{Command: a.scoped("gate", r.Name),
 					Why: "no longer merges cleanly onto public main"})
 			}
+		case feature.StateParentStale:
+			// Several branches on one moved parent share its restack.
+			cmd := a.scoped("feature", "restack", r.Parent)
+			why := "the branch below it, " + r.Parent + ", moved since it was started or restacked: restack the branches above " + r.Parent + ", then gate them again"
+			if r.Parent == feature.MainParent {
+				cmd = a.scoped("feature", "restack", r.Name, "--onto", "main")
+				why = "the branch it stood on merged: move its own commits onto main, then gate it again"
+			}
+			if k := shellJoin(cmd); !restacks[k] {
+				restacks[k] = true
+				rest = append(rest, contract.Next{Command: cmd, Why: why})
+			}
+		case feature.StatePublicPRNeedsUpdate:
+			rest = append(rest, contract.Next{Command: a.scoped("feature", "restack", r.Name, "--onto", "main"),
+				Why: "the PR below it merged by squash or rebase, and its open public PR still carries that PR's old commits: restack it onto main and gate it; a person updates the public PR by hand until re-publishing an open PR arrives"})
 		}
 	}
 	if len(merged) > 0 {
@@ -485,6 +647,21 @@ func (a *app) newerRecords() map[string]bool {
 	for _, w := range a.warnings {
 		if f, _ := w.Details["feature"].(string); w.Code == contract.RecordNewer && f != "" {
 			out[f] = true
+		}
+	}
+	return out
+}
+
+// mergedIntoParent maps each feature sync left open because its PR merged
+// into the public branch below it, not main, to that branch: the
+// FEATURE_NOT_CLOSED warnings with reason merged_into_parent_branch.
+func (a *app) mergedIntoParent() map[string]string {
+	out := map[string]string{}
+	for _, w := range a.warnings {
+		f, _ := w.Details["feature"].(string)
+		if w.Code == contract.FeatureNotClosed && w.Details["reason"] == "merged_into_parent_branch" && f != "" {
+			base, _ := w.Details["base"].(string)
+			out[f] = base
 		}
 	}
 	return out
@@ -728,7 +905,7 @@ var valueFlags = map[string]bool{
 	"--repo": true, "--workspace": true, "--shadow": true, "--for": true, "--reason": true, "--timeout": true,
 	"--mode": true, "--message": true, "-m": true, "--curate": true, "--title": true, "--body": true, "--branch": true,
 	"--install": true, "--uninstall": true, "--feature": true, "--op": true, "--actor": true, "--since": true,
-	"--limit": true,
+	"--limit": true, "--from": true, "--onto": true, "--mode-for": true, "--title-for": true,
 }
 
 // shortValue splits "-mVALUE" or "-m=VALUE" into "-m" and VALUE when -m
@@ -916,6 +1093,28 @@ func (a *app) forcePush(f string) string {
 		return "`git push --force-with-lease " + a.shadowRemote + " " + f + "`"
 	}
 	return "`git push --force-with-lease <remote> " + f + "`, <remote> being the shadow repo's remote"
+}
+
+// rebaseNexts are the git steps that rebase branch onto onto by hand in the
+// person's checkout, then the ghostbranch command that carries on. The
+// remote is this checkout's remote for the shadow repo, "shadow" when
+// unknown, as feature start's checkout steps name it.
+func (a *app) rebaseNexts(branch, onto, upstream string, then []string, thenWhy string) []contract.Next {
+	remote := a.shadowRemote
+	if remote == "" {
+		remote = "shadow"
+	}
+	whys := []string{
+		"fetch the shadow repo in your checkout (" + remote + " is its remote there)",
+		"switch to " + branch,
+		"rebase " + branch + "'s own commits onto " + onto + "; you resolve any conflict, Ghostbranch never does",
+		"push the rebased branch, leased so it never overwrites someone else's push",
+	}
+	var out []contract.Next
+	for i, s := range engine.RebaseSteps(remote, branch, onto, upstream) {
+		out = append(out, contract.Next{Command: s, Why: whys[i]})
+	}
+	return append(out, contract.Next{Command: then, Why: thenWhy})
 }
 
 // historyFound is whether the problem was found in an older feature
@@ -1171,4 +1370,22 @@ func (a *app) leakNext(ce *contract.Error) []contract.Next {
 			Why:        "only if a person judges these findings false positives: they review them at their console and give a reason"})
 	}
 	return out
+}
+
+// stringList reads a details value that is a list of strings, as the
+// engine sets it ([]string) or as JSON decodes it ([]any).
+func stringList(v any) []string {
+	switch l := v.(type) {
+	case []string:
+		return l
+	case []any:
+		out := make([]string, 0, len(l))
+		for _, x := range l {
+			if s, ok := x.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return nil
 }

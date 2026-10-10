@@ -1,0 +1,77 @@
+{
+  "schema_version": "0.11",
+  "command": "status",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "public": "acme/widget",
+    "shadow": "acme/widget-shadow",
+    "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+    "shadow_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+    "shadow_behind": false,
+    "overlay": "a1ef151295bf2b53d15b18523ab0184d02178bbd",
+    "overlay_status": "current",
+    "scheduled_sync": false,
+    "features": [
+      {
+        "name": "feat-a",
+        "state": "gate_passed",
+        "branch": "feat-a",
+        "head": "bbd420d3c5e21ee95ebc81464a424a47714e3fb8",
+        "base": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+        "parent": "main",
+        "children": [
+          "feat-b"
+        ],
+        "stack": null,
+        "drift": {
+          "status": "clean",
+          "files": []
+        },
+        "gate": {
+          "checks": "passed",
+          "leak": "clean",
+          "scanned_as": "preserve",
+          "fresh": true,
+          "at": "2026-10-05T12:00:05Z",
+          "job": null
+        },
+        "public_pr": null,
+        "pr_state": "",
+        "plan_id": "",
+        "moved": false,
+        "abandoned": false
+      },
+      {
+        "name": "feat-b",
+        "state": "gate_passed",
+        "branch": "feat-b",
+        "head": "ee3faf62ddad2889d7e08bf0866efbde7c79ee7e",
+        "base": "bbd420d3c5e21ee95ebc81464a424a47714e3fb8",
+        "parent": "feat-a",
+        "children": [],
+        "stack": null,
+        "drift": {
+          "status": "clean",
+          "files": []
+        },
+        "gate": {
+          "checks": "passed",
+          "leak": "clean",
+          "scanned_as": "preserve",
+          "fresh": true,
+          "at": "2026-10-05T12:00:10Z",
+          "job": null
+        },
+        "public_pr": null,
+        "pr_state": "",
+        "plan_id": "",
+        "moved": false,
+        "abandoned": false
+      }
+    ]
+  },
+  "warnings": [],
+  "next": [],
+  "error": null
+}

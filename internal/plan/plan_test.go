@@ -180,3 +180,20 @@ func TestSaveWritesAPrivateFile(t *testing.T) {
 		t.Fatalf("mode %v %v, want 0600", fi.Mode().Perm(), err)
 	}
 }
+
+func TestAStackPlanRoundTrips(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	n := 4
+	p := plan.Plan{SchemaVersion: plan.SchemaVersion, ID: "20261010T120000Z-abcdef", Kind: "promote", Feature: "a",
+		Chain:       []plan.Entry{{Feature: "a", Mode: "squash"}, {Feature: "b", Mode: "preserve"}},
+		PRs:         []plan.StackPR{{Feature: "a", Base: "main", Number: 1, URL: "u1"}, {Feature: "b", Base: "a", Number: 2, URL: "u2"}},
+		StackNumber: &n}
+	if _, err := plan.Save(dir, p); err != nil {
+		t.Fatal(err)
+	}
+	got, _, err := plan.Load(dir, p.ID)
+	if err != nil || len(got.Chain) != 2 || got.Chain[1].Feature != "b" || got.PRs[1].Base != "a" || got.StackNumber == nil || *got.StackNumber != 4 {
+		t.Fatalf("loaded %+v %v", got, err)
+	}
+}

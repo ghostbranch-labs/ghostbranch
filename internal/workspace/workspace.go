@@ -18,7 +18,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 )
 
-const SchemaVersion = "0.10"
+const SchemaVersion = "0.11"
 
 // Pair is a public repo and its shadow repo, as owner/name.
 type Pair struct {

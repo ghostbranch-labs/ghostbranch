@@ -1,0 +1,52 @@
+{
+  "schema_version": "0.11",
+  "command": "promote",
+  "ok": false,
+  "exit_code": 2,
+  "data": {
+    "gate": null,
+    "plan": null,
+    "plan_path": "",
+    "findings": [],
+    "waived": [],
+    "applied": null,
+    "preview": null,
+    "prs": [],
+    "stack_number": null
+  },
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "promote",
+        "feat-a",
+        "feat-b",
+        "--plan",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "promote the stack from its bottom, each branch right after its parent",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
+  "error": {
+    "code": "NOT_A_STACK",
+    "message": "feat-b's parent feat-a isn't public and isn't in the list: promote the stack from its bottom, each branch right after its parent",
+    "field": "features",
+    "retryable": false,
+    "details": {
+      "feature": "feat-b",
+      "features": [
+        "feat-b"
+      ],
+      "parent": "feat-a",
+      "reason": "parent_not_public",
+      "want": [
+        "feat-a",
+        "feat-b"
+      ]
+    }
+  }
+}

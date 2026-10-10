@@ -29,6 +29,7 @@ func TestEveryCodeHasItsExitCode(t *testing.T) {
 		contract.UpgradeNeeded: 1, contract.FeatureMoved: 4, contract.ShadowBehindError: 4,
 		contract.Interrupted: 1, contract.JobNotFound: 2, contract.JobStale: 4,
 		contract.LoginExpired: 1, contract.LoginUnavailable: 1, contract.TokenPermissionMissing: 1, contract.DoctorFailed: 1,
+		contract.FoldNeedsRebase: 4, contract.HasChildren: 4, contract.NotAStack: 2, contract.ParentRewritten: 4,
 	}
 	all := contract.AllCodes()
 	if len(all) != len(want) {
@@ -64,7 +65,7 @@ func TestSuccessEnvelopeShape(t *testing.T) {
 	if err := json.Unmarshal(b, &m); err != nil {
 		t.Fatal(err)
 	}
-	if m["schema_version"] != "0.10" || m["ok"] != true || m["exit_code"] != float64(0) ||
+	if m["schema_version"] != "0.11" || m["ok"] != true || m["exit_code"] != float64(0) ||
 		m["command"] != "sync" || m["error"] != nil {
 		t.Fatalf("bad envelope: %s", b)
 	}
@@ -135,7 +136,7 @@ func TestSubProject4CodesAreRegistered(t *testing.T) {
 	if err != nil || !es[0].NeedsHuman || !strings.Contains(es[0].WhatToDo, "--adopt") {
 		t.Fatalf("SHADOW_CREATE_DENIED doc: %+v %v", es, err)
 	}
-	if contract.SchemaVersion != "0.10" {
+	if contract.SchemaVersion != "0.11" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 }
@@ -158,7 +159,7 @@ func TestSubProject5aCodesAreRegistered(t *testing.T) {
 	if es, _ := contract.Explain("AUTHOR_UNMAPPED"); !es[0].NeedsHuman {
 		t.Fatal("AUTHOR_UNMAPPED needs a person: only they may edit the overlay config's author_map")
 	}
-	if contract.SchemaVersion != "0.10" {
+	if contract.SchemaVersion != "0.11" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 }
@@ -174,7 +175,7 @@ func TestSubProject5bCodesAreRegistered(t *testing.T) {
 			t.Fatalf("%s is not documented: %+v %v", c, es, err)
 		}
 	}
-	if contract.SchemaVersion != "0.10" {
+	if contract.SchemaVersion != "0.11" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 }
@@ -202,8 +203,11 @@ func TestFeatureNotClosedIsRegistered(t *testing.T) {
 	}
 	es, err := contract.Explain("FEATURE_NOT_CLOSED")
 	if err != nil || len(es) != 1 || es[0].Kind != contract.KindWarning ||
-		es[0].Summary != "Sync didn't close a merged feature: the close failed, or sync couldn't survey the features and so closed none." ||
-		!strings.HasPrefix(es[0].WhatToDo, "If details.deleted is set, the feature is gone: close its gate draft PR in the shadow repo by hand. Otherwise run ghostbranch feature show <name>, then feature close <name>.") ||
+		es[0].Summary != "Sync didn't close a merged feature: the close failed, sync couldn't survey the features and so closed none, another feature's record couldn't be read, so sync left the merged features open, or its PR merged into the public branch below it, not main." ||
+		!strings.Contains(es[0].WhatToDo, "With details.reason merged_into_parent_branch") ||
+		!strings.HasPrefix(es[0].WhatToDo, "If details.deleted is set, the feature is gone: close its gate draft PR in the shadow repo by hand.") ||
+		!strings.Contains(es[0].WhatToDo, "Otherwise run ghostbranch feature show <name>, then feature close <name>.") ||
+		!strings.Contains(es[0].WhatToDo, "With details.unreadable") ||
 		!strings.Contains(es[0].WhatToDo, "With no details.feature") {
 		t.Fatalf("FEATURE_NOT_CLOSED is not documented: %+v %v", es, err)
 	}
@@ -280,7 +284,7 @@ func TestSubProject5cCodesAreRegistered(t *testing.T) {
 			t.Fatalf("%s is not documented: %+v %v", c, es, err)
 		}
 	}
-	if contract.SchemaVersion != "0.10" {
+	if contract.SchemaVersion != "0.11" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 }
@@ -296,7 +300,7 @@ func TestSubProject5d1CodesAreRegistered(t *testing.T) {
 			t.Fatalf("%s is not documented: %+v %v", w, es, err)
 		}
 	}
-	if contract.SchemaVersion != "0.10" {
+	if contract.SchemaVersion != "0.11" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 	if es, _ := contract.Explain(string(contract.Locked)); !strings.Contains(es[0].WhatToDo, "nothing to delete") ||
@@ -328,10 +332,10 @@ func TestExplainSteersAnInterruptedPublishToApply(t *testing.T) {
 
 func TestNewer(t *testing.T) {
 	t.Parallel()
-	for v, want := range map[string]bool{"0.10": false, "0.9": false, "0.7": false, "0.11": true, "0.100": true, "1.0": true,
+	for v, want := range map[string]bool{"0.11": false, "0.10": false, "0.9": false, "0.7": false, "0.12": true, "0.100": true, "1.0": true,
 		"": false, "x": false, "0.8.1": false, "0.4": false, "0.2": false,
 		// A malformed version is never newer: it would lock users out.
-		"+1.0": false, "1.-5": false, "0.+9": false, " 0.10": false, "0.10 ": false, "1.": false, ".9": false} {
+		"+1.0": false, "1.-5": false, "0.+9": false, " 0.11": false, "0.11 ": false, "1.": false, ".9": false} {
 		if got := contract.Newer(v); got != want {
 			t.Errorf("Newer(%q) = %v, want %v", v, got, want)
 		}
@@ -342,7 +346,7 @@ func TestNewer(t *testing.T) {
 // and the user docs are generated from them, and agents act on them.
 func TestSubProject61Contract(t *testing.T) {
 	t.Parallel()
-	if contract.SchemaVersion != "0.10" {
+	if contract.SchemaVersion != "0.11" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 	for c, s := range map[contract.Code]string{contract.LoginExpired: "LOGIN_EXPIRED", contract.LoginUnavailable: "LOGIN_UNAVAILABLE",
@@ -434,7 +438,7 @@ func TestNewerRecord(t *testing.T) {
 
 func TestSubProject5d2Contract(t *testing.T) {
 	t.Parallel()
-	if contract.SchemaVersion != "0.10" {
+	if contract.SchemaVersion != "0.11" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 	for _, c := range []contract.WarningCode{contract.LedgerNotWritten, contract.SyncPushFailed, contract.PlanFileUnreadable} {
@@ -491,5 +495,79 @@ func TestGuardUnsupportedAndWaiverUnknownTexts(t *testing.T) {
 	}
 	if es, _ := contract.Explain("GUARD_UNSUPPORTED"); !strings.Contains(es[0].WhatToDo, "ignore pre-push and pre-push.ghostbranch-* in the hooks directory") {
 		t.Errorf("GUARD_UNSUPPORTED what to do: %q", es[0].WhatToDo)
+	}
+}
+
+// The 6.1a codes and their explain texts are pinned word for word: the guide
+// is generated from them, and agents act on them.
+func TestSubProject61aContract(t *testing.T) {
+	t.Parallel()
+	if contract.SchemaVersion != "0.11" {
+		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
+	}
+	for c, want := range map[contract.Code]struct {
+		s    string
+		exit int
+	}{
+		contract.FoldNeedsRebase: {"FOLD_NEEDS_REBASE", contract.ExitConflict},
+		contract.HasChildren:     {"HAS_CHILDREN", contract.ExitConflict},
+		contract.NotAStack:       {"NOT_A_STACK", contract.ExitUsage},
+		contract.ParentRewritten: {"PARENT_REWRITTEN", contract.ExitConflict},
+	} {
+		if string(c) != want.s || c.Exit() != want.exit || !slices.Contains(contract.AllCodes(), c) {
+			t.Errorf("%s: string %q, exit %d (want %d), registered %v", want.s, c, c.Exit(), want.exit, slices.Contains(contract.AllCodes(), c))
+		}
+	}
+	type doc struct {
+		summary, whatToDo string
+		causes            []string
+	}
+	for code, want := range map[string]doc{
+		"FOLD_NEEDS_REBASE": {
+			summary: "feature fold only fast-forwards, and the parent has moved on since the feature was branched from it, so nothing was folded.",
+			causes: []string{"commits were pushed to the parent after the feature was started from it or last restacked onto it",
+				"the parent was rewritten (rebased, amended or force-pushed)"},
+			whatToDo: "Bring the feature up to its parent's tip, then fold again. ghostbranch feature restack <parent> does it, and stops with git steps on a conflict. Or rebase it yourself (error.details.steps): git fetch shadow && git switch <feature> && git rebase --onto shadow/<parent> <forked_at> <feature>, resolve any conflicts, then git push --force-with-lease shadow <feature>. error.details.parent and error.details.forked_at name them. Ghostbranch never resolves conflicts.",
+		},
+		"HAS_CHILDREN": {
+			summary:  "The feature has children stacked on it (error.details.children), so it was not abandoned or closed: they would be left on a deleted parent.",
+			whatToDo: "Deal with each child in error.details.children first: fold it into this feature (ghostbranch feature fold <child>), abandon it (for abandon: ghostbranch feature abandon <child>) or close it (for close: ghostbranch feature close <child>), or move it onto main (ghostbranch feature restack <child> --onto main). An abandoned child blocks close, not abandon. Then run the command again.",
+		},
+		"NOT_A_STACK": {
+			summary: "The features given to promote aren't a stack that can be published together; error.details.reason says why and error.details.feature names where.",
+			causes: []string{
+				"duplicate: a feature is listed twice",
+				"order: the features aren't listed bottom first",
+				"gap: a listed feature's parent is neither the feature listed just below it nor already public (for example promote a c, leaving out b)",
+				"parent_not_public: the bottom feature's parent is neither main nor already published",
+				"parent_merged: the bottom's published parent merged; run sync",
+				"parent_moved: the bottom's published parent changed since it was published",
+				"stale_gate: a listed feature has no fresh, green gate; a gate goes stale when its own branch or any branch below it moves",
+			},
+			whatToDo: "Run ghostbranch status to see the stack. List the features bottom first, starting from one whose parent is main or already published, with none left out. Gate each one that needs it (ghostbranch gate <feature>, bottom up), then run promote again.",
+		},
+		"PARENT_REWRITTEN": {
+			summary:  "The feature's parent no longer contains the commit the feature was branched from (forked_at): the parent was rebased, amended or force-pushed.",
+			whatToDo: "Run ghostbranch feature restack <parent> to replay the feature's own commits onto the parent's new tip (it stops with git steps on a conflict), or ghostbranch feature restack <feature> --onto main to move it off the parent. Then run the command again. error.details.parent and error.details.forked_at name them.",
+		},
+	} {
+		es, err := contract.Explain(code)
+		if err != nil || len(es) != 1 {
+			t.Fatalf("explain %s = %+v %v", code, es, err)
+		}
+		e := es[0]
+		if e.Kind != contract.KindError || e.Summary != want.summary || e.WhatToDo != want.whatToDo ||
+			!slices.Equal(e.Causes, want.causes) || e.NeedsHuman {
+			t.Errorf("%s doc = %+v", code, e)
+		}
+	}
+	if contract.PublicBranchChanged != "PUBLIC_BRANCH_CHANGED" || !slices.Contains(contract.AllWarnings(), contract.PublicBranchChanged) {
+		t.Errorf("PublicBranchChanged = %q", contract.PublicBranchChanged)
+	}
+	es, err := contract.Explain("PUBLIC_BRANCH_CHANGED")
+	if err != nil || len(es) != 1 || es[0].Kind != contract.KindWarning ||
+		es[0].Summary != "A stacked feature's public branch holds commits Ghostbranch didn't publish, so sync didn't adopt them." ||
+		es[0].WhatToDo != "Look at the PR on GitHub: someone pushed to its branch. Ghostbranch never adopts a change it didn't scan; re-gate and promote again, or remove the foreign commits." {
+		t.Errorf("PUBLIC_BRANCH_CHANGED doc = %+v %v", es, err)
 	}
 }

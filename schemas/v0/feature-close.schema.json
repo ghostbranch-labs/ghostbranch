@@ -3,12 +3,12 @@
   "title": "feature close data",
   "type": "object",
   "additionalProperties": false,
-  "required": ["feature", "state", "deleted", "gate_pr", "needs_console", "approval", "preview"],
+  "required": ["feature", "state", "deleted", "gate_pr", "needs_console", "approval", "reparented", "preview"],
   "properties": {
     "feature": { "type": "string" },
     "state": {
       "description": "the state the feature was closed from",
-      "enum": ["draft", "in_review", "gate_passed", "published", "merged", "merged_moved", "pr_closed", "branch_gone", "abandoned", "unreadable"]
+      "enum": ["draft", "in_review", "gate_passed", "published", "merged", "merged_moved", "pr_closed", "branch_gone", "abandoned", "unreadable", "parent_stale", "public_pr_needs_update"]
     },
     "deleted": {
       "description": "each shadow-repo ref deleted, with the SHA it pointed at; empty under --plan",
@@ -25,6 +25,7 @@
         { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "console" } } }
       ]
     },
+    "reparented": { "description": "children moved onto main in the same atomic push that closed this feature", "type": "array", "items": { "type": "string" } },
     "preview": { "oneOf": [{ "type": "null" }, { "$ref": "preview.schema.json" }] }
   }
 }

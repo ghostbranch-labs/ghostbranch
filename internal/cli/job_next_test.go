@@ -454,3 +454,86 @@ func TestARefusedLoginOffersLogin(t *testing.T) {
 		t.Fatalf("next = %+v", next)
 	}
 }
+
+// The stack errors and states each name the one step that moves the stack
+// on.
+func TestNextForStacks(t *testing.T) {
+	t.Parallel()
+	repo := []string{"--repo", "acme/widget"}
+	cmd := func(args ...string) []string { return append(append([]string{"ghostbranch"}, args...), repo...) }
+	for _, tc := range []struct {
+		name string
+		err  error
+		want []string
+	}{
+		// A feature moved onto main that was rebased by hand past its old
+		// fork point records where it sits now.
+		{"fork point lost on main", contract.New(contract.ParentRewritten, "x").WithDetails(map[string]any{
+			"feature": "feat-b", "parent": "main", "forked_at": "abc", "reason": "fork_point_lost"}),
+			cmd("feature", "restack", "feat-b", "--onto", "main")},
+		{"not a stack, stale gate", contract.New(contract.NotAStack, "x").WithDetails(map[string]any{
+			"reason": "stale_gate", "feature": "feat-a", "features": []string{"feat-a", "feat-b"}}),
+			cmd("gate", "feat-a")},
+		{"not a stack, want", contract.New(contract.NotAStack, "x").WithDetails(map[string]any{
+			"reason": "order", "feature": "feat-a", "features": []string{"feat-b", "feat-a"}, "want": []string{"feat-a", "feat-b"}}),
+			cmd("promote", "feat-a", "feat-b", "--plan")},
+		{"not a stack, parent merged", contract.New(contract.NotAStack, "x").WithDetails(map[string]any{
+			"reason": "parent_merged", "feature": "feat-b", "parent": "feat-a"}),
+			cmd("sync")},
+		{"a stack plan went stale", contract.New(contract.PlanStale, "x").WithDetails(map[string]any{
+			"feature": "feat-a", "public": "acme/widget", "mode": "squash", "moved": []string{"public_main"}, "features": []string{"feat-a", "feat-b"}}),
+			[]string{"ghostbranch", "promote", "feat-a", "feat-b", "--plan", "--repo", "acme/widget"}},
+	} {
+		a := testApp("promote", "promote")
+		if next := a.next(tc.err); len(next) != 1 || !slices.Equal(next[0].Command, tc.want) {
+			t.Errorf("%s: next = %+v, want %v", tc.name, next, tc.want)
+		}
+	}
+	a := testApp("status", "status")
+	next := a.featureNexts(nil, []engine.FeatureReport{
+		{Name: "feat-b", State: feature.StateParentStale, Parent: "feat-a"},
+		{Name: "feat-c", State: feature.StateParentStale, Parent: "feat-a"},
+		{Name: "feat-d", State: feature.StateParentStale, Parent: "main"},
+		{Name: "feat-e", State: feature.StatePublicPRNeedsUpdate, Parent: "main"},
+	})
+	want := [][]string{
+		cmd("feature", "restack", "feat-a"),
+		cmd("feature", "restack", "feat-d", "--onto", "main"),
+		cmd("feature", "restack", "feat-e", "--onto", "main"),
+	}
+	if len(next) != len(want) {
+		t.Fatalf("featureNexts = %+v, want %v", next, want)
+	}
+	for i := range want {
+		if !slices.Equal(next[i].Command, want[i]) {
+			t.Errorf("featureNexts[%d] = %v, want %v", i, next[i].Command, want[i])
+		}
+	}
+}
+
+// A stale stack plan's re-plan can't carry the old plan's per-branch
+// flags: its why says to pass them again.
+func TestStackPlanStaleNextSaysToPassTheFlagsAgain(t *testing.T) {
+	t.Parallel()
+	a := testApp("apply", "apply")
+	next := a.next(contract.New(contract.PlanStale, "x").WithDetails(map[string]any{
+		"feature": "feat-a", "public": "acme/widget", "mode": "squash", "moved": []string{"public_main"}, "features": []string{"feat-a", "feat-b"}}))
+	if len(next) != 1 || !strings.Contains(next[0].Why, "--mode, --mode-for and --title-for") {
+		t.Fatalf("next = %+v", next)
+	}
+}
+
+// Sync leaves a feature whose PR merged into the branch below it open; next
+// hands its close to a person, who checks that branch first.
+func TestNextForAFeatureMergedIntoItsParentsBranch(t *testing.T) {
+	t.Parallel()
+	a := testApp("sync", "sync")
+	a.warnings = []contract.Warning{{Code: contract.FeatureNotClosed,
+		Details: map[string]any{"feature": "feat-b", "reason": "merged_into_parent_branch", "base": "feat-a"}}}
+	a.result = &engine.SyncResult{Surveyed: true, Attention: []engine.FeatureReport{{Name: "feat-b", State: feature.StateMerged, PRState: "merged"}}}
+	next := a.next(nil)
+	if len(next) != 1 || !slices.Equal(next[0].Command, []string{"ghostbranch", "feature", "close", "feat-b", "--repo", "acme/widget"}) ||
+		!next[0].NeedsHuman || !strings.Contains(next[0].Why, "feat-a's public branch") {
+		t.Fatalf("next = %+v", next)
+	}
+}

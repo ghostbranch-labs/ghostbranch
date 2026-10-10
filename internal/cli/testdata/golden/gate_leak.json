@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.10",
+  "schema_version": "0.11",
   "command": "gate",
   "ok": false,
   "exit_code": 3,
@@ -7,6 +7,8 @@
     "feature": "feat-x",
     "feature_head": "4d1d49322a3efd3fda9f092af6dd0ddce5b0a824",
     "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+    "parent": "",
+    "base": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
     "overlay": "a1ef151295bf2b53d15b18523ab0184d02178bbd",
     "candidate": "57eead8fac22b0b21ee3e5d3c2813c032893e602",
     "published_tree": "b0c171b27508197c71fd9aaf45002e46841f61e2",

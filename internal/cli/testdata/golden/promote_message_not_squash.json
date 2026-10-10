@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.10",
+  "schema_version": "0.11",
   "command": "promote",
   "ok": false,
   "exit_code": 2,
@@ -10,7 +10,9 @@
     "findings": [],
     "waived": [],
     "applied": null,
-    "preview": null
+    "preview": null,
+    "prs": [],
+    "stack_number": null
   },
   "warnings": [],
   "next": [

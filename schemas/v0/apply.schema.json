@@ -3,8 +3,10 @@
   "title": "apply data",
   "type": "object",
   "additionalProperties": false,
-  "required": ["plan_id", "public_branch", "public_pr", "pr_url", "resumed", "approval", "waived", "preview"],
+  "required": ["plan_id", "public_branch", "public_pr", "pr_url", "resumed", "approval", "waived", "preview", "prs", "stack_number"],
   "properties": {
+    "prs": { "description": "the chain's PRs, bottom first", "type": "array", "items": { "$ref": "common.schema.json#/$defs/stackPR" } },
+    "stack_number": { "$ref": "common.schema.json#/$defs/stackNumber" },
     "plan_id": { "$ref": "common.schema.json#/$defs/planId" },
     "public_branch": { "type": "string" },
     "public_pr": { "type": "integer", "minimum": 0 },

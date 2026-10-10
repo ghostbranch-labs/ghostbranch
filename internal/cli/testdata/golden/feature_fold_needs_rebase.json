@@ -1,0 +1,107 @@
+{
+  "schema_version": "0.11",
+  "command": "feature fold",
+  "ok": false,
+  "exit_code": 4,
+  "data": {},
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "git",
+        "fetch",
+        "shadow"
+      ],
+      "why": "fetch the shadow repo in your checkout (shadow is its remote there)",
+      "needs_human": false,
+      "needs_input": []
+    },
+    {
+      "command": [
+        "git",
+        "switch",
+        "feat-y"
+      ],
+      "why": "switch to feat-y",
+      "needs_human": false,
+      "needs_input": []
+    },
+    {
+      "command": [
+        "git",
+        "rebase",
+        "--onto",
+        "shadow/feat-x",
+        "d7407485ce685c126afcfc258f0a9eeb0092d776",
+        "feat-y"
+      ],
+      "why": "rebase feat-y's own commits onto feat-x; you resolve any conflict, Ghostbranch never does",
+      "needs_human": false,
+      "needs_input": []
+    },
+    {
+      "command": [
+        "git",
+        "push",
+        "--force-with-lease",
+        "shadow",
+        "feat-y"
+      ],
+      "why": "push the rebased branch, leased so it never overwrites someone else's push",
+      "needs_human": false,
+      "needs_input": []
+    },
+    {
+      "command": [
+        "ghostbranch",
+        "feature",
+        "fold",
+        "feat-y",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "then fold it again: feat-x fast-forwards to it",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
+  "error": {
+    "code": "FOLD_NEEDS_REBASE",
+    "message": "feat-x has moved on since feat-y was started from it (it is at 4655f2ffddef, which feat-y doesn't contain), so fold can't fast-forward it; rebase feat-y onto feat-x yourself (details.steps), push it, and fold again. Ghostbranch never rebases or resolves conflicts",
+    "field": "feature",
+    "retryable": false,
+    "details": {
+      "feature": "feat-y",
+      "forked_at": "d7407485ce685c126afcfc258f0a9eeb0092d776",
+      "parent": "feat-x",
+      "parent_head": "4655f2ffddef92a3a3f79ec5abcdd230590b2bed",
+      "steps": [
+        [
+          "git",
+          "fetch",
+          "shadow"
+        ],
+        [
+          "git",
+          "switch",
+          "feat-y"
+        ],
+        [
+          "git",
+          "rebase",
+          "--onto",
+          "shadow/feat-x",
+          "d7407485ce685c126afcfc258f0a9eeb0092d776",
+          "feat-y"
+        ],
+        [
+          "git",
+          "push",
+          "--force-with-lease",
+          "shadow",
+          "feat-y"
+        ]
+      ]
+    }
+  }
+}

@@ -1,11 +1,14 @@
 package engine
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/config"
@@ -23,7 +26,14 @@ import (
 )
 
 type PromoteOptions struct {
-	Feature  string
+	Feature string
+	// Features is a stack, bottom first: promote a b c. One feature is the
+	// same as Feature. Feature is always Features[0] once validated.
+	Features []string
+	// Modes and Titles set one branch's history mode and PR title in a
+	// stack promote (--mode-for, --title-for), keyed by feature.
+	Modes    map[string]string
+	Titles   map[string]string
 	Mode     string // squash, preserve or curated; "" means promote.default_mode
 	Message  string
 	Title    string
@@ -44,6 +54,10 @@ type PromoteResult struct {
 	Waived   []WaivedFinding  `json:"waived"`
 	Applied  *ApplyResult     `json:"applied"`
 	Preview  *preview.Preview `json:"preview"`
+	// PRs is every PR the plan opens, bottom first, with numbers once
+	// applied; StackNumber is the native GitHub stack, null when none.
+	PRs         []plan.StackPR `json:"prs"`
+	StackNumber *int           `json:"stack_number"`
 }
 
 const editorTemplate = "\n# Write the commit message for the public squash commit of feature %q.\n" +
@@ -60,7 +74,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	defer func() {
 		summary := ""
 		if res != nil && res.Applied != nil && err == nil {
-			summary = fmt.Sprintf("published %s as PR #%d", res.Applied.PublicBranch, res.Applied.PublicPR)
+			summary = publishSummary(res.Applied)
 		} else if res != nil && res.Plan != nil {
 			summary = "plan " + res.Plan.ID + " saved"
 		}
@@ -97,7 +111,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	if branch == "" {
 		branch = opt.Feature
 	}
-	res = &PromoteResult{Findings: []leak.Finding{}, Waived: []WaivedFinding{}}
+	res = &PromoteResult{Findings: []leak.Finding{}, Waived: []WaivedFinding{}, PRs: []plan.StackPR{}}
 	pc, err := e.open(ctx, "promote", p, true)
 	if err != nil {
 		return res, nil, err
@@ -121,6 +135,13 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 			Message: fmt.Sprintf("promote.author_map is set but not used: promote.author_email is %s; set author_email: map to use it, or remove the map",
 				cfg.Promote.AuthorEmail),
 			Details: map[string]any{"key": "promote.author_map"}})
+	}
+	// A list of several features, or one stacked on another feature, is a
+	// stack: one plan for every PR, each on the branch below.
+	if len(opt.Features) > 1 || e.stacked(ctx, pc, opt.Feature) {
+		var sw []contract.Warning
+		planID, sw, err = e.promoteStack(ctx, pc, cfg, O, opt, res)
+		return res, addWarnings(warns, sw...), err
 	}
 	if err := curateFlags(mode, opt.Curate); err != nil {
 		return res, warns, err
@@ -151,10 +172,12 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	}
 	// A preserved history of several commits has no one message to take the
 	// PR title from: ask for it before any CI runs.
+	// The feature's own commits, as its gate counts them: forked_at..head
+	// for one moved onto main that keeps its fork point.
 	if mode == config.ModePreserve && strings.TrimSpace(opt.Title) == "" {
-		sources, err := g.SourceCommits(ctx, pm, head)
+		sources, err := ownSources(ctx, g, opt.Feature, m, head, pm)
 		if err != nil {
-			return res, warns, internalErr(err, "list the feature's commits")
+			return res, warns, err
 		}
 		if len(sources) > 1 {
 			return res, warns, contract.New(contract.MissingInput, "this feature has %d commits, so its PR needs a title: pass --title", len(sources)).WithField("title")
@@ -165,9 +188,9 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 		if len(opt.Groups) > 1 && strings.TrimSpace(opt.Title) == "" {
 			return res, warns, contract.New(contract.MissingInput, "the --curate file has %d groups, so the PR needs a title: pass --title", len(opt.Groups)).WithField("title")
 		}
-		sources, err := g.SourceCommits(ctx, pm, head)
+		sources, err := ownSources(ctx, g, opt.Feature, m, head, pm)
 		if err != nil {
-			return res, warns, internalErr(err, "list the feature's commits")
+			return res, warns, err
 		}
 		if _, err := ResolveGroups(opt.Groups, sources); err != nil {
 			return res, warns, err
@@ -175,7 +198,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	}
 
 	names := guardNames(pc)
-	fresh, T2, entries, guardRep := e.reusableGate(ctx, g, cfg, m, opt.Feature, head, pm, O, names)
+	fresh, T2, entries, guardRep := e.reusableGate(ctx, pc, cfg, m, opt.Feature, head, pm, pm, O, names)
 	var commits []feature.GateCommit
 	// A pending gate job for exactly these inputs is waited on, not gated
 	// again; --detach returns it at once. A dry run never reuses one:
@@ -208,7 +231,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 			if m, _, err = e.readMeta(ctx, pc, opt.Feature); err != nil {
 				return res, warns, err
 			}
-			fresh, T2, entries, guardRep = e.reusableGate(ctx, g, cfg, m, opt.Feature, head, pm, O, names)
+			fresh, T2, entries, guardRep = e.reusableGate(ctx, pc, cfg, m, opt.Feature, head, pm, pm, O, names)
 		}
 	}
 	switch {
@@ -217,7 +240,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 		if err != nil {
 			return res, warns, err
 		}
-		res.Gate = &GateResult{Feature: opt.Feature, FeatureHead: head, PublicMain: pm, Overlay: O,
+		res.Gate = &GateResult{Feature: opt.Feature, FeatureHead: head, PublicMain: pm, Parent: m.Gate.Parent, Base: cmp.Or(m.Gate.Base, pm), Overlay: O,
 			Candidate: m.Gate.Candidate, PublishedTree: m.Gate.PublishedTree, ScannedAs: m.Gate.ScannedAs, Commits: infos, Checks: m.Gate.Checks,
 			FailedChecks: []string{}, Leak: m.Gate.Leak, Findings: []leak.Finding{}, Waived: []WaivedFinding{},
 			RepoGuards: &guardRep, Reused: true}
@@ -351,8 +374,8 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 			Commits: chain, DroppedEmpty: dropped},
 		Typed: plan.Typed{Title: strings.TrimSpace(opt.Title) != "", Body: strings.TrimSpace(opt.Body) != ""},
 		Leak:  plan.Leak{Findings: []map[string]any{}, Waived: planWaived(waived), Warnings: append([]contract.Warning{}, rep.Warnings...), ScannerVersion: version},
-		CI:    plan.CI{RepoGuards: guardRep}}
-	res.Plan = &pl
+		CI:    plan.CI{RepoGuards: guardRep}, PRs: []plan.StackPR{{Feature: opt.Feature, Base: "main"}}}
+	res.Plan, res.PRs = &pl, pl.PRs
 	if e.DryRun {
 		pv := preview.New(map[string]string{"public_main": pm, "feature_head": head, "overlay": O, "gate_candidate": C})
 		pv.Add(preview.PushRef(p.Shadow, remotePlanRef(planID), "", P),
@@ -362,7 +385,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 			res.Preview = pv
 			return res, warns, nil
 		}
-		if err := e.previewPublish(ctx, pc, pv, opt.Feature, publishedPlan(m), branch, P); err != nil {
+		if err := e.previewPublish(ctx, pc, pv, opt.Feature, publishedPlan(m), branch, "main", P); err != nil {
 			return res, warns, err
 		}
 		res.Preview = pv
@@ -382,20 +405,55 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	}
 	ar, aw, err := e.apply(ctx, pc, pl, opt.Yes)
 	res.Applied = ar
+	if ar != nil {
+		res.PRs, res.StackNumber = ar.PRs, ar.StackNumber
+	}
 	return res, addWarnings(warns, aw...), err
+}
+
+// stacked reports whether name's record names a feature as its parent. A
+// record that can't be read is not: the one-feature path reports why.
+func (e *Engine) stacked(ctx context.Context, pc *pairCtx, name string) bool {
+	m, _, _, err := e.readMetaAny(ctx, pc, name)
+	return err == nil && stackParent(m) != "main"
+}
+
+// publishSummary is the ledger's line for a publish.
+func publishSummary(r *ApplyResult) string {
+	if len(r.PRs) <= 1 {
+		return fmt.Sprintf("published %s as PR #%d", r.PublicBranch, r.PublicPR)
+	}
+	parts := make([]string, len(r.PRs))
+	for i, p := range r.PRs {
+		parts[i] = fmt.Sprintf("%s as PR #%d", p.Feature, p.Number)
+	}
+	s := "published " + strings.Join(parts, ", ")
+	if r.StackNumber != nil {
+		s += fmt.Sprintf(" (stack #%d)", *r.StackNumber)
+	}
+	return s
 }
 
 // reusableGate reports whether the recorded gate can be reused as is, with
 // the published tree T2 and its entries, and the repo guard report it
 // rebuilt on the way. A fresh green gate is reused only
 // while the shadow gate branch still points at its candidate; apply checks
-// that branch, so a deleted or moved one would make every plan stale.
-func (e *Engine) reusableGate(ctx context.Context, g *gitx.Git, cfg config.Config, m feature.Meta, name, head, pm, O string, names workflow.Names) (ok bool, T2 string, entries []gitx.TreeEntry, rep workflow.GuardReport) {
+// that branch, so a deleted or moved one would make every plan stale. The
+// gate must have built on the stack as it is now (gateStackFresh), and its
+// rebased chain must end at the candidate's parent, starting from onto when
+// it is empty: public main, or for a stacked feature its gate's Base.
+func (e *Engine) reusableGate(ctx context.Context, pc *pairCtx, cfg config.Config, m feature.Meta, name, head, pm, onto, O string, names workflow.Names) (ok bool, T2 string, entries []gitx.TreeEntry, rep workflow.GuardReport) {
+	g := pc.git
 	tip, tipOK, _ := g.Resolve(ctx, shadowRef(gateBranch(name)))
 	candidateLive := m.Gate != nil && m.Gate.Candidate != "" && tipOK && tip == m.Gate.Candidate
 	// A gate recorded without the mode its scan covered is not reused, so
 	// the result never claims a scan that did not happen.
 	ok = m.Gate.Passed() && m.Gate.FreshFor(head, pm, O) && candidateLive && m.Gate.Commits != nil && m.Gate.ScannedAs != ""
+	if ok {
+		// A stack read that fails is not fresh: gating again reports it.
+		stackFresh, err := e.gateStackFresh(ctx, pc, name, m)
+		ok = err == nil && stackFresh
+	}
 	if ok {
 		// A gate recorded by a binary that built its candidate differently
 		// is stale: one that stripped differently (an upgrade that added
@@ -406,7 +464,7 @@ func (e *Engine) reusableGate(ctx context.Context, g *gitx.Git, cfg config.Confi
 		var R string
 		var rerr error
 		if R, rerr = g.MustResolve(ctx, m.Gate.Candidate+"^"); rerr == nil {
-			if n := len(m.Gate.Commits); (n == 0 && R != pm) || (n > 0 && m.Gate.Commits[n-1].Rebased != R) {
+			if n := len(m.Gate.Commits); (n == 0 && R != onto) || (n > 0 && m.Gate.Commits[n-1].Rebased != R) {
 				rerr = errStaleGate
 			}
 		}
@@ -425,6 +483,72 @@ func (e *Engine) reusableGate(ctx context.Context, g *gitx.Git, cfg config.Confi
 // network, so a bad flag fails before any CI runs. An empty Mode means
 // promote.default_mode, which is checked once the config is read.
 func ValidatePromoteOptions(opt *PromoteOptions) error {
+	if len(opt.Features) == 0 && opt.Feature != "" {
+		opt.Features = []string{opt.Feature}
+	}
+	if len(opt.Features) > 0 {
+		opt.Feature = opt.Features[0]
+	}
+	for _, f := range opt.Features {
+		if err := feature.ValidateName(f, "feature"); err != nil {
+			return err
+		}
+	}
+	// Map keys in order, so the error names the same feature every run.
+	for _, fl := range []struct {
+		flag string
+		m    map[string]string
+	}{{"mode-for", opt.Modes}, {"title-for", opt.Titles}} {
+		for _, f := range slices.Sorted(maps.Keys(fl.m)) {
+			if !slices.Contains(opt.Features, f) {
+				return contract.New(contract.BadFlag, "--%s names %s, which this promote doesn't list", fl.flag, f).WithField(fl.flag)
+			}
+		}
+	}
+	for _, f := range slices.Sorted(maps.Keys(opt.Modes)) {
+		switch m := opt.Modes[f]; {
+		case m == config.ModeSquash || m == config.ModePreserve:
+		case m == config.ModeCurated && len(opt.Features) == 1:
+		case m == config.ModeCurated:
+			return contract.New(contract.BadFlag, "--mode-for %s=curated: a curated branch is promoted on its own, on top of the published branch below it", f).WithField("mode-for")
+		default:
+			return contract.New(contract.BadFlag, "--mode-for %s=%s: use squash or preserve", f, m).WithField("mode-for")
+		}
+	}
+	if len(opt.Features) == 1 {
+		// One feature: its --mode-for and --title-for are --mode and --title.
+		// Both at once would leave which one wins to the code path, so it
+		// is refused.
+		if m, ok := opt.Modes[opt.Feature]; ok {
+			if opt.Mode != "" {
+				return contract.New(contract.BadFlag, "--mode and --mode-for %s both set %s's mode: pass one", opt.Feature, opt.Feature).WithField("mode-for")
+			}
+			opt.Mode = m
+		}
+		if t, ok := opt.Titles[opt.Feature]; ok {
+			if strings.TrimSpace(opt.Title) != "" {
+				return contract.New(contract.BadFlag, "--title and --title-for %s both set %s's PR title: pass one", opt.Feature, opt.Feature).WithField("title-for")
+			}
+			opt.Title = t
+		}
+	}
+	if len(opt.Features) > 1 {
+		for _, fl := range []struct {
+			set        bool
+			name, what string
+		}{
+			{opt.Branch != "", "branch", "each branch of a stack publishes under its own name"},
+			{strings.TrimSpace(opt.Title) != "", "title", "set each PR's title with --title-for <feature>=<title>"},
+			{strings.TrimSpace(opt.Body) != "", "body", "each PR's body lists its commits"},
+			{strings.TrimSpace(opt.Message) != "", "message", "a squashed branch's commit message is its --title-for title, or its one commit's message"},
+			{opt.Curate != "" || opt.Mode == config.ModeCurated, "curate", "a curated branch is promoted on its own, on top of the published branch below it"},
+			{opt.Detach, "detach", "a stack promote runs no gate: gate each branch, bottom first, then promote"},
+		} {
+			if fl.set {
+				return contract.New(contract.BadFlag, "--%s takes one feature; with several, %s", fl.name, fl.what).WithField(fl.name)
+			}
+		}
+	}
 	switch opt.Mode {
 	case "", config.ModeSquash, config.ModePreserve, config.ModeCurated:
 	default:

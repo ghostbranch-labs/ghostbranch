@@ -1,0 +1,46 @@
+{
+  "schema_version": "0.11",
+  "command": "feature start",
+  "ok": false,
+  "exit_code": 4,
+  "data": {},
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "sync",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "shadow main is behind public main; sync it (fast-forward only)",
+      "needs_human": false,
+      "needs_input": []
+    },
+    {
+      "command": [
+        "ghostbranch",
+        "feature",
+        "start",
+        "feat-y",
+        "--from",
+        "feat-x",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "then start the feature again on feat-x",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
+  "error": {
+    "code": "SHADOW_BEHIND",
+    "message": "shadow main is 1 commit(s) behind public main, so a feature started now would be based on old code; run ghostbranch sync --repo acme/widget, then start the feature again",
+    "field": null,
+    "retryable": false,
+    "details": {
+      "public_main": "178f8a91fcb0e6a374393202f9c61275c78d3dbb",
+      "shadow_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7"
+    }
+  }
+}

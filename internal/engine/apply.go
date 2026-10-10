@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"fmt"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -35,6 +34,11 @@ type ApplyResult struct {
 	Approval     *ledger.Approval `json:"approval"`
 	Waived       []WaivedFinding  `json:"waived"`
 	Preview      *preview.Preview `json:"preview"`
+	// PRs is every PR the plan opened, bottom first (one for a plan of one
+	// feature); StackNumber is the native GitHub stack, null when none.
+	// PublicBranch, PublicPR and PRURL are the top PR's.
+	PRs         []plan.StackPR `json:"prs"`
+	StackNumber *int           `json:"stack_number"`
 }
 
 // Apply publishes a saved plan if the repos still match it. Every step is
@@ -45,7 +49,7 @@ func (e *Engine) Apply(ctx context.Context, opt ApplyOptions) (res *ApplyResult,
 	defer func() {
 		summary := ""
 		if res != nil && err == nil {
-			summary = fmt.Sprintf("published %s as PR #%d", res.PublicBranch, res.PublicPR)
+			summary = publishSummary(res)
 		}
 		e.recordWith("apply", pair, pl.Feature, pl.ID, summary, err, func(ent *ledger.Entry) {
 			if res != nil {
@@ -60,6 +64,11 @@ func (e *Engine) Apply(ctx context.Context, opt ApplyOptions) (res *ApplyResult,
 	// The plan file is local and unsigned: re-check where it would publish.
 	if err := feature.ValidateName(pl.Publish.TargetBranch, "plan"); err != nil {
 		return nil, nil, err
+	}
+	for _, en := range pl.Chain {
+		if err := feature.ValidateName(en.Publish.TargetBranch, "plan"); err != nil {
+			return nil, nil, err
+		}
 	}
 	p, ok := e.WS.Find(pl.Pair.Public)
 	if !ok {
@@ -157,8 +166,8 @@ func publishedPlan(m feature.Meta) string {
 // still needs: the push unless the branch is already at P, and the PR
 // unless one is open. A branch at another commit is refused, as the
 // publish would be; published is the plan the feature's record says was
-// published (see earlierPlan).
-func (e *Engine) previewPublish(ctx context.Context, pc *pairCtx, pv *preview.Preview, feature, published, branch, P string) error {
+// published (see earlierPlan). base is the PR's base branch.
+func (e *Engine) previewPublish(ctx context.Context, pc *pairCtx, pv *preview.Preview, feature, published, branch, base, P string) error {
 	existing, exists, _ := pc.git.Resolve(ctx, publicRef(branch))
 	if exists && existing != P {
 		return branchExists(branch, existing, e.earlierPlan(pc.pair, feature, branch, existing, published))
@@ -166,12 +175,12 @@ func (e *Engine) previewPublish(ctx context.Context, pc *pairCtx, pv *preview.Pr
 	if !exists {
 		pv.Add(preview.PushRef(pc.pair.Public, "refs/heads/"+branch, "", P))
 	}
-	pr, err := e.Forge.FindOpenPR(ctx, pc.pair.Public, branch, "main")
+	pr, err := e.Forge.FindOpenPR(ctx, pc.pair.Public, branch, base)
 	if err != nil {
 		return forgeErr(err, "find the public PR")
 	}
 	if pr == nil {
-		pv.Add(preview.OpenPR(pc.pair.Public, branch, "main", false))
+		pv.Add(preview.OpenPR(pc.pair.Public, branch, base, false))
 	}
 	return nil
 }
@@ -185,6 +194,9 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 	}
 	if def := pc.public.DefaultBranch; def != "" && strings.EqualFold(pl.Publish.TargetBranch, def) {
 		return nil, nil, contract.New(contract.NameInvalid, "plan %s would publish to the public default branch %q", pl.ID, def).WithField("plan")
+	}
+	if len(pl.Chain) > 0 {
+		return e.applyStack(ctx, pc, pl, yes)
 	}
 	cfg, O, warns, err := e.readConfig(ctx, pc)
 	if err != nil {
@@ -210,34 +222,12 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 	if err != nil {
 		return nil, warns, err
 	}
-	commits := pl.Publish.Commits
 	// Scan what is stored in the commits, not what the plan file says.
-	steps := make([]scanStep, len(commits))
-	authors := make([]string, len(commits))
-	shown := append([]plan.Commit(nil), commits...)
-	for i, c := range commits {
-		msg, err := g.CommitMessage(ctx, c.Commit)
-		if err != nil {
-			return nil, warns, internalErr(err, "read a public commit's message")
-		}
-		author, committer, err := g.CommitIdentities(ctx, c.Commit)
-		if err != nil {
-			return nil, warns, internalErr(err, "read a public commit's author and committer")
-		}
-		var sources []string
-		if pl.Mode != config.ModeSquash {
-			sources = links[i].sources
-		}
-		steps[i] = scanStep{sources: sources, entries: links[i].entries, texts: []leak.Text{
-			{Where: "commit_message", Content: msg},
-			{Where: "author", Content: author},
-			{Where: "committer", Content: committer}}}
-		authors[i] = author
-		shown[i].Subject = subject(msg)
+	steps, authors, shown, err := storedSteps(ctx, g, pl, links)
+	if err != nil {
+		return nil, warns, err
 	}
-	rep, _, err := e.scanChain(ctx, g, cfg, pm, steps, []leak.Text{
-		{Where: "branch", Content: pl.Publish.TargetBranch}, {Where: "pr_title", Content: pl.Publish.PR.Title},
-		{Where: "pr_body", Content: pl.Publish.PR.Body}})
+	rep, _, err := e.scanChain(ctx, g, cfg, pm, steps, planTexts(pl))
 	if err != nil {
 		return nil, warns, err
 	}
@@ -251,14 +241,18 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 	}
 
 	branch := pl.Publish.TargetBranch
-	res := &ApplyResult{PlanID: pl.ID, PublicBranch: branch, Waived: waived}
+	res := &ApplyResult{PlanID: pl.ID, PublicBranch: branch, Waived: waived, PRs: []plan.StackPR{{Feature: pl.Feature, Base: "main"}}}
 	existing, exists, _ := g.Resolve(ctx, publicRef(branch))
 	if exists && existing != P {
 		return res, warns, branchExists(branch, existing, e.earlierPlan(pc.pair, pl.Feature, branch, existing, publishedPlan(m)))
 	}
+	ids, err := g.PatchIDs(ctx, commitSHAs(pl.Publish.Commits))
+	if err != nil {
+		return res, warns, internalErr(err, "compute the published commits' patch-ids")
+	}
 	if e.DryRun {
 		pv := preview.New(map[string]string{"public_main": pm, "feature_head": head, "overlay": O, "gate_candidate": gateC})
-		if err := e.previewPublish(ctx, pc, pv, pl.Feature, publishedPlan(m), branch, P); err != nil {
+		if err := e.previewPublish(ctx, pc, pv, pl.Feature, publishedPlan(m), branch, "main", P); err != nil {
 			return res, warns, err
 		}
 		res.Preview = pv
@@ -300,9 +294,11 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 		res.Resumed = true
 	}
 	res.PublicPR, res.PRURL = pr.Number, pr.URL
+	res.PRs[0].Number, res.PRs[0].URL = pr.Number, pr.URL
 	m.SchemaVersion = feature.SchemaVersion
-	m.Promoted = &feature.Promoted{PublicPR: pr.Number, PlanID: pl.ID, FeatureHead: pl.Fingerprint.FeatureHead}
-	mw, err := e.updateMeta(ctx, pc, m, metaSHA)
+	m.Promoted = &feature.Promoted{PublicPR: pr.Number, PlanID: pl.ID, FeatureHead: pl.Fingerprint.FeatureHead,
+		Branch: branch, Base: "main", PublishedHead: P, PatchIDs: ids, Stack: stackOfRecord(m, pr.Number)}
+	_, mw, err := e.updateMeta(ctx, pc, m, metaSHA)
 	warns = addWarnings(warns, mw...)
 	if err != nil {
 		return res, warns, err
@@ -310,19 +306,33 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 	return res, warns, nil
 }
 
-// verifyChain checks that plan pl still stands on the shadow repo's
+// verifyChain is verifyEntry for a plan of one feature on public main.
+func (e *Engine) verifyChain(ctx context.Context, pc *pairCtx, pl plan.Plan, m feature.Meta, cfg config.Config, live plan.Fingerprint) (string, []link, error) {
+	tip, _, err := pc.git.Resolve(ctx, planRef(pl.ID))
+	if err != nil {
+		return "", nil, internalErr(err, "read plan "+pl.ID+"'s commit")
+	}
+	return e.verifyEntry(ctx, pc, pl, m, cfg, live, live.PublicMain, live.PublicMain, tip, false)
+}
+
+// verifyEntry checks that plan pl (a plan of one feature, or one branch of
+// a stack plan seen as one: entryPlan) still stands on the shadow repo's
 // objects, not on what the file says:
 //   - the recorded gate is green, fresh and for the live gate candidate;
-//   - its rebased chain runs from public main to the candidate's parent;
-//   - the plan ref holds the plan's commit;
+//   - its rebased chain runs from onto (public main, or the commit a
+//     stacked gate replayed its own commits onto) to the candidate's parent;
+//   - the plan ref holds the plan's commit (planTip, "" when the ref is
+//     missing), or, for a branch below the top of a stack (below), a
+//     commit above it;
 //   - the published tree is what this binary's strip gives;
 //   - the curate groups fit the mode and the gated commits;
 //   - the chain derived again from the gate is the plan's, commit by commit,
-//     on public main.
+//     on pubParent, the public commit below it.
 //
-// It returns the plan ref's commit P and the derived links, whose sources
-// and entries the scan uses.
-func (e *Engine) verifyChain(ctx context.Context, pc *pairCtx, pl plan.Plan, m feature.Meta, cfg config.Config, live plan.Fingerprint) (string, []link, error) {
+// It returns the plan's commit P and the derived links, whose sources and
+// entries the scan uses.
+func (e *Engine) verifyEntry(ctx context.Context, pc *pairCtx, pl plan.Plan, m feature.Meta, cfg config.Config, live plan.Fingerprint,
+	onto, pubParent, planTip string, below bool) (string, []link, error) {
 	g := pc.git
 	pm, gateC := live.PublicMain, live.GateCandidate
 	// The plan only stands while the recorded gate is green, fresh, and for
@@ -334,9 +344,9 @@ func (e *Engine) verifyChain(ctx context.Context, pc *pairCtx, pl plan.Plan, m f
 	if !m.Gate.Passed() || m.Gate.Commits == nil || m.Gate.Candidate != gateC || !m.Gate.FreshFor(live.FeatureHead, pm, live.Overlay) {
 		return "", nil, gateStale
 	}
-	// The recorded chain must run from public main to the candidate's
-	// parent, one parent at a time.
-	prev := pm
+	// The recorded chain must run from onto to the candidate's parent, one
+	// parent at a time.
+	prev := onto
 	for _, c := range m.Gate.Commits {
 		if parent, err := g.MustResolve(ctx, c.Rebased+"^"); err != nil || parent != prev {
 			return "", nil, gateStale
@@ -346,8 +356,16 @@ func (e *Engine) verifyChain(ctx context.Context, pc *pairCtx, pl plan.Plan, m f
 	if R, err := g.MustResolve(ctx, gateC+"^"); err != nil || R != prev {
 		return "", nil, gateStale
 	}
-	P, ok, _ := g.Resolve(ctx, planRef(pl.ID))
-	if !ok || P != pl.Publish.Commit {
+	P := pl.Publish.Commit
+	inPlan := planTip != "" && planTip == P
+	if !inPlan && below && planTip != "" {
+		// A lower branch of a stack plan: its tip is under the plan ref's.
+		var err error
+		if inPlan, err = g.IsAncestor(ctx, P, planTip); err != nil {
+			return "", nil, internalErr(err, "compare plan "+pl.ID+"'s commits")
+		}
+	}
+	if !inPlan {
 		return "", nil, contract.New(contract.PlanStale, "plan %s's commit is missing from the shadow repo", pl.ID).
 			WithDetails(stale(pl, []string{"publish.commit"}))
 	}
@@ -383,7 +401,15 @@ func (e *Engine) verifyChain(ctx context.Context, pc *pairCtx, pl plan.Plan, m f
 			return "", nil, curateStale
 		}
 	}
-	links, dropped, err := deriveChain(ctx, g, cfg, chainInput{mode: pl.Mode, pm: pm, T: pl.Publish.Tree, tEntries: tEntries,
+	// A chain on the public commit below it (a stacked branch) starts from
+	// that commit's tree, and curated groups replay onto onto.
+	baseTree := ""
+	if pubParent != pm {
+		if baseTree, err = g.TreeOf(ctx, pubParent); err != nil {
+			return "", nil, internalErr(err, "read the public commit below "+pl.Feature)
+		}
+	}
+	links, dropped, err := deriveChain(ctx, g, cfg, chainInput{mode: pl.Mode, pm: pm, baseTree: baseTree, onto: onto, T: pl.Publish.Tree, tEntries: tEntries,
 		commits: m.Gate.Commits, groups: pl.Curate},
 		func(cs []string, onto string) ([]string, error) { return e.replay(ctx, pc, cs, onto) })
 	if err != nil {
@@ -401,11 +427,15 @@ func (e *Engine) verifyChain(ctx context.Context, pc *pairCtx, pl plan.Plan, m f
 			return "", nil, chainStale
 		}
 	}
-	// The chain publishes on public main; the approval's file list is
+	// The chain publishes on pubParent; the approval's file list is
 	// measured from there, so the plan file's parent must be it.
-	if pl.Publish.Parent != pm {
+	if pl.Publish.Parent != pubParent {
+		what := "public main"
+		if pubParent != pm {
+			what = "the public commit below it"
+		}
 		return "", nil, contract.New(contract.PlanStale,
-			"plan %s names parent %s, not public main %s; make a new plan with ghostbranch promote", pl.ID, short(pl.Publish.Parent), short(pm)).
+			"plan %s names parent %s, not %s %s; make a new plan with ghostbranch promote", pl.ID, short(pl.Publish.Parent), what, short(pubParent)).
 			WithDetails(stale(pl, []string{"publish.parent"}))
 	}
 	// The plan ref is the chain's tip: walk back from it.
@@ -421,8 +451,62 @@ func (e *Engine) verifyChain(ctx context.Context, pc *pairCtx, pl plan.Plan, m f
 		}
 	}
 	set := overlay.NewSet(cfg.LeakScan.Strip...)
-	if err := assertChain(ctx, g, commits, pl.Publish.Tree, gateC, pm, set, guardNames(pc)); err != nil {
+	if err := assertChain(ctx, g, commits, pl.Publish.Tree, gateC, pubParent, set, guardNames(pc)); err != nil {
 		return "", nil, err
 	}
 	return P, links, nil
+}
+
+// storedSteps is what a plan's public commits hold, read from the commits
+// themselves, not the plan file: the scan step of each, each one's author,
+// and the commits with their subjects as stored.
+func storedSteps(ctx context.Context, g *gitx.Git, pl plan.Plan, links []link) ([]scanStep, []string, []plan.Commit, error) {
+	commits := pl.Publish.Commits
+	steps := make([]scanStep, len(commits))
+	authors := make([]string, len(commits))
+	shown := append([]plan.Commit(nil), commits...)
+	for i, c := range commits {
+		msg, err := g.CommitMessage(ctx, c.Commit)
+		if err != nil {
+			return nil, nil, nil, internalErr(err, "read a public commit's message")
+		}
+		author, committer, err := g.CommitIdentities(ctx, c.Commit)
+		if err != nil {
+			return nil, nil, nil, internalErr(err, "read a public commit's author and committer")
+		}
+		var sources []string
+		if pl.Mode != config.ModeSquash {
+			sources = links[i].sources
+		}
+		steps[i] = scanStep{sources: sources, entries: links[i].entries, texts: []leak.Text{
+			{Where: "commit_message", Content: msg},
+			{Where: "author", Content: author},
+			{Where: "committer", Content: committer}}}
+		authors[i] = author
+		shown[i].Subject = subject(msg)
+	}
+	return steps, authors, shown, nil
+}
+
+// planTexts are the texts a plan publishes beside its commits.
+func planTexts(pl plan.Plan) []leak.Text {
+	return []leak.Text{{Where: "branch", Content: pl.Publish.TargetBranch}, {Where: "pr_title", Content: pl.Publish.PR.Title},
+		{Where: "pr_body", Content: pl.Publish.PR.Body}}
+}
+
+func commitSHAs(cs []plan.Commit) []string {
+	out := make([]string, len(cs))
+	for i, c := range cs {
+		out[i] = c.Commit
+	}
+	return out
+}
+
+// stackOfRecord is the native stack m's publish record names for PR pr, 0
+// when none: a resumed publish of the same PR keeps it.
+func stackOfRecord(m feature.Meta, pr int) int {
+	if m.Promoted == nil || m.Promoted.PublicPR != pr {
+		return 0
+	}
+	return m.Promoted.Stack
 }

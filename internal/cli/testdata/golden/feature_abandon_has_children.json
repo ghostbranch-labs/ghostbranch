@@ -1,0 +1,64 @@
+{
+  "schema_version": "0.11",
+  "command": "feature abandon",
+  "ok": false,
+  "exit_code": 4,
+  "data": {},
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "feature",
+        "fold",
+        "feat-y",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "fold feat-y into its parent: the parent fast-forwards to it and feat-y closes",
+      "needs_human": false,
+      "needs_input": []
+    },
+    {
+      "command": [
+        "ghostbranch",
+        "feature",
+        "abandon",
+        "feat-y",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "or abandon feat-y too",
+      "needs_human": false,
+      "needs_input": []
+    },
+    {
+      "command": [
+        "ghostbranch",
+        "feature",
+        "restack",
+        "feat-y",
+        "--onto",
+        "main",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "or move feat-y onto main, dropping its parent's commits",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
+  "error": {
+    "code": "HAS_CHILDREN",
+    "message": "feature feat-x has 1 feature(s) stacked on it (feat-y), so it can't be abandoned; first, for each of them: fold it into feat-x (ghostbranch feature fold <child>), abandon it, or move it onto main (ghostbranch feature restack <child> --onto main)",
+    "field": "feature",
+    "retryable": false,
+    "details": {
+      "children": [
+        "feat-y"
+      ],
+      "feature": "feat-x",
+      "op": "abandon"
+    }
+  }
+}

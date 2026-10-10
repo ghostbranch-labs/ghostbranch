@@ -1,0 +1,37 @@
+{
+  "schema_version": "0.11",
+  "command": "feature restack",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "feature": "feat-x",
+    "onto": "",
+    "restacked": [
+      {
+        "feature": "feat-y",
+        "parent": "feat-x",
+        "from": "a80b011a96e35ed4ece66a7071d69d205af6e967",
+        "to": "e07b5fbd5c9cb8bc183f9b29bb48e4d187237e70",
+        "forked_at": "4655f2ffddef92a3a3f79ec5abcdd230590b2bed"
+      }
+    ],
+    "pending": [],
+    "preview": null
+  },
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "gate",
+        "feat-y",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "the restacked branches were rewritten; gate them again from the bottom (and in each checkout: git fetch, then git reset --keep <remote>/<branch>)",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
+  "error": null
+}

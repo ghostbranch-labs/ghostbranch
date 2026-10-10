@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.10",
+  "schema_version": "0.11",
   "command": "feature show",
   "ok": true,
   "exit_code": 0,
@@ -10,6 +10,9 @@
       "branch": "feat-x",
       "head": "d7407485ce685c126afcfc258f0a9eeb0092d776",
       "base": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+      "parent": "main",
+      "children": [],
+      "stack": null,
       "drift": {
         "status": "clean",
         "files": []

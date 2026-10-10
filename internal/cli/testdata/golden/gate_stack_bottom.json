@@ -1,0 +1,64 @@
+{
+  "schema_version": "0.11",
+  "command": "gate",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "feature": "feat-a",
+    "feature_head": "bbd420d3c5e21ee95ebc81464a424a47714e3fb8",
+    "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+    "parent": "main",
+    "base": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+    "overlay": "a1ef151295bf2b53d15b18523ab0184d02178bbd",
+    "candidate": "a5f14bdf6c4579dd29821bcf8108be9c6b5fee11",
+    "published_tree": "5fb33c6a6e2905ad3b9591d536c4eec7bade485c",
+    "scanned_as": "preserve",
+    "commits": [
+      {
+        "source": "bbd420d3c5e21ee95ebc81464a424a47714e3fb8",
+        "subject": "work",
+        "author": "Test Author <author@example.com>",
+        "files": [
+          "a.txt"
+        ]
+      }
+    ],
+    "checks": "passed",
+    "failed_checks": [],
+    "leak": "clean",
+    "findings": [],
+    "waived": [],
+    "repo_guards": {
+      "mode": "rewrite",
+      "rewritten": [],
+      "unrewritable": [],
+      "skipped": []
+    },
+    "shadow_pr": 1,
+    "job": "gate/feat-a/a5f14bdf6c45",
+    "reused": false,
+    "children": [
+      "feat-b"
+    ],
+    "chain": [
+      "feat-a"
+    ],
+    "preview": null
+  },
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "gate",
+        "feat-b",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "the gate passed; gate feat-b next: it is stacked on this one, and its gate builds on this gate",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
+  "error": null
+}
