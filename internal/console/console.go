@@ -27,6 +27,11 @@ const (
 // condition for asking a person anything (spec §6.3).
 func Usable(stdin, stderr *os.File) bool { return isTerminal(stdin) && isTerminal(stderr) }
 
+// Flush discards what was typed on the console device before a question, so
+// an Enter pressed earlier can't answer it. Only a real console device is
+// flushed; anything else is left alone.
+func Flush(dev io.ReadWriteCloser) { flush(dev) }
+
 // NewCode returns a random code. Bytes of 248 and above are rejected so each
 // of the 31 characters is equally likely.
 func NewCode(r io.Reader) (string, error) {
