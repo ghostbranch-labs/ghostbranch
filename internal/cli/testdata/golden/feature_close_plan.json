@@ -10,6 +10,7 @@
     "gate_pr": null,
     "needs_console": true,
     "approval": null,
+    "reparented": [],
     "preview": {
       "fingerprint": {
         "feature_head": "d7407485ce685c126afcfc258f0a9eeb0092d776"

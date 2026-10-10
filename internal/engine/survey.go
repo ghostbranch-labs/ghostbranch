@@ -43,6 +43,14 @@ type FeatureReport struct {
 	// only for a merged branch_gone feature, the one case
 	// ClosableWithoutConsole reads it.
 	gateForPublished bool
+	// meta is the record as read (nil when it couldn't be), and metaSHA its
+	// metadata commit: sync re-parents a closing feature's children from
+	// them, leased on that commit.
+	meta    *feature.Meta
+	metaSHA string
+	// flagged: sync found its public branch holding changes Ghostbranch
+	// didn't publish (PUBLIC_BRANCH_CHANGED).
+	flagged bool
 }
 
 // Drift is whether a feature still merges cleanly onto public main.
@@ -136,7 +144,7 @@ func (e *Engine) survey(ctx context.Context, pc *pairCtx, names ...string) ([]Fe
 
 func (e *Engine) surveyOne(ctx context.Context, pc *pairCtx, name, pm, O string) (FeatureReport, []contract.Warning, error) {
 	var warns []contract.Warning
-	m, _, newer, err := e.readMetaAny(ctx, pc, name)
+	m, metaSHA, newer, err := e.readMetaAny(ctx, pc, name)
 	if err != nil {
 		return FeatureReport{}, nil, err
 	}
@@ -155,6 +163,7 @@ func (e *Engine) surveyOne(ctx context.Context, pc *pairCtx, name, pm, O string)
 	}
 	r := FeatureReport{Name: name, Branch: m.Branch, Head: head, Base: m.Base, Abandoned: m.Abandoned,
 		Drift: Drift{Status: driftNA, Files: []string{}}}
+	r.meta, r.metaSHA = &m, metaSHA
 	if newer {
 		r.unreadable = unreadableNewer
 	}

@@ -33,7 +33,10 @@ type FeatureCloseResult struct {
 	GatePR       *int              `json:"gate_pr"`       // the draft PR closed (by us, or by GitHub as its branch went), nil when none was open
 	NeedsConsole bool              `json:"needs_console"` // closing takes a person at a console (not ClosableWithoutConsole); set under --plan too
 	Approval     *ledger.Approval  `json:"approval"`      // console; nil under --plan, and when none was needed
-	Preview      *preview.Preview  `json:"preview"`
+	// Reparented are the children moved onto main in the push that closed
+	// this feature; never null.
+	Reparented []string         `json:"reparented"`
+	Preview    *preview.Preview `json:"preview"`
 	// GatePRLeftOpen is the gate PR the close couldn't close, 0 when none;
 	// for human output only.
 	GatePRLeftOpen int `json:"-"`
@@ -250,17 +253,38 @@ func unreadableWhy(r FeatureReport) string {
 }
 
 // closeFeature deletes one surveyed feature. It asks no console: sync's
-// auto-close calls it only for ClosableWithoutConsole reports. The caller
+// auto-close calls it only for ClosableWithoutConsole reports. kids are
+// the features stacked on it: their records are rewritten onto main
+// (reparentChildren) and pushed in the same atomic push as the deletes, so
+// the close and the re-parenting land together or not at all. The caller
 // records the ledger entry, with Refs = res.Deleted. A non-nil res with an
-// error means the refs were deleted but the gate PR couldn't be closed.
-// The warnings are PLAN_FILE_UNREADABLE from listing the plan files and
-// MIRROR_NOT_UPDATED from the local cleanup.
-func (e *Engine) closeFeature(ctx context.Context, pc *pairCtx, r FeatureReport) (*FeatureCloseResult, []contract.Warning, error) {
+// error means the refs were deleted (and the children moved) but the gate
+// PR couldn't be closed. The warnings are PLAN_FILE_UNREADABLE from listing
+// the plan files and MIRROR_NOT_UPDATED from the local cleanup.
+func (e *Engine) closeFeature(ctx context.Context, pc *pairCtx, r FeatureReport, kids []FeatureReport) (*FeatureCloseResult, []contract.Warning, error) {
 	t, tw, err := e.closeTargets(ctx, pc, r)
 	if err != nil {
 		return nil, tw, err
 	}
-	res, cw, err := e.closeWith(ctx, pc, r, t, closeOpts{})
+	rps, err := e.reparentChildren(ctx, pc, r, kids)
+	if err != nil {
+		return nil, tw, err
+	}
+	var o closeOpts
+	names := make([]string, 0, len(rps))
+	for _, rp := range rps {
+		o.also = append(o.also, refUpdate{Ref: remoteMetaRef(rp.name), From: rp.old, To: rp.new, Local: metaRef(rp.name)})
+		names = append(names, rp.name)
+	}
+	if len(rps) > 0 && !e.DryRun {
+		e.progressf("moving %s onto main in the same push that closes %s", strings.Join(names, ", "), r.Name)
+	}
+	res, cw, err := e.closeWith(ctx, pc, r, t, o)
+	// The push landed once res is non-nil outside a dry run, even when the
+	// gate PR then wouldn't close.
+	if res != nil && res.Preview == nil {
+		res.Reparented = append(res.Reparented, names...)
+	}
 	return res, addWarnings(tw, cw...), err
 }
 
@@ -365,7 +389,8 @@ type closeOpts struct {
 // that fails is a MIRROR_NOT_UPDATED warning.
 func (e *Engine) closeWith(ctx context.Context, pc *pairCtx, r FeatureReport, t closeTargets, o closeOpts) (*FeatureCloseResult, []contract.Warning, error) {
 	sh := pc.pair.Shadow
-	res := &FeatureCloseResult{Feature: r.Name, State: r.State, Deleted: map[string]string{}, NeedsConsole: !ClosableWithoutConsole(r)}
+	res := &FeatureCloseResult{Feature: r.Name, State: r.State, Deleted: map[string]string{}, NeedsConsole: !ClosableWithoutConsole(r),
+		Reparented: []string{}}
 	pr, err := e.Forge.FindOpenPR(ctx, sh, gateBranch(r.Name), "main")
 	if err != nil {
 		return nil, nil, forgeErr(err, "find the gate PR of feature %s", r.Name)
@@ -543,6 +568,9 @@ func closeLedgerSummary(res *FeatureCloseResult) string {
 	s := fmt.Sprintf("closed %s (%s): deleted %d ref(s)", res.Feature, res.State, len(res.Deleted))
 	if res.GatePR != nil {
 		s += fmt.Sprintf("; closed gate PR #%d", *res.GatePR)
+	}
+	if len(res.Reparented) > 0 {
+		s += fmt.Sprintf("; moved %s onto main", strings.Join(res.Reparented, ", "))
 	}
 	return s
 }

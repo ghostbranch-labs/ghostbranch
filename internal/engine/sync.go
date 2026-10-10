@@ -50,6 +50,9 @@ type ClosedFeature struct {
 	Name     string            `json:"name"`
 	PublicPR int               `json:"public_pr"`
 	Deleted  map[string]string `json:"deleted"`
+	// Reparented are the children moved onto main in the push that closed
+	// it; never null.
+	Reparented []string `json:"reparented"`
 	// GatePRLeftOpen is the gate PR the close couldn't close, 0 when none;
 	// for human output only.
 	GatePRLeftOpen int `json:"-"`
@@ -77,11 +80,16 @@ type SyncBranch struct {
 // The top-level main fields describe main. A push with the person's token
 // starts the shadow repo's push-triggered workflows, re-testing what public
 // CI already tested, so sync then cancels those runs unless o.NoCancel.
-// Last, unless o.NoClose, it closes the features whose public PR merged and
-// whose branch hasn't moved (see closeMerged). A branch whose push fails is
-// reported (SYNC_PUSH_FAILED) and the rest still go; the first failure is
-// the sync's error, after the cancels and closes. A dry run reports each
-// branch's target in To.
+// Last, unless o.NoClose, it surveys the features: it records GitHub's
+// restack of the public branches of a stack above a merged PR (the same
+// changes on a new base) and flags any other change to them
+// (PUBLIC_BRANCH_CHANGED), then closes the features whose public PR merged
+// and whose branch hasn't moved, bottom of a stack first, moving each
+// closing feature's children onto main in the push that closes it (see
+// closeMerged). --no-close skips all of that, the survey too. A branch
+// whose push fails is reported (SYNC_PUSH_FAILED) and the rest still go;
+// the first failure is the sync's error, after the cancels and closes. A
+// dry run reports each branch's target in To.
 func (e *Engine) Sync(ctx context.Context, p workspace.Pair, o SyncOptions) (res *SyncResult, warns []contract.Warning, err error) {
 	defer func() {
 		summary := ""
@@ -220,11 +228,18 @@ func (e *Engine) Sync(ctx context.Context, p workspace.Pair, o SyncOptions) (res
 // closeMerged is sync's auto-close, under sync's pair lock. It surveys the
 // pair's features, which costs one GetPR per published feature: the only
 // way to learn which public PRs merged, and acceptable for the handful of
-// features a pair has. Once the survey succeeds it sets res.Surveyed, then
-// res.ActiveFeatures and res.Attention (a survey that fails leaves all
+// features a pair has. Once the survey succeeds it records GitHub's restack
+// of stacked public branches and flags foreign changes to them
+// (refreshPublished; one more GetPR per moved branch), sets res.Surveyed,
+// then res.ActiveFeatures and res.Attention (a survey that fails leaves all
 // three unset); then it closes each feature that is ClosableWithoutConsole
-// through closeFeature, the same code as feature close: nothing that needs
-// a person is ever touched here. noClose skips all of it, the survey too.
+// through closeFeature, the same code as feature close, parents before
+// children: a closing feature's children are re-parented onto main in its
+// close's atomic push. Nothing that needs a person is ever touched here.
+// While any feature's record can't be read at all, no merged feature is
+// closed: that feature may be stacked on it. Each such merged feature is in
+// res.Attention with a FEATURE_NOT_CLOSED warning naming the record.
+// noClose skips all of it, the survey too.
 // In a dry run the closes' ops join res.Preview. Nothing here fails the
 // sync: a survey that fails closes nothing, a feature whose record can't be
 // read is in res.Attention, and a close that fails (or, in a dry run, can't
@@ -242,26 +257,40 @@ func (e *Engine) closeMerged(ctx context.Context, pc *pairCtx, p *workspace.Pair
 			Message: fmt.Sprintf("couldn't survey features, so nothing was closed: %s: %s", ce.Code, ce.Message),
 			Details: map[string]any{"error_code": string(ce.Code)}})
 	}
+	// GitHub restacks the public branches above a merged PR: record those
+	// (the same changes), and flag anything else, before deciding what to close.
+	warns = addWarnings(warns, e.refreshPublished(ctx, pc, rs, res.Preview)...)
 	res.Surveyed = true
+	// A record that can't be read may be stacked on any merged feature:
+	// closing one could strand it on a deleted branch (feature close and
+	// fold refuse likewise), so none closes until it is dealt with.
+	unread := unreadableReports(rs)
 	for _, r := range rs {
 		closable := ClosableWithoutConsole(r)
 		if !r.Abandoned && !closable {
 			res.ActiveFeatures++
 		}
+		attention := r.flagged || (closable && len(unread) > 0)
 		switch r.State {
 		// A merged feature that isn't closable has a record from a newer
 		// Ghostbranch: RECORD_NEWER says why it waits for a person.
 		case feature.StateMergedMoved, feature.StatePRClosed, feature.StateBranchGone, feature.StateUnreadable, feature.StateMerged:
-			if !closable {
-				res.Attention = append(res.Attention, r)
-			}
+			attention = attention || !closable
+		}
+		if attention {
+			res.Attention = append(res.Attention, r)
 		}
 	}
-	for _, r := range rs {
+	for _, i := range bottomUp(rs) {
+		r := rs[i]
 		if !ClosableWithoutConsole(r) {
 			continue
 		}
-		cr, cw, err := e.closeFeature(ctx, pc, r)
+		if len(unread) > 0 {
+			warns = addWarnings(warns, closeBlocked(r.Name, unread))
+			continue
+		}
+		cr, cw, err := e.closeFeature(ctx, pc, r, childReports(rs, r.Name))
 		warns = addWarnings(warns, cw...)
 		if e.DryRun {
 			// A close that couldn't be previewed warns, as the real one would.
@@ -296,7 +325,8 @@ func (e *Engine) closeMerged(ctx context.Context, pc *pairCtx, p *workspace.Pair
 			} else {
 				e.progressf("closed merged feature %s (PR #%d)", r.Name, pr)
 			}
-			res.Closed = append(res.Closed, ClosedFeature{Name: r.Name, PublicPR: pr, Deleted: cr.Deleted, GatePRLeftOpen: cr.GatePRLeftOpen})
+			res.Closed = append(res.Closed, ClosedFeature{Name: r.Name, PublicPR: pr, Deleted: cr.Deleted, Reparented: cr.Reparented,
+				GatePRLeftOpen: cr.GatePRLeftOpen})
 		}
 		if err != nil {
 			var gone map[string]string

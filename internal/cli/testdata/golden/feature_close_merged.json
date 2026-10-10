@@ -15,6 +15,7 @@
     "gate_pr": 1,
     "needs_console": false,
     "approval": null,
+    "reparented": [],
     "preview": null
   },
   "warnings": [],

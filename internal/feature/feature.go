@@ -138,6 +138,10 @@ type Promoted struct {
 	PatchIDs []string `json:"patch_ids,omitempty"`
 	// Stack is the native GitHub stack its PR is in; 0 when none.
 	Stack int `json:"stack,omitempty"`
+	// NeedsUpdate: the PR below it merged by squash or rebase while the PRs
+	// were plain chained PRs (no native stack), so its open public PR still
+	// carries that parent's old commits. Republishing it is 6.1a-2.
+	NeedsUpdate bool `json:"needs_update,omitempty"`
 }
 
 // Meta is feature.json.
@@ -247,6 +251,8 @@ func StateOf(in StateInput) State {
 		return StateMergedMoved
 	case m.Promoted != nil && in.PRState == "closed":
 		return StatePRClosed
+	case m.Promoted != nil && m.Promoted.NeedsUpdate:
+		return StatePublicPRNeedsUpdate
 	case m.Promoted != nil:
 		return StatePublished
 	case in.ParentMoved:

@@ -1205,9 +1205,11 @@ func (h *harness) corruptMeta(name string) {
 	}
 }
 
-// A corrupt record doesn't stop sync's closes: the merged feature closes,
-// and the unreadable one waits for a person. --no-close never surveys.
-func TestSyncClosesBesideAnUnreadableRecord(t *testing.T) {
+// A corrupt record may be stacked on any merged feature, so sync closes
+// none while it is there: the merged feature waits in attention beside the
+// unreadable one, with a FEATURE_NOT_CLOSED naming it. Once the record is
+// dealt with, the next sync closes it. --no-close never surveys.
+func TestSyncLeavesMergedFeaturesOpenBesideAnUnreadableRecord(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	h.init()
@@ -1216,23 +1218,37 @@ func TestSyncClosesBesideAnUnreadableRecord(t *testing.T) {
 	want := h.featureRefs("feat-x", id)
 	h.corruptMeta("feat-bad")
 	res, warns := h.syncOK(engine.SyncOptions{})
-	if !res.Surveyed || res.ActiveFeatures != 1 || len(res.Closed) != 1 || res.Closed[0].Name != "feat-x" ||
-		!reflect.DeepEqual(res.Closed[0].Deleted, want) {
+	if !res.Surveyed || res.ActiveFeatures != 1 || len(res.Closed) != 0 {
 		t.Fatalf("sync = %+v", res)
 	}
-	if len(res.Attention) != 1 || res.Attention[0].Name != "feat-bad" || res.Attention[0].State != feature.StateUnreadable ||
-		res.Attention[0].Error == "" {
+	if len(res.Attention) != 2 || res.Attention[0].Name != "feat-bad" || res.Attention[0].State != feature.StateUnreadable ||
+		res.Attention[0].Error == "" || res.Attention[1].Name != "feat-x" || res.Attention[1].State != feature.StateMerged {
 		t.Fatalf("attention = %+v", res.Attention)
 	}
-	if len(warns) != 0 {
+	if len(warns) != 1 || warns[0].Code != contract.FeatureNotClosed || warns[0].Details["feature"] != "feat-x" ||
+		!reflect.DeepEqual(warns[0].Details["unreadable"], []string{"feat-bad"}) {
 		t.Fatalf("warnings = %+v", warns)
 	}
-	if _, ok := h.shadowRefs()["refs/ghostbranch/features/feat-bad"]; !ok {
+	refs := h.shadowRefs()
+	if _, ok := refs["refs/ghostbranch/features/feat-bad"]; !ok {
 		t.Fatal("sync deleted the unreadable record")
+	}
+	for ref, sha := range want {
+		if refs[ref] != sha {
+			t.Fatalf("%s is %q, want %s", ref, refs[ref], sha)
+		}
 	}
 	res, warns = h.syncOK(engine.SyncOptions{NoClose: true})
 	if res.Surveyed || len(warns) != 0 {
 		t.Fatalf("--no-close surveyed: %+v %+v", res, warns)
+	}
+	// The record is dealt with: the next sync closes feat-x.
+	if err := h.shadowGit().DeleteRef(h.ctx, "refs/ghostbranch/features/feat-bad"); err != nil {
+		t.Fatal(err)
+	}
+	res, warns = h.syncOK(engine.SyncOptions{})
+	if len(warns) != 0 || len(res.Closed) != 1 || res.Closed[0].Name != "feat-x" || !reflect.DeepEqual(res.Closed[0].Deleted, want) {
+		t.Fatalf("sync = %+v, warnings %+v", res, warns)
 	}
 }
 

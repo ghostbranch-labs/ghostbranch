@@ -232,3 +232,16 @@ func TestPromotedKeepsWhatWasPublished(t *testing.T) {
 		t.Fatalf("old record = %+v %v", old.Promoted, err)
 	}
 }
+
+func TestAPlainChainedChildNeedsItsPRUpdated(t *testing.T) {
+	t.Parallel()
+	m := feature.Meta{Name: "b", Promoted: &feature.Promoted{PublicPR: 2, PlanID: "p", NeedsUpdate: true}}
+	in := feature.StateInput{Meta: m, BranchExists: true, Head: "h", PRState: "open"}
+	if got := feature.StateOf(in); got != feature.StatePublicPRNeedsUpdate {
+		t.Fatalf("state = %s, want public_pr_needs_update", got)
+	}
+	in.PRState = "merged"
+	if got := feature.StateOf(in); got != feature.StateMerged {
+		t.Fatalf("a merged PR is merged whatever else: %s", got)
+	}
+}
