@@ -83,6 +83,7 @@ main, green CI, and a leak scan of exactly what will be published.
    repo, add `--shadow <owner/name>` to both.
    `init` asks questions only when a person runs it at a terminal; with `--json` it never asks.
    Flags answer them: `--shadow`/`--adopt`, `--guard`/`--no-guard`, `--sync`/`--no-sync`.
+   For an org's public repo it asks where the shadow repo lives; `--shadow <owner/name>` sets it.
 2. Exit 1 with `SHADOW_CREATE_DENIED` means the token may not create repos. **Stop**: show the person
    `error.details.steps` and **ask them to do steps 1 and 2 of `error.details.steps`**: create the empty
    private repo, and add it to the token. Never ask the person for a token with wider access.

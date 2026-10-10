@@ -40,7 +40,8 @@ func TestRenderListsEveryCodeFromTheRegistry(t *testing.T) {
 	// 347: the four sub-project 6.1 error rows (LOGIN_EXPIRED, LOGIN_UNAVAILABLE, TOKEN_PERMISSION_MISSING, DOCTOR_FAILED).
 	// 376: 6.1 (doctor, guided init, TOKEN_PERMISSION_MISSING, the agent rule, the Tokens section, the isolation check), plus 6.1's error rows
 	// 377: the 6.1 final review's fixes (doctor's fix command only when there is one; pick the public and shadow repos when installing the app).
-	if n := strings.Count(out, "\n"); n > 377 {
+	// 378: guided init asks where an org's shadow repo lives, and --shadow sets it (6.1 Task 10).
+	if n := strings.Count(out, "\n"); n > 378 {
 		t.Errorf("the guide is %d lines; keep it short (spec: about 150 plus the tables)", n)
 	}
 }
@@ -356,6 +357,7 @@ func TestGuideTeachesSetup(t *testing.T) {
 		"When you install the app, pick both the public repo and its shadow repo.",
 		"`init` asks questions only when a person runs it at a terminal; with `--json` it never asks.",
 		"`--guard`/`--no-guard`, `--sync`/`--no-sync`",
+		"For an org's public repo it asks where the shadow repo lives; `--shadow <owner/name>` sets it.",
 		"`TOKEN_PERMISSION_MISSING` names the permission and the repo in `error.details.permission` and `error.details.repo`",
 		"Never run `ghostbranch login` or `ghostbranch logout`",
 		"`GHOSTBRANCH_TOKEN`, then your stored login, then `GH_TOKEN`, `GITHUB_TOKEN`, then `gh auth token`",
