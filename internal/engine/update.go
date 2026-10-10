@@ -285,27 +285,32 @@ func (e *Engine) openUpdate(ctx context.Context, pc *pairCtx, m *feature.Meta, m
 // published commits removed on GitHub (Restores: the update puts them
 // back) replace. Otherwise it appends when the commits on the PR are, by
 // patch-id and message and in order, the first commits of publish.
+//
+// u is changed only on success: until then Style stays "", which
+// gateUpdateOf never reports or records.
 func setStyle(ctx context.Context, g *gitx.Git, u *prUpdate, m *feature.Meta, mode string, above bool, publish []string) error {
-	u.Style, u.Reason = plan.StyleReplace, ""
+	var reason string
 	switch {
 	case mode == config.ModeSquash:
-		u.Reason = plan.ReasonSquash
+		reason = plan.ReasonSquash
 	case mode == config.ModeCurated:
-		u.Reason = plan.ReasonCurated
+		reason = plan.ReasonCurated
 	case u.Base != cmp.Or(m.Promoted.Base, feature.MainParent):
-		u.Reason = plan.ReasonBaseChanged
+		reason = plan.ReasonBaseChanged
 	case m.Promoted.NeedsUpdate || above:
-		u.Reason = plan.ReasonRestack
+		reason = plan.ReasonRestack
 	case len(u.Restores) > 0:
-		u.Reason = plan.ReasonRebase
+		reason = plan.ReasonRebase
 	default:
-		reason, err := prefixReason(ctx, g, u.Public, publish)
+		r, err := prefixReason(ctx, g, u.Public, publish)
 		if err != nil {
 			return err
 		}
-		if u.Reason = reason; reason == "" {
-			u.Style = plan.StyleAppend
-		}
+		reason = r
+	}
+	u.Style, u.Reason = plan.StyleReplace, reason
+	if reason == "" {
+		u.Style = plan.StyleAppend
 	}
 	return nil
 }
@@ -599,9 +604,12 @@ func gateFitsUpdate(gt *feature.Gate, u *prUpdate, mode string) bool {
 	return w.Reason != plan.ReasonSquash && w.Reason != plan.ReasonCurated
 }
 
-// gateUpdateOf is u as a gate records and reports it; nil for nil.
+// gateUpdateOf is u as a gate records and reports it. It is nil for nil,
+// and for an update whose style isn't decided yet (Style ""): a gate that
+// stopped between reading the PR and choosing append or replace (a
+// conflict onto main, a broken marker, an unmapped author) built no update.
 func gateUpdateOf(u *prUpdate) *feature.GateUpdate {
-	if u == nil {
+	if u == nil || u.Style == "" {
 		return nil
 	}
 	return &feature.GateUpdate{PR: u.PR, Head: u.Head, Base: u.Base, Style: u.Style, Reason: u.Reason}

@@ -297,8 +297,28 @@ func TestUpdateGateRefusesAnUnmappedAuthor(t *testing.T) {
 	testutil.Commit(t, h.shadowGit(), "feat-x", "more", map[string]string{"more.txt": "m\n"})
 	res, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
 	_ = wantCode(t, err, contract.AuthorUnmapped)
+	validateResult(t, "gate.schema.json", res)
 	if res == nil || res.Leak != feature.LeakNotRun || res.ShadowPR != nil {
 		t.Fatalf("an unmapped author stops the update gate before CI: %+v", res)
+	}
+}
+
+// A gate that stops before it knows the update's style (here a conflict
+// replaying onto public main) reports and records no update, so its result
+// stays valid.
+func TestAnUpdateGateThatConflictsReportsNoUpdate(t *testing.T) {
+	t.Parallel()
+	h, _ := publishedFeature(t)
+	testutil.Commit(t, h.pubGit, "main", "upstream", map[string]string{"feature.txt": "upstream\n"})
+	testutil.Commit(t, h.shadowGit(), "feat-x", "more", map[string]string{"more.txt": "m\n"})
+	res, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
+	_ = wantCode(t, err, contract.RebaseConflict)
+	validateResult(t, "gate.schema.json", res)
+	if res.Update != nil {
+		t.Fatalf("a conflicted gate reported an update: %+v", res.Update)
+	}
+	if g := h.meta("feat-x").Gate; g != nil && g.Update != nil && g.Update.Style == "" {
+		t.Fatalf("recorded an update with no style: %+v", g.Update)
 	}
 }
 
