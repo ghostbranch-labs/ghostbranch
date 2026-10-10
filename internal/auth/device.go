@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -30,6 +31,15 @@ type DeviceCode struct {
 	DeviceCode, UserCode, VerificationURI string
 	ExpiresIn, Interval                   int
 }
+
+// String keeps the device code, a live secret until it expires, out of any
+// %v, %+v, %#v or %s. The user code and URL are shown to the person anyway.
+func (d DeviceCode) String() string {
+	return fmt.Sprintf("auth.DeviceCode{UserCode:%q VerificationURI:%q ExpiresIn:%d Interval:%d DeviceCode:<redacted>}",
+		d.UserCode, d.VerificationURI, d.ExpiresIn, d.Interval)
+}
+
+func (d DeviceCode) GoString() string { return d.String() }
 
 // oauthReply is every field GitHub's device and token endpoints answer
 // with. error_description is deliberately not read: it is free text from

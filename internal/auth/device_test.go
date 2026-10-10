@@ -3,7 +3,9 @@ package auth_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -142,5 +144,13 @@ func TestRefreshSendsNoClientSecret(t *testing.T) {
 	// The pair rotated: the old refresh token is dead.
 	if _, err := f.Refresh(t.Context(), "ghr_test_seed"); code(err) != contract.LoginExpired {
 		t.Fatalf("reused refresh token: %v", err)
+	}
+}
+
+func TestDeviceCodeNeverPrintsTheDeviceCode(t *testing.T) {
+	t.Parallel()
+	dc := auth.DeviceCode{DeviceCode: "dc_test_secret", UserCode: "WDJB-MJHT", VerificationURI: "https://github.com/login/device", ExpiresIn: 900, Interval: 5}
+	if s := fmt.Sprintf("%v %+v %#v %s", dc, dc, dc, &dc); strings.Contains(s, "dc_test_secret") || !strings.Contains(s, "WDJB-MJHT") {
+		t.Fatal(s)
 	}
 }
