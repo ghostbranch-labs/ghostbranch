@@ -10,6 +10,10 @@ type Fake struct {
 	// Unavailable makes every call fail with ErrUnavailable, as on a
 	// headless Linux machine. Set it before the Fake is shared.
 	Unavailable bool
+	// GetErr and SetErr, when set, are what every Get or Set returns, as
+	// from a locked keychain or a write the OS refused. Set them before the
+	// Fake is shared.
+	GetErr, SetErr error
 
 	mu                  sync.Mutex
 	items               map[string]string
@@ -27,6 +31,9 @@ func (f *Fake) Get(service, account string) (string, error) {
 	if f.Unavailable {
 		return "", fmt.Errorf("%w: fake", ErrUnavailable)
 	}
+	if f.GetErr != nil {
+		return "", f.GetErr
+	}
 	v, ok := f.items[fakeKey(service, account)]
 	if !ok {
 		return "", ErrNotFound
@@ -40,6 +47,9 @@ func (f *Fake) Set(service, account, secret string) error {
 	f.sets++
 	if f.Unavailable {
 		return fmt.Errorf("%w: fake", ErrUnavailable)
+	}
+	if f.SetErr != nil {
+		return f.SetErr
 	}
 	f.items[fakeKey(service, account)] = secret
 	return nil

@@ -18,6 +18,9 @@ type Source struct {
 	Refresh func(ctx context.Context, l Login) (Login, error)
 	Lock    func() (unlock func(), err error) // <GHOSTBRANCH_HOME>/locks/auth.lock in the CLI
 	Now     func() time.Time
+	// OnSaveError hears that a refreshed login couldn't be stored. The
+	// error may carry a secret, so it is for tests and logic, never output.
+	OnSaveError func(error)
 }
 
 func (s Source) now() time.Time {
@@ -127,7 +130,9 @@ func current(ctx context.Context, src Source, l *Login) (string, error) {
 	nl.Account, nl.Kind = cur.Account, cur.Kind
 	// If storing fails, the old pair is already dead: this command still
 	// works with the new token, and the next one fails LOGIN_EXPIRED and
-	// asks for a login.
-	_ = SaveLogin(src.Store, nl)
+	// asks for a login. OnSaveError says so now.
+	if err := SaveLogin(src.Store, nl); err != nil && src.OnSaveError != nil {
+		src.OnSaveError(err)
+	}
 	return nl.Token, nil
 }

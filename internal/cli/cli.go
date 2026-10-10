@@ -407,8 +407,18 @@ func (a *app) deviceFlow(ctx context.Context) auth.DeviceFlow {
 func (a *app) authSource() auth.Source {
 	return auth.Source{
 		Getenv: a.env.Getenv, GH: a.env.GHToken, Store: a.env.Keychain, Now: a.env.Now,
+		// GitHub rotates the refresh token once it answers, so a refresh is
+		// never cut short: a dropped reply would leave only the spent pair.
+		// The HTTP client's 30 s timeout still bounds it.
 		Refresh: func(ctx context.Context, l auth.Login) (auth.Login, error) {
+			ctx = context.WithoutCancel(ctx)
 			return a.deviceFlow(ctx).Refresh(ctx, l.RefreshToken)
+		},
+		// The error is never shown: it could carry a secret.
+		OnSaveError: func(error) {
+			if a.env.Stderr != nil {
+				_, _ = fmt.Fprintln(a.env.Stderr, "the refreshed GitHub login couldn't be saved to the OS keychain; the next command will ask you to log in again")
+			}
 		},
 		Lock: func() (func(), error) {
 			home, err := workspace.HomeDir(a.env.Getenv, runtime.GOOS, os.UserHomeDir)

@@ -72,3 +72,66 @@ func TestRunLoginOnAScript(t *testing.T) {
 		t.Fatalf("unusable keychain: %v (%d requests)", err, len(srv.Forms())-before)
 	}
 }
+
+// refreshApp is an app whose stored login expires in two minutes, so the
+// next Resolve refreshes it through srv.
+func refreshApp(t *testing.T, srv *authtest.Server, kc *keychain.Fake, stderr *strings.Builder) *app {
+	t.Helper()
+	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	if err := auth.SaveLogin(kc, auth.Login{Token: "ghu_test_old", RefreshToken: "ghr_test_seed", Expires: now.Add(2 * time.Minute),
+		RefreshExpires: now.Add(4000 * time.Hour), Account: "octo", Kind: "app"}); err != nil {
+		t.Fatal(err)
+	}
+	home := t.TempDir()
+	return &app{env: Env{
+		Getenv: func(k string) string {
+			if k == "GHOSTBRANCH_HOME" {
+				return home
+			}
+			return ""
+		},
+		Now: func() time.Time { return now }, Keychain: kc, Stderr: stderr,
+		ClientID: srv.ClientID, OAuthBaseURL: srv.URL, HTTPClient: srv.Client(),
+	}}
+}
+
+// GitHub rotates the refresh token as soon as it answers a refresh. A
+// command cancelled mid-refresh still finishes the POST and stores the new
+// pair; dropping the reply would leave only the spent pair and log the
+// person out.
+func TestACancelledRefreshStillStoresTheNewPair(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv := authtest.New(t, authtest.Options{RefreshToken: "ghr_test_seed", RefreshGate: func() {
+		cancel()
+		time.Sleep(200 * time.Millisecond) // the client sees the cancel before the reply
+	}})
+	kc := keychain.NewFake()
+	var stderr strings.Builder
+	a := refreshApp(t, srv, kc, &stderr)
+	_, _, _ = auth.Resolve(ctx, a.authSource())
+	l, err := auth.LoadLogin(kc)
+	if err != nil || l == nil || l.Token != srv.AccessToken(1) || l.RefreshToken != srv.RefreshToken(1) || srv.Refreshes() != 1 {
+		t.Fatalf("stored %v, %v (%d refreshes)", l, err, srv.Refreshes())
+	}
+}
+
+// A refreshed pair the keychain won't take is said once on stderr, without
+// the keychain's error, which could carry a secret.
+func TestAFailedSaveAfterARefreshIsSaidOnStderr(t *testing.T) {
+	t.Parallel()
+	srv := authtest.New(t, authtest.Options{RefreshToken: "ghr_test_seed"})
+	kc := keychain.NewFake()
+	var stderr strings.Builder
+	a := refreshApp(t, srv, kc, &stderr)
+	kc.SetErr = errors.New("write refused for ghr_test_refresh_1")
+	tok, _, err := auth.Resolve(context.Background(), a.authSource())
+	if err != nil || tok != srv.AccessToken(1) {
+		t.Fatalf("%q %v", tok, err)
+	}
+	want := "the refreshed GitHub login couldn't be saved to the OS keychain; the next command will ask you to log in again\n"
+	if got := stderr.String(); !strings.HasSuffix(got, want) || strings.Count(got, "\n") != 1 || strings.Contains(got, "ghr_test") {
+		t.Fatalf("stderr %q", got)
+	}
+}

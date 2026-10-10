@@ -285,3 +285,24 @@ func TestStaleLoginWithoutRefreshIsUsedAsIs(t *testing.T) {
 		}
 	}
 }
+
+// A refreshed pair that can't be saved is reported through OnSaveError,
+// once, and the command still gets the new token: the old pair is already
+// spent, so the next command will ask for a login.
+func TestAFailedSaveAfterARefreshIsReported(t *testing.T) {
+	t.Parallel()
+	srv := authtest.New(t, authtest.Options{RefreshToken: "ghr_test_seed"})
+	s := keychain.NewFake()
+	stored(t, s, "ghr_test_seed", 2*time.Minute)
+	s.SetErr = errors.New("keychain: write refused")
+	src := source(srv, s, nil, noGH(t))
+	var reported []error
+	src.OnSaveError = func(err error) { reported = append(reported, err) }
+	tok, _, err := auth.Resolve(t.Context(), src)
+	if err != nil || tok != srv.AccessToken(1) {
+		t.Fatalf("%q %v", tok, err)
+	}
+	if len(reported) != 1 || !errors.Is(reported[0], s.SetErr) {
+		t.Fatalf("reported %v", reported)
+	}
+}
