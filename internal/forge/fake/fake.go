@@ -77,6 +77,22 @@ type Forge struct {
 	// other read it probes is "yes", and Contents: write follows PushDenied.
 	Scopes      []string
 	PermsDenied map[string]map[string]bool
+	// Orgs are the owners that are organizations; every other owner is a
+	// user. GetRepo and CreatePrivateRepo report it in Repo.OwnerType.
+	Orgs map[string]bool
+	// CreateRefused makes CreatePrivateRepo under these owners fail with
+	// ErrForbidden, carrying the message as GitHub's (a *forge.HostError).
+	CreateRefused map[string]string
+}
+
+// view is r, the repo stored as full, as GitHub answers it. Callers hold f.mu.
+func (f *Forge) view(full string, r *forge.Repo) forge.Repo {
+	out := *r
+	out.OwnerType = forge.OwnerUser
+	if owner, _, err := forge.SplitName(full); err == nil && f.Orgs[owner] {
+		out.OwnerType = forge.OwnerOrganization
+	}
+	return out
 }
 
 // missing is the error MissingPermission scripts for method on full, or
@@ -233,7 +249,7 @@ func (f *Forge) GetRepo(_ context.Context, full string) (forge.Repo, error) {
 	if !ok {
 		return forge.Repo{}, fmt.Errorf("repo %s: %w", full, forge.ErrNotFound)
 	}
-	return *r, nil
+	return f.view(full, r), nil
 }
 
 func (f *Forge) CreatePrivateRepo(_ context.Context, full string) (forge.Repo, error) {
@@ -245,11 +261,17 @@ func (f *Forge) CreatePrivateRepo(_ context.Context, full string) (forge.Repo, e
 	if f.CreateForbidden {
 		return forge.Repo{}, fmt.Errorf("create %s: %w", full, forge.ErrForbidden)
 	}
+	if owner, _, err := forge.SplitName(full); err == nil {
+		if msg, ok := f.CreateRefused[owner]; ok {
+			return forge.Repo{}, fmt.Errorf("create %s: %w", full,
+				&forge.HostError{Message: msg, Err: fmt.Errorf("%w: 403 %s", forge.ErrForbidden, msg)})
+		}
+	}
 	r, err := f.add(full, true)
 	if err != nil {
 		return forge.Repo{}, err
 	}
-	return *r, nil
+	return f.view(full, r), nil
 }
 
 func (f *Forge) branchExists(full, branch string) bool {

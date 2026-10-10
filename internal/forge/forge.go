@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode"
 )
 
 // ErrNotFound wraps any "does not exist" answer from the host.
@@ -46,13 +47,53 @@ func (e *PermissionError) Error() string {
 
 func (e *PermissionError) Unwrap() error { return ErrForbidden }
 
+// HostError carries the host's own message for a failed call (GitHub's
+// "message" field) and nothing else from the response. Its text is Err's.
+type HostError struct {
+	Message string
+	Err     error
+}
+
+func (e *HostError) Error() string { return e.Err.Error() }
+
+func (e *HostError) Unwrap() error { return e.Err }
+
+// HostMessage is the host's message carried in err's chain, on one line
+// of printable characters (no terminal escapes), or "".
+func HostMessage(err error) string {
+	var h *HostError
+	if !errors.As(err, &h) {
+		return ""
+	}
+	m := strings.Map(func(r rune) rune {
+		if unicode.IsPrint(r) || unicode.IsSpace(r) {
+			return r
+		}
+		return -1
+	}, h.Message)
+	m = strings.Join(strings.Fields(m), " ")
+	if r := []rune(m); len(r) > 200 {
+		m = string(r[:200]) + "…"
+	}
+	return m
+}
+
 type Repo struct {
 	FullName      string
 	Private       bool
 	Fork          bool
 	DefaultBranch string
 	CloneURL      string
+	// OwnerType is GitHub's type of the repo's owner: OwnerOrganization or
+	// OwnerUser ("" when unknown).
+	OwnerType string
 }
+
+// The owner types GitHub reports.
+const (
+	OwnerOrganization = "Organization"
+	OwnerUser         = "User"
+)
 
 type PR struct {
 	Number int

@@ -249,3 +249,34 @@ func TestMissingPermissionFailsTheScriptedCall(t *testing.T) {
 		t.Fatalf("an unscripted call failed: %v", err)
 	}
 }
+
+// Repos say whether their owner is an organization or a user, as GitHub's do.
+func TestFakeOwnerType(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	f := fake.New(filepath.Join(t.TempDir(), "forge"))
+	f.Orgs = map[string]bool{"acme": true}
+	if r, err := f.CreatePrivateRepo(ctx, "acme/widget-shadow"); err != nil || r.OwnerType != forge.OwnerOrganization {
+		t.Fatalf("org repo = %+v %v", r, err)
+	}
+	if _, err := f.AddRepo("octo/widget-shadow", true); err != nil {
+		t.Fatal(err)
+	}
+	if r, err := f.GetRepo(ctx, "octo/widget-shadow"); err != nil || r.OwnerType != forge.OwnerUser {
+		t.Fatalf("user repo = %+v %v", r, err)
+	}
+}
+
+// CreateRefused refuses as GitHub does, carrying its message.
+func TestFakeCreateRefused(t *testing.T) {
+	t.Parallel()
+	f := fake.New(filepath.Join(t.TempDir(), "forge"))
+	f.CreateRefused = map[string]string{"acme": "Resource not accessible by integration"}
+	_, err := f.CreatePrivateRepo(context.Background(), "acme/widget-shadow")
+	if !errors.Is(err, forge.ErrForbidden) || forge.HostMessage(err) != "Resource not accessible by integration" {
+		t.Fatalf("%v (message %q)", err, forge.HostMessage(err))
+	}
+	if _, err := f.CreatePrivateRepo(context.Background(), "octo/widget-shadow"); err != nil {
+		t.Fatal(err)
+	}
+}

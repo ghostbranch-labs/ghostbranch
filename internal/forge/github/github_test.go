@@ -53,7 +53,7 @@ func TestGetRepoAndErrors(t *testing.T) {
 			t.Errorf("missing auth header: %q", r.Header.Get("Authorization"))
 		}
 		writeJSON(w, map[string]any{"full_name": "acme/widget", "private": false, "fork": false,
-			"default_branch": "main", "clone_url": "https://github.com/acme/widget.git"})
+			"default_branch": "main", "clone_url": "https://github.com/acme/widget.git", "owner": map[string]any{"login": "acme", "type": "Organization"}})
 	})
 	mux.HandleFunc("GET /repos/acme/none", func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
@@ -64,7 +64,7 @@ func TestGetRepoAndErrors(t *testing.T) {
 	c := newClient(t, mux)
 	ctx := context.Background()
 	r, err := c.GetRepo(ctx, "acme/widget")
-	if err != nil || r.FullName != "acme/widget" || r.Private || r.CloneURL != "https://github.com/acme/widget.git" {
+	if err != nil || r.FullName != "acme/widget" || r.Private || r.CloneURL != "https://github.com/acme/widget.git" || r.OwnerType != forge.OwnerOrganization {
 		t.Fatalf("GetRepo = %+v %v", r, err)
 	}
 	if _, err := c.GetRepo(ctx, "acme/none"); !errors.Is(err, forge.ErrNotFound) {
@@ -394,9 +394,11 @@ func TestCreatePrivateRepoForbidden(t *testing.T) {
 		http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
 	})
 	c := newClient(t, mux)
-	for _, full := range []string{"acme/widget-shadow", "hidden/widget-shadow"} {
-		if _, err := c.CreatePrivateRepo(context.Background(), full); !errors.Is(err, forge.ErrForbidden) {
-			t.Fatalf("%s: %v", full, err)
+	// The refusal keeps GitHub's message, and only that, for the person.
+	for full, msg := range map[string]string{"acme/widget-shadow": "Resource not accessible by personal access token", "hidden/widget-shadow": "Not Found"} {
+		_, err := c.CreatePrivateRepo(context.Background(), full)
+		if !errors.Is(err, forge.ErrForbidden) || forge.HostMessage(err) != msg {
+			t.Fatalf("%s: %v (message %q)", full, err, forge.HostMessage(err))
 		}
 	}
 }

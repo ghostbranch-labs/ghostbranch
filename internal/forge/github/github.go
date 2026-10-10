@@ -196,7 +196,7 @@ func splitList(s string) []string {
 
 func toRepo(r *gh.Repository) forge.Repo {
 	return forge.Repo{FullName: r.GetFullName(), Private: r.GetPrivate(), Fork: r.GetFork(),
-		DefaultBranch: r.GetDefaultBranch(), CloneURL: r.GetCloneURL()}
+		DefaultBranch: r.GetDefaultBranch(), CloneURL: r.GetCloneURL(), OwnerType: r.GetOwner().GetType()}
 }
 
 func toPR(p *gh.PullRequest) forge.PR {
@@ -236,11 +236,12 @@ func (c *Client) CreatePrivateRepo(ctx context.Context, full string) (forge.Repo
 		Description: new("Ghostbranch shadow repo (private). Do not make public."),
 	})
 	// The public repo was already read, so a 404 on an org owner means "not allowed".
+	// A refusal keeps GitHub's message, for the person to read.
 	if isForbidden(resp, err) {
-		return forge.Repo{}, fmt.Errorf("create %s: %w", full, forbidden(full, resp, err))
+		return forge.Repo{}, fmt.Errorf("create %s: %w", full, forbidden(full, resp, hostErr(err)))
 	}
 	if err != nil && org != "" && statusOf(resp) == http.StatusNotFound {
-		return forge.Repo{}, fmt.Errorf("%w: create %s: %w", forge.ErrForbidden, full, err)
+		return forge.Repo{}, fmt.Errorf("%w: create %s: %w", forge.ErrForbidden, full, hostErr(err))
 	}
 	if err := wrap(ctx, full, resp, err); err != nil {
 		return forge.Repo{}, err
@@ -684,4 +685,14 @@ func (c *Client) OAuthScopes(ctx context.Context) ([]string, bool, error) {
 		}
 	}
 	return scopes, true, nil
+}
+
+// hostErr keeps GitHub's message of err (its "message" field only) in the
+// chain as a *forge.HostError; err without one is returned as is.
+func hostErr(err error) error {
+	var ge *gh.ErrorResponse
+	if !errors.As(err, &ge) || ge.Message == "" {
+		return err
+	}
+	return &forge.HostError{Message: ge.Message, Err: err}
 }
