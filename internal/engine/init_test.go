@@ -481,3 +481,55 @@ func TestInitRefusesAScheduleTheOverlayContradicts(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A shadow repo under another owner than the public repo's (an org's public
+// repo with the shadow on the person's account) is created or adopted,
+// registered, resolved from the public checkout, and used.
+func TestInitAcceptsAShadowRepoUnderAnotherOwner(t *testing.T) {
+	t.Parallel()
+	const personal = "octo/widget-shadow"
+	for _, adopt := range []bool{false, true} {
+		t.Run(map[bool]string{false: "create", true: "adopt"}[adopt], func(t *testing.T) {
+			t.Parallel()
+			h := newHarness(t)
+			h.forge.Orgs = map[string]bool{"acme": true}
+			if adopt {
+				if _, err := h.forge.CreatePrivateRepo(h.ctx, personal); err != nil {
+					t.Fatal(err)
+				}
+			}
+			res, _, err := h.eng.Init(h.ctx, engine.InitOptions{Public: publicName, Shadow: personal, Adopt: adopt})
+			if err != nil || res.Shadow != personal || res.CreatedShadow == adopt || res.Adopted != adopt {
+				t.Fatalf("init = %+v %v", res, err)
+			}
+			sg := gitx.New(h.forge.RepoDir(personal))
+			raw, ok, _ := sg.ShowFile(h.ctx, "refs/heads/ghostbranch", ".ghostbranch.yml")
+			if cfg, _, err := config.Parse(raw); !ok || err != nil || cfg.Public != publicName || cfg.Shadow != personal {
+				t.Fatalf("overlay config = %+v %v", cfg, err)
+			}
+			ws, err := workspace.Open(filepath.Dir(filepath.Dir(h.eng.WS.Dir)), h.eng.WS.Name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := workspace.Pair{Public: publicName, Shadow: personal}
+			for _, by := range []struct {
+				flag    string
+				remotes []workspace.Remote
+			}{
+				{publicName, nil},
+				{personal, nil},
+				{"", []workspace.Remote{{Name: "origin", URL: "https://github.com/acme/widget.git"}}},
+			} {
+				if p, err := ws.Resolve(by.flag, by.remotes); err != nil || p != want {
+					t.Fatalf("resolve %q %v = %+v %v", by.flag, by.remotes, p, err)
+				}
+			}
+			if _, _, err := h.eng.FeatureStart(h.ctx, want, "feat-x"); err != nil {
+				t.Fatalf("feature start: %v", err)
+			}
+			if _, err := sg.MustResolve(h.ctx, "refs/heads/feat-x"); err != nil {
+				t.Fatalf("no feature branch in %s: %v", personal, err)
+			}
+		})
+	}
+}
