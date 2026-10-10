@@ -843,3 +843,47 @@ func TestOAuthScopes(t *testing.T) {
 		t.Fatalf("fine-grained: %v %v %v", scopes, ok, err)
 	}
 }
+
+// X-Accepted-GitHub-Permissions comes on every 403 to a fine-grained or app
+// token, so only GitHub's "Resource not accessible by" message names a
+// missing permission. Any other 403 (SAML SSO, an archived repo, an org
+// policy) is a plain ErrForbidden, and a 403 that says to wait is transient.
+func TestOnlyAnInaccessible403NamesAPermission(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	deny := func(header map[string]string, body string) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("X-Accepted-GitHub-Permissions", "pull_requests=write")
+			for k, v := range header {
+				w.Header().Set(k, v)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(body))
+		}
+	}
+	mux.HandleFunc("POST /repos/acme/sso/pulls", deny(nil,
+		`{"message":"Resource protected by organization SAML enforcement. You must grant your Personal Access token access to this organization."}`))
+	mux.HandleFunc("POST /repos/acme/archived/pulls", deny(nil, `{"message":"Repository was archived so is read-only."}`))
+	mux.HandleFunc("POST /repos/acme/wait/pulls", deny(map[string]string{"Retry-After": "30"}, `{"message":"You have been blocked from creating content."}`))
+	mux.HandleFunc("POST /repos/acme/empty/pulls", deny(map[string]string{"X-RateLimit-Remaining": "0"}, `{"message":"Slow down."}`))
+	c := newTokenClient(t, mux, "ghu_test")
+	ctx := context.Background()
+	open := func(repo string) error {
+		_, err := c.CreatePR(ctx, repo, forge.NewPR{Title: "t", Head: "feat", Base: "main"})
+		return err
+	}
+	for _, repo := range []string{"acme/sso", "acme/archived"} {
+		err := open(repo)
+		var pe *forge.PermissionError
+		if errors.As(err, &pe) || !errors.Is(err, forge.ErrForbidden) || errors.Is(err, forge.ErrTransient) {
+			t.Errorf("%s: %v, want a plain ErrForbidden", repo, err)
+		}
+	}
+	for _, repo := range []string{"acme/wait", "acme/empty"} {
+		err := open(repo)
+		if errors.Is(err, forge.ErrForbidden) || !errors.Is(err, forge.ErrTransient) {
+			t.Errorf("%s: %v, want transient and not forbidden", repo, err)
+		}
+	}
+}

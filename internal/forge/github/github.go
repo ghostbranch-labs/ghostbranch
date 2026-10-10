@@ -93,7 +93,7 @@ func wrap(ctx context.Context, full string, resp *gh.Response, err error) error 
 	}
 	var rl *gh.RateLimitError
 	var arl *gh.AbuseRateLimitError
-	if errors.As(err, &rl) || errors.As(err, &arl) || status == http.StatusTooManyRequests || status == 0 || status >= 500 {
+	if errors.As(err, &rl) || errors.As(err, &arl) || waitAsked(resp) || status == http.StatusTooManyRequests || status == 0 || status >= 500 {
 		return fmt.Errorf("%w: %w", forge.ErrTransient, err)
 	}
 	return err
@@ -106,13 +106,33 @@ func statusOf(resp *gh.Response) int {
 	return resp.StatusCode
 }
 
-// forbidden wraps a plain 403: a *forge.PermissionError when GitHub's
-// headers name what the token lacks, otherwise forge.ErrForbidden.
+// forbidden wraps a plain 403: a *forge.PermissionError when GitHub says
+// the resource is not accessible and its headers name what the token
+// lacks, otherwise forge.ErrForbidden. X-Accepted-GitHub-Permissions comes
+// on every 403 to a fine-grained or app token, SAML SSO, archived repos and
+// org policies included, so the header alone names nothing.
 func forbidden(full string, resp *gh.Response, err error) error {
-	if p := missingPermission(resp.Header); p != "" {
+	if p := missingPermission(resp.Header); p != "" && inaccessible(err) {
 		return fmt.Errorf("%w: %w", &forge.PermissionError{Permission: p, Repo: full}, err)
 	}
 	return fmt.Errorf("%w: %w", forge.ErrForbidden, err)
+}
+
+// inaccessible reports GitHub's "Resource not accessible by …" 403, the one
+// that means the token lacks a permission.
+func inaccessible(err error) bool {
+	var ge *gh.ErrorResponse
+	return errors.As(err, &ge) && strings.HasPrefix(ge.Message, "Resource not accessible by")
+}
+
+// waitAsked reports a 403 that tells the caller to wait (Retry-After or no
+// rate limit left) but that go-github didn't classify as a rate limit, such
+// as an unrecognised secondary limit. It may pass on its own.
+func waitAsked(resp *gh.Response) bool {
+	if statusOf(resp) != http.StatusForbidden {
+		return false
+	}
+	return resp.Header.Get("Retry-After") != "" || resp.Header.Get("X-RateLimit-Remaining") == "0"
 }
 
 // permissionNames are GitHub's settings-page names for the permission keys
@@ -350,9 +370,10 @@ func (c *Client) markLimited(full string) {
 }
 
 // isForbidden reports a plain 403, as a fine-grained token gets for check
-// runs. Rate limits also arrive as 403 but are not permission problems.
+// runs. Rate limits, and a 403 that says to wait, also arrive as 403 but
+// are not permission problems.
 func isForbidden(resp *gh.Response, err error) bool {
-	if err == nil || statusOf(resp) != http.StatusForbidden {
+	if err == nil || statusOf(resp) != http.StatusForbidden || waitAsked(resp) {
 		return false
 	}
 	var rl *gh.RateLimitError
