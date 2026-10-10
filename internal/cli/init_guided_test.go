@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/auth"
 	"github.com/ghostbranch-labs/ghostbranch/internal/auth/authtest"
@@ -483,5 +484,345 @@ func TestGuidedInitRefusesAForkAsTheShadowRepo(t *testing.T) {
 	}
 	if pairs := registered(te); len(pairs) != 1 || pairs[0].Shadow != "acme/other-shadow" {
 		t.Fatalf("pairs %+v", pairs)
+	}
+}
+
+// Task 10: where the shadow repo of an organization's public repo lives.
+
+const installLink = "https://github.com/apps/ghostbranch-cli/installations/new"
+
+// atOrgTerminal is atTerminal with acme an organization; the login is octo.
+func atOrgTerminal(te *testEnv, answers ...string) *person {
+	te.forge.Orgs = map[string]bool{"acme": true}
+	return atTerminal(te, answers...)
+}
+
+// appLogin makes the run's token a stored app login (ghu_) instead of
+// GHOSTBRANCH_TOKEN.
+func appLogin(te *testEnv) {
+	delete(te.vars, "GHOSTBRANCH_TOKEN")
+	storeLogin(te, "ghu_test", "ghr_test", time.Hour)
+}
+
+// GitHub's message when an app login creates a repo on an account the app
+// isn't installed on.
+const notInstalledMsg = "Resource not accessible by integration"
+
+// refuseIn has GitHub refuse to create repos under these owners, saying msg.
+func refuseIn(te *testEnv, msg string, owners ...string) {
+	te.forge.CreateRefused = map[string]string{}
+	for _, o := range owners {
+		te.forge.CreateRefused[o] = msg
+	}
+}
+
+func wantPair(t *testing.T, te *testEnv, shadow string) {
+	t.Helper()
+	if pairs := registered(te); len(pairs) != 1 || pairs[0].Shadow != shadow {
+		t.Fatalf("pairs %+v, want shadow %s", pairs, shadow)
+	}
+	if _, err := te.forge.GetRepo(context.Background(), shadow); err != nil {
+		t.Fatalf("shadow %s: %v", shadow, err)
+	}
+}
+
+const whereQ = "Choose 1, 2 or 3"
+
+func TestGuidedInitAsksWhereAnOrgsShadowLives(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	p := atOrgTerminal(te, "", "", "", "")
+	if code, out, errOut := te.run("init", "acme/widget"); code != 0 {
+		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
+	}
+	hasPrefixes(t, p.asked, whereQ, "Create private repo acme/widget-shadow?", "Turn on scheduled sync?", "Proceed?")
+	for _, want := range []string{"Where should the private shadow repo live?",
+		"  1. acme/widget-shadow   (the org; teammates can use it)   [default]",
+		"  2. octo/widget-shadow   (your account; only you)",
+		"  3. another repo name, or an existing repo to adopt"} {
+		if !slices.Contains(p.said, want) {
+			t.Errorf("never said %q: %q", want, p.said)
+		}
+	}
+	if saidHas(p, installLink) {
+		t.Errorf("a token login was shown the app's install link: %q", p.said)
+	}
+	wantPair(t, te, "acme/widget-shadow")
+}
+
+func TestGuidedInitPutsTheShadowOnThePersonsAccount(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	p := atOrgTerminal(te, "4", "2", "", "", "")
+	if code, out, errOut := te.run("init", "acme/widget"); code != 0 {
+		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
+	}
+	hasPrefixes(t, p.asked, whereQ, whereQ, "Create private repo octo/widget-shadow?", "Turn on scheduled sync?", "Proceed?")
+	if !saidHas(p, "Answer 1, 2 or 3.") {
+		t.Fatalf("said %q", p.said)
+	}
+	wantPair(t, te, "octo/widget-shadow")
+	if shadowExists(te) {
+		t.Fatal("the org's shadow was made too")
+	}
+}
+
+func TestGuidedInitAdoptsANamedShadowRepo(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	if _, err := te.forge.AddRepo("octo/private-mirror", true); err != nil {
+		t.Fatal(err)
+	}
+	p := atOrgTerminal(te, "3", "octo/private-mirror", "", "", "")
+	if code, out, errOut := te.run("init", "acme/widget"); code != 0 {
+		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
+	}
+	hasPrefixes(t, p.asked, whereQ, "Shadow repo (owner/repo", "octo/private-mirror already exists. Adopt it", "Turn on scheduled sync?", "Proceed?")
+	wantPair(t, te, "octo/private-mirror")
+}
+
+func TestGuidedInitRefusesAPublicNamedShadowRepo(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	if _, err := te.forge.AddRepo("octo/open", false); err != nil {
+		t.Fatal(err)
+	}
+	p := atOrgTerminal(te, "3", "octo/open", "octo/closed", "", "", "")
+	if code, out, errOut := te.run("init", "acme/widget"); code != 0 {
+		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
+	}
+	hasPrefixes(t, p.asked, whereQ, "Shadow repo (owner/repo", "Shadow repo to use instead", "Create private repo octo/closed?",
+		"Turn on scheduled sync?", "Proceed?")
+	if !saidHas(p, "octo/open is public; a shadow repo must be private.") {
+		t.Fatalf("said %q", p.said)
+	}
+	wantPair(t, te, "octo/closed")
+}
+
+// No question for a public repo on a personal account, nor with --shadow.
+func TestGuidedInitAsksWhereOnlyForAnOrgWithoutShadow(t *testing.T) {
+	t.Parallel()
+	t.Run("personal public repo", func(t *testing.T) {
+		t.Parallel()
+		te := newTestEnv(t) // acme is a user here
+		p := atTerminal(te, "", "", "")
+		if code, out, errOut := te.run("init", "acme/widget"); code != 0 {
+			t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
+		}
+		hasPrefixes(t, p.asked, "Create private repo acme/widget-shadow?", "Turn on scheduled sync?", "Proceed?")
+		if saidHas(p, "Where should the private shadow repo live?") {
+			t.Fatalf("said %q", p.said)
+		}
+	})
+	t.Run("--shadow", func(t *testing.T) {
+		t.Parallel()
+		te := newTestEnv(t)
+		p := atOrgTerminal(te, "", "")
+		if code, out, errOut := te.run("init", "acme/widget", "--shadow", "octo/widget-shadow"); code != 0 {
+			t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
+		}
+		hasPrefixes(t, p.asked, "Turn on scheduled sync?", "Proceed?")
+		if !saidHas(p, "octo/widget-shadow") {
+			t.Fatalf("the summary doesn't name the shadow: %q", p.said)
+		}
+		wantPair(t, te, "octo/widget-shadow")
+	})
+}
+
+func TestGuidedInitOffersThePersonalAccountWhenTheOrgRefuses(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	refuseIn(te, "Repository creation failed.", "acme")
+	p := atOrgTerminal(te, "", "", "", "", "")
+	if code, out, errOut := te.run("init", "acme/widget"); code != 0 {
+		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
+	}
+	hasPrefixes(t, p.asked, whereQ, "Create private repo acme/widget-shadow?", "Turn on scheduled sync?", "Proceed?",
+		"Use octo/widget-shadow instead?")
+	wantPair(t, te, "octo/widget-shadow")
+	if shadowExists(te) {
+		t.Fatal("the org's shadow exists")
+	}
+}
+
+func TestGuidedInitDeclinedPersonalAccountMakesTheOrgsByHand(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	refuseIn(te, "Repository creation failed.", "acme")
+	p := atOrgTerminal(te, "", "", "", "", "n", "")
+	p.onWait = func() { _, _ = te.forge.AddRepo("acme/widget-shadow", true) }
+	if code, out, errOut := te.run("init", "acme/widget"); code != 0 {
+		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
+	}
+	hasPrefixes(t, p.asked, whereQ, "Create private repo acme/widget-shadow?", "Turn on scheduled sync?", "Proceed?",
+		"Use octo/widget-shadow instead?", "Press Enter once acme/widget-shadow exists.")
+	wantPair(t, te, "acme/widget-shadow")
+}
+
+// The org and the personal account both refuse: with an app login, init
+// says the app isn't installed on the account and gives its install link;
+// either way it waits for the personal repo made by hand.
+func TestGuidedInitPersonalAccountRefusedToo(t *testing.T) {
+	t.Parallel()
+	for _, app := range []bool{true, false} {
+		t.Run(map[bool]string{true: "app login", false: "token"}[app], func(t *testing.T) {
+			t.Parallel()
+			te := newTestEnv(t)
+			if app {
+				appLogin(te)
+			}
+			refuseIn(te, notInstalledMsg, "acme", "octo")
+			p := atOrgTerminal(te, "", "", "", "", "", "")
+			p.onWait = func() { _, _ = te.forge.AddRepo("octo/widget-shadow", true) }
+			if code, out, errOut := te.run("init", "acme/widget"); code != 0 {
+				t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
+			}
+			hasPrefixes(t, p.asked, whereQ, "Create private repo acme/widget-shadow?", "Turn on scheduled sync?", "Proceed?",
+				"Use octo/widget-shadow instead?", "Press Enter once octo/widget-shadow exists.")
+			if !slices.Contains(p.said, `GitHub refused to create octo/widget-shadow on octo. GitHub said: "`+notInstalledMsg+`"`) {
+				t.Fatalf("never said the personal account refused: %q", p.said)
+			}
+			const notInstalled = "  - the Ghostbranch app isn't installed on octo: install it at " + installLink
+			if got := slices.Contains(p.said, notInstalled); got != app {
+				t.Fatalf("app %v, said the install link %v: %q", app, got, p.said)
+			}
+			if !saidHas(p, "GitHub didn't let your login create octo/widget-shadow. Create it yourself:") ||
+				!saidHas(p, "https://github.com/new?owner=octo&name=widget-shadow&visibility=private") {
+				t.Fatalf("no create-by-hand steps for the personal repo: %q", p.said)
+			}
+			wantPair(t, te, "octo/widget-shadow")
+		})
+	}
+}
+
+func TestGuidedInitCtrlCAtWhereTheShadowLives(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	p := atOrgTerminal(te, "", "", "", "")
+	p.interruptAt = 1
+	code, _, errOut := te.run("init", "acme/widget")
+	if code != 1 || !strings.Contains(errOut, "[INTERRUPTED]") {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	if len(p.asked) != 1 || !strings.HasPrefix(p.asked[0], whereQ) || shadowExists(te) || len(registered(te)) != 0 {
+		t.Fatalf("asked %q; shadow made %v; pairs %v", p.asked, shadowExists(te), registered(te))
+	}
+	if _, err := te.forge.GetRepo(context.Background(), "octo/widget-shadow"); !errors.Is(err, forge.ErrNotFound) {
+		t.Fatalf("personal shadow: %v", err)
+	}
+}
+
+// An app login only reaches repos on accounts where the app is installed:
+// the texts say so and give the install link. A token login keeps the
+// plain texts.
+func TestGuidedInitAppLoginTexts(t *testing.T) {
+	t.Parallel()
+	const (
+		option2   = "     For 2, the ghostbranch-cli GitHub App must be installed on your account (octo): " + installLink
+		offer     = "For that, the ghostbranch-cli GitHub App must be installed on your account (octo): " + installLink
+		step2     = "  2. Give Ghostbranch access to it: install the ghostbranch-cli GitHub App on acme, or add acme/widget-shadow to its repositories, at " + installLink
+		notYet    = "acme/widget-shadow isn't there yet, or the ghostbranch-cli GitHub App can't see it: install the app on acme, or add acme/widget-shadow to its repositories, at " + installLink
+		step2PAT  = "  2. Give Ghostbranch access to it: add it to the Ghostbranch GitHub App's repositories (or to your token's)."
+		notYetPAT = "acme/widget-shadow isn't there yet, or your login can't see it."
+	)
+	for _, app := range []bool{true, false} {
+		t.Run(map[bool]string{true: "app login", false: "token"}[app], func(t *testing.T) {
+			t.Parallel()
+			te := newTestEnv(t)
+			if app {
+				appLogin(te)
+			}
+			refuseIn(te, notInstalledMsg, "acme")
+			// Org shadow refused, personal declined, by hand: not there at the
+			// first Enter, there at the second.
+			p := atOrgTerminal(te, "", "", "", "", "n", "", "")
+			waits := 0
+			p.onWait = func() {
+				if waits++; waits == 2 {
+					_, _ = te.forge.AddRepo("acme/widget-shadow", true)
+				}
+			}
+			if code, out, errOut := te.run("init", "acme/widget"); code != 0 {
+				t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
+			}
+			for _, tc := range []struct {
+				line string
+				want bool
+			}{{option2, app}, {offer, app}, {step2, app}, {notYet, app}, {step2PAT, !app}, {notYetPAT, !app}} {
+				if slices.Contains(p.said, tc.line) != tc.want {
+					t.Errorf("said %q: %v, want %v (all: %q)", tc.line, !tc.want, tc.want, p.said)
+				}
+			}
+			wantPair(t, te, "acme/widget-shadow")
+		})
+	}
+}
+
+// A refused creation says which account refused and why: GitHub's message,
+// then the likely causes for the case, each with its fix.
+func TestGuidedInitSaysWhyCreationWasRefused(t *testing.T) {
+	t.Parallel()
+	const (
+		appMissing = "  - the Ghostbranch app isn't installed on %s: install it at " + installLink
+		orgPolicy  = "  - acme's settings may not let members create private repos: ask an org owner to create acme/widget-shadow (%s), or choose your personal account"
+		tokenLacks = "  - your token may lack Administration: write (fine-grained) or the repo scope (classic) on acme: ghostbranch doctor shows what's missing"
+	)
+	for _, tc := range []struct {
+		name, msg, shadow string
+		app, org          bool
+		args, answers     []string
+		want, never       []string
+	}{
+		{name: "org, app not installed", msg: notInstalledMsg, shadow: "acme/widget-shadow", app: true, org: true,
+			answers: []string{"", "", "", "", "n", ""},
+			want: []string{`GitHub refused to create acme/widget-shadow on acme. GitHub said: "Resource not accessible by integration"`,
+				"Likely cause:", fmt.Sprintf(appMissing, "acme")},
+			never: []string{fmt.Sprintf(orgPolicy, "then add it to the app"), tokenLacks}},
+		{name: "org policy", msg: "Repository creation failed.", shadow: "acme/widget-shadow", app: true, org: true,
+			answers: []string{"", "", "", "", "n", ""},
+			want: []string{`GitHub refused to create acme/widget-shadow on acme. GitHub said: "Repository creation failed."`,
+				"Likely cause:", fmt.Sprintf(orgPolicy, "then add it to the app")},
+			never: []string{fmt.Sprintf(appMissing, "acme"), tokenLacks}},
+		{name: "personal account, app not installed", msg: notInstalledMsg, shadow: "octo/widget-shadow", app: true,
+			args: []string{"--shadow", "octo/widget-shadow"}, answers: []string{"", "", ""},
+			want: []string{`GitHub refused to create octo/widget-shadow on octo. GitHub said: "Resource not accessible by integration"`,
+				"Likely cause:", fmt.Sprintf(appMissing, "octo")}},
+		{name: "token", msg: "Resource not accessible by personal access token", shadow: "acme/widget-shadow", org: true,
+			answers: []string{"", "", "", "", "n", ""},
+			want: []string{`GitHub refused to create acme/widget-shadow on acme. GitHub said: "Resource not accessible by personal access token"`,
+				"Likely causes:", tokenLacks, fmt.Sprintf(orgPolicy, "then give your token access to it")},
+			never: []string{fmt.Sprintf(appMissing, "acme")}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			te := newTestEnv(t)
+			if tc.app {
+				appLogin(te)
+			}
+			if tc.org {
+				te.forge.Orgs = map[string]bool{"acme": true}
+			}
+			owner, _, _ := forge.SplitName(tc.shadow)
+			refuseIn(te, tc.msg, owner)
+			p := atTerminal(te, tc.answers...)
+			p.onWait = func() { _, _ = te.forge.AddRepo(tc.shadow, true) }
+			if code, out, errOut := te.run(append([]string{"init", "acme/widget"}, tc.args...)...); code != 0 {
+				t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
+			}
+			for _, l := range tc.want {
+				if !slices.Contains(p.said, l) {
+					t.Errorf("never said %q (all: %q)", l, p.said)
+				}
+			}
+			for _, l := range tc.never {
+				if slices.Contains(p.said, l) {
+					t.Errorf("said %q", l)
+				}
+			}
+			if strings.Contains(strings.Join(p.said, "\n"), "ghu_test") {
+				t.Fatal("the token was said")
+			}
+			wantPair(t, te, tc.shadow)
+		})
 	}
 }

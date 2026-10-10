@@ -162,35 +162,36 @@ func (a *app) ensureLogin(ctx context.Context, ask prompt.Asker) error {
 	return err
 }
 
-// checkPublic looks the public repo up. When reask, a missing repo or a
-// declined private one asks again.
-func checkPublic(ctx context.Context, ask prompt.Asker, f forge.Forge, public string, reask bool) (string, error) {
+// checkPublic looks the public repo up and returns its name and what GitHub
+// says of it. When reask, a missing repo or a declined private one asks
+// again.
+func checkPublic(ctx context.Context, ask prompt.Asker, f forge.Forge, public string, reask bool) (string, forge.Repo, error) {
 	for {
 		pub, err := f.GetRepo(ctx, public)
 		switch {
 		case err == nil && !pub.Private:
-			return public, nil
+			return public, pub, nil
 		case err == nil:
 			use, aerr := ask.YesNo(ctx, public+" is private, and Ghostbranch is meant for public repos. Use it anyway?", false)
 			if aerr != nil {
-				return "", aerr
+				return "", forge.Repo{}, aerr
 			}
 			if use {
-				return public, nil
+				return public, pub, nil
 			}
 			if !reask {
-				return "", contract.New(contract.BadFlag, "%s is private, and init stopped there", public).WithField("public")
+				return "", forge.Repo{}, contract.New(contract.BadFlag, "%s is private, and init stopped there", public).WithField("public")
 			}
 		case errors.Is(err, forge.ErrNotFound) && reask:
 			ask.Say(public + " doesn't exist, or your login can't see it.")
 		default:
 			ce := contract.Wrap(contract.ForgeError, err, "look up public repo %s", public)
 			ce.Retryable = errors.Is(err, forge.ErrTransient)
-			return "", ce
+			return "", forge.Repo{}, ce
 		}
 		var aerr error
 		if public, aerr = askRepo(ctx, ask, "Public repo (owner/repo)", ""); aerr != nil {
-			return "", aerr
+			return "", forge.Repo{}, aerr
 		}
 	}
 }
@@ -202,10 +203,9 @@ func shadowOf(o engine.InitOptions) string {
 	return o.Public + "-shadow"
 }
 
-// askShadow settles the shadow repo: create <public>-shadow, adopt it if it
-// exists, or take another name (adopted when it exists).
-func askShadow(ctx context.Context, ask prompt.Asker, f forge.Forge, o engine.InitOptions) (engine.InitOptions, error) {
-	name := o.Public + "-shadow"
+// askShadow settles the shadow repo, starting from name: create it, adopt
+// it if it exists, or take another name (adopted when it exists).
+func askShadow(ctx context.Context, ask prompt.Asker, f forge.Forge, o engine.InitOptions, name string) (engine.InitOptions, error) {
 	for {
 		sh, err := f.GetRepo(ctx, name)
 		var yes bool
@@ -241,6 +241,87 @@ func askShadow(ctx context.Context, ask prompt.Asker, f forge.Forge, o engine.In
 	}
 }
 
+// setup is what guided init knows of where the shadow repo can live: the
+// login, when the public repo is an organization's (the person's account is
+// then the other place), and the app's install link when the token is a
+// stored app login, which reaches only the accounts the app is installed on.
+type setup struct {
+	login   string // "" unless the public repo is an organization's and the login isn't its owner
+	app     string // the GitHub App's URL name
+	install string // its install link; "" unless the token is a stored app login
+}
+
+// shadowSetup reads the setup: the public repo's owner type and the login.
+func (a *app) shadowSetup(ctx context.Context, e *engine.Engine, public string, pub forge.Repo) setup {
+	s := setup{app: a.env.AppSlug}
+	if s.app == "" {
+		s.app = auth.AppSlug
+	}
+	if e.TokenSource == "login" && auth.Kind(e.Token) == "app" {
+		s.install = "https://github.com/apps/" + s.app + "/installations/new"
+	}
+	if pub.OwnerType != forge.OwnerOrganization {
+		return s
+	}
+	owner, _, _ := forge.SplitName(public)
+	if u, err := e.Forge.CurrentUser(ctx); err == nil && u.Login != "" && !strings.EqualFold(u.Login, owner) {
+		s.login = u.Login
+	}
+	return s
+}
+
+// personalShadow is <login>/<repo>-shadow.
+func personalShadow(login, public string) string {
+	_, name, _ := forge.SplitName(public)
+	return login + "/" + name + "-shadow"
+}
+
+// appNeeded is the line saying the app must be installed on the person's
+// account, or "" when the token isn't an app login.
+func (s setup) appNeeded(lead string) string {
+	if s.install == "" {
+		return ""
+	}
+	return lead + "the " + s.app + " GitHub App must be installed on your account (" + s.login + "): " + s.install
+}
+
+// chooseShadow asks where the shadow repo of an organization's public repo
+// lives (the org, the person's account, or a name given); for anyone
+// else's public repo it is askShadow from <public>-shadow.
+func chooseShadow(ctx context.Context, ask prompt.Asker, f forge.Forge, o engine.InitOptions, s setup) (engine.InitOptions, error) {
+	org := o.Public + "-shadow"
+	if s.login == "" {
+		return askShadow(ctx, ask, f, o, org)
+	}
+	personal := personalShadow(s.login, o.Public)
+	ask.Say("Where should the private shadow repo live?")
+	ask.Say("  1. " + org + "   (the org; teammates can use it)   [default]")
+	ask.Say("  2. " + personal + "   (your account; only you)")
+	if l := s.appNeeded("     For 2, "); l != "" {
+		ask.Say(l)
+	}
+	ask.Say("  3. another repo name, or an existing repo to adopt")
+	for {
+		c, err := ask.Text(ctx, "Choose 1, 2 or 3", "1")
+		if err != nil {
+			return o, err
+		}
+		switch strings.TrimSpace(c) {
+		case "1":
+			return askShadow(ctx, ask, f, o, org)
+		case "2":
+			return askShadow(ctx, ask, f, o, personal)
+		case "3":
+			name, err := askRepo(ctx, ask, "Shadow repo (owner/repo; an existing repo is adopted)", "")
+			if err != nil {
+				return o, err
+			}
+			return askShadow(ctx, ask, f, o, name)
+		}
+		ask.Say("Answer 1, 2 or 3.")
+	}
+}
+
 // overlayExists: init makes the overlay branch the shadow repo's default
 // branch right after creating it.
 func overlayExists(ctx context.Context, f forge.Forge, o engine.InitOptions) bool {
@@ -256,12 +337,21 @@ func newRepoURL(full string) string {
 // createByHand is the way on when GitHub won't let the login create the
 // shadow repo: the person creates it, presses Enter, and init adopts it
 // once it exists, is private and isn't a fork. A lookup GitHub didn't answer
-// waits for Enter again.
-func createByHand(ctx context.Context, ask prompt.Asker, f forge.Forge, o engine.InitOptions) (engine.InitOptions, error) {
+// waits for Enter again. An app login sees only the repos of the accounts
+// the app is installed on (and, there, those it was given), so with one the
+// steps and the not-there line give the app's install link.
+func createByHand(ctx context.Context, ask prompt.Asker, f forge.Forge, o engine.InitOptions, s setup) (engine.InitOptions, error) {
 	shadow := shadowOf(o)
+	owner, _, _ := forge.SplitName(shadow)
 	ask.Say("GitHub didn't let your login create " + shadow + ". Create it yourself:")
 	ask.Say("  1. Open " + newRepoURL(shadow) + " and create it: private, with no README, license or .gitignore.")
-	ask.Say("  2. Give Ghostbranch access to it: add it to the Ghostbranch GitHub App's repositories (or to your token's).")
+	notYet := shadow + " isn't there yet, or your login can't see it."
+	if s.install != "" {
+		ask.Say("  2. Give Ghostbranch access to it: install the " + s.app + " GitHub App on " + owner + ", or add " + shadow + " to its repositories, at " + s.install)
+		notYet = shadow + " isn't there yet, or the " + s.app + " GitHub App can't see it: install the app on " + owner + ", or add " + shadow + " to its repositories, at " + s.install
+	} else {
+		ask.Say("  2. Give Ghostbranch access to it: add it to the Ghostbranch GitHub App's repositories (or to your token's).")
+	}
 	for {
 		if err := ask.Wait(ctx, "Press Enter once "+shadow+" exists."); err != nil {
 			return o, err
@@ -269,7 +359,7 @@ func createByHand(ctx context.Context, ask prompt.Asker, f forge.Forge, o engine
 		sh, err := f.GetRepo(ctx, shadow)
 		switch {
 		case errors.Is(err, forge.ErrNotFound):
-			ask.Say(shadow + " isn't there yet, or your login can't see it.")
+			ask.Say(notYet)
 		case errors.Is(err, forge.ErrTransient):
 			ask.Say("couldn't reach GitHub; press Enter to try again")
 		case err != nil:
@@ -284,6 +374,102 @@ func createByHand(ctx context.Context, ask prompt.Asker, f forge.Forge, o engine
 			return o, nil
 		}
 	}
+}
+
+func createDenied(err error) bool {
+	ce := contract.From(err)
+	return ce != nil && ce.Code == contract.ShadowCreateDenied
+}
+
+// explainRefusal says which account refused to create shadow and why:
+// GitHub's own message, when it sent one (nothing else from the response),
+// then the likely causes for this case, each with its fix.
+func explainRefusal(ask prompt.Asker, s setup, public, shadow string, err error) {
+	owner, _, _ := forge.SplitName(shadow)
+	pubOwner, _, _ := forge.SplitName(public)
+	line := "GitHub refused to create " + shadow + " on " + owner + "."
+	msg := forge.HostMessage(err)
+	if msg != "" {
+		line += ` GitHub said: "` + msg + `"`
+	}
+	ask.Say(line)
+	var causes []string
+	appMissing := s.install != "" && strings.HasPrefix(msg, "Resource not accessible by integration")
+	switch {
+	case appMissing:
+		causes = append(causes, "the Ghostbranch app isn't installed on "+owner+": install it at "+s.install)
+	case s.install == "":
+		causes = append(causes, "your token may lack Administration: write (fine-grained) or the repo scope (classic) on "+owner+": ghostbranch doctor shows what's missing")
+	}
+	if s.login != "" && strings.EqualFold(owner, pubOwner) && !appMissing {
+		access := "then give your token access to it"
+		if s.install != "" {
+			access = "then add it to the app"
+		}
+		causes = append(causes, owner+"'s settings may not let members create private repos: ask an org owner to create "+shadow+
+			" ("+access+"), or choose your personal account")
+	}
+	switch len(causes) {
+	case 0:
+	case 1:
+		ask.Say("Likely cause:")
+	default:
+		ask.Say("Likely causes:")
+	}
+	for _, c := range causes {
+		ask.Say("  - " + c)
+	}
+}
+
+// createRefused is the way on once GitHub refused to create the shadow
+// repo: it says why, offers the person's account when the refusal was the
+// organization's, and otherwise (or when that is refused too) waits for the
+// repo made by hand.
+func createRefused(ctx context.Context, ask prompt.Asker, e *engine.Engine, o engine.InitOptions, s setup, refusal error) (*engine.InitResult, []contract.Warning, error) {
+	shadow := shadowOf(o)
+	explainRefusal(ask, s, o.Public, shadow, refusal)
+	owner, _, _ := forge.SplitName(shadow)
+	pubOwner, _, _ := forge.SplitName(o.Public)
+	var w []contract.Warning
+	if s.login != "" && strings.EqualFold(owner, pubOwner) {
+		personal := personalShadow(s.login, o.Public)
+		if l := s.appNeeded("For that, "); l != "" {
+			ask.Say(l)
+		}
+		use, err := ask.YesNo(ctx, "Use "+personal+" instead? It's on your account, so only you can use it.", true)
+		if err != nil {
+			return nil, nil, err
+		}
+		if use {
+			p := o
+			_, err := e.Forge.GetRepo(ctx, personal)
+			switch {
+			case err == nil: // it exists: the usual checks, then adopt
+				if p, err = askShadow(ctx, ask, e.Forge, o, personal); err != nil {
+					return nil, nil, err
+				}
+			case errors.Is(err, forge.ErrNotFound):
+				p.Shadow, p.Adopt = personal, false
+			default:
+				ce := contract.Wrap(contract.ForgeError, err, "look up %s", personal)
+				ce.Retryable = errors.Is(err, forge.ErrTransient)
+				return nil, nil, ce
+			}
+			res, w2, err := e.Init(ctx, p)
+			w = append(w, w2...)
+			if !createDenied(err) {
+				return res, w, err
+			}
+			explainRefusal(ask, s, p.Public, shadowOf(p), err)
+			o = p
+		}
+	}
+	o, err := createByHand(ctx, ask, e.Forge, o, s)
+	if err != nil {
+		return nil, w, err
+	}
+	res, w2, err := e.Init(ctx, o)
+	return res, append(w, w2...), err
 }
 
 // guidedInit is spec § 4: ask what is missing, preview, run init, guard
@@ -309,9 +495,11 @@ func (a *app) guidedInit(ctx context.Context, args []string, f initFlags) error 
 	if err != nil {
 		return err
 	}
-	if public, err = checkPublic(ctx, ask, e.Forge, public, len(args) == 0); err != nil {
+	var pub forge.Repo
+	if public, pub, err = checkPublic(ctx, ask, e.Forge, public, len(args) == 0); err != nil {
 		return err
 	}
+	s := a.shadowSetup(ctx, e, public, pub)
 	o := engine.InitOptions{Public: public, Shadow: f.shadow, Adopt: f.adopt, Schedule: schedule(f.sync)}
 	reg, registered := e.WS.Find(public)
 	switch {
@@ -319,7 +507,7 @@ func (a *app) guidedInit(ctx context.Context, args []string, f initFlags) error 
 		o.Shadow = reg.Shadow
 		ask.Say(fmt.Sprintf("Resuming the setup of %s, whose shadow repo is %s.", reg.Public, reg.Shadow))
 	case f.shadow == "" && !f.adopt:
-		if o, err = askShadow(ctx, ask, e.Forge, o); err != nil {
+		if o, err = chooseShadow(ctx, ask, e.Forge, o, s); err != nil {
 			return err
 		}
 	}
@@ -377,12 +565,9 @@ func (a *app) guidedInit(ctx context.Context, args []string, f initFlags) error 
 	}
 	ask.Say("Setting up " + public + "…")
 	res, w, err := e.Init(ctx, o)
-	if ce := contract.From(err); ce != nil && ce.Code == contract.ShadowCreateDenied {
-		if o, err = createByHand(ctx, ask, e.Forge, o); err != nil {
-			return err
-		}
+	if createDenied(err) {
 		var w2 []contract.Warning
-		res, w2, err = e.Init(ctx, o)
+		res, w2, err = createRefused(ctx, ask, e, o, s, err)
 		w = append(w, w2...)
 	}
 	if res != nil {
