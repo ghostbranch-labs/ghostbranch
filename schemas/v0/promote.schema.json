@@ -5,6 +5,8 @@
   "additionalProperties": false,
   "required": ["gate", "plan", "plan_path", "findings", "waived", "applied", "preview"],
   "properties": {
+    "prs": { "description": "the chain's PRs, bottom first", "type": "array", "items": { "$ref": "common.schema.json#/$defs/stackPR" } },
+    "stack_number": { "$ref": "common.schema.json#/$defs/stackNumber" },
     "gate": { "oneOf": [{ "type": "null" }, { "$ref": "gate.schema.json" }] },
     "plan": { "oneOf": [{ "type": "null" }, { "$ref": "plan.schema.json" }] },
     "plan_path": { "type": "string" },

@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	SchemaVersion = "0.10"
+	SchemaVersion = "0.11"
 	MetaFile      = "feature.json"
 )
 
@@ -128,6 +128,13 @@ const (
 	// StateUnreadable is a feature whose record couldn't be read: the survey
 	// reports it with an error, and only a console close removes it.
 	StateUnreadable State = "unreadable"
+	// StateParentStale is a stacked feature whose parent moved since the
+	// feature's forked_at; feature restack brings it up to the parent's tip.
+	StateParentStale State = "parent_stale"
+	// StatePublicPRNeedsUpdate is a feature published as a plain chained PR
+	// (not a native stack) whose PR below was squash- or rebase-merged: its
+	// public branch still carries the old parent commits.
+	StatePublicPRNeedsUpdate State = "public_pr_needs_update"
 )
 
 // StateInput is everything state depends on.

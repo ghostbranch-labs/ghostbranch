@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.10",
+  "schema_version": "0.11",
   "command": "feature abandon",
   "ok": true,
   "exit_code": 0,
@@ -11,7 +11,7 @@
       "fingerprint": {},
       "ops": [
         {
-          "from": "d8a9ef4f64d59dc1ea51d5dd65577d65fb9bfd0f",
+          "from": "c4e3026327d2c98b1f7655dec16e33481aec0a39",
           "op": "push_ref",
           "ref": "refs/ghostbranch/features/feat-x",
           "repo": "acme/widget-shadow",

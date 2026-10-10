@@ -163,6 +163,25 @@ var errorDocs = map[Code]Doc{
 		WhatToDo: "Run ghostbranch gate <feature>, with --detach to get a job id."},
 	JobStale: {Summary: "A newer gate replaced this job: the feature, public main or the overlay changed, and the feature was gated again.",
 		WhatToDo: "Wait on the current job (error.details.current_job), or, if there is none, gate the feature again."},
+	FoldNeedsRebase: {Summary: "feature fold only fast-forwards, and the parent has moved on since the feature was branched from it, so nothing was folded.",
+		Causes: []string{"commits were pushed to the parent after the feature was started from it or last restacked onto it",
+			"the parent was rewritten (rebased, amended or force-pushed)"},
+		WhatToDo: "Bring the feature up to its parent's tip, then fold again. ghostbranch feature restack <parent> does it, and stops with git steps on a conflict. Or rebase it yourself (error.details.steps): git fetch shadow && git switch <feature> && git rebase --onto shadow/<parent> <forked_at> <feature>, resolve any conflicts, then git push --force-with-lease shadow <feature>. error.details.parent and error.details.forked_at name them. Ghostbranch never resolves conflicts."},
+	HasChildren: {Summary: "The feature has children stacked on it (error.details.children), so it was not abandoned or closed: they would be left on a deleted parent.",
+		WhatToDo: "Deal with each child in error.details.children first: fold it into this feature (ghostbranch feature fold <child>), abandon it (for abandon: ghostbranch feature abandon <child>) or close it (for close: ghostbranch feature close <child>), or move it onto main (ghostbranch feature restack <child> --onto main). An abandoned child blocks close, not abandon. Then run the command again."},
+	NotAStack: {Summary: "The features given to promote aren't a stack that can be published together; error.details.reason says why and error.details.feature names where.",
+		Causes: []string{
+			"duplicate: a feature is listed twice",
+			"order: the features aren't listed bottom first",
+			"gap: a listed feature's parent is neither the feature listed just below it nor already public (for example promote a c, leaving out b)",
+			"parent_not_public: the bottom feature's parent is neither main nor already published",
+			"parent_merged: the bottom's published parent merged; run sync",
+			"parent_moved: the bottom's published parent changed since it was published",
+			"stale_gate: a listed feature has no fresh, green gate; a gate goes stale when its own branch or any branch below it moves",
+		},
+		WhatToDo: "Run ghostbranch status to see the stack. List the features bottom first, starting from one whose parent is main or already published, with none left out. Gate each one that needs it (ghostbranch gate <feature>, bottom up), then run promote again."},
+	ParentRewritten: {Summary: "The feature's parent no longer contains the commit the feature was branched from (forked_at): the parent was rebased, amended or force-pushed.",
+		WhatToDo: "Run ghostbranch feature restack <parent> to replay the feature's own commits onto the parent's new tip (it stops with git steps on a conflict), or ghostbranch feature restack <feature> --onto main to move it off the parent. Then run the command again. error.details.parent and error.details.forked_at name them."},
 }
 
 var warningDocs = map[WarningCode]Doc{
@@ -218,6 +237,8 @@ var warningDocs = map[WarningCode]Doc{
 		WhatToDo: "Look at details.path: fix its permissions or delete it. If it belonged to a feature that was just closed, that feature's plan ref may remain in the shadow repo; it is harmless."},
 	AgentOnPersonLogin: {Summary: "This run looks like an agent or a script, and it is using a person's stored login, which can publish.",
 		WhatToDo: "Give the agent its own shadow-only token in GHOSTBRANCH_TOKEN (see ghostbranch guide § Tokens). The person's login still needs the console code to publish."},
+	PublicBranchChanged: {Summary: "A stacked feature's public branch holds commits Ghostbranch didn't publish, so sync didn't adopt them.",
+		WhatToDo: "Look at the PR on GitHub: someone pushed to its branch. Ghostbranch never adopts a change it didn't scan; re-gate and promote again, or remove the foreign commits."},
 }
 
 func intp(n int) *int { return &n }

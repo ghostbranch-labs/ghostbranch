@@ -42,7 +42,8 @@ func TestRenderListsEveryCodeFromTheRegistry(t *testing.T) {
 	// 377: the 6.1 final review's fixes (doctor's fix command only when there is one; pick the public and shadow repos when installing the app).
 	// 378: guided init asks where an org's shadow repo lives, and --shadow sets it (6.1 Task 10).
 	// 379: one line on terminal colour, --no-color and NO_COLOR.
-	if n := strings.Count(out, "\n"); n > 379 {
+	// 383: the four sub-project 6.1a error rows (FOLD_NEEDS_REBASE, HAS_CHILDREN, NOT_A_STACK, PARENT_REWRITTEN).
+	if n := strings.Count(out, "\n"); n > 383 {
 		t.Errorf("the guide is %d lines; keep it short (spec: about 150 plus the tables)", n)
 	}
 }

@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.10",
+  "schema_version": "0.11",
   "command": "feature close",
   "ok": true,
   "exit_code": 0,
@@ -19,7 +19,7 @@
           "op": "delete_ref",
           "ref": "refs/ghostbranch/features/feat-x",
           "repo": "acme/widget-shadow",
-          "sha": "385bde185450354d0a411ff9444632c31e8efd54"
+          "sha": "bf27baab2ad4466d747e887c6acd19d8fe5c2de8"
         },
         {
           "op": "delete_ref",

@@ -13,7 +13,7 @@ import (
 
 // SchemaVersion versions the envelope and every data schema. It stays 0.x
 // until launch, and 0.x versions may break.
-const SchemaVersion = "0.10"
+const SchemaVersion = "0.11"
 
 // Exit codes. Agents branch on these, so they never change meaning.
 const (
@@ -129,6 +129,22 @@ const (
 	// DoctorFailed means at least one doctor check failed; details.failed
 	// lists their IDs.
 	DoctorFailed Code = "DOCTOR_FAILED"
+	// FoldNeedsRebase means feature fold can't fast-forward the parent to the
+	// feature: the parent moved on since the feature was branched from it.
+	// details: feature, parent, forked_at, parent_head.
+	FoldNeedsRebase Code = "FOLD_NEEDS_REBASE"
+	// HasChildren means abandon or close refused a feature with children
+	// stacked on it. details: feature, children.
+	HasChildren Code = "HAS_CHILDREN"
+	// NotAStack means promote's features aren't a stack it can publish
+	// together. details.reason is duplicate, order, gap, parent_not_public,
+	// parent_merged, parent_moved or stale_gate; details.feature names the
+	// feature it is about.
+	NotAStack Code = "NOT_A_STACK"
+	// ParentRewritten means a feature's parent no longer contains forked_at,
+	// the commit the feature was branched from. details: feature, parent,
+	// forked_at.
+	ParentRewritten Code = "PARENT_REWRITTEN"
 )
 
 var exitCodes = map[Code]int{
@@ -156,6 +172,10 @@ var exitCodes = map[Code]int{
 	LoginUnavailable:       ExitFailure,
 	TokenPermissionMissing: ExitFailure,
 	DoctorFailed:           ExitFailure,
+	FoldNeedsRebase:        ExitConflict,
+	HasChildren:            ExitConflict,
+	NotAStack:              ExitUsage,
+	ParentRewritten:        ExitConflict,
 }
 
 // Exit is the process exit code for c.
@@ -302,13 +322,17 @@ const (
 	// AgentOnPersonLogin means a run that looks like an agent or a script is
 	// using a person's stored login instead of a token of its own.
 	AgentOnPersonLogin WarningCode = "AGENT_ON_PERSON_LOGIN"
+	// PublicBranchChanged means a stacked feature's public branch holds
+	// commits Ghostbranch didn't publish, so sync didn't adopt them.
+	PublicBranchChanged WarningCode = "PUBLIC_BRANCH_CHANGED"
 )
 
 var warningCodes = []WarningCode{ConfigKeyIgnored, PublicNotPublic, GateNotRecorded, ChecksLimited, ActorUnknown,
 	WorkflowChanged, LargeFile, BinaryFile, WaiversUnreadable,
 	OverlayOutdated, RepoGuard, RepoGuardUnrewritable, SecretsUnlisted, SecretsMissing, PushTriggersOnSync,
 	ActionsMinutesBilled, ShadowBehind, AuditIncomplete, CINotCancelled, PRStateUnknown, DriftUnknown, FeatureNotClosed,
-	MirrorNotUpdated, RecordNewer, RecordUnreadable, LedgerNotWritten, SyncPushFailed, PlanFileUnreadable, AgentOnPersonLogin}
+	MirrorNotUpdated, RecordNewer, RecordUnreadable, LedgerNotWritten, SyncPushFailed, PlanFileUnreadable, AgentOnPersonLogin,
+	PublicBranchChanged}
 
 // AllWarnings lists every warning code, sorted.
 func AllWarnings() []WarningCode {

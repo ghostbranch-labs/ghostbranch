@@ -5,13 +5,15 @@
   "additionalProperties": false,
   "required": ["schema_version", "name", "branch", "created_by", "created_at", "base", "abandoned", "gate", "promoted"],
   "properties": {
-    "schema_version": { "const": "0.10" },
+    "schema_version": { "const": "0.11" },
     "name": { "type": "string" },
     "branch": { "type": "string" },
     "created_by": { "$ref": "common.schema.json#/$defs/actor" },
     "created_at": { "$ref": "common.schema.json#/$defs/time" },
     "base": { "$ref": "common.schema.json#/$defs/sha" },
     "abandoned": { "type": "boolean" },
+    "parent": { "description": "the feature this one is stacked on, or main; absent means main, as in every record before 0.11", "type": "string", "minLength": 1 },
+    "forked_at": { "description": "the parent's commit the feature was branched from or last restacked onto; its own commits are forked_at..head", "$ref": "common.schema.json#/$defs/shaOrEmpty" },
     "gate": {
       "oneOf": [
         { "type": "null" },
