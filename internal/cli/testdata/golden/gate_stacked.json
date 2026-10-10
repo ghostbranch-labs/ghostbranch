@@ -1,0 +1,61 @@
+{
+  "schema_version": "0.11",
+  "command": "gate",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "feature": "feat-y",
+    "feature_head": "a80b011a96e35ed4ece66a7071d69d205af6e967",
+    "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+    "parent": "feat-x",
+    "base": "ae35c93ec206f3de1454150359b40ee389ef9678",
+    "overlay": "a1ef151295bf2b53d15b18523ab0184d02178bbd",
+    "candidate": "03de6d459bbf925f9b1d80c175d3fbca663848c2",
+    "published_tree": "fc88bf603e9da8711ba23933237f2cca7bcf5933",
+    "scanned_as": "preserve",
+    "commits": [
+      {
+        "source": "a80b011a96e35ed4ece66a7071d69d205af6e967",
+        "subject": "work",
+        "author": "Test Author <author@example.com>",
+        "files": [
+          "stacked.txt"
+        ]
+      }
+    ],
+    "checks": "passed",
+    "failed_checks": [],
+    "leak": "clean",
+    "findings": [],
+    "waived": [],
+    "repo_guards": {
+      "mode": "rewrite",
+      "rewritten": [],
+      "unrewritable": [],
+      "skipped": []
+    },
+    "shadow_pr": 1,
+    "job": "gate/feat-y/03de6d459bbf",
+    "reused": false,
+    "preview": null
+  },
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "promote",
+        "feat-y",
+        "--mode",
+        "preserve",
+        "--plan",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "the gate passed; plan the publish",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
+  "error": null
+}

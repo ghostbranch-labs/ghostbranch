@@ -34,6 +34,18 @@
             "failed_checks": { "type": "array", "items": { "type": "string" } },
             "shadow_pr": { "type": "integer", "minimum": 1 },
             "started_at": { "$ref": "common.schema.json#/$defs/time" },
+            "parent": { "description": "the feature the gate stacked on; absent when it built on public main", "type": "string" },
+            "forked_at": { "description": "the fork point the gate replayed the feature's own commits from; absent when unstacked", "$ref": "common.schema.json#/$defs/sha" },
+            "base": { "description": "the commit the feature's own commits were replayed onto (the rebased tip below); absent when unstacked", "$ref": "common.schema.json#/$defs/sha" },
+            "base_tree": { "description": "base's published tree, the leak scan's baseline; absent when unstacked", "$ref": "common.schema.json#/$defs/sha" },
+            "below": {
+              "description": "every feature under this one with the head the gate built on, bottom first; absent when unstacked",
+              "type": "array",
+              "items": {
+                "type": "object", "additionalProperties": false, "required": ["feature", "head"],
+                "properties": { "feature": { "type": "string" }, "head": { "$ref": "common.schema.json#/$defs/sha" } }
+              }
+            },
             "leak": { "enum": ["clean", "found", "not_run"] },
             "commits": {
               "description": "null in a gate recorded by an older binary, which promote treats as an older gate",

@@ -34,6 +34,7 @@ type link struct {
 type chainInput struct {
 	mode     string               // config.ModeSquash | ModePreserve | ModeCurated
 	pm       string               // public main
+	baseTree string               // the published tree the chain starts from; "" means public main's (pm's) tree
 	T        string               // the gated published tree (stripped tip)
 	tEntries []gitx.TreeEntry     // T's entries
 	commits  []feature.GateCommit // the gate's rebased chain, oldest first
@@ -50,9 +51,12 @@ type replayFunc func(commits []string, onto string) ([]string, error)
 // No commit at all is NOTHING_TO_PUBLISH. The last link's tree is always
 // in.T, the tree the gate's CI tested.
 func deriveChain(ctx context.Context, g *gitx.Git, cfg config.Config, in chainInput, replay replayFunc) ([]link, []string, error) {
-	base, err := g.TreeOf(ctx, in.pm)
-	if err != nil {
-		return nil, nil, internalErr(err, "read public main's tree")
+	base := in.baseTree
+	if base == "" {
+		var err error
+		if base, err = g.TreeOf(ctx, in.pm); err != nil {
+			return nil, nil, internalErr(err, "read public main's tree")
+		}
 	}
 	var links []link
 	dropped := []string{}
@@ -303,11 +307,20 @@ type scanStep struct {
 // scanned once and carry no commits. Warnings of one code are merged into
 // one, listing every path.
 func (e *Engine) scanChain(ctx context.Context, g *gitx.Git, cfg config.Config, pm string, steps []scanStep, texts []leak.Text) (leak.Report, string, error) {
+	return e.scanChainFrom(ctx, g, cfg, pm, true, steps, texts)
+}
+
+// scanChainFrom is scanChain from base, a commit or a tree. With firstFull
+// the first step's whole tree is scanned, as a squash scan always has.
+// Without it, only what the first step changes from base is scanned: for a
+// stacked feature, whose base is the published tree below it, which the
+// gates below scanned.
+func (e *Engine) scanChainFrom(ctx context.Context, g *gitx.Git, cfg config.Config, base string, firstFull bool, steps []scanStep, texts []leak.Text) (leak.Report, string, error) {
 	sc, err := e.NewScanner(rules(cfg))
 	if err != nil {
 		return leak.Report{}, "", internalErr(err, "start the leak scanner")
 	}
-	old, err := blobsByPath(ctx, g, pm)
+	old, err := blobsByPath(ctx, g, base)
 	if err != nil {
 		return leak.Report{}, "", err
 	}
@@ -330,6 +343,9 @@ func (e *Engine) scanChain(ctx context.Context, g *gitx.Git, cfg config.Config, 
 		}
 	}
 	var prev map[string]string
+	if !firstFull {
+		prev = old
+	}
 	for _, st := range steps {
 		entries := st.entries
 		if prev != nil {

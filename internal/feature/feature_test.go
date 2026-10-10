@@ -168,3 +168,52 @@ func TestStackedRecordsRoundTrip(t *testing.T) {
 		t.Fatalf("an unstacked record names a parent:\n%s", raw)
 	}
 }
+
+func TestStackFreshFor(t *testing.T) {
+	t.Parallel()
+	var none *feature.Gate
+	if none.StackFreshFor("", "", nil) {
+		t.Fatal("a nil gate is fresh")
+	}
+	single := &feature.Gate{}
+	if !single.StackFreshFor("", "", map[string]string{}) {
+		t.Fatal("an unstacked gate of an unstacked feature is stale")
+	}
+	g := &feature.Gate{Parent: "b", ForkedAt: "f1", Below: []feature.StackHead{{Feature: "a", Head: "h1"}, {Feature: "b", Head: "h2"}}}
+	for _, c := range []struct {
+		parent, fork string
+		heads        map[string]string
+		want         bool
+	}{
+		{"b", "f1", map[string]string{"a": "h1", "b": "h2"}, true},
+		{"b", "f1", map[string]string{"a": "h9", "b": "h2"}, false}, // a lower branch moved
+		{"b", "f2", map[string]string{"a": "h1", "b": "h2"}, false}, // restacked: a new fork point
+		{"", "", map[string]string{}, false},                        // re-parented onto main
+		{"b", "f1", map[string]string{"b": "h2"}, false},            // the stack below changed shape
+	} {
+		if got := g.StackFreshFor(c.parent, c.fork, c.heads); got != c.want {
+			t.Fatalf("StackFreshFor(%q, %q, %v) = %v", c.parent, c.fork, c.heads, got)
+		}
+	}
+}
+
+func TestStateOfParentStale(t *testing.T) {
+	t.Parallel()
+	gate := &feature.Gate{FeatureHead: "h", PublicMain: "p", Overlay: "o", Checks: feature.ChecksPassed, Leak: feature.LeakClean}
+	in := feature.StateInput{Meta: feature.Meta{Gate: gate}, BranchExists: true, Head: "h", PublicMain: "p", Overlay: "o"}
+	if s := feature.StateOf(in); s != feature.StateGatePassed {
+		t.Fatalf("state = %s", s)
+	}
+	in.StackStale = true
+	if s := feature.StateOf(in); s != feature.StateInReview {
+		t.Fatalf("a gate on a moved stack: %s", s)
+	}
+	in.ParentMoved = true
+	if s := feature.StateOf(in); s != feature.StateParentStale {
+		t.Fatalf("a moved parent: %s", s)
+	}
+	in.Meta.Abandoned = true
+	if s := feature.StateOf(in); s != feature.StateAbandoned {
+		t.Fatalf("abandoned wins: %s", s)
+	}
+}

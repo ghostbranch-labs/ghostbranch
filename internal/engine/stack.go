@@ -167,11 +167,15 @@ func RebaseSteps(remote, branch, onto, upstream string) [][]string {
 // reason. forkedAt is child's recorded fork point.
 func parentRewritten(child, parent, forkedAt, reason string) error {
 	var msg string
-	switch reason {
-	case reasonParentGone:
+	switch {
+	case reason == reasonParentGone:
 		msg = fmt.Sprintf("feature %s is stacked on %s, which is gone from the shadow repo; move it onto main with ghostbranch feature restack %s --onto main",
 			child, parent, child)
-	case reasonForkPointLost:
+	case reason == reasonForkPointLost && parent == feature.MainParent:
+		// Moved onto main off a parent: only its own commits were left.
+		msg = fmt.Sprintf("feature %s no longer contains its fork point %s from the feature it was moved off (it was rebased by hand); once it sits on main's tip, run ghostbranch feature restack %s --onto main to record it there",
+			child, short(forkedAt), child)
+	case reason == reasonForkPointLost:
 		msg = fmt.Sprintf("feature %s no longer contains its fork point %s from %s (it was rebased by hand); run ghostbranch feature restack %s to put it on %s's tip",
 			child, short(forkedAt), parent, parent, parent)
 	default:

@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -141,6 +142,13 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	if err != nil {
 		return res, warns, err
 	}
+	// A stacked feature's gate covers only its own commits, so it is never
+	// published alone. Task 6 replaces this with the whole-stack promote.
+	if below := parentFeature(m); below != "" {
+		return res, warns, contract.New(contract.NotAStack,
+			"feature %s is stacked on %s, and its gate covers only its own commits; it can't be published on its own", opt.Feature, below).
+			WithField("feature").WithDetails(map[string]any{"feature": opt.Feature, "parent": below})
+	}
 	head, ok, _ := g.Resolve(ctx, shadowRef(m.Branch))
 	if !ok {
 		return res, warns, contract.New(contract.FeatureNotFound, "feature branch %q is gone from %s", m.Branch, p.Shadow).WithField("feature")
@@ -217,7 +225,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 		if err != nil {
 			return res, warns, err
 		}
-		res.Gate = &GateResult{Feature: opt.Feature, FeatureHead: head, PublicMain: pm, Overlay: O,
+		res.Gate = &GateResult{Feature: opt.Feature, FeatureHead: head, PublicMain: pm, Parent: m.Gate.Parent, Base: cmp.Or(m.Gate.Base, pm), Overlay: O,
 			Candidate: m.Gate.Candidate, PublishedTree: m.Gate.PublishedTree, ScannedAs: m.Gate.ScannedAs, Commits: infos, Checks: m.Gate.Checks,
 			FailedChecks: []string{}, Leak: m.Gate.Leak, Findings: []leak.Finding{}, Waived: []WaivedFinding{},
 			RepoGuards: &guardRep, Reused: true}

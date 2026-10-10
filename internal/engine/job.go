@@ -259,7 +259,11 @@ func (e *Engine) resultFromRecord(ctx context.Context, pc *pairCtx, name string,
 	if err != nil {
 		return nil, warns, err
 	}
-	infos, err := gateCommitInfos(ctx, pc.git, cfg, g.PublicMain, g.Commits)
+	from := g.PublicMain
+	if g.Base != "" {
+		from = g.Base
+	}
+	infos, err := gateCommitInfos(ctx, pc.git, cfg, from, g.Commits)
 	if err != nil {
 		return nil, warns, err
 	}
@@ -267,7 +271,7 @@ func (e *Engine) resultFromRecord(ctx context.Context, pc *pairCtx, name string,
 	if failed == nil {
 		failed = []string{}
 	}
-	res := &GateResult{Feature: name, FeatureHead: g.FeatureHead, PublicMain: g.PublicMain, Overlay: g.Overlay,
+	res := &GateResult{Feature: name, FeatureHead: g.FeatureHead, PublicMain: g.PublicMain, Parent: g.Parent, Base: from, Overlay: g.Overlay,
 		Candidate: g.Candidate, PublishedTree: g.PublishedTree, ScannedAs: g.ScannedAs, Commits: infos,
 		Checks: g.Checks, FailedChecks: failed, Leak: g.Leak, Findings: []leak.Finding{}, Waived: []WaivedFinding{},
 		mapping: g.Commits}
@@ -314,7 +318,14 @@ func (e *Engine) pendingFor(ctx context.Context, pc *pairCtx, name, mode string)
 		mode = cfg.Promote.DefaultMode
 	}
 	if m.Gate.FreshFor(head, pm, O) && m.Gate.ScannedAs == mode && tip == m.Gate.Candidate {
-		return m.Gate, nil
+		// A job built on a stack that has moved since is not this gate.
+		st, err := e.stackState(ctx, pc, name, m)
+		if err != nil {
+			return nil, err
+		}
+		if !st.broken && m.Gate.StackFreshFor(parentFeature(m), forkOf(m), st.heads) {
+			return m.Gate, nil
+		}
 	}
 	return nil, nil
 }

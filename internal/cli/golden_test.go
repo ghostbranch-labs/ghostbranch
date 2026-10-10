@@ -92,6 +92,19 @@ func TestGoldenContract(t *testing.T) {
 			withFeature(te)
 			te.forge.MissingPermission = map[string]string{"CreatePR": "Pull requests: write"}
 		}, []string{"gate", "feat-x"}, 1},
+		{"gate_stacked", withStack, []string{"gate", "feat-y"}, 0},
+		{"gate_parent_rewritten", func(te *testEnv) {
+			withStack(te)
+			sh := gitx.New(te.forge.RepoDir("acme/widget-shadow"))
+			main, err := sh.MustResolve(te.t.Context(), "refs/heads/main")
+			if err != nil {
+				te.t.Fatal(err)
+			}
+			if err := sh.UpdateRef(te.t.Context(), "refs/heads/feat-x", main); err != nil {
+				te.t.Fatal(err)
+			}
+			te.shadowCommit("feat-x", map[string]string{"feature.txt": "rewritten\n"})
+		}, []string{"gate", "feat-y"}, contract.ParentRewritten.Exit()},
 		{"promote_plan", gatedFeature, []string{"promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--plan"}, 0},
 		{"promote_needs_human", func(te *testEnv) { gatedFeature(te); te.vars["GHOSTBRANCH_ACTOR"] = "agent:claude-code" },
 			[]string{"promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--yes"}, 5},

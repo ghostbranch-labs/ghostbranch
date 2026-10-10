@@ -166,6 +166,14 @@ func (e *Engine) surveyOne(ctx context.Context, pc *pairCtx, name, pm, O string)
 			r.Gate.Job = &job
 		}
 	}
+	st, err := e.stackState(ctx, pc, name, m)
+	if err != nil {
+		return FeatureReport{}, nil, err
+	}
+	stackStale := m.Gate != nil && (st.broken || !m.Gate.StackFreshFor(parentFeature(m), forkOf(m), st.heads))
+	if r.Gate != nil && stackStale {
+		r.Gate.Fresh = false
+	}
 	if m.Promoted != nil {
 		n := m.Promoted.PublicPR
 		r.PublicPR, r.PlanID = &n, m.Promoted.PlanID
@@ -201,7 +209,7 @@ func (e *Engine) surveyOne(ctx context.Context, pc *pairCtx, name, pm, O string)
 		}
 	}
 	r.State = feature.StateOf(feature.StateInput{Meta: m, BranchExists: exists, Head: head, PublicMain: pm,
-		Overlay: O, PRState: r.PRState, Moved: r.Moved})
+		Overlay: O, PRState: r.PRState, Moved: r.Moved, ParentMoved: st.parentMoved, StackStale: stackStale})
 	// Only a merged branch_gone feature needs to know whether its gate is
 	// for what was published (ClosableWithoutConsole), so only it reads the
 	// gate branch.

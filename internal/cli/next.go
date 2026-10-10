@@ -330,6 +330,12 @@ func (a *app) steps(err error) []contract.Next {
 				return []contract.Next{{Command: a.scoped("feature", "restack", f, "--onto", "main"),
 					Why: "its parent is gone; move it onto main, keeping only its own commits"}}
 			}
+			if parent == "main" && f != "" {
+				// A feature moved onto main that was rebased by hand past
+				// its old fork point.
+				return []contract.Next{{Command: a.scoped("feature", "restack", f, "--onto", "main"),
+					Why: "once " + f + " sits on main's tip, record it there, dropping its old fork point"}}
+			}
 			if parent != "" {
 				return []contract.Next{
 					{Command: a.scoped("feature", "restack", parent), Why: "restack the features above " + parent + " onto its tip, in the shadow repo; a conflict stops it with git steps"},
