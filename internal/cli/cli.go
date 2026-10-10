@@ -11,8 +11,10 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -27,8 +29,11 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	ghforge "github.com/ghostbranch-labs/ghostbranch/internal/forge/github"
+	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/grant"
+	"github.com/ghostbranch-labs/ghostbranch/internal/keychain"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
+	"github.com/ghostbranch-labs/ghostbranch/internal/prompt"
 	"github.com/ghostbranch-labs/ghostbranch/internal/waiver"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
@@ -46,12 +51,29 @@ type Env struct {
 	// are real terminals, so a person could be asked at the console.
 	ConsoleUsable bool
 	// OpenConsole opens the console device for the approval code.
-	OpenConsole  func() (io.ReadWriteCloser, error)
-	Now          func() time.Time
-	Sleep        func(context.Context, time.Duration) error
-	Rand         io.Reader
-	NewForge     func(token string) (forge.Forge, error)
-	GHToken      func() (string, error)
+	OpenConsole func() (io.ReadWriteCloser, error)
+	// Asker opens the console for guided init's questions: the console
+	// device, never stdin. DefaultEnv's is prompt.OnConsole over
+	// ConsoleUsable and OpenConsole.
+	Asker    func() (prompt.Asker, error)
+	Now      func() time.Time
+	Sleep    func(context.Context, time.Duration) error
+	Rand     io.Reader
+	NewForge func(token string) (forge.Forge, error)
+	GHToken  func() (string, error)
+	// Keychain holds the stored login. nil means no login is consulted or
+	// stored; tests use keychain.NewFake().
+	Keychain keychain.Store
+	// ClientID is the GitHub App's client ID (auth.ClientID). OAuthBaseURL
+	// is GitHub's web origin for the device flow and refresh, and
+	// HTTPClient the client those calls use.
+	ClientID     string
+	OAuthBaseURL string
+	HTTPClient   *http.Client
+	// AppSlug is the GitHub App's URL name (auth.AppSlug), for its install
+	// page. OpenBrowser opens a URL in the person's browser, best effort.
+	AppSlug      string
+	OpenBrowser  func(url string) error
 	CwdRemotes   func() []workspace.Remote
 	NewScanner   func(leak.Rules) (leak.Scanner, error)
 	PollInterval time.Duration
@@ -73,16 +95,30 @@ type Env struct {
 	// a command), a remote name not yet in use for adding one, and whether
 	// the current directory is a git checkout at all.
 	ShadowRemote func(shadow string) (remote, free string, inCheckout bool)
+	// GitVersion runs `git version` (doctor's tools check); nil means
+	// gitx.Version. Build is this binary's version and commit; nil means
+	// "(unknown)" for both.
+	GitVersion func(context.Context) (string, error)
+	Build      func() (version, commit string)
 }
 
 // DefaultEnv is the real process environment.
 func DefaultEnv() Env {
-	return Env{
+	env := Env{
 		Stdout: os.Stdout, Stderr: os.Stderr, Stdin: os.Stdin, Getenv: os.Getenv, UserHome: os.UserHomeDir,
 		ConsoleUsable: console.Usable(os.Stdin, os.Stderr), OpenConsole: console.Open,
 		Now: time.Now, Sleep: sleepCtx, Rand: rand.Reader,
-		NewForge:     func(token string) (forge.Forge, error) { return ghforge.New(token), nil },
-		GHToken:      auth.GHCLI,
+		NewForge: func(token string) (forge.Forge, error) {
+			c, err := ghforge.New(token)
+			if err != nil {
+				return nil, err // never a non-nil Forge holding a nil *Client
+			}
+			return c, nil
+		},
+		GHToken:  auth.GHCLI,
+		Keychain: keychain.OS(), ClientID: auth.ClientID, OAuthBaseURL: "https://github.com",
+		AppSlug: auth.AppSlug, OpenBrowser: openBrowser,
+		HTTPClient:   &http.Client{Timeout: 30 * time.Second},
 		CwdRemotes:   cwdRemotes,
 		NewScanner:   func(r leak.Rules) (leak.Scanner, error) { return leak.NewGitleaks(r) },
 		PollInterval: engine.DefaultPollInterval,
@@ -91,7 +127,11 @@ func DefaultEnv() Env {
 		Getwd:        os.Getwd,
 		GuardState:   guardState,
 		ShadowRemote: shadowRemote,
+		GitVersion:   gitx.Version,
+		Build:        buildInfo,
 	}
+	env.Asker = func() (prompt.Asker, error) { return prompt.OnConsole(env.ConsoleUsable, env.OpenConsole) }
+	return env
 }
 
 type app struct {
@@ -197,6 +237,7 @@ func commandName(cmd *cobra.Command) string {
 }
 
 func (a *app) render(err error) int {
+	err = a.permissionMissing(err)
 	if a.eng != nil {
 		a.warnings = append(a.warnings, a.eng.LedgerWarnings()...)
 	}
@@ -225,6 +266,36 @@ func (a *app) render(err error) int {
 		printNext(a.env.Stdout, next)
 	}
 	return env.ExitCode
+}
+
+// permissionMissing turns a FORGE_ERROR or INTERNAL whose cause is a
+// *forge.PermissionError into TOKEN_PERMISSION_MISSING, naming the
+// permission, the repo and this command. It runs in render, which every
+// command's error passes through exactly once, and render is the only place
+// that knows the command's name. Codes the engine chose on purpose from a
+// refusal (SHADOW_CREATE_DENIED, TOKEN_CANNOT_PUBLISH, ...) are left alone.
+// It converts only errors the engine left generic: one the engine shaped on
+// purpose (feature close's "close it by hand") drops the PermissionError from
+// its chain and keeps its own code.
+func (a *app) permissionMissing(err error) error {
+	ce := contract.From(err)
+	if ce == nil || (ce.Code != contract.ForgeError && ce.Code != contract.Internal) {
+		return err
+	}
+	var pe *forge.PermissionError
+	if !errors.As(err, &pe) {
+		return err
+	}
+	where := ""
+	if pe.Repo != "" {
+		where = " on " + pe.Repo
+	}
+	out := contract.New(contract.TokenPermissionMissing,
+		"the token lacks %s%s, which ghostbranch %s needs; a person grants it, and ghostbranch doctor lists every missing permission",
+		pe.Permission, where, a.command).
+		WithDetails(map[string]any{"permission": pe.Permission, "repo": pe.Repo, "command": a.command})
+	out.Err = err
+	return out
 }
 
 // printSteps lists an error's details.steps, numbered, for people. The JSON
@@ -316,13 +387,56 @@ func (a *app) workspaceName() string {
 	return name
 }
 
+// oauthBase is GitHub's web origin for login and refresh.
+func (a *app) oauthBase() string {
+	if a.env.OAuthBaseURL == "" {
+		return "https://github.com"
+	}
+	return strings.TrimRight(a.env.OAuthBaseURL, "/")
+}
+
+// deviceFlow is the GitHub App device flow; its waits end early on Ctrl-C.
+func (a *app) deviceFlow(ctx context.Context) auth.DeviceFlow {
+	return auth.DeviceFlow{ClientID: a.env.ClientID, BaseURL: a.oauthBase(), HTTP: a.env.HTTPClient, Now: a.env.Now,
+		Sleep: func(d time.Duration) { _ = a.env.Sleep(ctx, d) }}
+}
+
+// authSource is where this run's token comes from. A refresh takes
+// <GHOSTBRANCH_HOME>/locks/auth.lock: the stored login is one per OS user,
+// shared by every workspace, so the lock is too.
+func (a *app) authSource() auth.Source {
+	return auth.Source{
+		Getenv: a.env.Getenv, GH: a.env.GHToken, Store: a.env.Keychain, Now: a.env.Now,
+		// GitHub rotates the refresh token once it answers, so a refresh is
+		// never cut short: a dropped reply would leave only the spent pair.
+		// The HTTP client's 30 s timeout still bounds it.
+		Refresh: func(ctx context.Context, l auth.Login) (auth.Login, error) {
+			ctx = context.WithoutCancel(ctx)
+			return a.deviceFlow(ctx).Refresh(ctx, l.RefreshToken)
+		},
+		// The error is never shown: it could carry a secret.
+		OnSaveError: func(error) {
+			if a.env.Stderr != nil {
+				_, _ = fmt.Fprintln(a.env.Stderr, "the refreshed GitHub login couldn't be saved to the OS keychain; the next command will ask you to log in again")
+			}
+		},
+		Lock: func() (func(), error) {
+			home, err := workspace.HomeDir(a.env.Getenv, runtime.GOOS, os.UserHomeDir)
+			if err != nil {
+				return nil, contract.Wrap(contract.Internal, err, "find the state directory")
+			}
+			return auth.FileLock(filepath.Join(home, "locks", "auth.lock"), a.env.Now, auth.LockWait)()
+		},
+	}
+}
+
 func (a *app) engine(ctx context.Context) (*engine.Engine, error) {
 	a.ran = true
 	actor, err := a.actor()
 	if err != nil {
 		return nil, err
 	}
-	token, source, err := auth.Resolve(a.env.Getenv, a.env.GHToken)
+	token, source, err := auth.Resolve(ctx, a.authSource())
 	if err != nil {
 		return nil, err
 	}
@@ -344,7 +458,7 @@ func (a *app) engine(ctx context.Context) (*engine.Engine, error) {
 		}
 	}
 	e := &engine.Engine{Forge: f, WS: ws, Actor: actor, Token: token, TokenSource: source,
-		Now: a.env.Now, Sleep: a.env.Sleep, Rand: a.env.Rand, Progress: a.env.Stderr,
+		LooksLikeAgent: auth.LooksLikeAgent(a.env.Getenv, a.env.ConsoleUsable), Now: a.env.Now, Sleep: a.env.Sleep, Rand: a.env.Rand, Progress: a.env.Stderr,
 		NewScanner: a.env.NewScanner, PollInterval: a.env.PollInterval, SettleWindow: a.env.SettleWindow, CIAppearWindow: a.env.CIAppearWindow, CIAppearPoll: a.env.CIAppearPoll,
 		DryRun: a.dryRun, OnPush: a.env.OnPush, Grants: grant.NewStore(ws.GrantsPath(), ws.GrantsLockPath()),
 		Waivers: waiver.NewStore(ws.WaiversPath(), ws.WaiversLockPath())}

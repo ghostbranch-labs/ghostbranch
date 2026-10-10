@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode"
 )
 
 // ErrNotFound wraps any "does not exist" answer from the host.
@@ -17,12 +18,65 @@ var ErrTransient = errors.New("transient forge error")
 
 // ErrForbidden wraps a plain permission refusal (a 403 that is not a rate
 // limit): the token may not do this. Every Forge method wraps a plain 403
-// with it.
+// with it, ListChecks included once its workflow-runs fallback is refused
+// too. A *PermissionError is one whose missing permission the host named.
 var ErrForbidden = errors.New("forbidden")
 
 // ErrConflict wraps a 409: the host refused the change in the resource's
 // current state.
 var ErrConflict = errors.New("conflict")
+
+// PermissionError is a permission refusal whose missing permission the
+// host named. It unwraps to ErrForbidden, so every errors.Is(err,
+// ErrForbidden) check still holds. Its text never includes a token.
+type PermissionError struct {
+	// Permission is what the token lacks, as GitHub's settings page names
+	// it: "Workflows: write", or a set joined with " and ". For a classic
+	// or OAuth token, "OAuth scope: repo".
+	Permission string
+	// Repo is the owner/name the refused call was about; "" for none.
+	Repo string
+}
+
+func (e *PermissionError) Error() string {
+	if e.Repo == "" {
+		return "the token lacks " + e.Permission
+	}
+	return "the token lacks " + e.Permission + " on " + e.Repo
+}
+
+func (e *PermissionError) Unwrap() error { return ErrForbidden }
+
+// HostError carries the host's own message for a failed call (GitHub's
+// "message" field) and nothing else from the response. Its text is Err's.
+type HostError struct {
+	Message string
+	Err     error
+}
+
+func (e *HostError) Error() string { return e.Err.Error() }
+
+func (e *HostError) Unwrap() error { return e.Err }
+
+// HostMessage is the host's message carried in err's chain, on one line
+// of printable characters (no terminal escapes), or "".
+func HostMessage(err error) string {
+	var h *HostError
+	if !errors.As(err, &h) {
+		return ""
+	}
+	m := strings.Map(func(r rune) rune {
+		if unicode.IsPrint(r) || unicode.IsSpace(r) {
+			return r
+		}
+		return -1
+	}, h.Message)
+	m = strings.Join(strings.Fields(m), " ")
+	if r := []rune(m); len(r) > 200 {
+		m = string(r[:200]) + "…"
+	}
+	return m
+}
 
 type Repo struct {
 	FullName      string
@@ -30,7 +84,16 @@ type Repo struct {
 	Fork          bool
 	DefaultBranch string
 	CloneURL      string
+	// OwnerType is GitHub's type of the repo's owner: OwnerOrganization or
+	// OwnerUser ("" when unknown).
+	OwnerType string
 }
+
+// The owner types GitHub reports.
+const (
+	OwnerOrganization = "Organization"
+	OwnerUser         = "User"
+)
 
 type PR struct {
 	Number int

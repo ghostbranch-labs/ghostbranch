@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "login data",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["account", "kind", "token_kind", "expires", "replaced", "install_url", "env_token"],
+  "properties": {
+    "account": { "description": "the GitHub login; empty when GitHub didn't say", "type": "string" },
+    "kind": { "description": "app: the GitHub App device flow; pat: a token from stdin", "enum": ["app", "pat"] },
+    "token_kind": { "$ref": "common.schema.json#/$defs/tokenKind" },
+    "expires": { "description": "an app token's expiry; null for a pasted token", "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/time" }] },
+    "replaced": { "description": "a stored login was replaced", "type": "boolean" },
+    "install_url": { "description": "first app login: where the person picks the repos the app may use; empty otherwise", "type": "string" },
+    "env_token": { "description": "GHOSTBRANCH_TOKEN when it is set and wins over this login; empty otherwise", "type": "string" }
+  }
+}

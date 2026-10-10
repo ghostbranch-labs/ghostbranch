@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "doctor data",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["checks"],
+  "properties": {
+    "checks": {
+      "description": "every check, in order: tools, token, pair, guard, state, ci (fewer only when doctor was interrupted)",
+      "type": "array", "maxItems": 6,
+      "items": { "$ref": "#/$defs/check" }
+    }
+  },
+  "$defs": {
+    "check": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "status", "message", "fix", "details"],
+      "properties": {
+        "id": { "$ref": "common.schema.json#/$defs/checkId" },
+        "status": { "enum": ["ok", "warn", "fail", "skipped"] },
+        "message": { "type": "string", "minLength": 1 },
+        "fix": { "description": "a command that fixes it, for reading; empty when there is none to run. error.next carries the failing checks' fixes as argv", "type": "string" },
+        "details": {
+          "description": "the check's findings; open, so a later version may add fields. tools: git, git_minimum, version, commit. token: source, kind, account, can_publish, expires, refresh_expires, agent_on_person_login, groups. pair: public, shadow, public_private, shadow_private, behind, overlay_status. guard: checkout, hooks_dir, installed, workspace, remotes, publics. state: workspace, dir, features. ci: guards, secrets_listed, missing_secrets, push_triggers.",
+          "type": "object",
+          "properties": {
+            "git": { "type": "string" },
+            "git_minimum": { "type": "string" },
+            "version": { "type": "string" },
+            "commit": { "type": "string" },
+            "source": { "enum": ["", "GHOSTBRANCH_TOKEN", "login", "GH_TOKEN", "GITHUB_TOKEN", "gh auth token"] },
+            "kind": { "description": "empty with no token", "oneOf": [{ "const": "" }, { "$ref": "common.schema.json#/$defs/tokenKind" }] },
+            "account": { "type": "string" },
+            "can_publish": { "enum": ["true", "false", "unknown"] },
+            "expires": { "$ref": "common.schema.json#/$defs/time" },
+            "refresh_expires": { "$ref": "common.schema.json#/$defs/time" },
+            "agent_on_person_login": { "type": "boolean" },
+            "groups": {
+              "description": "what the token lacks per command group, each entry \"<permission> on <owner/repo>\"",
+              "type": "object", "additionalProperties": false,
+              "required": ["init", "sync", "gate", "promote", "audit"],
+              "properties": {
+                "init": { "$ref": "#/$defs/groupAccess" },
+                "sync": { "$ref": "#/$defs/groupAccess" },
+                "gate": { "$ref": "#/$defs/groupAccess" },
+                "promote": { "$ref": "#/$defs/groupAccess" },
+                "audit": { "$ref": "#/$defs/groupAccess" }
+              }
+            },
+            "public": { "$ref": "common.schema.json#/$defs/repo" },
+            "shadow": { "$ref": "common.schema.json#/$defs/repo" },
+            "public_private": { "type": "boolean" },
+            "shadow_private": { "type": "boolean" },
+            "behind": { "type": "integer", "minimum": 1 },
+            "overlay_status": { "type": "string" },
+            "checkout": { "type": "string" },
+            "hooks_dir": { "type": "string" },
+            "installed": { "type": "boolean" },
+            "workspace": { "type": "string" },
+            "remotes": { "type": ["array", "null"], "items": { "type": "string" } },
+            "publics": { "type": ["array", "null"], "items": { "type": "string" } },
+            "dir": { "type": "string" },
+            "features": { "type": "integer", "minimum": 0 },
+            "guards": { "type": "integer", "minimum": 0 },
+            "secrets_listed": { "type": "boolean" },
+            "missing_secrets": { "type": ["array", "null"], "items": { "type": "string" } },
+            "push_triggers": { "type": ["array", "null"], "items": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "groupAccess": {
+      "type": "object", "additionalProperties": false,
+      "required": ["missing", "unknown", "optional_missing"],
+      "properties": {
+        "missing": { "type": "array", "items": { "type": "string" } },
+        "unknown": { "type": "array", "items": { "type": "string" } },
+        "optional_missing": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

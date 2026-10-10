@@ -13,7 +13,7 @@ import (
 
 // SchemaVersion versions the envelope and every data schema. It stays 0.x
 // until launch, and 0.x versions may break.
-const SchemaVersion = "0.9"
+const SchemaVersion = "0.10"
 
 // Exit codes. Agents branch on these, so they never change meaning.
 const (
@@ -114,6 +114,21 @@ const (
 	JobNotFound Code = "JOB_NOT_FOUND"
 	// JobStale means a newer gate replaced the job.
 	JobStale Code = "JOB_STALE"
+	// LoginExpired means the stored login's refresh token expired or was
+	// revoked, so it can't be refreshed; a person logs in again.
+	LoginExpired Code = "LOGIN_EXPIRED"
+	// LoginUnavailable means login can't run or store a login here (no
+	// console for the device flow, no OS keychain, no client ID in this
+	// build, the flow was denied or its code expired), or the stored login
+	// can't be read. details.reason says which.
+	LoginUnavailable Code = "LOGIN_UNAVAILABLE"
+	// TokenPermissionMissing means GitHub refused a call because the token
+	// lacks a permission GitHub named. details.permission, details.repo and
+	// details.command say which, where and for what.
+	TokenPermissionMissing Code = "TOKEN_PERMISSION_MISSING"
+	// DoctorFailed means at least one doctor check failed; details.failed
+	// lists their IDs.
+	DoctorFailed Code = "DOCTOR_FAILED"
 )
 
 var exitCodes = map[Code]int{
@@ -129,14 +144,18 @@ var exitCodes = map[Code]int{
 	RebaseConflict: ExitConflict, SyncDiverged: ExitConflict, BranchExists: ExitConflict,
 	OverlayCollision: ExitConflict, ShadowNotEmpty: ExitConflict, RefMoved: ExitConflict,
 	CurateConflict: ExitConflict, CurateTreeMismatch: ExitConflict,
-	ApprovalRequired:  ExitNeedsApproval,
-	PlanStale:         ExitPlanStale,
-	UpgradeNeeded:     ExitFailure,
-	FeatureMoved:      ExitConflict,
-	ShadowBehindError: ExitConflict,
-	Interrupted:       ExitFailure,
-	JobNotFound:       ExitUsage,
-	JobStale:          ExitConflict,
+	ApprovalRequired:       ExitNeedsApproval,
+	PlanStale:              ExitPlanStale,
+	UpgradeNeeded:          ExitFailure,
+	FeatureMoved:           ExitConflict,
+	ShadowBehindError:      ExitConflict,
+	Interrupted:            ExitFailure,
+	JobNotFound:            ExitUsage,
+	JobStale:               ExitConflict,
+	LoginExpired:           ExitFailure,
+	LoginUnavailable:       ExitFailure,
+	TokenPermissionMissing: ExitFailure,
+	DoctorFailed:           ExitFailure,
 }
 
 // Exit is the process exit code for c.
@@ -280,13 +299,16 @@ const (
 	// PlanFileUnreadable means a plan file on this machine couldn't be read
 	// and was skipped.
 	PlanFileUnreadable WarningCode = "PLAN_FILE_UNREADABLE"
+	// AgentOnPersonLogin means a run that looks like an agent or a script is
+	// using a person's stored login instead of a token of its own.
+	AgentOnPersonLogin WarningCode = "AGENT_ON_PERSON_LOGIN"
 )
 
 var warningCodes = []WarningCode{ConfigKeyIgnored, PublicNotPublic, GateNotRecorded, ChecksLimited, ActorUnknown,
 	WorkflowChanged, LargeFile, BinaryFile, WaiversUnreadable,
 	OverlayOutdated, RepoGuard, RepoGuardUnrewritable, SecretsUnlisted, SecretsMissing, PushTriggersOnSync,
 	ActionsMinutesBilled, ShadowBehind, AuditIncomplete, CINotCancelled, PRStateUnknown, DriftUnknown, FeatureNotClosed,
-	MirrorNotUpdated, RecordNewer, RecordUnreadable, LedgerNotWritten, SyncPushFailed, PlanFileUnreadable}
+	MirrorNotUpdated, RecordNewer, RecordUnreadable, LedgerNotWritten, SyncPushFailed, PlanFileUnreadable, AgentOnPersonLogin}
 
 // AllWarnings lists every warning code, sorted.
 func AllWarnings() []WarningCode {

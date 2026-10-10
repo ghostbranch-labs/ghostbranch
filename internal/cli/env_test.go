@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -18,6 +19,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge/fake"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/grant"
+	"github.com/ghostbranch-labs/ghostbranch/internal/keychain"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
@@ -57,6 +59,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		Rand:         &testutil.SeqReader{},
 		NewForge:     func(string) (forge.Forge, error) { return f, nil },
 		GHToken:      func() (string, error) { return "", errors.New("gh is not logged in") },
+		Keychain:     keychain.NewFake(),
 		CwdRemotes:   func() []workspace.Remote { return nil },
 		NewScanner:   func(r leak.Rules) (leak.Scanner, error) { return leak.NewGitleaks(r) },
 		PollInterval: time.Second, SettleWindow: 5 * time.Second,
@@ -64,6 +67,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		Getwd:        func() (string, error) { return root, nil },
 		GuardState:   func(string) (bool, bool) { return false, false },
 		ShadowRemote: func(string) (string, string, bool) { return "shadow", "shadow", true },
+		GitVersion:   func(context.Context) (string, error) { return "git version 2.47.1", nil },
 	}
 	return te
 }

@@ -1,0 +1,88 @@
+{
+  "schema_version": "0.10",
+  "command": "doctor",
+  "ok": false,
+  "exit_code": 1,
+  "data": {
+    "checks": [
+      {
+        "id": "tools",
+        "status": "ok",
+        "message": "git 2.47.1; ghostbranch (unknown), commit (unknown)",
+        "fix": "",
+        "details": {
+          "commit": "(unknown)",
+          "git": "2.47.1",
+          "git_minimum": "2.38",
+          "version": "(unknown)"
+        }
+      },
+      {
+        "id": "token",
+        "status": "fail",
+        "message": "no GitHub token: run `ghostbranch login`, or set GHOSTBRANCH_TOKEN or GH_TOKEN, or run `gh auth login`",
+        "fix": "ghostbranch login",
+        "details": {
+          "account": "",
+          "can_publish": "unknown",
+          "kind": "",
+          "source": ""
+        }
+      },
+      {
+        "id": "pair",
+        "status": "skipped",
+        "message": "no GitHub token (see token)",
+        "fix": "",
+        "details": {}
+      },
+      {
+        "id": "guard",
+        "status": "skipped",
+        "message": "not in a git checkout",
+        "fix": "",
+        "details": {}
+      },
+      {
+        "id": "state",
+        "status": "ok",
+        "message": "workspace \"default\"; the records are readable, none is newer than this binary, and no gate job has been pending for over an hour (features not checked: no readable pair)",
+        "fix": "",
+        "details": {
+          "dir": "<ROOT>/home/workspaces/default",
+          "workspace": "default"
+        }
+      },
+      {
+        "id": "ci",
+        "status": "skipped",
+        "message": "no readable pair to audit (see pair)",
+        "fix": "",
+        "details": {}
+      }
+    ]
+  },
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "login"
+      ],
+      "why": "token: no GitHub token: run `ghostbranch login`, or set GHOSTBRANCH_TOKEN or GH_TOKEN, or run `gh auth login`",
+      "needs_human": true,
+      "needs_input": []
+    }
+  ],
+  "error": {
+    "code": "DOCTOR_FAILED",
+    "message": "1 check(s) failed: token",
+    "field": null,
+    "retryable": false,
+    "details": {
+      "failed": [
+        "token"
+      ]
+    }
+  }
+}

@@ -317,7 +317,7 @@ func TestNextAppliesAPlanByItsPath(t *testing.T) {
 func TestNextForANewerOrUnreadableRecord(t *testing.T) {
 	t.Parallel()
 	a := testApp("status")
-	a.warnings = []contract.Warning{{Code: contract.RecordNewer, Details: map[string]any{"feature": "feat-x", "record_version": "0.10"}}}
+	a.warnings = []contract.Warning{{Code: contract.RecordNewer, Details: map[string]any{"feature": "feat-x", "record_version": "0.11"}}}
 	next := a.featureNexts(nil, []engine.FeatureReport{
 		{Name: "feat-x", State: feature.StateMerged, PRState: "merged"},
 		{Name: "feat-y", State: feature.StateUnreadable},
@@ -441,5 +441,16 @@ func TestAgainForAPersonReplacesARelativeRepo(t *testing.T) {
 	}
 	if got := a.again(false); !slices.Equal(got, []string{"ghostbranch", "agents", "allow", "--repo", ".", "--non-interactive", "--json"}) {
 		t.Fatalf("again(false) = %v", got)
+	}
+}
+
+// A login GitHub refused offers `ghostbranch login` to a person, like the
+// other device-flow failures.
+func TestARefusedLoginOffersLogin(t *testing.T) {
+	t.Parallel()
+	a := testApp("sync", "sync", "--json")
+	next := a.next(contract.New(contract.LoginUnavailable, "x").WithDetails(map[string]any{"reason": "refused"}))
+	if len(next) != 1 || !slices.Equal(next[0].Command, []string{"ghostbranch", "login"}) || !next[0].NeedsHuman {
+		t.Fatalf("next = %+v", next)
 	}
 }

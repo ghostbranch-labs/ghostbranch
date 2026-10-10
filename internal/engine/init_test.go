@@ -453,3 +453,143 @@ func TestAdoptFastForwardIsLeased(t *testing.T) {
 		t.Fatal("a failed adopt registered the pair")
 	}
 }
+
+func TestInitWithAScheduleTurnsOnScheduledSync(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	if _, _, err := h.eng.Init(h.ctx, engine.InitOptions{Public: publicName, Schedule: engine.DefaultSyncSchedule}); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := h.status()
+	if !st.ScheduledSync || st.OverlayStatus != "current" {
+		t.Fatalf("status %+v", st)
+	}
+}
+
+func TestInitRefusesAScheduleTheOverlayContradicts(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	pushes := len(h.pushes)
+	_, _, err := h.eng.Init(h.ctx, engine.InitOptions{Public: publicName, Schedule: engine.DefaultSyncSchedule})
+	ce := wantCode(t, err, contract.BadFlag)
+	if ce.Field != "sync" || !strings.Contains(ce.Message, "ghostbranch upgrade") || len(h.pushes) != pushes {
+		t.Fatalf("%+v; pushes %d -> %d", ce, pushes, len(h.pushes))
+	}
+	// The same schedule as the overlay's resumes as before.
+	if _, _, err := h.eng.Init(h.ctx, engine.InitOptions{Public: publicName, Schedule: config.ScheduleOff}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A shadow repo under another owner than the public repo's (an org's public
+// repo with the shadow on the person's account) is created or adopted,
+// registered, resolved from the public checkout, and used.
+func TestInitAcceptsAShadowRepoUnderAnotherOwner(t *testing.T) {
+	t.Parallel()
+	const personal = "octo/widget-shadow"
+	for _, adopt := range []bool{false, true} {
+		t.Run(map[bool]string{false: "create", true: "adopt"}[adopt], func(t *testing.T) {
+			t.Parallel()
+			h := newHarness(t)
+			h.forge.Orgs = map[string]bool{"acme": true}
+			if adopt {
+				if _, err := h.forge.CreatePrivateRepo(h.ctx, personal); err != nil {
+					t.Fatal(err)
+				}
+			}
+			res, _, err := h.eng.Init(h.ctx, engine.InitOptions{Public: publicName, Shadow: personal, Adopt: adopt})
+			if err != nil || res.Shadow != personal || res.CreatedShadow == adopt || res.Adopted != adopt {
+				t.Fatalf("init = %+v %v", res, err)
+			}
+			sg := gitx.New(h.forge.RepoDir(personal))
+			raw, ok, _ := sg.ShowFile(h.ctx, "refs/heads/ghostbranch", ".ghostbranch.yml")
+			if cfg, _, err := config.Parse(raw); !ok || err != nil || cfg.Public != publicName || cfg.Shadow != personal {
+				t.Fatalf("overlay config = %+v %v", cfg, err)
+			}
+			ws, err := workspace.Open(filepath.Dir(filepath.Dir(h.eng.WS.Dir)), h.eng.WS.Name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := workspace.Pair{Public: publicName, Shadow: personal}
+			for _, by := range []struct {
+				flag    string
+				remotes []workspace.Remote
+			}{
+				{publicName, nil},
+				{personal, nil},
+				{"", []workspace.Remote{{Name: "origin", URL: "https://github.com/acme/widget.git"}}},
+			} {
+				if p, err := ws.Resolve(by.flag, by.remotes); err != nil || p != want {
+					t.Fatalf("resolve %q %v = %+v %v", by.flag, by.remotes, p, err)
+				}
+			}
+			if _, _, err := h.eng.FeatureStart(h.ctx, want, "feat-x"); err != nil {
+				t.Fatalf("feature start: %v", err)
+			}
+			if _, err := sg.MustResolve(h.ctx, "refs/heads/feat-x"); err != nil {
+				t.Fatalf("no feature branch in %s: %v", personal, err)
+			}
+		})
+	}
+}
+
+// The shadow repo can't be the public repo itself, in any case: init and
+// every command on such a pair refuse, and nothing is created or pushed.
+func TestInitRefusesThePublicRepoAsItsOwnShadow(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.forge.SetPrivate(publicName, true) // adoptable otherwise: private, not a fork
+	for _, adopt := range []bool{false, true} {
+		_, _, err := h.eng.Init(h.ctx, engine.InitOptions{Public: publicName, Shadow: "ACME/Widget", Adopt: adopt})
+		if ce := wantCode(t, err, contract.BadFlag); ce.Field != "shadow" || !strings.Contains(ce.Message, "must be a different repo from the public one") {
+			t.Fatalf("adopt %v: %+v", adopt, ce)
+		}
+	}
+	if _, ok := h.eng.WS.Find(publicName); ok || len(h.pushes) != 0 {
+		t.Fatalf("registered %v, pushes %v", ok, h.pushes)
+	}
+	if _, err := h.forge.GetRepo(h.ctx, shadowName); !errors.Is(err, forge.ErrNotFound) {
+		t.Fatalf("a shadow was created: %v", err)
+	}
+	_, _, err := h.eng.FeatureStart(h.ctx, workspace.Pair{Public: publicName, Shadow: publicName}, "feat-x")
+	if ce := wantCode(t, err, contract.BadFlag); ce.Field != "shadow" {
+		t.Fatalf("feature start on such a pair: %+v", ce)
+	}
+}
+
+// An empty public repo (no commits, so no main) is refused before anything
+// is written: no shadow repo is created and nothing is registered, in the
+// --plan preview and in a real run. A repo whose branches don't include main
+// is refused the same way.
+func TestInitRefusesAPublicRepoWithoutMain(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	if _, err := h.forge.AddRepo("acme/empty", false); err != nil {
+		t.Fatal(err)
+	}
+	dir, err := h.forge.AddRepo("acme/trunk", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	testutil.Commit(t, gitx.New(dir), "trunk", "initial", map[string]string{"README.md": "# trunk\n"})
+	for _, tc := range []struct{ public, says string }{
+		{"acme/empty", "acme/empty has no commits on main yet: push a first commit (a README is enough), then run ghostbranch init again"},
+		{"acme/trunk", "acme/trunk has no main branch (it has trunk)"},
+	} {
+		for _, dry := range []bool{true, false} {
+			h.eng.DryRun = dry
+			_, _, err := h.eng.Init(h.ctx, engine.InitOptions{Public: tc.public})
+			ce := wantCode(t, err, contract.BadFlag)
+			if ce.Field != "public" || ce.Retryable || !strings.HasPrefix(ce.Message, tc.says) {
+				t.Fatalf("%s (dry %v): %+v", tc.public, dry, ce)
+			}
+			if _, err := h.forge.GetRepo(h.ctx, tc.public+"-shadow"); !errors.Is(err, forge.ErrNotFound) {
+				t.Fatalf("%s (dry %v): a shadow repo was created: %v", tc.public, dry, err)
+			}
+			if _, ok := h.eng.WS.Find(tc.public); ok || len(h.pushes) != 0 {
+				t.Fatalf("%s (dry %v): registered %v, pushes %v", tc.public, dry, ok, h.pushes)
+			}
+		}
+	}
+}

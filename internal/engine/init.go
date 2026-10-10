@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -23,7 +24,15 @@ type InitOptions struct {
 	Public string
 	Shadow string // default: <public>-shadow
 	Adopt  bool
+	// Schedule is sync.schedule for a new overlay: "" or config.ScheduleOff
+	// leaves scheduled sync off, DefaultSyncSchedule turns it on. An
+	// overlay that already exists keeps its config: init refuses with
+	// BAD_FLAG, before pushing anything, if its schedule differs.
+	Schedule string
 }
+
+// DefaultSyncSchedule is init --sync's cron: every 6 hours, at minute 23.
+const DefaultSyncSchedule = "23 */6 * * *"
 
 type InitResult struct {
 	Public           string           `json:"public"`
@@ -37,6 +46,14 @@ type InitResult struct {
 	DefaultBranchSet bool             `json:"default_branch_set"`
 	Audit            *AuditResult     `json:"audit"`
 	Preview          *preview.Preview `json:"preview"`
+	// GuardInstalled: the push guard is installed in this checkout when
+	// init finishes (installed by this run, or before it).
+	GuardInstalled bool `json:"guard_installed"`
+	// Doctor is doctor's summary after a guided init; nil otherwise.
+	Doctor *DoctorSummary `json:"doctor"`
+	// Guided and DoctorChecks are for human output only.
+	Guided       bool          `json:"-"`
+	DoctorChecks []DoctorCheck `json:"-"`
 	// Ready is true once Init returned without an error; human output says
 	// "ready" only then. It is not part of the JSON result.
 	Ready bool `json:"-"`
@@ -91,7 +108,13 @@ func (e *Engine) Init(ctx context.Context, opt InitOptions) (res *InitResult, wa
 	if _, _, err := forge.SplitName(shadow); err != nil {
 		return nil, nil, contract.New(contract.BadFlag, "%v", err).WithField("shadow")
 	}
+	if s := opt.Schedule; s != "" && s != config.ScheduleOff && s != DefaultSyncSchedule {
+		return nil, nil, contract.New(contract.BadFlag, "init's schedule must be %q or %q, not %q", config.ScheduleOff, DefaultSyncSchedule, s).WithField("sync")
+	}
 	p := workspace.Pair{Public: opt.Public, Shadow: shadow}
+	if err := sameRepo(p); err != nil {
+		return nil, nil, err
+	}
 	pair = &p
 	res = &InitResult{Public: p.Public, Shadow: p.Shadow, MirroredBranches: []string{}, MirroredTags: []string{}}
 
@@ -175,6 +198,11 @@ func (e *Engine) Init(ctx context.Context, opt InitOptions) (res *InitResult, wa
 		return res, warns, err
 	}
 	_, hasOverlay, _ := g.Resolve(ctx, shadowRef(OverlayBranch))
+	if hasOverlay && opt.Schedule != "" {
+		if err := e.checkSchedule(ctx, pc, opt.Schedule); err != nil {
+			return res, warns, err
+		}
+	}
 	if e.DryRun {
 		pv := preview.New(map[string]string{"public_main": publicMain})
 		addMirrorOps(pv, p.Shadow, specs, leases)
@@ -197,7 +225,7 @@ func (e *Engine) Init(ctx context.Context, opt InitOptions) (res *InitResult, wa
 		}
 	}
 	if !hasOverlay {
-		if err := e.createOverlay(ctx, pc); err != nil {
+		if err := e.createOverlay(ctx, pc, opt.Schedule); err != nil {
 			return res, warns, err
 		}
 		res.OverlayCreated = true
@@ -310,7 +338,8 @@ func (e *Engine) checkAdoptable(ctx context.Context, pc *pairCtx) error {
 	return nil
 }
 
-// checkPublicBranches refuses a public repo with a branch named ghostbranch
+// checkPublicBranches refuses a public repo without a main branch (an empty
+// repo: there is nothing to mirror), or with a branch named ghostbranch
 // (or under ghostbranch/): mirroring it would collide with the overlay
 // branch. It reads the public repo's branches with ls-remote, before
 // anything is created or pushed.
@@ -330,14 +359,29 @@ func (e *Engine) checkPublicBranches(ctx context.Context, p workspace.Pair, pub 
 	if err != nil {
 		return remoteErr(err, "list the public repo's branches")
 	}
+	var branches []string
 	for _, line := range strings.Split(out, "\n") {
 		_, ref, ok := strings.Cut(strings.TrimSpace(line), "\t")
+		if !ok {
+			continue
+		}
 		b := strings.TrimPrefix(ref, "refs/heads/")
-		if ok && (b == OverlayBranch || strings.HasPrefix(b, OverlayBranch+"/")) {
+		if b == OverlayBranch || strings.HasPrefix(b, OverlayBranch+"/") {
 			return contract.New(contract.NameInvalid,
 				"public repo %s has a branch %q, but Ghostbranch reserves that name for the shadow repo's overlay branch, so it can't mirror it; rename or delete that branch in the public repo, then run init again",
 				p.Public, b).WithField("public").WithDetails(map[string]any{"public": p.Public, "branch": b})
 		}
+		branches = append(branches, b)
+	}
+	switch {
+	case len(branches) == 0:
+		return contract.New(contract.BadFlag,
+			"%s has no commits on main yet: push a first commit (a README is enough), then run ghostbranch init again", p.Public).
+			WithField("public").WithDetails(map[string]any{"public": p.Public, "branch": "main"})
+	case !slices.Contains(branches, "main"):
+		return contract.New(contract.BadFlag,
+			"%s has no main branch (it has %s): Ghostbranch mirrors main, so create it in the public repo, then run ghostbranch init again",
+			p.Public, strings.Join(branches, ", ")).WithField("public").WithDetails(map[string]any{"public": p.Public, "branch": "main"})
 	}
 	return nil
 }
@@ -449,9 +493,30 @@ func (e *Engine) previewNewShadow(ctx context.Context, p workspace.Pair, pub for
 	return nil
 }
 
-func (e *Engine) createOverlay(ctx context.Context, pc *pairCtx) error {
+// checkSchedule refuses an init --sync or --no-sync that the existing
+// overlay's config contradicts: init never rewrites a config. A config it
+// can't read is left to the audit's warning, as before.
+func (e *Engine) checkSchedule(ctx context.Context, pc *pairCtx, want string) error {
+	cfg, _, _, err := e.readConfig(ctx, pc)
+	if err != nil || cfg.Sync.Schedule == want {
+		return nil
+	}
+	flag := "--no-sync"
+	if want != config.ScheduleOff {
+		flag = "--sync"
+	}
+	return contract.New(contract.BadFlag,
+		"%s already has an overlay whose sync.schedule is %q, and init doesn't change it: drop %s, or edit sync.schedule in .ghostbranch.yml on the %s branch and run ghostbranch upgrade",
+		pc.pair.Shadow, cfg.Sync.Schedule, flag, OverlayBranch).WithField("sync")
+}
+
+func (e *Engine) createOverlay(ctx context.Context, pc *pairCtx, schedule string) error {
 	g := pc.git
-	cfgBlob, err := g.HashObject(ctx, config.Render(pc.pair.Public, pc.pair.Shadow))
+	sched := schedule
+	if sched == "" {
+		sched = config.ScheduleOff
+	}
+	cfgBlob, err := g.HashObject(ctx, config.RenderSchedule(pc.pair.Public, pc.pair.Shadow, sched))
 	if err != nil {
 		return internalErr(err, "write .ghostbranch.yml")
 	}
@@ -459,10 +524,10 @@ func (e *Engine) createOverlay(ctx context.Context, pc *pairCtx) error {
 	if err != nil {
 		return internalErr(err, "write the overlay README")
 	}
-	// The managed files the default config wants: none while sync.schedule
-	// defaults to off, but this keeps init in step if a default changes.
+	// The managed files the new config wants: the sync workflow when the
+	// schedule is on.
 	def := config.Default()
-	files := managed.Render(managed.Input{Public: pc.pair.Public, Schedule: def.Sync.Schedule, Branches: def.Sync.Branches})
+	files := managed.Render(managed.Input{Public: pc.pair.Public, Schedule: sched, Branches: def.Sync.Branches})
 	entries := []gitx.TreeEntry{
 		{Mode: "100644", Type: "blob", SHA: cfgBlob, Path: ".ghostbranch.yml"},
 		{Mode: "100644", Type: "blob", SHA: readme, Path: ".ghostbranch/README.md"},

@@ -72,10 +72,18 @@ main, green CI, and a leak scan of exactly what will be published.
 
 ## Set up a repo
 
+0. **`ghostbranch doctor --json` checks the setup and changes nothing.** `data.checks[]` holds
+   `tools`, `token`, `pair`, `guard`, `state` and `ci`, each `ok`, `warn`, `fail` or `skipped`, with a
+   `fix` command when there is one. Exit 1 with `DOCTOR_FAILED` lists the failing checks in
+   `error.details.failed`, and `next` gives their fixes. Run it first, and whenever a command fails in
+   a way you don't understand.
 1. Shadow repo already exists (another machine, or a fresh `GHOSTBRANCH_HOME`)? Run
    `ghostbranch init <public> --adopt --plan --json`, then without `--plan`: it only registers the pair
    here and checks the shadow repo. Otherwise the same without `--adopt`. If the person named a shadow
    repo, add `--shadow <owner/name>` to both.
+   `init` asks questions only when a person runs it at a terminal; with `--json` it never asks.
+   Flags answer them: `--shadow`/`--adopt`, `--guard`/`--no-guard`, `--sync`/`--no-sync`.
+   For an org's public repo it asks where the shadow repo lives; `--shadow <owner/name>` sets it.
 2. Exit 1 with `SHADOW_CREATE_DENIED` means the token may not create repos. **Stop**: show the person
    `error.details.steps` and **ask them to do steps 1 and 2 of `error.details.steps`**: create the empty
    private repo, and add it to the token. Never ask the person for a token with wider access.
@@ -162,6 +170,9 @@ main, green CI, and a leak scan of exactly what will be published.
   change: they go public. Show them to the person; use theirs if they give them.
 - `LOCKED`: another ghostbranch command is running on this machine (`error.details.held_by`: `pid`,
   `op`, `since`). Wait and retry. A lock frees itself when its process ends; never delete lock files.
+- `TOKEN_PERMISSION_MISSING` names the permission and the repo in `error.details.permission` and
+  `error.details.repo`: stop and tell the person both. `ghostbranch doctor --json` lists everything
+  the token lacks, per command. Never ask for a token with wider access than that.
 - An unknown key in `.ghostbranch.yml`, including under `sync:` or `ci:`, is `UPGRADE_NEEDED` with
   `error.details.unknown_key`: fix the typo, or upgrade if a newer Ghostbranch set the pair up.
 - Don't know a code? `ghostbranch explain <CODE> --json`.
@@ -198,6 +209,8 @@ main, green CI, and a leak scan of exactly what will be published.
 - Never run `ghostbranch waivers add`, edit `waivers.json`, or otherwise hide a leak-scan finding.
 - Never create or delete repos (other than through `ghostbranch init`), or change repo settings, tokens
   or secrets yourself; those are the person's.
+- Never run `ghostbranch login` or `ghostbranch logout`, or rely on the person's stored login: use the
+  token you were given. If `doctor` or `agents status` warns `AGENT_ON_PERSON_LOGIN`, tell the person.
 
 You may *suggest* these to the person, never run them yourself:
 
@@ -255,6 +268,23 @@ marker (`// BEGIN-INTERNAL billing`, `// BEGIN-INTERNAL.`), a doubled prefix (`/
 another). So do markers in a UTF-16 or UTF-32 file, or in one Git reads as binary. A person can change
 the tokens with `leak_scan.markers` in `.ghostbranch.yml`.
 
+## Tokens (for people)
+
+Ghostbranch uses the first token it finds: `GHOSTBRANCH_TOKEN`, then your stored login, then
+`GH_TOKEN`, `GITHUB_TOKEN`, then `gh auth token`. With `GHOSTBRANCH_TOKEN` set, the stored login is
+never read.
+
+- `ghostbranch login` signs you in with the Ghostbranch GitHub App in your browser. When you install
+  the app, pick both the public repo and its shadow repo. The login lives in your OS keychain and
+  refreshes itself; `LOGIN_EXPIRED` means log in again. `ghostbranch login --with-token` stores a
+  token you pipe in on stdin instead. With no keychain (`LOGIN_UNAVAILABLE`), set `GHOSTBRANCH_TOKEN`.
+- `ghostbranch auth status` shows the source, account, kind, expiry and whether it can publish;
+  `ghostbranch logout` deletes the stored login. It doesn't revoke the app at GitHub: for an app
+  login it returns `revoke_url`, where you do that.
+- An agent running as you can reach your stored login, as it can reach `gh`'s token. Give each agent
+  its own token in `GHOSTBRANCH_TOKEN` (see *Strict isolation*). `doctor` and `agents status` warn
+  `AGENT_ON_PERSON_LOGIN` when a session that looks like an agent's uses your login.
+
 ## Token permissions (for people)
 
 Any token can read public repos, so for a public repo you only grant permissions on the shadow repo.
@@ -286,7 +316,8 @@ other OS users can't read them, but an agent running as you can.
 3. Make sure the agent's sandbox cannot read your `gh` login or keychain, or `gh auth token` hands it
    your full token.
 4. Check it: in the agent's environment, `ghostbranch agents status --json` shows
-   `"token_can_publish": "false"`.
+   `"token_can_publish": "false"` and the token's `"token_kind"`, and `ghostbranch doctor --json`
+   says the token can't publish.
 
 Then only you can publish: run `ghostbranch apply <plan>` in your own terminal, where Ghostbranch
 uses your `gh` login.

@@ -7,7 +7,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -45,53 +44,13 @@ func (a *app) here(ctx context.Context) (*guard.Checkout, *workspace.Workspace, 
 	return co, ws, err
 }
 
-// publicRemotes finds the remotes with any url or pushurl at a registered
-// public repo (never a shadow repo).
-func publicRemotes(ctx context.Context, co *guard.Checkout, ws *workspace.Workspace) (guard.Hook, error) {
-	h := guard.Hook{Workspace: ws.Name}
-	remotes, err := co.RemoteURLs(ctx)
-	if err != nil {
-		return h, err
-	}
-	names := make([]string, 0, len(remotes))
-	for n := range remotes {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	seen := map[string]bool{}
-	for _, n := range names {
-		public := false
-		for _, u := range remotes[n] {
-			slug, ok := guard.Slug(u)
-			if !ok {
-				continue
-			}
-			if p, ok := ws.Find(slug); ok && strings.EqualFold(p.Public, slug) {
-				public = true
-				if !seen[slug] {
-					seen[slug] = true
-					h.Publics = append(h.Publics, slug)
-				}
-			}
-		}
-		if public {
-			h.Remotes = append(h.Remotes, n)
-		}
-	}
-	if len(h.Remotes) == 0 {
-		return h, contract.New(contract.NotAPairCheckout,
-			"no remote of %s points at a public repo registered in workspace %q; run ghostbranch init <owner/repo> first", co.Top, ws.Name)
-	}
-	return h, nil
-}
-
 // pairOrGuard is the pair check status and uninstall share with install:
 // a remote of the checkout must point at a registered public repo, unless
 // the guard is installed here. An installed guard stays visible and
 // removable, since guard check tells a person to uninstall a guard it can't
 // place (after remove, or a changed remote).
 func pairOrGuard(ctx context.Context, co *guard.Checkout, ws *workspace.Workspace) error {
-	_, err := publicRemotes(ctx, co, ws)
+	_, err := guard.PublicRemotes(ctx, co, ws)
 	if err == nil || contract.From(err).Code != contract.NotAPairCheckout {
 		return err
 	}
@@ -107,28 +66,38 @@ func (a *app) guardInstallCmd() *cobra.Command {
 		Short: "Install the pre-push guard in this checkout",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			co, ws, err := a.here(cmd.Context())
+			res, err := a.installGuard(cmd.Context())
 			if err != nil {
 				return err
 			}
-			h, err := publicRemotes(cmd.Context(), co, ws)
-			if err != nil {
-				return err
-			}
-			bin, err := a.env.Executable()
-			if err != nil {
-				return contract.Wrap(contract.Internal, err, "find this binary's path")
-			}
-			h.Binary = filepath.ToSlash(bin)
-			res, err := guard.Install(cmd.Context(), co, h, a.dryRun)
-			if err != nil {
-				return err
-			}
-			return done(a, &res, nil, nil)
+			return done(a, res, nil, nil)
 		},
 	}
 	c.Flags().BoolVar(&a.dryRun, "plan", false, "show what would change, and change nothing")
 	return c
+}
+
+// installGuard installs the guard in the current checkout, as guard
+// install does.
+func (a *app) installGuard(ctx context.Context) (*guard.Result, error) {
+	co, ws, err := a.here(ctx)
+	if err != nil {
+		return nil, err
+	}
+	h, err := guard.PublicRemotes(ctx, co, ws)
+	if err != nil {
+		return nil, err
+	}
+	bin, err := a.env.Executable()
+	if err != nil {
+		return nil, contract.Wrap(contract.Internal, err, "find this binary's path")
+	}
+	h.Binary = filepath.ToSlash(bin)
+	res, err := guard.Install(ctx, co, h, a.dryRun)
+	if err != nil {
+		return nil, err
+	}
+	return &res, nil
 }
 
 func (a *app) guardUninstallCmd() *cobra.Command {

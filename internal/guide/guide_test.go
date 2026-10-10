@@ -37,7 +37,11 @@ func TestRenderListsEveryCodeFromTheRegistry(t *testing.T) {
 	// 333: the guard bullet says a branch named after a known feature is refused whatever it carries (5d-1 final review).
 	// 341: 5d-2 (newer merged features, every branch_gone a person closes, the ledger's name filter, file modes, the new warnings and the unreadable state).
 	// 343: the final review's fixes (an unreadable record may be a passing read error; where a newer merged feature shows).
-	if n := strings.Count(out, "\n"); n > 343 {
+	// 347: the four sub-project 6.1 error rows (LOGIN_EXPIRED, LOGIN_UNAVAILABLE, TOKEN_PERMISSION_MISSING, DOCTOR_FAILED).
+	// 376: 6.1 (doctor, guided init, TOKEN_PERMISSION_MISSING, the agent rule, the Tokens section, the isolation check), plus 6.1's error rows
+	// 377: the 6.1 final review's fixes (doctor's fix command only when there is one; pick the public and shadow repos when installing the app).
+	// 378: guided init asks where an org's shadow repo lives, and --shadow sets it (6.1 Task 10).
+	if n := strings.Count(out, "\n"); n > 378 {
 		t.Errorf("the guide is %d lines; keep it short (spec: about 150 plus the tables)", n)
 	}
 }
@@ -334,6 +338,34 @@ func TestGuideTeachesPolish(t *testing.T) {
 		"`PLAN_FILE_UNREADABLE`: fix or delete the file at `details.path`",
 		"and `unreadable` (a record that can't be read: `feature show <name>` gives the error; run the command again if it was a passing failure, as a corrupt one only a person at the console closes",
 		"`remove` needs no GitHub token",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the guide lacks %q", want)
+		}
+	}
+}
+
+// What 6.1 taught: login and the resolution order, doctor, guided init,
+// and the agent-token warning.
+func TestGuideTeachesSetup(t *testing.T) {
+	t.Parallel()
+	out := strings.Join(strings.Fields(guide.Render(contract.Registry())), " ")
+	for _, want := range []string{
+		"**`ghostbranch doctor --json` checks the setup and changes nothing.**",
+		"`DOCTOR_FAILED` lists the failing checks in `error.details.failed`",
+		"with a `fix` command when there is one.",
+		"When you install the app, pick both the public repo and its shadow repo.",
+		"`init` asks questions only when a person runs it at a terminal; with `--json` it never asks.",
+		"`--guard`/`--no-guard`, `--sync`/`--no-sync`",
+		"For an org's public repo it asks where the shadow repo lives; `--shadow <owner/name>` sets it.",
+		"`TOKEN_PERMISSION_MISSING` names the permission and the repo in `error.details.permission` and `error.details.repo`",
+		"Never run `ghostbranch login` or `ghostbranch logout`",
+		"`GHOSTBRANCH_TOKEN`, then your stored login, then `GH_TOKEN`, `GITHUB_TOKEN`, then `gh auth token`",
+		"With `GHOSTBRANCH_TOKEN` set, the stored login is never read.",
+		"`ghostbranch login --with-token` stores a token you pipe in on stdin",
+		"It doesn't revoke the app at GitHub",
+		"`AGENT_ON_PERSON_LOGIN`",
+		"`\"token_kind\"`",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the guide lacks %q", want)

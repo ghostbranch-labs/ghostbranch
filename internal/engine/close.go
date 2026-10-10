@@ -394,8 +394,18 @@ func (e *Engine) closeWith(ctx context.Context, pc *pairCtx, r FeatureReport, t 
 		case errors.Is(err, forge.ErrNotFound):
 		case errors.Is(err, forge.ErrForbidden):
 			res.GatePRLeftOpen = pr.Number
-			return res, warns, afterDeletes(forgeErr(err, "deleted %d ref(s) of feature %s, but the token may not close its gate PR #%d in %s; close it by hand",
-				len(res.Deleted), r.Name, pr.Number, sh))
+			// This code is chosen on purpose: the refs are gone, so a person
+			// closes the PR by hand. The cause goes into the message, not the
+			// chain, so the CLI never turns it into TOKEN_PERMISSION_MISSING
+			// (whose "run this command again" would find no feature). A named
+			// permission still reaches the caller in details.
+			ce := contract.New(contract.ForgeError, "deleted %d ref(s) of feature %s, but the token may not close its gate PR #%d in %s; close it by hand: %v",
+				len(res.Deleted), r.Name, pr.Number, sh, err)
+			var pe *forge.PermissionError
+			if errors.As(err, &pe) {
+				ce = ce.WithDetails(map[string]any{"permission": pe.Permission, "repo": pe.Repo})
+			}
+			return res, warns, afterDeletes(ce)
 		default:
 			res.GatePRLeftOpen = pr.Number
 			return res, warns, afterDeletes(forgeErr(err, "deleted %d ref(s) of feature %s, but couldn't close its gate PR #%d in %s; close it by hand",

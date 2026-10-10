@@ -28,6 +28,7 @@ func TestEveryCodeHasItsExitCode(t *testing.T) {
 		contract.AuthorUnmapped: 1, contract.NothingToPublish: 1,
 		contract.UpgradeNeeded: 1, contract.FeatureMoved: 4, contract.ShadowBehindError: 4,
 		contract.Interrupted: 1, contract.JobNotFound: 2, contract.JobStale: 4,
+		contract.LoginExpired: 1, contract.LoginUnavailable: 1, contract.TokenPermissionMissing: 1, contract.DoctorFailed: 1,
 	}
 	all := contract.AllCodes()
 	if len(all) != len(want) {
@@ -63,7 +64,7 @@ func TestSuccessEnvelopeShape(t *testing.T) {
 	if err := json.Unmarshal(b, &m); err != nil {
 		t.Fatal(err)
 	}
-	if m["schema_version"] != "0.9" || m["ok"] != true || m["exit_code"] != float64(0) ||
+	if m["schema_version"] != "0.10" || m["ok"] != true || m["exit_code"] != float64(0) ||
 		m["command"] != "sync" || m["error"] != nil {
 		t.Fatalf("bad envelope: %s", b)
 	}
@@ -134,7 +135,7 @@ func TestSubProject4CodesAreRegistered(t *testing.T) {
 	if err != nil || !es[0].NeedsHuman || !strings.Contains(es[0].WhatToDo, "--adopt") {
 		t.Fatalf("SHADOW_CREATE_DENIED doc: %+v %v", es, err)
 	}
-	if contract.SchemaVersion != "0.9" {
+	if contract.SchemaVersion != "0.10" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 }
@@ -157,7 +158,7 @@ func TestSubProject5aCodesAreRegistered(t *testing.T) {
 	if es, _ := contract.Explain("AUTHOR_UNMAPPED"); !es[0].NeedsHuman {
 		t.Fatal("AUTHOR_UNMAPPED needs a person: only they may edit the overlay config's author_map")
 	}
-	if contract.SchemaVersion != "0.9" {
+	if contract.SchemaVersion != "0.10" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 }
@@ -173,7 +174,7 @@ func TestSubProject5bCodesAreRegistered(t *testing.T) {
 			t.Fatalf("%s is not documented: %+v %v", c, es, err)
 		}
 	}
-	if contract.SchemaVersion != "0.9" {
+	if contract.SchemaVersion != "0.10" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 }
@@ -279,7 +280,7 @@ func TestSubProject5cCodesAreRegistered(t *testing.T) {
 			t.Fatalf("%s is not documented: %+v %v", c, es, err)
 		}
 	}
-	if contract.SchemaVersion != "0.9" {
+	if contract.SchemaVersion != "0.10" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 }
@@ -295,7 +296,7 @@ func TestSubProject5d1CodesAreRegistered(t *testing.T) {
 			t.Fatalf("%s is not documented: %+v %v", w, es, err)
 		}
 	}
-	if contract.SchemaVersion != "0.9" {
+	if contract.SchemaVersion != "0.10" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 	if es, _ := contract.Explain(string(contract.Locked)); !strings.Contains(es[0].WhatToDo, "nothing to delete") ||
@@ -327,13 +328,98 @@ func TestExplainSteersAnInterruptedPublishToApply(t *testing.T) {
 
 func TestNewer(t *testing.T) {
 	t.Parallel()
-	for v, want := range map[string]bool{"0.9": false, "0.7": false, "0.10": true, "0.11": true, "1.0": true,
-		"": false, "x": false, "0.8.1": false, "0.4": false,
+	for v, want := range map[string]bool{"0.10": false, "0.9": false, "0.7": false, "0.11": true, "0.100": true, "1.0": true,
+		"": false, "x": false, "0.8.1": false, "0.4": false, "0.2": false,
 		// A malformed version is never newer: it would lock users out.
-		"+1.0": false, "1.-5": false, "0.+9": false, " 0.9": false, "0.9 ": false, "1.": false, ".9": false} {
+		"+1.0": false, "1.-5": false, "0.+9": false, " 0.10": false, "0.10 ": false, "1.": false, ".9": false} {
 		if got := contract.Newer(v); got != want {
 			t.Errorf("Newer(%q) = %v, want %v", v, got, want)
 		}
+	}
+}
+
+// The 6.1 codes and their explain texts are pinned word for word: the guide
+// and the user docs are generated from them, and agents act on them.
+func TestSubProject61Contract(t *testing.T) {
+	t.Parallel()
+	if contract.SchemaVersion != "0.10" {
+		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
+	}
+	for c, s := range map[contract.Code]string{contract.LoginExpired: "LOGIN_EXPIRED", contract.LoginUnavailable: "LOGIN_UNAVAILABLE",
+		contract.TokenPermissionMissing: "TOKEN_PERMISSION_MISSING", contract.DoctorFailed: "DOCTOR_FAILED"} {
+		if string(c) != s || c.Exit() != contract.ExitFailure || !slices.Contains(contract.AllCodes(), c) {
+			t.Errorf("%s: string %q, exit %d, registered %v", s, c, c.Exit(), slices.Contains(contract.AllCodes(), c))
+		}
+	}
+	type doc struct {
+		summary, whatToDo string
+		causes            []string
+		human             bool
+	}
+	for code, want := range map[string]doc{
+		"LOGIN_EXPIRED": {
+			summary: "The stored GitHub login has expired and can't be refreshed.",
+			causes: []string{"its refresh token is past its six months",
+				"the login was revoked on GitHub, or the Ghostbranch app was uninstalled or its authorization removed"},
+			whatToDo: "A person runs ghostbranch login again. An agent stops and hands this to the person; an agent with a token of its own sets GHOSTBRANCH_TOKEN, which never uses the stored login.",
+			human:    true,
+		},
+		"LOGIN_UNAVAILABLE": {
+			summary: "Ghostbranch can't log in here, or can't read the stored login (error.details.reason says which).",
+			causes: []string{
+				"no_console: no terminal a person can use for the device flow; ghostbranch login --with-token reads a pasted token from stdin instead",
+				"no_keychain: this machine has no usable OS keychain (for example Linux without a Secret Service), and Ghostbranch never stores a token in a plain file",
+				"no_client_id: this build of Ghostbranch has no GitHub App client ID",
+				"denied, expired_code: the person denied the request on GitHub, or the code expired before they approved it",
+				"corrupt: the stored login can't be read",
+				"keychain_error: the OS keychain exists but refused (for example, it is locked)",
+				"refused: GitHub refused the login, for example because the app has device flow turned off",
+				"refresh_failed: GitHub refused to refresh the stored login for a reason other than its expiry",
+			},
+			whatToDo: "Read error.details.reason. For no_console or no_keychain, set GHOSTBRANCH_TOKEN to a token instead; agents and CI always do. For no_client_id, use ghostbranch login --with-token or GHOSTBRANCH_TOKEN. For denied or expired_code, run ghostbranch login again and approve the code on GitHub. For corrupt, a person runs ghostbranch logout, then ghostbranch login. For keychain_error, unlock the keychain or set GHOSTBRANCH_TOKEN. For refused or refresh_failed, run ghostbranch login again.",
+			human:    true,
+		},
+		"TOKEN_PERMISSION_MISSING": {
+			summary: "The token in use lacks a GitHub permission this command needs: error.details.permission on error.details.repo.",
+			causes: []string{
+				"a fine-grained token or the Ghostbranch app wasn't granted that permission, for example Workflows: write to change .github/workflows files",
+				"the repo isn't in the token's or the app installation's repository access",
+				"a classic or OAuth token lacks the scope named (OAuth scope: ...)",
+			},
+			whatToDo: "Run ghostbranch doctor: it lists every permission the token lacks, for each command. A person grants error.details.permission on error.details.repo (in the fine-grained token's settings, or the Ghostbranch app installation's repository access), then runs the command in error.details.command again. Never ask for wider access than doctor names.",
+			human:    true,
+		},
+		"DOCTOR_FAILED": {
+			summary:  "ghostbranch doctor found failing checks; error.details.failed lists their IDs.",
+			causes:   []string{"one of tools, token, pair, guard, state or ci failed; data.checks[].message says why"},
+			whatToDo: "Run the fix each failing check names (data.checks[].fix, also listed in next), then run ghostbranch doctor again. Warnings don't fail doctor.",
+		},
+	} {
+		es, err := contract.Explain(code)
+		if err != nil || len(es) != 1 {
+			t.Fatalf("explain %s = %+v %v", code, es, err)
+		}
+		e := es[0]
+		if e.Kind != contract.KindError || *e.ExitCode != 1 || e.Summary != want.summary || e.WhatToDo != want.whatToDo ||
+			!slices.Equal(e.Causes, want.causes) || e.NeedsHuman != want.human {
+			t.Errorf("%s doc = %+v", code, e)
+		}
+	}
+	es, _ := contract.Explain("AUTH_MISSING")
+	if !strings.Contains(es[0].WhatToDo, "ghostbranch login") || !strings.Contains(strings.Join(es[0].Causes, " "), "no stored login") {
+		t.Errorf("AUTH_MISSING must name ghostbranch login and the stored login: %+v", es[0])
+	}
+	if w := es[0].WhatToDo; strings.Index(w, "ghostbranch login") > strings.Index(w, "GHOSTBRANCH_TOKEN") || strings.Index(w, "GHOSTBRANCH_TOKEN") > strings.Index(w, "gh auth login") {
+		t.Errorf("AUTH_MISSING must name ghostbranch login, then GHOSTBRANCH_TOKEN, then gh auth login: %q", w)
+	}
+	if contract.AgentOnPersonLogin != "AGENT_ON_PERSON_LOGIN" || !slices.Contains(contract.AllWarnings(), contract.AgentOnPersonLogin) {
+		t.Errorf("AgentOnPersonLogin = %q, registered %v", contract.AgentOnPersonLogin, slices.Contains(contract.AllWarnings(), contract.AgentOnPersonLogin))
+	}
+	ws, err := contract.Explain("AGENT_ON_PERSON_LOGIN")
+	if err != nil || len(ws) != 1 || ws[0].Kind != contract.KindWarning ||
+		ws[0].Summary != "This run looks like an agent or a script, and it is using a person's stored login, which can publish." ||
+		ws[0].WhatToDo != "Give the agent its own shadow-only token in GHOSTBRANCH_TOKEN (see ghostbranch guide § Tokens). The person's login still needs the console code to publish." {
+		t.Errorf("AGENT_ON_PERSON_LOGIN doc = %+v %v", ws, err)
 	}
 }
 
@@ -348,7 +434,7 @@ func TestNewerRecord(t *testing.T) {
 
 func TestSubProject5d2Contract(t *testing.T) {
 	t.Parallel()
-	if contract.SchemaVersion != "0.9" {
+	if contract.SchemaVersion != "0.10" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 	for _, c := range []contract.WarningCode{contract.LedgerNotWritten, contract.SyncPushFailed, contract.PlanFileUnreadable} {

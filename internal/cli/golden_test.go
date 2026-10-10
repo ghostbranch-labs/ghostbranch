@@ -11,7 +11,9 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/ghostbranch-labs/ghostbranch/internal/auth/authtest"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
@@ -29,7 +31,8 @@ var dataSchemas = map[string]string{
 	"remove": "remove.schema.json", "log": "log.schema.json",
 	"status": "status.schema.json", "feature list": "feature-list.schema.json", "feature show": "feature-show.schema.json",
 	"feature abandon": "feature-abandon.schema.json", "feature close": "feature-close.schema.json",
-	"wait": "gate.schema.json",
+	"wait": "gate.schema.json", "login": "login.schema.json", "logout": "logout.schema.json", "auth status": "auth-status.schema.json",
+	"doctor": "doctor.schema.json",
 }
 
 var rootPath = regexp.MustCompile(`<ROOT>[^"]*`)
@@ -77,6 +80,10 @@ func TestGoldenContract(t *testing.T) {
 		{"gate", withFeature, []string{"gate", "feat-x"}, 0},
 		{"gate_checks_failed", func(te *testEnv) { withFeature(te); te.forge.Checks = failing }, []string{"gate", "feat-x"}, 3},
 		{"gate_leak", withLeakyFeature, []string{"gate", "feat-x"}, 3},
+		{"gate_permission_missing", func(te *testEnv) {
+			withFeature(te)
+			te.forge.MissingPermission = map[string]string{"CreatePR": "Pull requests: write"}
+		}, []string{"gate", "feat-x"}, 1},
 		{"promote_plan", gatedFeature, []string{"promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--plan"}, 0},
 		{"promote_needs_human", func(te *testEnv) { gatedFeature(te); te.vars["GHOSTBRANCH_ACTOR"] = "agent:claude-code" },
 			[]string{"promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--yes"}, 5},
@@ -190,6 +197,23 @@ jobs:
 		}, []string{"wait", "<OLD_JOB>"}, 4},
 		{"wait_bad_job", initOnly, []string{"wait", "nope"}, 2},
 		{"promote_detach", withFeature, []string{"promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--plan", "--detach"}, 0},
+		{"login_with_token", func(te *testEnv) {
+			te.forge.User = forge.User{Login: "octo", ID: 1}
+			te.env.Stdin = strings.NewReader("ghp_test_golden\n")
+		}, []string{"login", "--with-token"}, 0},
+		{"login_no_console", nil, []string{"login"}, 1},
+		{"login_device", func(te *testEnv) { deviceLogin(te, authtest.Options{Pending: 1}) }, []string{"login"}, 0},
+		{"logout", func(te *testEnv) { storeLogin(te, "ghu_test_x", "ghr_test_x", 8*time.Hour) }, []string{"logout"}, 0},
+		{"auth_status_login", func(te *testEnv) {
+			te.forge.User = forge.User{Login: "octo", ID: 1}
+			initOnly(te)
+			delete(te.vars, "GHOSTBRANCH_TOKEN")
+			storeLogin(te, "ghu_test_x", "ghr_test_x", 8*time.Hour)
+		}, []string{"auth", "status"}, 0},
+		{"auth_status_env", nil, []string{"auth", "status"}, 0},
+		{"doctor", initOnly, []string{"doctor", "--repo", "acme/widget"}, 0},
+		{"doctor_no_pair", nil, []string{"doctor"}, 0},
+		{"doctor_failed", func(te *testEnv) { initOnly(te); delete(te.vars, "GHOSTBRANCH_TOKEN") }, []string{"doctor", "--repo", "acme/widget"}, 1},
 	}
 	for _, s := range scenarios {
 		t.Run(s.name, func(t *testing.T) {

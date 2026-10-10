@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"regexp"
 	"time"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/approval"
@@ -53,7 +54,11 @@ type Engine struct {
 	Token string
 	// TokenSource names where Token came from, for error messages.
 	TokenSource string
-	Now         func() time.Time
+	// LooksLikeAgent is auth.LooksLikeAgent for this run: it is likely an
+	// agent or a script, not a person at a terminal. Doctor and agents
+	// status read it to spot an agent on a person's stored login.
+	LooksLikeAgent bool
+	Now            func() time.Time
 	// Sleep waits d, or returns ctx.Err() as soon as ctx is done.
 	Sleep        func(context.Context, time.Duration) error
 	Rand         io.Reader
@@ -122,10 +127,26 @@ func forgeErr(err error, format string, args ...any) error {
 	return ce
 }
 
+// gitAuthFailure matches git's words for a credential or access problem:
+// sending the same token again fails the same way.
+var gitAuthFailure = regexp.MustCompile(`(?i)(authentication failed|invalid username or (password|token)|could not read (username|password)|terminal prompts disabled|returned error: 40[134]|repository not found|permission to \S+ denied|write access to repository not granted)`)
+
+// remoteErr is a failed fetch, ls-remote or push. It is retryable unless
+// the credentials or the repo's visibility are the problem, or the command
+// was cancelled.
 func remoteErr(err error, what string) error {
 	ce := contract.Wrap(contract.ForgeError, err, "%s", what)
-	ce.Retryable = true
+	ce.Retryable = !authFailure(err) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)
 	return ce
+}
+
+func authFailure(err error) bool {
+	var perm *gitx.PermissionError
+	if errors.As(err, &perm) {
+		return true
+	}
+	var ge *gitx.Error
+	return errors.As(err, &ge) && gitAuthFailure.MatchString(ge.Stderr)
 }
 
 func internalErr(err error, what string) error {

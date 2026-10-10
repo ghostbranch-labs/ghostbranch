@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 	"sync"
 
@@ -64,6 +65,43 @@ type Forge struct {
 	// records the repo each ClosePullRequest call named.
 	ClosePRErr   error
 	ClosePRRepos []string
+	// MissingPermission scripts a 403 that names its permission: the method
+	// named (GetRepo, CreatePrivateRepo, SetDefaultBranch, FindOpenPR,
+	// CreatePR, GetPR, ListChecks, SecretNames, PushRuns, CancelRun,
+	// ForceCancelRun, ClosePullRequest) fails with a *forge.PermissionError
+	// naming that permission and the repo, for any repo.
+	MissingPermission map[string]string
+	// Scopes is OAuthScopes' answer; nil means GitHub sent no X-OAuth-Scopes
+	// header (a fine-grained or App token). PermsDenied makes
+	// ProbePermissions answer "no" for these permissions, per repo; every
+	// other read it probes is "yes", and Contents: write follows PushDenied.
+	Scopes      []string
+	PermsDenied map[string]map[string]bool
+	// Orgs are the owners that are organizations; every other owner is a
+	// user. GetRepo and CreatePrivateRepo report it in Repo.OwnerType.
+	Orgs map[string]bool
+	// CreateRefused makes CreatePrivateRepo under these owners fail with
+	// ErrForbidden, carrying the message as GitHub's (a *forge.HostError).
+	CreateRefused map[string]string
+}
+
+// view is r, the repo stored as full, as GitHub answers it. Callers hold f.mu.
+func (f *Forge) view(full string, r *forge.Repo) forge.Repo {
+	out := *r
+	out.OwnerType = forge.OwnerUser
+	if owner, _, err := forge.SplitName(full); err == nil && f.Orgs[owner] {
+		out.OwnerType = forge.OwnerOrganization
+	}
+	return out
+}
+
+// missing is the error MissingPermission scripts for method on full, or
+// nil. Callers hold f.mu.
+func (f *Forge) missing(method, full string) error {
+	if p := f.MissingPermission[method]; p != "" {
+		return fmt.Errorf("%s %s: %w", method, full, &forge.PermissionError{Permission: p, Repo: full})
+	}
+	return nil
 }
 
 // Run is a seeded workflow run that a push of SHA started. The flags script
@@ -185,6 +223,9 @@ func (f *Forge) SetPRMerged(full string, n int) {
 func (f *Forge) ClosePullRequest(_ context.Context, full string, number int) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := f.missing("ClosePullRequest", full); err != nil {
+		return err
+	}
 	f.ClosePRRepos = append(f.ClosePRRepos, full)
 	if f.ClosePRErr != nil {
 		return f.ClosePRErr
@@ -201,24 +242,36 @@ func (f *Forge) ClosePullRequest(_ context.Context, full string, number int) err
 func (f *Forge) GetRepo(_ context.Context, full string) (forge.Repo, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := f.missing("GetRepo", full); err != nil {
+		return forge.Repo{}, err
+	}
 	r, ok := f.repos[full]
 	if !ok {
 		return forge.Repo{}, fmt.Errorf("repo %s: %w", full, forge.ErrNotFound)
 	}
-	return *r, nil
+	return f.view(full, r), nil
 }
 
 func (f *Forge) CreatePrivateRepo(_ context.Context, full string) (forge.Repo, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := f.missing("CreatePrivateRepo", full); err != nil {
+		return forge.Repo{}, err
+	}
 	if f.CreateForbidden {
 		return forge.Repo{}, fmt.Errorf("create %s: %w", full, forge.ErrForbidden)
+	}
+	if owner, _, err := forge.SplitName(full); err == nil {
+		if msg, ok := f.CreateRefused[owner]; ok {
+			return forge.Repo{}, fmt.Errorf("create %s: %w", full,
+				&forge.HostError{Message: msg, Err: fmt.Errorf("%w: 403 %s", forge.ErrForbidden, msg)})
+		}
 	}
 	r, err := f.add(full, true)
 	if err != nil {
 		return forge.Repo{}, err
 	}
-	return *r, nil
+	return f.view(full, r), nil
 }
 
 func (f *Forge) branchExists(full, branch string) bool {
@@ -233,6 +286,9 @@ func (f *Forge) branchExists(full, branch string) bool {
 func (f *Forge) SetDefaultBranch(_ context.Context, full, branch string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := f.missing("SetDefaultBranch", full); err != nil {
+		return err
+	}
 	if !f.branchExists(full, branch) {
 		return fmt.Errorf("set default branch of %s: branch %s does not exist", full, branch)
 	}
@@ -243,6 +299,9 @@ func (f *Forge) SetDefaultBranch(_ context.Context, full, branch string) error {
 func (f *Forge) FindOpenPR(_ context.Context, full, head, base string) (*forge.PR, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := f.missing("FindOpenPR", full); err != nil {
+		return nil, err
+	}
 	for _, pr := range f.prs[full] {
 		if pr.Head == head && pr.Base == base && pr.State == "open" {
 			p := pr
@@ -255,6 +314,9 @@ func (f *Forge) FindOpenPR(_ context.Context, full, head, base string) (*forge.P
 func (f *Forge) CreatePR(_ context.Context, full string, in forge.NewPR) (forge.PR, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := f.missing("CreatePR", full); err != nil {
+		return forge.PR{}, err
+	}
 	if !f.branchExists(full, in.Head) {
 		return forge.PR{}, fmt.Errorf("create PR in %s: head branch %s does not exist", full, in.Head)
 	}
@@ -268,6 +330,9 @@ func (f *Forge) CreatePR(_ context.Context, full string, in forge.NewPR) (forge.
 func (f *Forge) GetPR(_ context.Context, full string, number int) (forge.PR, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := f.missing("GetPR", full); err != nil {
+		return forge.PR{}, err
+	}
 	if f.GetPRErr != nil {
 		if err := f.GetPRErr(full, number); err != nil {
 			return forge.PR{}, err
@@ -283,8 +348,11 @@ func (f *Forge) GetPR(_ context.Context, full string, number int) (forge.PR, err
 
 func (f *Forge) ListChecks(_ context.Context, full, sha string) ([]forge.Check, error) {
 	f.mu.Lock()
-	script := f.Checks
+	script, miss := f.Checks, f.missing("ListChecks", full)
 	f.mu.Unlock()
+	if miss != nil {
+		return nil, miss
+	}
 	if script != nil {
 		return script(full, sha), nil
 	}
@@ -319,6 +387,9 @@ func (f *Forge) PushAccess(_ context.Context, full string) forge.PushAccess {
 func (f *Forge) SecretNames(_ context.Context, full string) ([]string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := f.missing("SecretNames", full); err != nil {
+		return nil, err
+	}
 	if f.SecretsForbidden[full] {
 		return nil, fmt.Errorf("list secrets of %s: %w", full, forge.ErrForbidden)
 	}
@@ -332,6 +403,9 @@ func (f *Forge) PushRuns(_ context.Context, full, sha string) ([]forge.Run, erro
 	defer f.mu.Unlock()
 	f.PushRunsCalls++
 	f.PushRunsRepos = append(f.PushRunsRepos, full)
+	if err := f.missing("PushRuns", full); err != nil {
+		return nil, err
+	}
 	if f.RunsForbidden[full] {
 		return nil, fmt.Errorf("list workflow runs of %s: %w", full, forge.ErrForbidden)
 	}
@@ -356,6 +430,9 @@ func (f *Forge) PushRuns(_ context.Context, full, sha string) ([]forge.Run, erro
 func (f *Forge) CancelRun(_ context.Context, full string, id int64) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := f.missing("CancelRun", full); err != nil {
+		return err
+	}
 	f.CancelRunRepos = append(f.CancelRunRepos, full)
 	if f.CancelForbidden[full] {
 		return fmt.Errorf("cancel workflow run %d of %s: %w", id, full, forge.ErrForbidden)
@@ -388,6 +465,9 @@ func (f *Forge) CancelRun(_ context.Context, full string, id int64) error {
 func (f *Forge) ForceCancelRun(_ context.Context, full string, id int64) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := f.missing("ForceCancelRun", full); err != nil {
+		return err
+	}
 	f.ForceCancelRepos = append(f.ForceCancelRepos, full)
 	if f.ForceCancelForbidden[full] {
 		return fmt.Errorf("force-cancel workflow run %d of %s: %w", id, full, forge.ErrForbidden)
@@ -418,3 +498,36 @@ func (f *Forge) ForceCancelRun(_ context.Context, full string, id int64) error {
 	}
 	return fmt.Errorf("workflow run %d of %s: %w", id, full, forge.ErrNotFound)
 }
+
+func (f *Forge) ProbePermissions(_ context.Context, full string) (forge.RepoPermissions, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := forge.RepoPermissions{Have: map[string]string{}, Accepted: map[string]string{}}
+	if _, ok := f.repos[full]; !ok {
+		out.Have[forge.PermMetadataRead] = forge.AccessNo
+		return out, nil
+	}
+	for _, p := range []string{forge.PermMetadataRead, forge.PermContentsRead, forge.PermPullsRead,
+		forge.PermActionsRead, forge.PermStatusesRead, forge.PermSecretsRead} {
+		out.Have[p] = forge.AccessYes
+		if f.PermsDenied[full][p] {
+			out.Have[p] = forge.AccessNo
+		}
+	}
+	out.Have[forge.PermContentsWrite] = forge.AccessYes
+	if f.PushDenied[full] {
+		out.Have[forge.PermContentsWrite] = forge.AccessNo
+	}
+	return out, nil
+}
+
+func (f *Forge) OAuthScopes(context.Context) ([]string, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.UserErr != nil {
+		return nil, false, f.UserErr
+	}
+	return slices.Clone(f.Scopes), f.Scopes != nil, nil
+}
+
+var _ forge.PermissionProber = (*Forge)(nil)

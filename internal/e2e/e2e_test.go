@@ -131,7 +131,11 @@ func reset(t *testing.T, tok string) {
 	if err := g.Push(ctx, "shadow", gitx.PushOptions{}, "+"+baseline+":refs/heads/main"); err != nil {
 		t.Fatalf("reset shadow main: %v", err)
 	}
-	if err := ghforge.New(tok).SetDefaultBranch(ctx, shadowRepo, "main"); err != nil {
+	gc, err := ghforge.New(tok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := gc.SetDefaultBranch(ctx, shadowRepo, "main"); err != nil {
 		t.Fatalf("reset shadow default branch: %v", err)
 	}
 	if specs := deletes("shadow", func(ref string) bool { return ref == "refs/heads/main" }); len(specs) > 0 {
@@ -238,6 +242,21 @@ func TestSandboxLoop(t *testing.T) {
 	run(0, "init", publicRepo, "--shadow", shadowRepo, "--adopt")
 	run(0, "sync")
 
+	// The setup check on the sandbox pair: nothing fails. Warnings are
+	// fine: a fine-grained token's write permissions are unknown, and this
+	// directory isn't a clone of the sandbox repo, so the guard check skips.
+	doc := run(0, "doctor", "--repo", publicRepo)["data"].(map[string]any)
+	docChecks, _ := doc["checks"].([]any)
+	if len(docChecks) != 6 {
+		t.Fatalf("doctor: %v", doc)
+	}
+	for _, c := range docChecks {
+		ch := c.(map[string]any)
+		if ch["status"] == "fail" || (ch["id"] == "pair" && ch["status"] != "ok") {
+			t.Fatalf("doctor %s: %s: %v", ch["id"], ch["status"], ch["message"])
+		}
+	}
+
 	feat := "e2e-" + runID
 	run(0, "feature", "start", feat)
 	commit(feat, map[string]string{"hello.txt": "hello from " + runID + "\n", ".ghostbranch/notes.md": "private notes\n",
@@ -250,7 +269,11 @@ func TestSandboxLoop(t *testing.T) {
 		t.Fatalf("want one rewritten repo guard: %v", gateRes["repo_guards"])
 	}
 	candidate, _ := gateRes["candidate"].(string)
-	checks, err := ghforge.New(tok).ListChecks(ctx, shadowRepo, candidate)
+	gc, err := ghforge.New(tok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checks, err := gc.ListChecks(ctx, shadowRepo, candidate)
 	if err != nil {
 		t.Fatal(err)
 	}

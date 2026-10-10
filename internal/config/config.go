@@ -493,8 +493,32 @@ func validate(c Config) error {
 	return nil
 }
 
-// Render is the config file init writes for a new pair.
-func Render(public, shadow string) []byte {
+// Render is the config file init writes for a new pair, with scheduled
+// sync off.
+func Render(public, shadow string) []byte { return RenderSchedule(public, shadow, ScheduleOff) }
+
+const syncOffBlock = `sync:
+  # Scheduled sync is off: run ghostbranch sync yourself (commands warn when
+  # shadow main falls behind public). To opt in, set a cron such as
+  # "23 */6 * * *" (about 120 Actions minutes a month), then run
+  # ghostbranch upgrade.
+  schedule: "off"
+  branches: [main]`
+
+const syncOnBlock = `sync:
+  # Scheduled sync is on: a workflow in this shadow repo runs ghostbranch
+  # sync on this cron (about 120 Actions minutes a month at every 6 hours).
+  # To turn it off, set schedule: "off", then run ghostbranch upgrade.
+  schedule: "%s"
+  branches: [main]`
+
+// RenderSchedule is Render with sync.schedule set to schedule: ScheduleOff
+// or a five-field cron.
+func RenderSchedule(public, shadow, schedule string) []byte {
+	sync := syncOffBlock
+	if schedule != ScheduleOff {
+		sync = fmt.Sprintf(syncOnBlock, schedule)
+	}
 	return []byte(fmt.Sprintf(`# Ghostbranch configuration. It lives only on this shadow repo's
 # "ghostbranch" branch and is never promoted.
 version: 1
@@ -519,13 +543,7 @@ leak_scan:
   large_file: 5MB
   secrets: true
 
-sync:
-  # Scheduled sync is off: run ghostbranch sync yourself (commands warn when
-  # shadow main falls behind public). To opt in, set a cron such as
-  # "23 */6 * * *" (about 120 Actions minutes a month), then run
-  # ghostbranch upgrade.
-  schedule: "off"
-  branches: [main]
+%s
 
 ci:
   rewrite_repo_guards: rewrite
@@ -533,5 +551,5 @@ ci:
 gate:
   ci_appear_timeout: 10m
   ci_timeout: 60m
-`, public, shadow))
+`, public, shadow, sync))
 }

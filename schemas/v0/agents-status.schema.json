@@ -3,7 +3,7 @@
   "title": "agents status data",
   "type": "object",
   "additionalProperties": false,
-  "required": ["pair", "grants", "token_can_publish", "token"],
+  "required": ["pair", "grants", "token_can_publish", "token", "token_kind"],
   "properties": {
     "pair": { "type": "string" },
     "grants": {
@@ -28,6 +28,7 @@
     "token": {
       "type": "object", "additionalProperties": false, "required": ["source", "http_status"],
       "properties": { "source": { "type": "string" }, "http_status": { "type": "integer" } }
-    }
+    },
+    "token_kind": { "$ref": "common.schema.json#/$defs/tokenKind" }
   }
 }
