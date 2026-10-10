@@ -1,0 +1,35 @@
+{
+  "schema_version": "0.11",
+  "command": "feature fold",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "feature": "feat-y",
+    "parent": "feat-x",
+    "from": "d7407485ce685c126afcfc258f0a9eeb0092d776",
+    "to": "a80b011a96e35ed4ece66a7071d69d205af6e967",
+    "reparented": [],
+    "deleted": {
+      "refs/ghostbranch/features/feat-y": "525e8cd485c8e67d520a36934f253cecf1f6219d",
+      "refs/heads/feat-y": "a80b011a96e35ed4ece66a7071d69d205af6e967"
+    },
+    "gate_pr": null,
+    "preview": null
+  },
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "gate",
+        "feat-x",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "feat-x now holds feat-y's commits; gate it",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
+  "error": null
+}

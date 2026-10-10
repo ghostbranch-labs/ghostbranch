@@ -274,6 +274,47 @@ func (a *app) steps(err error) []contract.Next {
 				return []contract.Next{{Command: withoutFlags(a.again(false), "-m", "--message"), NeedsInput: []string{"--message"},
 					Why: "write the squash commit's message"}}
 			}
+		case contract.FoldNeedsRebase:
+			f, _ := ce.Details["feature"].(string)
+			parent, _ := ce.Details["parent"].(string)
+			forked, _ := ce.Details["forked_at"].(string)
+			if f != "" && parent != "" {
+				return a.rebaseNexts(f, parent, forked, a.scoped("feature", "fold", f), "then fold it again: "+parent+" fast-forwards to it")
+			}
+		case contract.RebaseConflict:
+			// A restack's stop names the command that carries on; a gate's
+			// conflict has no next here.
+			if again, ok := ce.Details["again"].([]string); ok {
+				f, _ := ce.Details["feature"].(string)
+				parent, _ := ce.Details["parent"].(string)
+				up, _ := ce.Details["upstream"].(string)
+				return a.rebaseNexts(f, parent, up, a.scoped(again...),
+					"then run the restack again: it records "+f+" where you put it and goes on with the features above it")
+			}
+		case contract.HasChildren:
+			kids, _ := ce.Details["children"].([]string)
+			op, _ := ce.Details["op"].(string)
+			var out []contract.Next
+			for _, k := range kids {
+				out = append(out,
+					contract.Next{Command: a.scoped("feature", "fold", k), Why: "fold " + k + " into its parent: the parent fast-forwards to it and " + k + " closes"},
+					contract.Next{Command: a.scoped("feature", op, k), NeedsHuman: op == "close", Why: "or " + op + " " + k + " too"},
+					contract.Next{Command: a.scoped("feature", "restack", k, "--onto", "main"), Why: "or move " + k + " onto main, dropping its parent's commits"})
+			}
+			return out
+		case contract.ParentRewritten:
+			f, _ := ce.Details["feature"].(string)
+			parent, _ := ce.Details["parent"].(string)
+			if reason, _ := ce.Details["reason"].(string); reason == "parent_gone" && f != "" {
+				return []contract.Next{{Command: a.scoped("feature", "restack", f, "--onto", "main"),
+					Why: "its parent is gone; move it onto main, keeping only its own commits"}}
+			}
+			if parent != "" {
+				return []contract.Next{
+					{Command: a.scoped("feature", "restack", parent), Why: "restack the features above " + parent + " onto its tip, in the shadow repo; a conflict stops it with git steps"},
+					{Command: a.again(false), Why: "then run this again"},
+				}
+			}
 		case contract.BadFlag:
 			switch ce.Field {
 			case "message":
@@ -333,6 +374,24 @@ func (a *app) steps(err error) []contract.Next {
 		case r.Gate != nil && r.Gate.Checks == feature.ChecksPending && r.Gate.Job != nil:
 			out = append(out, a.waitNext(*r.Gate.Job),
 				contract.Next{Command: withoutSwitch(a.again(false), "--detach"), Why: "once the job has passed, promote again; it reuses the green gate"})
+		}
+	case *engine.FoldResult:
+		if r.Preview != nil {
+			out = append(out, contract.Next{Command: a.scoped("feature", "fold", r.Feature), Why: "the preview lists what folding changes; run it to fold"})
+		} else {
+			out = append(out, contract.Next{Command: a.scoped("gate", r.Parent), Why: r.Parent + " now holds " + r.Feature + "'s commits; gate it"})
+		}
+	case *engine.RestackResult:
+		args := []string{"feature", "restack", r.Feature}
+		if r.Onto != "" {
+			args = append(args, "--onto", r.Onto)
+		}
+		switch {
+		case r.Preview != nil:
+			out = append(out, contract.Next{Command: a.scoped(args...), Why: "the preview lists the branches restacking rewrites; run it to restack"})
+		case len(r.Restacked) > 0:
+			out = append(out, contract.Next{Command: a.scoped("gate", r.Restacked[0].Feature),
+				Why: "the restacked branches were rewritten; gate them again from the bottom (and in each checkout: git fetch, then git reset --keep <remote>/<branch>)"})
 		}
 	case *engine.FeatureCloseResult:
 		if r.Preview != nil {
@@ -739,7 +798,7 @@ var valueFlags = map[string]bool{
 	"--repo": true, "--workspace": true, "--shadow": true, "--for": true, "--reason": true, "--timeout": true,
 	"--mode": true, "--message": true, "-m": true, "--curate": true, "--title": true, "--body": true, "--branch": true,
 	"--install": true, "--uninstall": true, "--feature": true, "--op": true, "--actor": true, "--since": true,
-	"--limit": true, "--from": true,
+	"--limit": true, "--from": true, "--onto": true,
 }
 
 // shortValue splits "-mVALUE" or "-m=VALUE" into "-m" and VALUE when -m
@@ -927,6 +986,28 @@ func (a *app) forcePush(f string) string {
 		return "`git push --force-with-lease " + a.shadowRemote + " " + f + "`"
 	}
 	return "`git push --force-with-lease <remote> " + f + "`, <remote> being the shadow repo's remote"
+}
+
+// rebaseNexts are the git steps that rebase branch onto onto by hand in the
+// person's checkout, then the ghostbranch command that carries on. The
+// remote is this checkout's remote for the shadow repo, "shadow" when
+// unknown, as feature start's checkout steps name it.
+func (a *app) rebaseNexts(branch, onto, upstream string, then []string, thenWhy string) []contract.Next {
+	remote := a.shadowRemote
+	if remote == "" {
+		remote = "shadow"
+	}
+	whys := []string{
+		"fetch the shadow repo in your checkout (" + remote + " is its remote there)",
+		"switch to " + branch,
+		"rebase " + branch + "'s own commits onto " + onto + "; you resolve any conflict, Ghostbranch never does",
+		"push the rebased branch, leased so it never overwrites someone else's push",
+	}
+	var out []contract.Next
+	for i, s := range engine.RebaseSteps(remote, branch, onto, upstream) {
+		out = append(out, contract.Next{Command: s, Why: whys[i]})
+	}
+	return append(out, contract.Next{Command: then, Why: thenWhy})
 }
 
 // historyFound is whether the problem was found in an older feature

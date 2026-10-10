@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/auth/authtest"
+	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
@@ -32,7 +33,7 @@ var dataSchemas = map[string]string{
 	"status": "status.schema.json", "feature list": "feature-list.schema.json", "feature show": "feature-show.schema.json",
 	"feature abandon": "feature-abandon.schema.json", "feature close": "feature-close.schema.json",
 	"wait": "gate.schema.json", "login": "login.schema.json", "logout": "logout.schema.json", "auth status": "auth-status.schema.json",
-	"doctor": "doctor.schema.json",
+	"doctor": "doctor.schema.json", "feature fold": "feature-fold.schema.json", "feature restack": "feature-restack.schema.json",
 }
 
 var rootPath = regexp.MustCompile(`<ROOT>[^"]*`)
@@ -192,6 +193,20 @@ jobs:
 		}, []string{"feature", "close", "feat-x"}, 0},
 		{"feature_close_needs_human", withFeature, []string{"feature", "close", "feat-x"}, 5},
 		{"feature_close_plan", gatedFeature, []string{"feature", "close", "feat-x", "--plan"}, 0},
+		{"feature_fold", withStack, []string{"feature", "fold", "feat-y"}, 0},
+		{"feature_fold_plan", withStack, []string{"feature", "fold", "feat-y", "--plan"}, 0},
+		{"feature_fold_needs_rebase", func(te *testEnv) {
+			withStack(te)
+			te.shadowCommit("feat-x", map[string]string{"later.txt": "later\n"})
+		}, []string{"feature", "fold", "feat-y"}, contract.FoldNeedsRebase.Exit()},
+		{"feature_restack", func(te *testEnv) {
+			withStack(te)
+			te.shadowCommit("feat-x", map[string]string{"later.txt": "later\n"})
+		}, []string{"feature", "restack", "feat-x"}, 0},
+		{"feature_restack_onto_main", withStack, []string{"feature", "restack", "feat-y", "--onto", "main"}, 0},
+		{"feature_restack_conflict", withConflictingStack, []string{"feature", "restack", "feat-x"}, contract.RebaseConflict.Exit()},
+		{"feature_abandon_has_children", withStack, []string{"feature", "abandon", "feat-x"}, contract.HasChildren.Exit()},
+		{"feature_close_has_children", withStack, []string{"feature", "close", "feat-x"}, contract.HasChildren.Exit()},
 		{"gate_detach", withFeature, []string{"gate", "feat-x", "--detach"}, 0},
 		{"wait", func(te *testEnv) { withFeature(te); te.mustRun("gate", "feat-x", "--detach") }, []string{"wait", "<JOB>"}, 0},
 		{"wait_finished", func(te *testEnv) { withFeature(te); te.mustRun("gate", "feat-x") }, []string{"wait", "<JOB>"}, 0},

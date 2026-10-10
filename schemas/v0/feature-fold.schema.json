@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "feature fold data",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["feature", "parent", "from", "to", "reparented", "deleted", "gate_pr", "preview"],
+  "properties": {
+    "feature": { "description": "the folded feature, now closed", "type": "string" },
+    "parent": { "description": "the feature it was folded into", "type": "string" },
+    "from": { "description": "the parent's head before the fold", "$ref": "common.schema.json#/$defs/sha" },
+    "to": { "description": "the parent's head now: the folded feature's head", "$ref": "common.schema.json#/$defs/sha" },
+    "reparented": { "description": "the folded feature's children, now stacked on parent with their fork points unchanged", "type": "array", "items": { "type": "string" } },
+    "deleted": {
+      "description": "each shadow-repo ref of the folded feature deleted, with the SHA it pointed at; empty under --plan",
+      "type": "object",
+      "propertyNames": { "pattern": "^refs/" },
+      "additionalProperties": { "$ref": "common.schema.json#/$defs/sha" }
+    },
+    "gate_pr": { "description": "the folded feature's gate draft PR, closed; null when none was open", "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 1 }] },
+    "preview": { "oneOf": [{ "type": "null" }, { "$ref": "preview.schema.json" }] }
+  }
+}

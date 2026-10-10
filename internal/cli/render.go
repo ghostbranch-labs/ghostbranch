@@ -345,6 +345,38 @@ func human(r any, st style.Styler) string {
 		default:
 			fmt.Fprintf(&b, "Restored %s; it is an active feature again.\n", oneLine(v.Feature))
 		}
+	case *engine.FoldResult:
+		if v.Preview != nil {
+			previewText(&b, v.Preview)
+			break
+		}
+		fmt.Fprintf(&b, "Folded %s into %s: %s moved %s -> %s, and %s is closed (%d ref(s) deleted).\n",
+			oneLine(v.Feature), oneLine(v.Parent), oneLine(v.Parent), short(v.From), short(v.To), oneLine(v.Feature), len(v.Deleted))
+		if len(v.Reparented) > 0 {
+			fmt.Fprintf(&b, "Now stacked on %s: %s.\n", oneLine(v.Parent), oneLine(strings.Join(v.Reparented, ", ")))
+		}
+		b.WriteString("The ledger keeps each deleted ref's SHA (ghostbranch log).\n")
+	case *engine.RestackResult:
+		if v.Preview != nil {
+			previewText(&b, v.Preview)
+			break
+		}
+		if len(v.Restacked) == 0 && len(v.Pending) == 0 {
+			fmt.Fprintf(&b, "Nothing to restack: every feature above %s is on its parent's tip.\n", oneLine(v.Feature))
+		}
+		for _, r := range v.Restacked {
+			if r.From == r.To {
+				fmt.Fprintf(&b, "  %s: on %s already; record updated\n", oneLine(r.Feature), oneLine(r.Parent))
+				continue
+			}
+			fmt.Fprintf(&b, "  %s onto %s: %s -> %s\n", oneLine(r.Feature), oneLine(r.Parent), short(r.From), short(r.To))
+		}
+		if len(v.Pending) > 0 {
+			fmt.Fprintf(&b, "Stopped at %s.\n", oneLine(strings.Join(v.Pending, ", ")))
+		}
+		if len(v.Restacked) > 0 {
+			b.WriteString("These branches were rewritten in the shadow repo: in each checkout, git fetch, then git reset --keep <remote>/<branch>.\n")
+		}
 	case *engine.FeatureCloseResult:
 		if v.Preview != nil {
 			previewText(&b, v.Preview)
