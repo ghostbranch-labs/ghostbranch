@@ -131,7 +131,11 @@ func reset(t *testing.T, tok string) {
 	if err := g.Push(ctx, "shadow", gitx.PushOptions{}, "+"+baseline+":refs/heads/main"); err != nil {
 		t.Fatalf("reset shadow main: %v", err)
 	}
-	if err := ghforge.New(tok).SetDefaultBranch(ctx, shadowRepo, "main"); err != nil {
+	gc, err := ghforge.New(tok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := gc.SetDefaultBranch(ctx, shadowRepo, "main"); err != nil {
 		t.Fatalf("reset shadow default branch: %v", err)
 	}
 	if specs := deletes("shadow", func(ref string) bool { return ref == "refs/heads/main" }); len(specs) > 0 {
@@ -250,7 +254,11 @@ func TestSandboxLoop(t *testing.T) {
 		t.Fatalf("want one rewritten repo guard: %v", gateRes["repo_guards"])
 	}
 	candidate, _ := gateRes["candidate"].(string)
-	checks, err := ghforge.New(tok).ListChecks(ctx, shadowRepo, candidate)
+	gc, err := ghforge.New(tok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checks, err := gc.ListChecks(ctx, shadowRepo, candidate)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -9,7 +9,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+
+	gh "github.com/google/go-github/v92/github"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	ghforge "github.com/ghostbranch-labs/ghostbranch/internal/forge/github"
@@ -19,9 +22,14 @@ var _ forge.Forge = (*ghforge.Client)(nil)
 
 func newClient(t *testing.T, mux *http.ServeMux) *ghforge.Client {
 	t.Helper()
+	return newTokenClient(t, mux, "tok")
+}
+
+func newTokenClient(t *testing.T, mux *http.ServeMux, token string) *ghforge.Client {
+	t.Helper()
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
-	c, err := ghforge.NewWithBaseURL("tok", srv.URL)
+	c, err := ghforge.NewWithBaseURL(token, srv.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +277,7 @@ func TestListChecksBothDeniedNamesTheFix(t *testing.T) {
 		_, _ = w.Write([]byte(patDenied))
 	})
 	_, err := newClient(t, mux).ListChecks(context.Background(), "acme/s", "abc")
-	if err == nil || !strings.Contains(err.Error(), "Actions: read") || !strings.Contains(err.Error(), "acme/s") {
+	if err == nil || !strings.Contains(err.Error(), "Actions: read") || !strings.Contains(err.Error(), "acme/s") || !errors.Is(err, forge.ErrForbidden) {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -306,7 +314,11 @@ func TestPushAccessProbesReceivePack(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	c := ghforge.New("tok").WithGitBase(srv.URL)
+	c, err := ghforge.New("tok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.WithGitBase(srv.URL)
 	ctx := context.Background()
 	if a := c.PushAccess(ctx, "acme/widget"); a.Can != "false" || a.HTTPStatus != 403 {
 		t.Fatalf("public: %+v", a)
@@ -583,5 +595,164 @@ func TestA403IsForbiddenOnEveryCall(t *testing.T) {
 	})
 	if _, err := newClient(t, limited).GetRepo(ctx, "acme/s"); errors.Is(err, forge.ErrForbidden) || !errors.Is(err, forge.ErrTransient) {
 		t.Fatalf("rate limit: %v, want transient and not forbidden", err)
+	}
+}
+
+// An empty token never builds an unauthenticated client: it would read
+// public repos and then fail on private ones with confusing 404s.
+func TestNoClientWithoutAToken(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	for _, tok := range []string{"", "  ", "\n\t"} {
+		if c, err := ghforge.New(tok); c != nil || !errors.Is(err, ghforge.ErrNoToken) {
+			t.Errorf("New(%q) = %v, %v", tok, c, err)
+		}
+		if c, err := ghforge.NewWithBaseURL(tok, srv.URL); c != nil || !errors.Is(err, ghforge.ErrNoToken) {
+			t.Errorf("NewWithBaseURL(%q) = %v, %v", tok, c, err)
+		}
+	}
+	var zero ghforge.Client
+	if a := zero.WithGitBase(srv.URL).PushAccess(context.Background(), "acme/widget"); a.Can != "unknown" || a.HTTPStatus != 0 {
+		t.Errorf("a client without a token probed: %+v", a)
+	}
+	if n := hits.Load(); n != 0 {
+		t.Fatalf("%d unauthenticated requests", n)
+	}
+}
+
+func TestTokenWhitespaceIsTrimmed(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /user", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer ghu_test" {
+			t.Errorf("Authorization = %q", got)
+		}
+		writeJSON(w, map[string]any{"login": "octo", "id": 1})
+	})
+	if _, err := newTokenClient(t, mux, " ghu_test\r\n").CurrentUser(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Only failures that may pass on their own are transient: a bad token, a
+// validation error or the caller's own cancel are not. Every error keeps
+// go-github's error in its chain, and none shows the token.
+func TestErrorsKeepTheirChainAndRetryOnlyWhatMayPass(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	status := func(code int, body string) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(code)
+			_, _ = w.Write([]byte(body))
+		}
+	}
+	mux.HandleFunc("GET /repos/acme/badtoken", status(http.StatusUnauthorized, `{"message":"Bad credentials"}`))
+	mux.HandleFunc("GET /repos/acme/busy", status(http.StatusTooManyRequests, `{"message":"Too Many Requests"}`))
+	mux.HandleFunc("GET /repos/acme/down", status(http.StatusServiceUnavailable, `{"message":"unavailable"}`))
+	mux.HandleFunc("GET /repos/acme/invalid", status(http.StatusUnprocessableEntity, `{"message":"Validation Failed"}`))
+	c := newTokenClient(t, mux, "ghu_test")
+	ctx := context.Background()
+	for repo, transient := range map[string]bool{"acme/badtoken": false, "acme/busy": true, "acme/down": true, "acme/invalid": false} {
+		_, err := c.GetRepo(ctx, repo)
+		var ge *gh.ErrorResponse
+		if err == nil || errors.Is(err, forge.ErrTransient) != transient || errors.Is(err, forge.ErrForbidden) || !errors.As(err, &ge) {
+			t.Errorf("%s: %v (transient %v, want %v; chain kept %v)", repo, err, errors.Is(err, forge.ErrTransient), transient, errors.As(err, &ge))
+		}
+		if err != nil && strings.Contains(err.Error(), "ghu_test") {
+			t.Errorf("%s: the token is in the error: %v", repo, err)
+		}
+	}
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := c.GetRepo(cancelled, "acme/down"); !errors.Is(err, context.Canceled) || errors.Is(err, forge.ErrTransient) {
+		t.Fatalf("cancelled: %v, want context.Canceled and not transient", err)
+	}
+}
+
+// A 403 names the missing permission when GitHub's headers do: the first
+// permission set for fine-grained and app tokens, the accepted scope for a
+// classic token that holds none of them. Without them it stays a plain
+// ErrForbidden; nothing is guessed.
+func TestA403NamesTheMissingPermission(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	deny := func(perms, accepted, held string) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			if perms != "" {
+				w.Header().Set("X-Accepted-GitHub-Permissions", perms)
+			}
+			if accepted != "" {
+				w.Header().Set("X-Accepted-OAuth-Scopes", accepted)
+				w.Header().Set("X-OAuth-Scopes", held)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(patDenied))
+		}
+	}
+	mux.HandleFunc("POST /repos/acme/one/pulls", deny("pull_requests=write", "", ""))
+	mux.HandleFunc("POST /repos/acme/two/pulls", deny("pull_requests=write,contents=read; issues=write,contents=read", "", ""))
+	mux.HandleFunc("POST /repos/acme/classic/pulls", deny("", "repo", "read:org, gist"))
+	mux.HandleFunc("POST /repos/acme/plain/pulls", deny("", "", ""))
+	mux.HandleFunc("POST /repos/acme/held/pulls", deny("", "repo", "repo, read:org"))
+	mux.HandleFunc("GET /repos/acme/two/actions/secrets", deny("secrets=read", "", ""))
+	c := newTokenClient(t, mux, "ghu_test")
+	ctx := context.Background()
+	open := func(repo string) error {
+		_, err := c.CreatePR(ctx, repo, forge.NewPR{Title: "t", Head: "feat", Base: "main"})
+		return err
+	}
+	for repo, want := range map[string]string{"acme/one": "Pull requests: write",
+		"acme/two": "Pull requests: write and Contents: read", "acme/classic": "OAuth scope: repo"} {
+		err := open(repo)
+		var pe *forge.PermissionError
+		var ge *gh.ErrorResponse
+		if !errors.As(err, &pe) || pe.Permission != want || pe.Repo != repo {
+			t.Errorf("%s: %v, want permission %q", repo, err, want)
+		}
+		if !errors.Is(err, forge.ErrForbidden) || !errors.As(err, &ge) || strings.Contains(err.Error(), "ghu_test") {
+			t.Errorf("%s: forbidden %v, chain kept %v, err %v", repo, errors.Is(err, forge.ErrForbidden), errors.As(err, &ge), err)
+		}
+	}
+	for _, repo := range []string{"acme/plain", "acme/held"} {
+		err := open(repo)
+		var pe *forge.PermissionError
+		if errors.As(err, &pe) || !errors.Is(err, forge.ErrForbidden) {
+			t.Errorf("%s: %v, want a plain ErrForbidden", repo, err)
+		}
+	}
+	_, err := c.SecretNames(ctx, "acme/two")
+	var pe *forge.PermissionError
+	if !errors.As(err, &pe) || pe.Permission != "Secrets: read" || !strings.Contains(err.Error(), "list secrets of acme/two") {
+		t.Fatalf("SecretNames: %v", err)
+	}
+}
+
+// The probe never follows a redirect: a redirect to a page that answers
+// 200 would read as "can push".
+func TestPushAccessNeverFollowsARedirect(t *testing.T) {
+	t.Parallel()
+	var followed atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/login" {
+			followed.Store(true)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		http.Redirect(w, r, "/login", http.StatusFound)
+	}))
+	defer srv.Close()
+	c, err := ghforge.New("tok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := c.WithGitBase(srv.URL).PushAccess(context.Background(), "acme/widget"); a.Can != "unknown" || a.HTTPStatus != http.StatusFound || followed.Load() {
+		t.Fatalf("redirect: %+v, followed %v", a, followed.Load())
 	}
 }

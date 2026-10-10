@@ -64,6 +64,21 @@ type Forge struct {
 	// records the repo each ClosePullRequest call named.
 	ClosePRErr   error
 	ClosePRRepos []string
+	// MissingPermission scripts a 403 that names its permission: the method
+	// named (GetRepo, CreatePrivateRepo, SetDefaultBranch, FindOpenPR,
+	// CreatePR, GetPR, ListChecks, SecretNames, PushRuns, CancelRun,
+	// ForceCancelRun, ClosePullRequest) fails with a *forge.PermissionError
+	// naming that permission and the repo, for any repo.
+	MissingPermission map[string]string
+}
+
+// missing is the error MissingPermission scripts for method on full, or
+// nil. Callers hold f.mu.
+func (f *Forge) missing(method, full string) error {
+	if p := f.MissingPermission[method]; p != "" {
+		return fmt.Errorf("%s %s: %w", method, full, &forge.PermissionError{Permission: p, Repo: full})
+	}
+	return nil
 }
 
 // Run is a seeded workflow run that a push of SHA started. The flags script
@@ -185,6 +200,9 @@ func (f *Forge) SetPRMerged(full string, n int) {
 func (f *Forge) ClosePullRequest(_ context.Context, full string, number int) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := f.missing("ClosePullRequest", full); err != nil {
+		return err
+	}
 	f.ClosePRRepos = append(f.ClosePRRepos, full)
 	if f.ClosePRErr != nil {
 		return f.ClosePRErr
@@ -201,6 +219,9 @@ func (f *Forge) ClosePullRequest(_ context.Context, full string, number int) err
 func (f *Forge) GetRepo(_ context.Context, full string) (forge.Repo, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := f.missing("GetRepo", full); err != nil {
+		return forge.Repo{}, err
+	}
 	r, ok := f.repos[full]
 	if !ok {
 		return forge.Repo{}, fmt.Errorf("repo %s: %w", full, forge.ErrNotFound)
@@ -211,6 +232,9 @@ func (f *Forge) GetRepo(_ context.Context, full string) (forge.Repo, error) {
 func (f *Forge) CreatePrivateRepo(_ context.Context, full string) (forge.Repo, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := f.missing("CreatePrivateRepo", full); err != nil {
+		return forge.Repo{}, err
+	}
 	if f.CreateForbidden {
 		return forge.Repo{}, fmt.Errorf("create %s: %w", full, forge.ErrForbidden)
 	}
@@ -233,6 +257,9 @@ func (f *Forge) branchExists(full, branch string) bool {
 func (f *Forge) SetDefaultBranch(_ context.Context, full, branch string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := f.missing("SetDefaultBranch", full); err != nil {
+		return err
+	}
 	if !f.branchExists(full, branch) {
 		return fmt.Errorf("set default branch of %s: branch %s does not exist", full, branch)
 	}
@@ -243,6 +270,9 @@ func (f *Forge) SetDefaultBranch(_ context.Context, full, branch string) error {
 func (f *Forge) FindOpenPR(_ context.Context, full, head, base string) (*forge.PR, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := f.missing("FindOpenPR", full); err != nil {
+		return nil, err
+	}
 	for _, pr := range f.prs[full] {
 		if pr.Head == head && pr.Base == base && pr.State == "open" {
 			p := pr
@@ -255,6 +285,9 @@ func (f *Forge) FindOpenPR(_ context.Context, full, head, base string) (*forge.P
 func (f *Forge) CreatePR(_ context.Context, full string, in forge.NewPR) (forge.PR, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := f.missing("CreatePR", full); err != nil {
+		return forge.PR{}, err
+	}
 	if !f.branchExists(full, in.Head) {
 		return forge.PR{}, fmt.Errorf("create PR in %s: head branch %s does not exist", full, in.Head)
 	}
@@ -268,6 +301,9 @@ func (f *Forge) CreatePR(_ context.Context, full string, in forge.NewPR) (forge.
 func (f *Forge) GetPR(_ context.Context, full string, number int) (forge.PR, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := f.missing("GetPR", full); err != nil {
+		return forge.PR{}, err
+	}
 	if f.GetPRErr != nil {
 		if err := f.GetPRErr(full, number); err != nil {
 			return forge.PR{}, err
@@ -283,8 +319,11 @@ func (f *Forge) GetPR(_ context.Context, full string, number int) (forge.PR, err
 
 func (f *Forge) ListChecks(_ context.Context, full, sha string) ([]forge.Check, error) {
 	f.mu.Lock()
-	script := f.Checks
+	script, miss := f.Checks, f.missing("ListChecks", full)
 	f.mu.Unlock()
+	if miss != nil {
+		return nil, miss
+	}
 	if script != nil {
 		return script(full, sha), nil
 	}
@@ -319,6 +358,9 @@ func (f *Forge) PushAccess(_ context.Context, full string) forge.PushAccess {
 func (f *Forge) SecretNames(_ context.Context, full string) ([]string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := f.missing("SecretNames", full); err != nil {
+		return nil, err
+	}
 	if f.SecretsForbidden[full] {
 		return nil, fmt.Errorf("list secrets of %s: %w", full, forge.ErrForbidden)
 	}
@@ -332,6 +374,9 @@ func (f *Forge) PushRuns(_ context.Context, full, sha string) ([]forge.Run, erro
 	defer f.mu.Unlock()
 	f.PushRunsCalls++
 	f.PushRunsRepos = append(f.PushRunsRepos, full)
+	if err := f.missing("PushRuns", full); err != nil {
+		return nil, err
+	}
 	if f.RunsForbidden[full] {
 		return nil, fmt.Errorf("list workflow runs of %s: %w", full, forge.ErrForbidden)
 	}
@@ -356,6 +401,9 @@ func (f *Forge) PushRuns(_ context.Context, full, sha string) ([]forge.Run, erro
 func (f *Forge) CancelRun(_ context.Context, full string, id int64) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := f.missing("CancelRun", full); err != nil {
+		return err
+	}
 	f.CancelRunRepos = append(f.CancelRunRepos, full)
 	if f.CancelForbidden[full] {
 		return fmt.Errorf("cancel workflow run %d of %s: %w", id, full, forge.ErrForbidden)
@@ -388,6 +436,9 @@ func (f *Forge) CancelRun(_ context.Context, full string, id int64) error {
 func (f *Forge) ForceCancelRun(_ context.Context, full string, id int64) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err := f.missing("ForceCancelRun", full); err != nil {
+		return err
+	}
 	f.ForceCancelRepos = append(f.ForceCancelRepos, full)
 	if f.ForceCancelForbidden[full] {
 		return fmt.Errorf("force-cancel workflow run %d of %s: %w", id, full, forge.ErrForbidden)

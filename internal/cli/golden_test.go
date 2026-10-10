@@ -77,6 +77,10 @@ func TestGoldenContract(t *testing.T) {
 		{"gate", withFeature, []string{"gate", "feat-x"}, 0},
 		{"gate_checks_failed", func(te *testEnv) { withFeature(te); te.forge.Checks = failing }, []string{"gate", "feat-x"}, 3},
 		{"gate_leak", withLeakyFeature, []string{"gate", "feat-x"}, 3},
+		{"gate_permission_missing", func(te *testEnv) {
+			withFeature(te)
+			te.forge.MissingPermission = map[string]string{"CreatePR": "Pull requests: write"}
+		}, []string{"gate", "feat-x"}, 1},
 		{"promote_plan", gatedFeature, []string{"promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--plan"}, 0},
 		{"promote_needs_human", func(te *testEnv) { gatedFeature(te); te.vars["GHOSTBRANCH_ACTOR"] = "agent:claude-code" },
 			[]string{"promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--yes"}, 5},

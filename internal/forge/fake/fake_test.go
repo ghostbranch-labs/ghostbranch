@@ -232,3 +232,20 @@ func TestFakeForceCancelOfAFinishedRunAndPerRunErrors(t *testing.T) {
 		t.Fatalf("ForceCancelled = %v", f.ForceCancelled)
 	}
 }
+
+func TestMissingPermissionFailsTheScriptedCall(t *testing.T) {
+	t.Parallel()
+	f := fake.New(t.TempDir())
+	if _, err := f.AddRepo("acme/widget", false); err != nil {
+		t.Fatal(err)
+	}
+	f.MissingPermission = map[string]string{"GetRepo": "Metadata: read"}
+	_, err := f.GetRepo(context.Background(), "acme/widget")
+	var pe *forge.PermissionError
+	if !errors.As(err, &pe) || pe.Permission != "Metadata: read" || pe.Repo != "acme/widget" || !errors.Is(err, forge.ErrForbidden) {
+		t.Fatalf("GetRepo = %v", err)
+	}
+	if _, err := f.SecretNames(context.Background(), "acme/widget"); err != nil {
+		t.Fatalf("an unscripted call failed: %v", err)
+	}
+}

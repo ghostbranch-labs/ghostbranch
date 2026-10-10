@@ -1,0 +1,65 @@
+{
+  "schema_version": "0.10",
+  "command": "gate",
+  "ok": false,
+  "exit_code": 1,
+  "data": {
+    "feature": "feat-x",
+    "feature_head": "d7407485ce685c126afcfc258f0a9eeb0092d776",
+    "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+    "overlay": "a1ef151295bf2b53d15b18523ab0184d02178bbd",
+    "candidate": "ad7c1d9752519d03b74752a472ecf072aacd2fb7",
+    "published_tree": "ef9061717144a4bf03a0230d8f8926d019f2adeb",
+    "scanned_as": "preserve",
+    "commits": [
+      {
+        "source": "d7407485ce685c126afcfc258f0a9eeb0092d776",
+        "subject": "work",
+        "author": "Test Author <author@example.com>",
+        "files": [
+          "feature.txt"
+        ]
+      }
+    ],
+    "checks": "not_run",
+    "failed_checks": [],
+    "leak": "clean",
+    "findings": [],
+    "waived": [],
+    "repo_guards": {
+      "mode": "rewrite",
+      "rewritten": [],
+      "unrewritable": [],
+      "skipped": []
+    },
+    "shadow_pr": null,
+    "job": null,
+    "reused": false,
+    "preview": null
+  },
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "doctor",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "doctor lists every permission the token lacks, for each command; a person grants them, then runs this command again",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
+  "error": {
+    "code": "TOKEN_PERMISSION_MISSING",
+    "message": "the token lacks Pull requests: write on acme/widget-shadow, which ghostbranch gate needs; a person grants it, and ghostbranch doctor lists every missing permission",
+    "field": null,
+    "retryable": false,
+    "details": {
+      "command": "gate",
+      "permission": "Pull requests: write",
+      "repo": "acme/widget-shadow"
+    }
+  }
+}

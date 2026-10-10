@@ -81,7 +81,7 @@ func DefaultEnv() Env {
 		Stdout: os.Stdout, Stderr: os.Stderr, Stdin: os.Stdin, Getenv: os.Getenv, UserHome: os.UserHomeDir,
 		ConsoleUsable: console.Usable(os.Stdin, os.Stderr), OpenConsole: console.Open,
 		Now: time.Now, Sleep: sleepCtx, Rand: rand.Reader,
-		NewForge:     func(token string) (forge.Forge, error) { return ghforge.New(token), nil },
+		NewForge:     func(token string) (forge.Forge, error) { return ghforge.New(token) },
 		GHToken:      auth.GHCLI,
 		CwdRemotes:   cwdRemotes,
 		NewScanner:   func(r leak.Rules) (leak.Scanner, error) { return leak.NewGitleaks(r) },
@@ -197,6 +197,7 @@ func commandName(cmd *cobra.Command) string {
 }
 
 func (a *app) render(err error) int {
+	err = a.permissionMissing(err)
 	if a.eng != nil {
 		a.warnings = append(a.warnings, a.eng.LedgerWarnings()...)
 	}
@@ -225,6 +226,33 @@ func (a *app) render(err error) int {
 		printNext(a.env.Stdout, next)
 	}
 	return env.ExitCode
+}
+
+// permissionMissing turns a FORGE_ERROR or INTERNAL whose cause is a
+// *forge.PermissionError into TOKEN_PERMISSION_MISSING, naming the
+// permission, the repo and this command. It runs in render, which every
+// command's error passes through exactly once, and render is the only place
+// that knows the command's name. Codes the engine chose on purpose from a
+// refusal (SHADOW_CREATE_DENIED, TOKEN_CANNOT_PUBLISH, ...) are left alone.
+func (a *app) permissionMissing(err error) error {
+	ce := contract.From(err)
+	if ce == nil || (ce.Code != contract.ForgeError && ce.Code != contract.Internal) {
+		return err
+	}
+	var pe *forge.PermissionError
+	if !errors.As(err, &pe) {
+		return err
+	}
+	where := ""
+	if pe.Repo != "" {
+		where = " on " + pe.Repo
+	}
+	out := contract.New(contract.TokenPermissionMissing,
+		"the token lacks %s%s, which ghostbranch %s needs; a person grants it, and ghostbranch doctor lists every missing permission",
+		pe.Permission, where, a.command).
+		WithDetails(map[string]any{"permission": pe.Permission, "repo": pe.Repo, "command": a.command})
+	out.Err = err
+	return out
 }
 
 // printSteps lists an error's details.steps, numbered, for people. The JSON
