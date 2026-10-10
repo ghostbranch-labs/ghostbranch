@@ -127,7 +127,10 @@ func (e *Engine) FeatureRestack(ctx context.Context, p workspace.Pair, opt Resta
 	for i, n := range order {
 		r := recs[n]
 		parent := parentFeature(r.meta)
-		again := []string{"feature", "restack", parent}
+		// What carries on after the person rebases n by hand: the same
+		// restack, so every branch above name (n's siblings too) is
+		// reached; without --onto once name's own move has landed.
+		again := []string{"feature", "restack", name}
 		reparent := opt.Onto != "" && n == name
 		if reparent {
 			parent = opt.Onto
@@ -181,6 +184,10 @@ func checkOnto(recs map[string]stackRecord, self stackRecord, above []string, on
 	if !ok || t.head == "" {
 		return contract.New(contract.FeatureNotFound,
 			"no feature %q with a branch in the shadow repo to stack %s on; list them with ghostbranch feature list --all", onto, self.name).WithField("onto")
+	}
+	if t.meta.Abandoned {
+		// As feature start --from: nothing is built on a parked feature.
+		return bad("feature %q is abandoned, so nothing can be stacked on it; move %s onto main or another feature", onto, self.name)
 	}
 	return nil
 }

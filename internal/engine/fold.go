@@ -79,7 +79,7 @@ func (e *Engine) FeatureFold(ctx context.Context, p workspace.Pair, opt FoldOpti
 			"feature %s is published as public PR #%d; fold joins only unpublished features, so no public PR loses its branch", name, m.Promoted.PublicPR).
 			WithField("feature")
 	}
-	recs, err := e.records(ctx, pc)
+	recs, err := e.readableRecords(ctx, pc, name, "fold")
 	if err != nil {
 		return nil, warns, err
 	}

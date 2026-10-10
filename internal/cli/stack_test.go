@@ -1,7 +1,9 @@
 package cli_test
 
 import (
+	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
@@ -101,6 +103,63 @@ func TestHasChildrenNextOffersTheThreeWaysOut(t *testing.T) {
 		}
 		if got := argvs(n); !reflect.DeepEqual(got, want) || n[1]["needs_human"] != (op == "close") {
 			t.Fatalf("%s: next = %v", op, n)
+		}
+	}
+}
+
+// feature fold's next: a moved parent is looked at again (worded for a
+// fold), and a gate PR left open after the fold landed is closed by a
+// person, with the fold's ledger entry.
+func TestNextForFeatureFold(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	withStack(te)
+	raced := false
+	te.env.OnPush = func(op, _ string, _ []string) {
+		if op == "feature fold" && !raced {
+			raced = true
+			te.shadowCommit("feat-x", map[string]string{"race.txt": "r\n"})
+		}
+	}
+	code, env := te.runJSON("feature", "fold", "feat-y")
+	te.env.OnPush = nil
+	n := nextOf(t, env)
+	if code != contract.FeatureMoved.Exit() || len(n) != 1 || n[0]["needs_human"] != false ||
+		!reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "feature", "show", "feat-y", "--repo", "acme/widget"}) ||
+		!strings.Contains(n[0]["why"].(string), "being folded") {
+		t.Fatalf("moved: exit %d, next = %v", code, n)
+	}
+
+	te = newTestEnv(t)
+	withStack(te)
+	te.mustRun("gate", "feat-y")
+	te.forge.ClosePRErr = errors.New("boom")
+	code, env = te.runJSON("feature", "fold", "feat-y")
+	te.forge.ClosePRErr = nil
+	n = nextOf(t, env)
+	data, _ := env["data"].(map[string]any)
+	deleted, _ := data["deleted"].(map[string]any)
+	if code != contract.ForgeError.Exit() || len(deleted) == 0 || len(n) != 1 || n[0]["needs_human"] != true ||
+		!reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "log", "--feature", "feat-y", "--op", "feature fold", "--repo", "acme/widget"}) {
+		t.Fatalf("gate PR left open: exit %d, deleted %v, next = %v", code, deleted, n)
+	}
+}
+
+// close and fold refuse beside a record that can't be read; next sends a
+// person to close that record at the console, then runs this again.
+func TestUnreadableRecordNextIsItsConsoleClose(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	withStack(te)
+	corruptFeature(te, "feat-bad")
+	for _, args := range [][]string{{"feature", "close", "feat-x"}, {"feature", "fold", "feat-y"}} {
+		code, env := te.runJSON(args...)
+		e, _ := env["error"].(map[string]any)
+		n := nextOf(t, env)
+		if code != contract.Internal.Exit() || e["code"] != "INTERNAL" || len(n) != 2 || n[0]["needs_human"] != true ||
+			!reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "feature", "close", "feat-bad", "--repo", "acme/widget"}) ||
+			!reflect.DeepEqual(argv(n[1]), append(append([]string{"ghostbranch"}, args...), "--repo", "acme/widget")) {
+			t.Fatalf("%v: exit %d, error %v, next = %v", args, code, e, n)
 		}
 	}
 }

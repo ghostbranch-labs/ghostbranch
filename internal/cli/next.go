@@ -228,14 +228,35 @@ func (a *app) steps(err error) []contract.Next {
 			}
 		case contract.FeatureMoved:
 			if f, _ := ce.Details["feature"].(string); f != "" {
-				return []contract.Next{{Command: a.scoped("feature", "show", f),
-					Why: "the feature changed while it was being closed and nothing was deleted; look at it again before closing it"}}
+				why := "the feature changed while it was being closed and nothing was deleted; look at it again before closing it"
+				if a.command == "feature fold" {
+					why = "the feature or its parent changed while it was being folded, and nothing changed; look at it again before folding it"
+				}
+				return []contract.Next{{Command: a.scoped("feature", "show", f), Why: why}}
 			}
 		case contract.ForgeError:
-			// feature close deleted the refs, then couldn't close the gate PR.
+			// feature close or fold deleted the refs, then couldn't close the gate PR.
 			if r, ok := a.result.(*engine.FeatureCloseResult); ok && len(r.Deleted) > 0 {
 				return []contract.Next{{Command: a.scoped("log", "--feature", r.Feature, "--op", "feature close"), NeedsHuman: true,
 					Why: "the feature's refs are deleted and the ledger lists them with their SHAs; a person closes its gate draft PR in the shadow repo on GitHub (error.message names it)"}}
+			}
+			if r, ok := a.result.(*engine.FoldResult); ok && len(r.Deleted) > 0 {
+				return []contract.Next{{Command: a.scoped("log", "--feature", r.Feature, "--op", "feature fold"), NeedsHuman: true,
+					Why: "the fold landed: " + r.Parent + " holds the feature's commits, and the ledger lists its deleted refs with their SHAs; a person closes its gate draft PR in the shadow repo on GitHub (error.message names it)"}}
+			}
+		case contract.Internal:
+			// close or fold refused beside a record that can't be read.
+			if bad, ok := ce.Details["unreadable"].([]string); ok && len(bad) > 0 {
+				var out []contract.Next
+				for _, b := range bad {
+					out = append(out, contract.Next{Command: a.scoped("feature", "close", b), NeedsHuman: true,
+						Why: "feature " + b + "'s record can't be read, so it may be stacked on this one: a person closes it at the console, or fixes its record"})
+				}
+				if f, _ := ce.Details["feature"].(string); f != "" {
+					op, _ := ce.Details["op"].(string)
+					out = append(out, contract.Next{Command: a.scoped("feature", op, f), Why: "then " + op + " " + f + " again"})
+				}
+				return out
 			}
 		case contract.CurateInvalid, contract.CurateConflict, contract.CurateTreeMismatch:
 			why := map[contract.Code]string{

@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -43,34 +44,65 @@ type stackRecord struct {
 
 // records reads every feature record in the mirror, by name. A record that
 // doesn't parse is left out: this binary can't see what it is stacked on,
-// and such a feature only closes at a console.
+// and such a feature only closes at a console. A caller that would strand
+// a child it can't see uses readableRecords instead.
 func (e *Engine) records(ctx context.Context, pc *pairCtx) (map[string]stackRecord, error) {
+	out, _, err := e.recordsAndUnreadable(ctx, pc)
+	return out, err
+}
+
+// recordsAndUnreadable is records, plus the names of the records left out
+// because they don't parse, sorted.
+func (e *Engine) recordsAndUnreadable(ctx context.Context, pc *pairCtx) (map[string]stackRecord, []string, error) {
 	const prefix = "refs/shadow-meta/features/"
 	refs, err := pc.git.Refs(ctx, strings.TrimSuffix(prefix, "/"))
 	if err != nil {
-		return nil, internalErr(err, "list features")
+		return nil, nil, internalErr(err, "list features")
 	}
 	out := make(map[string]stackRecord, len(refs))
+	unreadable := []string{}
 	for ref := range refs {
 		name := strings.TrimPrefix(ref, prefix)
 		m, sha, newer, err := e.readMetaAny(ctx, pc, name)
 		if err != nil {
 			var bad *unreadableRecord
 			if errors.As(err, &bad) {
+				unreadable = append(unreadable, name)
 				continue
 			}
-			return nil, err
+			return nil, nil, err
 		}
 		head, ok, err := pc.git.Resolve(ctx, shadowRef(m.Branch))
 		if err != nil {
-			return nil, internalErr(err, "read feature branch "+m.Branch)
+			return nil, nil, internalErr(err, "read feature branch "+m.Branch)
 		}
 		if !ok {
 			head = ""
 		}
 		out[name] = stackRecord{name: name, meta: m, metaSHA: sha, head: head, newer: newer}
 	}
-	return out, nil
+	sort.Strings(unreadable)
+	return out, unreadable, nil
+}
+
+// readableRecords is records for an op that deletes name's branch (close,
+// fold): it refuses while another feature's record can't be read, as that
+// feature may be stacked on name and would be stranded on a deleted
+// branch. name's own record may be the unreadable one (a console close).
+func (e *Engine) readableRecords(ctx context.Context, pc *pairCtx, name, op string) (map[string]stackRecord, error) {
+	recs, unreadable, err := e.recordsAndUnreadable(ctx, pc)
+	if err != nil {
+		return nil, err
+	}
+	others := slices.DeleteFunc(unreadable, func(n string) bool { return n == name })
+	if len(others) == 0 {
+		return recs, nil
+	}
+	done := map[string]string{"close": "closed", "fold": "folded"}[op]
+	return nil, contract.New(contract.Internal,
+		"feature %s's record couldn't be read as a whole: it is corrupt, so it can't be told whether it is stacked on %s, and %s can't be %s until it is dealt with; a person closes it at the console (ghostbranch feature close %s), or its record is fixed",
+		others[0], name, name, done, others[0]).WithField("feature").
+		WithDetails(map[string]any{"feature": name, "op": op, "unreadable": others})
 }
 
 // childrenOf lists the features stacked directly on name, sorted; abandoned

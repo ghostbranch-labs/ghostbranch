@@ -246,6 +246,8 @@ func TestRestackStopsAtAConflictWithSteps(t *testing.T) {
 	h.startFeature("feat-a", map[string]string{"shared.txt": "one\n"})
 	h.startOn("feat-b", "feat-a", map[string]string{"b.txt": "b\n"})
 	h.startOn("feat-c", "feat-b", map[string]string{"shared.txt": "one\nc\n"})
+	// feat-d sits beside feat-b: the restack that carries on must reach it.
+	dOld := h.startOn("feat-d", "feat-a", map[string]string{"d.txt": "d\n"})
 	bOld, cOld := h.head("feat-b"), h.head("feat-c")
 	cFork := h.meta("feat-c").ForkedAt
 	cMeta := h.shadowRefs()["refs/ghostbranch/features/feat-c"]
@@ -254,18 +256,19 @@ func TestRestackStopsAtAConflictWithSteps(t *testing.T) {
 	ce := wantCode(t, err, contract.RebaseConflict)
 	if ce.Details["feature"] != "feat-c" || ce.Details["parent"] != "feat-b" || !reflect.DeepEqual(ce.Details["files"], []string{"shared.txt"}) ||
 		!reflect.DeepEqual(ce.Details["steps"], engine.RebaseSteps("shadow", "feat-c", "feat-b", cFork)) ||
-		!reflect.DeepEqual(ce.Details["again"], []string{"feature", "restack", "feat-b"}) {
+		!reflect.DeepEqual(ce.Details["again"], []string{"feature", "restack", "feat-a"}) {
 		t.Fatalf("details = %+v", ce.Details)
 	}
-	// feat-b, before the conflict, stays restacked; feat-c is untouched.
-	if res == nil || len(res.Restacked) != 1 || res.Restacked[0].Feature != "feat-b" || !reflect.DeepEqual(res.Pending, []string{"feat-c"}) {
+	// feat-b, before the conflict, stays restacked; feat-c is untouched, and
+	// feat-d, after it, is pending.
+	if res == nil || len(res.Restacked) != 1 || res.Restacked[0].Feature != "feat-b" || !reflect.DeepEqual(res.Pending, []string{"feat-c", "feat-d"}) {
 		t.Fatalf("restack = %+v", res)
 	}
 	bNew := h.head("feat-b")
 	if bNew == bOld || h.meta("feat-b").ForkedAt != h.head("feat-a") {
 		t.Fatal("feat-b was not kept restacked")
 	}
-	if h.head("feat-c") != cOld || h.shadowRefs()["refs/ghostbranch/features/feat-c"] != cMeta {
+	if h.head("feat-c") != cOld || h.head("feat-d") != dOld || h.shadowRefs()["refs/ghostbranch/features/feat-c"] != cMeta {
 		t.Fatal("the conflicting branch was changed")
 	}
 	// The person rebases feat-c by hand onto the new feat-b, resolving the
@@ -274,12 +277,13 @@ func TestRestackStopsAtAConflictWithSteps(t *testing.T) {
 		t.Fatal(err)
 	}
 	resolved := testutil.Commit(t, sg, "feat-c", "work on feat-c", map[string]string{"shared.txt": "two\nc\n"})
-	res, _, err = h.eng.FeatureRestack(h.ctx, h.pair, engine.RestackOptions{Feature: "feat-b"})
-	if err != nil || len(res.Restacked) != 1 || res.Restacked[0].From != resolved || res.Restacked[0].To != resolved {
+	res, _, err = h.eng.FeatureRestack(h.ctx, h.pair, engine.RestackOptions{Feature: "feat-a"})
+	if err != nil || len(res.Restacked) != 2 || res.Restacked[0].Feature != "feat-c" || res.Restacked[0].From != resolved || res.Restacked[0].To != resolved ||
+		res.Restacked[1].Feature != "feat-d" || res.Restacked[1].From != dOld || len(res.Pending) != 0 {
 		t.Fatalf("restack after the fix = %+v %v", res, err)
 	}
-	if h.meta("feat-c").ForkedAt != bNew {
-		t.Fatal("the restack did not record feat-c's new fork point")
+	if h.meta("feat-c").ForkedAt != bNew || h.meta("feat-d").ForkedAt != h.head("feat-a") {
+		t.Fatal("the restack did not record the new fork points")
 	}
 }
 
@@ -336,10 +340,15 @@ func TestRestackOntoMainDropsTheParentsCommits(t *testing.T) {
 func TestRestackOntoRefusesALoopAndANoOp(t *testing.T) {
 	t.Parallel()
 	h := threeDeep(t)
+	h.startFeature("feat-d", map[string]string{"d.txt": "d\n"})
+	if _, _, err := h.eng.FeatureAbandon(h.ctx, h.pair, "feat-d", false); err != nil {
+		t.Fatal(err)
+	}
 	for _, c := range []struct{ feature, onto string }{
 		{"feat-a", "feat-c"}, // feat-c is above feat-a
 		{"feat-a", "feat-a"},
-		{"feat-a", "main"}, // already on main
+		{"feat-a", "main"},   // already on main
+		{"feat-b", "feat-d"}, // feat-d is abandoned
 	} {
 		_, _, err := h.eng.FeatureRestack(h.ctx, h.pair, engine.RestackOptions{Feature: c.feature, Onto: c.onto})
 		if ce := wantCode(t, err, contract.BadFlag); ce.Field != "onto" {
@@ -440,5 +449,57 @@ func TestRestackOntoMainHonoursAForkPointOnAMainParent(t *testing.T) {
 	}
 	if b := h.meta("feat-b"); b.Parent != "" || b.ForkedAt != "" || b.Base != main {
 		t.Fatalf("feat-b = parent %q, forked_at %q, base %s", b.Parent, b.ForkedAt, b.Base)
+	}
+}
+
+// Fold joins only unpublished features: a published one's public PR would
+// lose its branch.
+func TestFoldRefusesAPublishedFeature(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.startFeature("feat-a", map[string]string{"a.txt": "a\n"})
+	head := h.startOn("feat-b", "feat-a", map[string]string{"b.txt": "b\n"})
+	h.editRemoteMeta("feat-b", func(m *feature.Meta) {
+		m.Promoted = &feature.Promoted{PublicPR: 7, PlanID: "0123456789ab", FeatureHead: head}
+	})
+	before := h.shadowRefs()
+	_, _, err := h.eng.FeatureFold(h.ctx, h.pair, engine.FoldOptions{Feature: "feat-b"})
+	if ce := wantCode(t, err, contract.BadFlag); ce.Field != "feature" || !strings.Contains(ce.Message, "#7") {
+		t.Fatalf("error = %+v", ce)
+	}
+	if h.pushesBy("feature fold") != 0 || !reflect.DeepEqual(h.shadowRefs(), before) {
+		t.Fatal("a refused fold changed the shadow repo")
+	}
+}
+
+// A record that can't be read may be a child: close and fold refuse while
+// one is in the pair, before any console, naming it; its own console close
+// is not stopped by itself.
+func TestCloseAndFoldRefuseBesideAnUnreadableRecord(t *testing.T) {
+	t.Parallel()
+	h := threeDeep(t)
+	h.corruptMeta("feat-c")
+	before := h.shadowRefs()
+	_, _, err := h.eng.FeatureClose(h.ctx, h.pair, "feat-a")
+	ce := wantCode(t, err, contract.Internal)
+	if ce.Field != "feature" || ce.Details["op"] != "close" || !reflect.DeepEqual(ce.Details["unreadable"], []string{"feat-c"}) ||
+		!strings.Contains(ce.Message, "ghostbranch feature close feat-c") || len(h.approver.asked) != 0 {
+		t.Fatalf("close = %+v, console asked %d time(s)", ce, len(h.approver.asked))
+	}
+	_, _, err = h.eng.FeatureFold(h.ctx, h.pair, engine.FoldOptions{Feature: "feat-b"})
+	if ce := wantCode(t, err, contract.Internal); ce.Details["op"] != "fold" || !reflect.DeepEqual(ce.Details["unreadable"], []string{"feat-c"}) {
+		t.Fatalf("fold = %+v", ce)
+	}
+	if !reflect.DeepEqual(h.shadowRefs(), before) {
+		t.Fatal("a refused close or fold changed the shadow repo")
+	}
+	// The unreadable feature itself still closes at the console; then feat-b
+	// folds.
+	if _, _, err := h.eng.FeatureClose(h.ctx, h.pair, "feat-c"); err != nil || len(h.approver.asked) != 1 {
+		t.Fatalf("console close of feat-c: %v (asked %d)", err, len(h.approver.asked))
+	}
+	if _, _, err := h.eng.FeatureFold(h.ctx, h.pair, engine.FoldOptions{Feature: "feat-b"}); err != nil {
+		t.Fatalf("fold after feat-c closed: %v", err)
 	}
 }

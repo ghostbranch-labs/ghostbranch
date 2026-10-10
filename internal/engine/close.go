@@ -169,8 +169,9 @@ func (e *Engine) FeatureClose(ctx context.Context, p workspace.Pair, name string
 		}
 	}
 	// Closing deletes the branch the features stacked on it are built on,
-	// abandoned ones too (Review Focus 2).
-	recs, err := e.records(ctx, pc)
+	// abandoned ones too (Review Focus 2). Another feature whose record
+	// can't be read may be one of them, so that refuses too.
+	recs, err := e.readableRecords(ctx, pc, name, "close")
 	if err != nil {
 		return nil, warns, err
 	}
