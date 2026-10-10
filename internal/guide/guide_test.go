@@ -41,7 +41,8 @@ func TestRenderListsEveryCodeFromTheRegistry(t *testing.T) {
 	// 376: 6.1 (doctor, guided init, TOKEN_PERMISSION_MISSING, the agent rule, the Tokens section, the isolation check), plus 6.1's error rows
 	// 377: the 6.1 final review's fixes (doctor's fix command only when there is one; pick the public and shadow repos when installing the app).
 	// 378: guided init asks where an org's shadow repo lives, and --shadow sets it (6.1 Task 10).
-	if n := strings.Count(out, "\n"); n > 378 {
+	// 379: one line on terminal colour, --no-color and NO_COLOR.
+	if n := strings.Count(out, "\n"); n > 379 {
 		t.Errorf("the guide is %d lines; keep it short (spec: about 150 plus the tables)", n)
 	}
 }

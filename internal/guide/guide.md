@@ -157,6 +157,7 @@ main, green CI, and a leak scan of exactly what will be published.
 
 - Always pass `--json`. Act on `exit_code`, `error.code` and `next`; don't parse the text.
   JSON is on stdout and progress on stderr: never merge the two streams (no `2>&1`).
+  Human output uses colour on a terminal; `--no-color` or `NO_COLOR` turns it off, and `--json` has none.
 - Run `next` commands exactly as given. Add the flags listed in `needs_input` yourself.
 - **When `needs_human` is true, stop.** Tell the person the exact command and why, and don't look
   for another way.
