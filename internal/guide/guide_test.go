@@ -37,7 +37,8 @@ func TestRenderListsEveryCodeFromTheRegistry(t *testing.T) {
 	// 333: the guard bullet says a branch named after a known feature is refused whatever it carries (5d-1 final review).
 	// 341: 5d-2 (newer merged features, every branch_gone a person closes, the ledger's name filter, file modes, the new warnings and the unreadable state).
 	// 343: the final review's fixes (an unreadable record may be a passing read error; where a newer merged feature shows).
-	if n := strings.Count(out, "\n"); n > 343 {
+	// 347: the four sub-project 6.1 error rows (LOGIN_EXPIRED, LOGIN_UNAVAILABLE, TOKEN_PERMISSION_MISSING, DOCTOR_FAILED).
+	if n := strings.Count(out, "\n"); n > 347 {
 		t.Errorf("the guide is %d lines; keep it short (spec: about 150 plus the tables)", n)
 	}
 }

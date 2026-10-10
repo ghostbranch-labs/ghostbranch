@@ -49,8 +49,39 @@ var exitDocs = map[int]Doc{
 }
 
 var errorDocs = map[Code]Doc{
-	AuthMissing: {Summary: "No GitHub token was found.", Causes: []string{"GHOSTBRANCH_TOKEN, GH_TOKEN and GITHUB_TOKEN are unset and `gh auth token` gave nothing"},
-		WhatToDo: "A person sets GHOSTBRANCH_TOKEN or runs `gh auth login`. For a fine-grained token, the permissions each command needs are in the token table of `ghostbranch guide`.", NeedsHuman: true},
+	AuthMissing: {Summary: "No GitHub token was found.",
+		Causes:     []string{"GHOSTBRANCH_TOKEN, GH_TOKEN and GITHUB_TOKEN are unset, there is no stored login (ghostbranch login), and `gh auth token` gave nothing"},
+		WhatToDo:   "A person runs `ghostbranch login`, or sets GHOSTBRANCH_TOKEN. Agents and CI use a token of their own in GHOSTBRANCH_TOKEN; the permissions each command needs are in the token table of `ghostbranch guide`. `gh auth login` also works.",
+		NeedsHuman: true},
+	LoginExpired: {Summary: "The stored GitHub login has expired and can't be refreshed.",
+		Causes: []string{"its refresh token is past its six months",
+			"the login was revoked on GitHub, or the Ghostbranch app was uninstalled or its authorization removed"},
+		WhatToDo:   "A person runs ghostbranch login again. An agent stops and hands this to the person; an agent with a token of its own sets GHOSTBRANCH_TOKEN, which never uses the stored login.",
+		NeedsHuman: true},
+	LoginUnavailable: {Summary: "Ghostbranch can't log in here, or can't read the stored login (error.details.reason says which).",
+		Causes: []string{
+			"no_console: no terminal a person can use for the device flow; ghostbranch login --with-token reads a pasted token from stdin instead",
+			"no_keychain: this machine has no usable OS keychain (for example Linux without a Secret Service), and Ghostbranch never stores a token in a plain file",
+			"no_client_id: this build of Ghostbranch has no GitHub App client ID",
+			"denied, expired_code: the person denied the request on GitHub, or the code expired before they approved it",
+			"corrupt: the stored login can't be read",
+			"keychain_error: the OS keychain exists but refused (for example, it is locked)",
+			"refused: GitHub refused the login, for example because the app has device flow turned off",
+			"refresh_failed: GitHub refused to refresh the stored login for a reason other than its expiry",
+		},
+		WhatToDo:   "Read error.details.reason. For no_console or no_keychain, set GHOSTBRANCH_TOKEN to a token instead; agents and CI always do. For no_client_id, use ghostbranch login --with-token or GHOSTBRANCH_TOKEN. For denied or expired_code, run ghostbranch login again and approve the code on GitHub. For corrupt, a person runs ghostbranch logout, then ghostbranch login. For keychain_error, unlock the keychain or set GHOSTBRANCH_TOKEN. For refused or refresh_failed, run ghostbranch login again.",
+		NeedsHuman: true},
+	TokenPermissionMissing: {Summary: "The token in use lacks a GitHub permission this command needs: error.details.permission on error.details.repo.",
+		Causes: []string{
+			"a fine-grained token or the Ghostbranch app wasn't granted that permission, for example Workflows: write to change .github/workflows files",
+			"the repo isn't in the token's or the app installation's repository access",
+			"a classic or OAuth token lacks the scope named (OAuth scope: ...)",
+		},
+		WhatToDo:   "Run ghostbranch doctor: it lists every permission the token lacks, for each command. A person grants error.details.permission on error.details.repo (in the fine-grained token's settings, or the Ghostbranch app installation's repository access), then runs the command in error.details.command again. Never ask for wider access than doctor names.",
+		NeedsHuman: true},
+	DoctorFailed: {Summary: "ghostbranch doctor found failing checks; error.details.failed lists their IDs.",
+		Causes:   []string{"one of tools, token, pair, guard, state or ci failed; data.checks[].message says why"},
+		WhatToDo: "Run the fix each failing check names (data.checks[].fix, also listed in next), then run ghostbranch doctor again. Warnings don't fail doctor."},
 	ForgeError: {Summary: "A GitHub API or git transport call failed.", Causes: []string{"network trouble", "GitHub outage or rate limit", "a token without the needed permission"},
 		WhatToDo: "Retry when retryable is true; otherwise read the message for the failing call."},
 	ShadowNotPrivate: {Summary: "The shadow repo is public or a fork, so Ghostbranch refuses to touch it.", Causes: []string{"someone changed the shadow repo's visibility"},
@@ -185,6 +216,8 @@ var warningDocs = map[WarningCode]Doc{
 		WhatToDo: "details.branch is the branch and details.code the push's error code. For REF_MOVED, run ghostbranch sync again. For PUSH_REFUSED or a permission error, a person fixes the token or the shadow repo's rules, then runs sync again."},
 	PlanFileUnreadable: {Summary: "A plan file on this machine couldn't be read, so it was skipped.",
 		WhatToDo: "Look at details.path: fix its permissions or delete it. If it belonged to a feature that was just closed, that feature's plan ref may remain in the shadow repo; it is harmless."},
+	AgentOnPersonLogin: {Summary: "This run looks like an agent or a script, and it is using a person's stored login, which can publish.",
+		WhatToDo: "Give the agent its own shadow-only token in GHOSTBRANCH_TOKEN (see ghostbranch guide § Tokens). The person's login still needs the console code to publish."},
 }
 
 func intp(n int) *int { return &n }

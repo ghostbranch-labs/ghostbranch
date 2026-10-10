@@ -16,6 +16,19 @@
         }
       }
     },
+    "tokenKind": { "description": "from the token's prefix: ghu_ app, github_pat_ fine-grained, ghp_ classic, gho_ oauth", "enum": ["app", "fine-grained", "classic", "oauth", "unknown"] },
+    "doctorSummary": {
+      "description": "doctor's counts by status and the failed check IDs; init's data.doctor",
+      "type": "object", "additionalProperties": false,
+      "required": ["ok", "warn", "fail", "skipped", "failed"],
+      "properties": {
+        "ok": { "type": "integer", "minimum": 0 },
+        "warn": { "type": "integer", "minimum": 0 },
+        "fail": { "type": "integer", "minimum": 0 },
+        "skipped": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "array", "items": { "enum": ["tools", "token", "pair", "guard", "state", "ci"] } }
+      }
+    },
     "sha": { "type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$" },
     "shaOrEmpty": { "type": "string", "pattern": "^([0-9a-f]{40}([0-9a-f]{24})?)?$" },
     "repo": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },

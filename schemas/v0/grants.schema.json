@@ -5,7 +5,7 @@
   "additionalProperties": false,
   "required": ["schema_version", "grants"],
   "properties": {
-    "schema_version": { "const": "0.9" },
+    "schema_version": { "const": "0.10" },
     "grants": { "type": "array", "items": { "$ref": "#/$defs/grant" } }
   },
   "$defs": {

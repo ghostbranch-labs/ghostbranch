@@ -317,7 +317,7 @@ func TestNextAppliesAPlanByItsPath(t *testing.T) {
 func TestNextForANewerOrUnreadableRecord(t *testing.T) {
 	t.Parallel()
 	a := testApp("status")
-	a.warnings = []contract.Warning{{Code: contract.RecordNewer, Details: map[string]any{"feature": "feat-x", "record_version": "0.10"}}}
+	a.warnings = []contract.Warning{{Code: contract.RecordNewer, Details: map[string]any{"feature": "feat-x", "record_version": "0.11"}}}
 	next := a.featureNexts(nil, []engine.FeatureReport{
 		{Name: "feat-x", State: feature.StateMerged, PRState: "merged"},
 		{Name: "feat-y", State: feature.StateUnreadable},

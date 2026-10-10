@@ -28,6 +28,7 @@
     "token": {
       "type": "object", "additionalProperties": false, "required": ["source", "http_status"],
       "properties": { "source": { "type": "string" }, "http_status": { "type": "integer" } }
-    }
+    },
+    "token_kind": { "$ref": "common.schema.json#/$defs/tokenKind" }
   }
 }

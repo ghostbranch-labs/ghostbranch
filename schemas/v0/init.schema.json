@@ -16,6 +16,8 @@
     "overlay_created": { "type": "boolean" },
     "default_branch_set": { "type": "boolean" },
     "audit": { "oneOf": [{ "type": "null" }, { "$ref": "audit.schema.json" }] },
-    "preview": { "oneOf": [{ "type": "null" }, { "$ref": "preview.schema.json" }] }
+    "preview": { "oneOf": [{ "type": "null" }, { "$ref": "preview.schema.json" }] },
+    "guard_installed": { "description": "guided init installed the push guard in this checkout", "type": "boolean" },
+    "doctor": { "description": "the doctor run at the end of guided init; null when it didn't run", "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/doctorSummary" }] }
   }
 }
