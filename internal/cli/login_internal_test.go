@@ -62,4 +62,13 @@ func TestRunLoginOnAScript(t *testing.T) {
 	if !errors.As(err, &ce) || ce.Code != contract.LoginUnavailable || ce.Details["reason"] != "no_keychain" || len(srv.Forms()) != before {
 		t.Fatalf("no keychain: %v (%d requests)", err, len(srv.Forms())-before)
 	}
+
+	// An unusable keychain stops it before GitHub is asked too.
+	kc := keychain.NewFake()
+	kc.Unavailable = true
+	a.env.Keychain = kc
+	_, err = a.runLogin(context.Background(), prompt.NewScript())
+	if !errors.As(err, &ce) || ce.Code != contract.LoginUnavailable || ce.Details["reason"] != "no_keychain" || len(srv.Forms()) != before {
+		t.Fatalf("unusable keychain: %v (%d requests)", err, len(srv.Forms())-before)
+	}
 }

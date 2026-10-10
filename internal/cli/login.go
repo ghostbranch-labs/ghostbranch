@@ -137,8 +137,11 @@ func (a *app) loginDevice(ctx context.Context) (*LoginResult, error) {
 // browser when it can, waits for the approval, fills the account and stores
 // the login. It asks nothing. The device code itself is never shown.
 func (a *app) runLogin(ctx context.Context, ask prompt.Asker) (*auth.Login, error) {
-	if a.env.Keychain == nil {
-		return nil, noKeychain()
+	// Probe the keychain before GitHub is asked: a fresh pair that can't be
+	// stored is lost. priorLogin handles a nil, unusable or locked keychain
+	// and lets a corrupt entry be replaced.
+	if _, err := a.priorLogin(); err != nil {
+		return nil, err
 	}
 	flow := a.deviceFlow(ctx)
 	dc, err := flow.Start(ctx)
