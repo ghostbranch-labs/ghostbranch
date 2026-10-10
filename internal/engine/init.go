@@ -111,6 +111,9 @@ func (e *Engine) Init(ctx context.Context, opt InitOptions) (res *InitResult, wa
 		return nil, nil, contract.New(contract.BadFlag, "init's schedule must be %q or %q, not %q", config.ScheduleOff, DefaultSyncSchedule, s).WithField("sync")
 	}
 	p := workspace.Pair{Public: opt.Public, Shadow: shadow}
+	if err := sameRepo(p); err != nil {
+		return nil, nil, err
+	}
 	pair = &p
 	res = &InitResult{Public: p.Public, Shadow: p.Shadow, MirroredBranches: []string{}, MirroredTags: []string{}}
 

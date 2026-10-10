@@ -58,9 +58,22 @@ func (pc *pairCtx) release() {
 	}
 }
 
-// open runs the shared preflight: look up both repos, refuse unless the
-// shadow repo is private and not a fork, take the lock, and fetch.
+// sameRepo refuses a pair whose shadow repo is the public repo itself
+// (GitHub names are case-insensitive).
+func sameRepo(p workspace.Pair) error {
+	if !strings.EqualFold(p.Public, p.Shadow) {
+		return nil
+	}
+	return contract.New(contract.BadFlag, "the shadow repo must be a different repo from the public one (both are %s)", p.Public).WithField("shadow")
+}
+
+// open runs the shared preflight: refuse a shadow repo that is the public
+// repo, look up both repos, refuse unless the shadow repo is private and not
+// a fork, take the lock, and fetch.
 func (e *Engine) open(ctx context.Context, op string, p workspace.Pair, mutating bool) (*pairCtx, error) {
+	if err := sameRepo(p); err != nil {
+		return nil, err
+	}
 	pub, err := e.Forge.GetRepo(ctx, p.Public)
 	if err != nil {
 		return nil, forgeErr(err, "look up public repo %s", p.Public)

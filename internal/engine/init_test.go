@@ -533,3 +533,25 @@ func TestInitAcceptsAShadowRepoUnderAnotherOwner(t *testing.T) {
 		})
 	}
 }
+
+// The shadow repo can't be the public repo itself, in any case: init and
+// every command on such a pair refuse, and nothing is created or pushed.
+func TestInitRefusesThePublicRepoAsItsOwnShadow(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.forge.SetPrivate(publicName, true) // adoptable otherwise: private, not a fork
+	for _, adopt := range []bool{false, true} {
+		_, _, err := h.eng.Init(h.ctx, engine.InitOptions{Public: publicName, Shadow: "ACME/Widget", Adopt: adopt})
+		if ce := wantCode(t, err, contract.BadFlag); ce.Field != "shadow" || !strings.Contains(ce.Message, "must be a different repo from the public one") {
+			t.Fatalf("adopt %v: %+v", adopt, ce)
+		}
+	}
+	if _, ok := h.eng.WS.Find(publicName); ok || len(h.pushes) != 0 {
+		t.Fatalf("registered %v, pushes %v", ok, h.pushes)
+	}
+	if _, err := h.forge.GetRepo(h.ctx, shadowName); !errors.Is(err, forge.ErrNotFound) {
+		t.Fatalf("a shadow was created: %v", err)
+	}
+	_, _, err := h.eng.FeatureStart(h.ctx, workspace.Pair{Public: publicName, Shadow: publicName}, "feat-x")
+	wantCode(t, err, contract.BadFlag)
+}
