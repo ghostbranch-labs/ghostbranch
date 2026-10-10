@@ -32,6 +32,9 @@ type FeatureReport struct {
 	PlanID    string       `json:"plan_id"`
 	Moved     bool         `json:"moved"` // since publish; false when unpublished; meaningless when the branch is gone (branch_gone reads only PRState)
 	Abandoned bool         `json:"abandoned"`
+	// PR is how its open public PR compares with the feature; nil unless
+	// it is published and the PR is open.
+	PR *PRSync `json:"pr,omitempty"`
 	// Error is why the feature couldn't be surveyed; set only with state
 	// unreadable. feature show returns it as its error.
 	Error string `json:"error,omitempty"`
@@ -228,6 +231,11 @@ func (e *Engine) surveyOne(ctx context.Context, pc *pairCtx, name, pm, O string)
 		}
 		base := e.publishedHead(m)
 		r.Moved = base == "" || head != base
+		if r.PRState == prOpen {
+			var ws []contract.Warning
+			r.PR, ws = e.prSyncOf(ctx, pc, m, head, base, pm, st.heads)
+			warns = append(warns, ws...)
+		}
 	}
 	if exists {
 		clean, files, err := pc.git.MergeTreeCheck(ctx, pm, head)
@@ -243,8 +251,12 @@ func (e *Engine) surveyOne(ctx context.Context, pc *pairCtx, name, pm, O string)
 			r.Drift = Drift{Status: driftConflicts, Files: append([]string{}, files...)}
 		}
 	}
+	behind := 0
+	if r.PR != nil {
+		behind = r.PR.Behind
+	}
 	r.State = feature.StateOf(feature.StateInput{Meta: m, BranchExists: exists, Head: head, PublicMain: pm,
-		Overlay: O, PRState: r.PRState, Moved: r.Moved, ParentMoved: st.parentMoved, StackStale: stackStale})
+		Overlay: O, PRState: r.PRState, Moved: r.Moved, ParentMoved: st.parentMoved, StackStale: stackStale, Behind: behind})
 	// Only a merged branch_gone feature needs to know whether its gate is
 	// for what was published (ClosableWithoutConsole), so only it reads the
 	// gate branch.

@@ -230,6 +230,10 @@ const (
 	// (not a native stack) whose PR below was squash- or rebase-merged: its
 	// public branch still carries the old parent commits.
 	StatePublicPRNeedsUpdate State = "public_pr_needs_update"
+	// StatePRBehind is a published feature whose PR is open and whose
+	// branch has commits the PR doesn't: gate it, then promote updates the
+	// PR.
+	StatePRBehind State = "pr_behind"
 )
 
 // StateInput is everything state depends on.
@@ -250,6 +254,9 @@ type StateInput struct {
 	// StackStale reports that the gate built on a stack that has changed
 	// since (Gate.StackFreshFor is false); false when unstacked.
 	StackStale bool
+	// Behind counts the branch's commits since it was published that its
+	// open PR doesn't have; 0 when it isn't published or the PR isn't open.
+	Behind int
 }
 
 // StateOf computes state. The first matching rule wins.
@@ -268,6 +275,8 @@ func StateOf(in StateInput) State {
 		return StatePRClosed
 	case m.Promoted != nil && m.Promoted.NeedsUpdate:
 		return StatePublicPRNeedsUpdate
+	case m.Promoted != nil && in.PRState == "open" && in.Behind > 0:
+		return StatePRBehind
 	case m.Promoted != nil:
 		return StatePublished
 	case in.ParentMoved:
