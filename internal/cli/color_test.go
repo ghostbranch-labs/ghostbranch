@@ -103,7 +103,7 @@ func TestNoEscapeWhenColorIsOff(t *testing.T) {
 	}
 	// --no-color even when flag parsing fails before it.
 	_, out, errOut := te.runColor(true, "doctor", "--bogus", "--no-color")
-	if strings.Contains(out+errOut, "") {
+	if strings.Contains(out+errOut, "\x1b") {
 		t.Errorf("no-color usage error: ESC in output: %q %q", out, errOut)
 	}
 	// --json even when flag parsing fails.
