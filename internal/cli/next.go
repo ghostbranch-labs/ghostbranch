@@ -129,6 +129,8 @@ func (a *app) steps(err error) []contract.Next {
 						Why: "no shadow repo yet: create one"},
 				}
 			}
+		case contract.DoctorFailed:
+			return a.doctorNext()
 		case contract.TokenPermissionMissing:
 			return []contract.Next{{Command: a.scoped("doctor"),
 				Why: "doctor lists every permission the token lacks, for each command; a person grants them, then runs this command again"}}

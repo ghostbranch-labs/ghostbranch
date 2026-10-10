@@ -1,0 +1,68 @@
+{
+  "schema_version": "0.10",
+  "command": "doctor",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "checks": [
+      {
+        "id": "tools",
+        "status": "ok",
+        "message": "git 2.47.1; ghostbranch (unknown), commit (unknown)",
+        "fix": "",
+        "details": {
+          "commit": "(unknown)",
+          "git": "2.47.1",
+          "git_minimum": "2.38",
+          "version": "(unknown)"
+        }
+      },
+      {
+        "id": "token",
+        "status": "ok",
+        "message": "the unknown token from GHOSTBRANCH_TOKEN works, as octo; permissions not checked: no pair (run doctor in a checkout of the public repo, or pass --repo)",
+        "fix": "",
+        "details": {
+          "account": "octo",
+          "can_publish": "unknown",
+          "kind": "unknown",
+          "source": "GHOSTBRANCH_TOKEN"
+        }
+      },
+      {
+        "id": "pair",
+        "status": "skipped",
+        "message": "not in a checkout of a registered public repo; pass --repo <owner/repo> to check a pair",
+        "fix": "",
+        "details": {}
+      },
+      {
+        "id": "guard",
+        "status": "skipped",
+        "message": "no pair, so no public repo to guard (see pair)",
+        "fix": "",
+        "details": {}
+      },
+      {
+        "id": "state",
+        "status": "ok",
+        "message": "workspace \"default\"; the records are readable, none is newer than this binary, and no gate job has been pending for over an hour (features not checked: no readable pair)",
+        "fix": "",
+        "details": {
+          "dir": "<ROOT>/home/workspaces/default",
+          "workspace": "default"
+        }
+      },
+      {
+        "id": "ci",
+        "status": "skipped",
+        "message": "no readable pair to audit (see pair)",
+        "fix": "",
+        "details": {}
+      }
+    ]
+  },
+  "warnings": [],
+  "next": [],
+  "error": null
+}

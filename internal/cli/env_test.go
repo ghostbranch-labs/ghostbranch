@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -66,6 +67,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		Getwd:        func() (string, error) { return root, nil },
 		GuardState:   func(string) (bool, bool) { return false, false },
 		ShadowRemote: func(string) (string, string, bool) { return "shadow", "shadow", true },
+		GitVersion:   func(context.Context) (string, error) { return "git version 2.47.1", nil },
 	}
 	return te
 }

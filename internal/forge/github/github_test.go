@@ -8,7 +8,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -18,7 +20,10 @@ import (
 	ghforge "github.com/ghostbranch-labs/ghostbranch/internal/forge/github"
 )
 
-var _ forge.Forge = (*ghforge.Client)(nil)
+var (
+	_ forge.Forge            = (*ghforge.Client)(nil)
+	_ forge.PermissionProber = (*ghforge.Client)(nil)
+)
 
 func newClient(t *testing.T, mux *http.ServeMux) *ghforge.Client {
 	t.Helper()
@@ -754,5 +759,87 @@ func TestPushAccessNeverFollowsARedirect(t *testing.T) {
 	}
 	if a := c.WithGitBase(srv.URL).PushAccess(context.Background(), "acme/widget"); a.Can != "unknown" || a.HTTPStatus != http.StatusFound || followed.Load() {
 		t.Fatalf("redirect: %+v, followed %v", a, followed.Load())
+	}
+}
+
+func TestProbePermissionsOnlyReads(t *testing.T) {
+	t.Parallel()
+	var mu sync.Mutex
+	var methods []string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		methods = append(methods, r.Method)
+		mu.Unlock()
+		switch r.URL.Path {
+		case "/repos/acme/widget-shadow":
+			writeJSON(w, map[string]any{"full_name": "acme/widget-shadow", "private": true, "default_branch": "main"})
+		case "/repos/acme/widget-shadow/commits", "/repos/acme/widget-shadow/pulls":
+			writeJSON(w, []any{})
+		case "/repos/acme/widget-shadow/actions/runs":
+			w.Header().Set("X-Accepted-GitHub-Permissions", "actions=read")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"message": "Resource not accessible by personal access token"}`))
+		case "/repos/acme/widget-shadow/commits/main/status":
+			writeJSON(w, map[string]any{"state": "success"})
+		case "/repos/acme/widget-shadow/actions/secrets":
+			writeJSON(w, map[string]any{"total_count": 0, "secrets": []any{}})
+		case "/acme/widget-shadow.git/info/refs":
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	c, err := ghforge.NewWithBaseURL("tok", srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.WithGitBase(srv.URL)
+	got, err := c.ProbePermissions(context.Background(), "acme/widget-shadow")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		forge.PermMetadataRead: forge.AccessYes, forge.PermContentsRead: forge.AccessYes, forge.PermPullsRead: forge.AccessYes,
+		forge.PermActionsRead: forge.AccessNo, forge.PermStatusesRead: forge.AccessYes, forge.PermSecretsRead: forge.AccessYes,
+		forge.PermContentsWrite: forge.AccessYes,
+	}
+	if !reflect.DeepEqual(got.Have, want) || got.Accepted[forge.PermActionsRead] != "actions=read" {
+		t.Fatalf("got %+v", got)
+	}
+	for _, m := range methods {
+		if m != http.MethodGet {
+			t.Fatalf("the probe sent a %s", m)
+		}
+	}
+	// A repo the token can't see: nothing more is probed.
+	got, err = c.ProbePermissions(context.Background(), "acme/hidden")
+	if err != nil || !reflect.DeepEqual(got.Have, map[string]string{forge.PermMetadataRead: forge.AccessNo}) {
+		t.Fatalf("hidden: %+v %v", got, err)
+	}
+}
+
+func TestOAuthScopes(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/user", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "Bearer tok" {
+			w.Header().Set("X-OAuth-Scopes", "repo, workflow")
+		}
+		writeJSON(w, map[string]any{"login": "octo", "id": 42})
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	classic, _ := ghforge.NewWithBaseURL("tok", srv.URL)
+	scopes, ok, err := classic.OAuthScopes(context.Background())
+	if err != nil || !ok || !reflect.DeepEqual(scopes, []string{"repo", "workflow"}) {
+		t.Fatalf("classic: %v %v %v", scopes, ok, err)
+	}
+	fine, _ := ghforge.NewWithBaseURL("other", srv.URL)
+	if scopes, ok, err := fine.OAuthScopes(context.Background()); err != nil || ok || scopes != nil {
+		t.Fatalf("fine-grained: %v %v %v", scopes, ok, err)
 	}
 }

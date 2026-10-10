@@ -32,6 +32,7 @@ var dataSchemas = map[string]string{
 	"status": "status.schema.json", "feature list": "feature-list.schema.json", "feature show": "feature-show.schema.json",
 	"feature abandon": "feature-abandon.schema.json", "feature close": "feature-close.schema.json",
 	"wait": "gate.schema.json", "login": "login.schema.json", "logout": "logout.schema.json", "auth status": "auth-status.schema.json",
+	"doctor": "doctor.schema.json",
 }
 
 var rootPath = regexp.MustCompile(`<ROOT>[^"]*`)
@@ -210,6 +211,9 @@ jobs:
 			storeLogin(te, "ghu_test_x", "ghr_test_x", 8*time.Hour)
 		}, []string{"auth", "status"}, 0},
 		{"auth_status_env", nil, []string{"auth", "status"}, 0},
+		{"doctor", initOnly, []string{"doctor", "--repo", "acme/widget"}, 0},
+		{"doctor_no_pair", nil, []string{"doctor"}, 0},
+		{"doctor_failed", func(te *testEnv) { initOnly(te); delete(te.vars, "GHOSTBRANCH_TOKEN") }, []string{"doctor", "--repo", "acme/widget"}, 1},
 	}
 	for _, s := range scenarios {
 		t.Run(s.name, func(t *testing.T) {

@@ -1,0 +1,117 @@
+{
+  "schema_version": "0.10",
+  "command": "doctor",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "checks": [
+      {
+        "id": "tools",
+        "status": "ok",
+        "message": "git 2.47.1; ghostbranch (unknown), commit (unknown)",
+        "fix": "",
+        "details": {
+          "commit": "(unknown)",
+          "git": "2.47.1",
+          "git_minimum": "2.38",
+          "version": "(unknown)"
+        }
+      },
+      {
+        "id": "token",
+        "status": "warn",
+        "message": "the unknown token from GHOSTBRANCH_TOKEN works, as octo; GitHub doesn't say whether it has: Administration: write on acme/widget-shadow (init), Pull requests: write on acme/widget (promote), Pull requests: write on acme/widget-shadow (gate), Workflows: write on acme/widget-shadow (gate, init, sync)",
+        "fix": "",
+        "details": {
+          "account": "octo",
+          "can_publish": "true",
+          "groups": {
+            "audit": {
+              "missing": [],
+              "unknown": [],
+              "optional_missing": []
+            },
+            "gate": {
+              "missing": [],
+              "unknown": [
+                "Pull requests: write on acme/widget-shadow",
+                "Workflows: write on acme/widget-shadow"
+              ],
+              "optional_missing": []
+            },
+            "init": {
+              "missing": [],
+              "unknown": [
+                "Workflows: write on acme/widget-shadow",
+                "Administration: write on acme/widget-shadow"
+              ],
+              "optional_missing": []
+            },
+            "promote": {
+              "missing": [],
+              "unknown": [
+                "Pull requests: write on acme/widget"
+              ],
+              "optional_missing": []
+            },
+            "sync": {
+              "missing": [],
+              "unknown": [
+                "Workflows: write on acme/widget-shadow"
+              ],
+              "optional_missing": []
+            }
+          },
+          "kind": "unknown",
+          "source": "GHOSTBRANCH_TOKEN"
+        }
+      },
+      {
+        "id": "pair",
+        "status": "ok",
+        "message": "acme/widget (public) and acme/widget-shadow (private) are reachable, and the overlay and its config are valid; shadow main and the managed files are current",
+        "fix": "",
+        "details": {
+          "overlay_status": "current",
+          "public": "acme/widget",
+          "public_private": false,
+          "shadow": "acme/widget-shadow",
+          "shadow_private": true
+        }
+      },
+      {
+        "id": "guard",
+        "status": "skipped",
+        "message": "not in a git checkout",
+        "fix": "",
+        "details": {}
+      },
+      {
+        "id": "state",
+        "status": "ok",
+        "message": "workspace \"default\"; the records are readable, none is newer than this binary, and no gate job has been pending for over an hour",
+        "fix": "",
+        "details": {
+          "dir": "<ROOT>/home/workspaces/default",
+          "features": 0,
+          "workspace": "default"
+        }
+      },
+      {
+        "id": "ci",
+        "status": "ok",
+        "message": "0 repo guard(s) the gate rewrites; secret names not checked (no workflow uses one, or the token can't list them); no workflow runs on sync's pushes",
+        "fix": "",
+        "details": {
+          "guards": 0,
+          "missing_secrets": [],
+          "push_triggers": [],
+          "secrets_listed": false
+        }
+      }
+    ]
+  },
+  "warnings": [],
+  "next": [],
+  "error": null
+}

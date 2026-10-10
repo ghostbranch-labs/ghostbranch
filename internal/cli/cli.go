@@ -29,6 +29,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	ghforge "github.com/ghostbranch-labs/ghostbranch/internal/forge/github"
+	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/grant"
 	"github.com/ghostbranch-labs/ghostbranch/internal/keychain"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
@@ -89,6 +90,11 @@ type Env struct {
 	// a command), a remote name not yet in use for adding one, and whether
 	// the current directory is a git checkout at all.
 	ShadowRemote func(shadow string) (remote, free string, inCheckout bool)
+	// GitVersion runs `git version` (doctor's tools check); nil means
+	// gitx.Version. Build is this binary's version and commit; nil means
+	// "(unknown)" for both.
+	GitVersion func(context.Context) (string, error)
+	Build      func() (version, commit string)
 }
 
 // DefaultEnv is the real process environment.
@@ -116,6 +122,8 @@ func DefaultEnv() Env {
 		Getwd:        os.Getwd,
 		GuardState:   guardState,
 		ShadowRemote: shadowRemote,
+		GitVersion:   gitx.Version,
+		Build:        buildInfo,
 	}
 }
 
@@ -433,7 +441,7 @@ func (a *app) engine(ctx context.Context) (*engine.Engine, error) {
 		}
 	}
 	e := &engine.Engine{Forge: f, WS: ws, Actor: actor, Token: token, TokenSource: source,
-		Now: a.env.Now, Sleep: a.env.Sleep, Rand: a.env.Rand, Progress: a.env.Stderr,
+		LooksLikeAgent: auth.LooksLikeAgent(a.env.Getenv, a.env.ConsoleUsable), Now: a.env.Now, Sleep: a.env.Sleep, Rand: a.env.Rand, Progress: a.env.Stderr,
 		NewScanner: a.env.NewScanner, PollInterval: a.env.PollInterval, SettleWindow: a.env.SettleWindow, CIAppearWindow: a.env.CIAppearWindow, CIAppearPoll: a.env.CIAppearPoll,
 		DryRun: a.dryRun, OnPush: a.env.OnPush, Grants: grant.NewStore(ws.GrantsPath(), ws.GrantsLockPath()),
 		Waivers: waiver.NewStore(ws.WaiversPath(), ws.WaiversLockPath())}

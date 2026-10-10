@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 	"sync"
 
@@ -70,6 +71,12 @@ type Forge struct {
 	// ForceCancelRun, ClosePullRequest) fails with a *forge.PermissionError
 	// naming that permission and the repo, for any repo.
 	MissingPermission map[string]string
+	// Scopes is OAuthScopes' answer; nil means GitHub sent no X-OAuth-Scopes
+	// header (a fine-grained or App token). PermsDenied makes
+	// ProbePermissions answer "no" for these permissions, per repo; every
+	// other read it probes is "yes", and Contents: write follows PushDenied.
+	Scopes      []string
+	PermsDenied map[string]map[string]bool
 }
 
 // missing is the error MissingPermission scripts for method on full, or
@@ -469,3 +476,36 @@ func (f *Forge) ForceCancelRun(_ context.Context, full string, id int64) error {
 	}
 	return fmt.Errorf("workflow run %d of %s: %w", id, full, forge.ErrNotFound)
 }
+
+func (f *Forge) ProbePermissions(_ context.Context, full string) (forge.RepoPermissions, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := forge.RepoPermissions{Have: map[string]string{}, Accepted: map[string]string{}}
+	if _, ok := f.repos[full]; !ok {
+		out.Have[forge.PermMetadataRead] = forge.AccessNo
+		return out, nil
+	}
+	for _, p := range []string{forge.PermMetadataRead, forge.PermContentsRead, forge.PermPullsRead,
+		forge.PermActionsRead, forge.PermStatusesRead, forge.PermSecretsRead} {
+		out.Have[p] = forge.AccessYes
+		if f.PermsDenied[full][p] {
+			out.Have[p] = forge.AccessNo
+		}
+	}
+	out.Have[forge.PermContentsWrite] = forge.AccessYes
+	if f.PushDenied[full] {
+		out.Have[forge.PermContentsWrite] = forge.AccessNo
+	}
+	return out, nil
+}
+
+func (f *Forge) OAuthScopes(context.Context) ([]string, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.UserErr != nil {
+		return nil, false, f.UserErr
+	}
+	return slices.Clone(f.Scopes), f.Scopes != nil, nil
+}
+
+var _ forge.PermissionProber = (*Forge)(nil)

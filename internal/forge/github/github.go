@@ -584,3 +584,83 @@ func (c *Client) ClosePullRequest(ctx context.Context, full string, number int) 
 	}
 	return wrap(ctx, full, resp, err)
 }
+
+// ProbePermissions learns what the token may do on full with read calls
+// only (forge.PermissionProber). A fine-grained token can't be asked what
+// it may write, so only Contents: write is probed, through PushAccess.
+func (c *Client) ProbePermissions(ctx context.Context, full string) (forge.RepoPermissions, error) {
+	owner, name, err := forge.SplitName(full)
+	if err != nil {
+		return forge.RepoPermissions{}, err
+	}
+	out := forge.RepoPermissions{Have: map[string]string{}, Accepted: map[string]string{}}
+	r, resp, err := c.c.Repositories.Get(ctx, owner, name)
+	switch {
+	case err == nil:
+		out.Have[forge.PermMetadataRead] = forge.AccessYes
+	case ctx.Err() == nil && (statusOf(resp) == http.StatusNotFound || isForbidden(resp, err)):
+		out.Have[forge.PermMetadataRead] = forge.AccessNo
+		return out, nil
+	default:
+		return out, wrap(ctx, full, resp, err)
+	}
+	note := func(perm string, resp *gh.Response, err error) {
+		switch {
+		case err == nil:
+			out.Have[perm] = forge.AccessYes
+		case isForbidden(resp, err):
+			out.Have[perm] = forge.AccessNo
+			if h := resp.Header.Get("X-Accepted-GitHub-Permissions"); h != "" {
+				out.Accepted[perm] = h
+			}
+		case statusOf(resp) == http.StatusConflict && perm == forge.PermContentsRead:
+			out.Have[perm] = forge.AccessYes // an empty repo has no commits to list
+		}
+	}
+	one := gh.ListOptions{PerPage: 1}
+	_, resp, err = c.c.Repositories.ListCommits(ctx, owner, name, &gh.CommitsListOptions{ListOptions: one})
+	note(forge.PermContentsRead, resp, err)
+	_, resp, err = c.c.PullRequests.List(ctx, owner, name, &gh.PullRequestListOptions{State: "all", ListOptions: one})
+	note(forge.PermPullsRead, resp, err)
+	_, resp, err = c.c.Actions.ListRepositoryWorkflowRuns(ctx, owner, name, &gh.ListWorkflowRunsOptions{ListOptions: one})
+	note(forge.PermActionsRead, resp, err)
+	_, resp, err = c.c.Repositories.GetCombinedStatus(ctx, owner, name, r.GetDefaultBranch(), &one)
+	note(forge.PermStatusesRead, resp, err)
+	_, resp, err = c.c.Actions.ListRepoSecrets(ctx, owner, name, &one)
+	note(forge.PermSecretsRead, resp, err)
+	if ctx.Err() != nil {
+		return out, ctx.Err()
+	}
+	switch c.PushAccess(ctx, full).Can {
+	case "true":
+		out.Have[forge.PermContentsWrite] = forge.AccessYes
+	case "false":
+		out.Have[forge.PermContentsWrite] = forge.AccessNo
+	}
+	return out, nil
+}
+
+// OAuthScopes reads a classic token's scopes from GET /user's
+// X-OAuth-Scopes header (forge.PermissionProber).
+func (c *Client) OAuthScopes(ctx context.Context) ([]string, bool, error) {
+	_, resp, err := c.c.Users.Get(ctx, "")
+	if err := wrap(ctx, "", resp, err); err != nil {
+		return nil, false, err
+	}
+	if resp == nil || resp.Response == nil {
+		return nil, false, nil
+	}
+	vals, ok := resp.Header[http.CanonicalHeaderKey("X-OAuth-Scopes")]
+	if !ok {
+		return nil, false, nil
+	}
+	scopes := []string{}
+	for _, v := range vals {
+		for _, s := range strings.Split(v, ",") {
+			if s = strings.TrimSpace(s); s != "" {
+				scopes = append(scopes, s)
+			}
+		}
+	}
+	return scopes, true, nil
+}

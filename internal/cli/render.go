@@ -65,6 +65,10 @@ func human(r any) string {
 			break
 		}
 		fmt.Fprintf(&b, "Skill for %s %s: %s\n", v.Target, v.Action, v.Path)
+	case *engine.DoctorResult:
+		for _, c := range v.Checks {
+			doctorLine(&b, c)
+		}
 	case *guard.Result:
 		if v.Preview != nil {
 			previewText(&b, v.Preview)
@@ -625,4 +629,16 @@ func when(t *time.Time) string {
 		return "never"
 	}
 	return t.UTC().Format("2006-01-02 15:04 UTC")
+}
+
+// doctorMarks are doctor's status marks for people.
+var doctorMarks = map[string]string{engine.DoctorOK: "✓", engine.DoctorWarn: "!", engine.DoctorFail: "✗", engine.DoctorSkipped: "–"}
+
+// doctorLine is one check: mark, id and message, with the fix indented
+// below.
+func doctorLine(b *strings.Builder, c engine.DoctorCheck) {
+	fmt.Fprintf(b, "%s %-6s %s\n", doctorMarks[c.Status], c.ID, c.Message)
+	if c.Fix != "" {
+		fmt.Fprintf(b, "    fix: %s\n", c.Fix)
+	}
 }

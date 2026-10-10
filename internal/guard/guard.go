@@ -14,11 +14,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
+	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
 // Marker is the line that identifies a hook Ghostbranch wrote.
@@ -314,18 +316,82 @@ func Inspect(c *Checkout) (Status, error) {
 		return st, nil
 	}
 	st.Installed = true
-	vars := map[string]string{}
-	for _, line := range strings.Split(s, "\n") {
-		if k, v, ok := strings.Cut(line, "="); ok && strings.HasPrefix(k, "GB_") {
-			vars[k] = unsq(v)
-		}
-	}
+	vars := hookVars(s)
 	st.Binary = vars["GB_BIN"]
 	st.Remotes, st.Publics = strings.Fields(vars["GB_REMOTES"]), strings.Fields(vars["GB_PUBLIC"])
 	if fi, err := os.Stat(filepath.FromSlash(st.Binary)); err == nil && !fi.IsDir() {
 		st.BinaryFound = true
 	}
 	return st, nil
+}
+
+// hookVars reads the GB_* assignments of an installed hook script.
+func hookVars(s string) map[string]string {
+	vars := map[string]string{}
+	for _, line := range strings.Split(s, "\n") {
+		if k, v, ok := strings.Cut(line, "="); ok && strings.HasPrefix(k, "GB_") {
+			vars[k] = unsq(v)
+		}
+	}
+	return vars
+}
+
+// ReadHook returns the installed guard's settings. installed is false when
+// the pre-push hook isn't the guard. current reports whether the script is
+// exactly what this version writes for those settings: an older guard (one
+// that misses pushurl, say) is not current.
+func ReadHook(c *Checkout) (h Hook, installed, current bool, err error) {
+	s, ok, err := readFile(c.hookPath())
+	if err != nil {
+		return Hook{}, false, false, contract.Wrap(contract.Internal, err, "read %s", c.hookPath())
+	}
+	if !ok || !strings.Contains(s, Marker) {
+		return Hook{}, false, false, nil
+	}
+	vars := hookVars(s)
+	h = Hook{Remotes: strings.Fields(vars["GB_REMOTES"]), Publics: strings.Fields(vars["GB_PUBLIC"]),
+		Workspace: vars["GB_WORKSPACE"], Binary: vars["GB_BIN"]}
+	return h, true, s == Script(h), nil
+}
+
+// PublicRemotes finds the remotes with any url or pushurl at a registered
+// public repo (never a shadow repo).
+func PublicRemotes(ctx context.Context, co *Checkout, ws *workspace.Workspace) (Hook, error) {
+	h := Hook{Workspace: ws.Name}
+	remotes, err := co.RemoteURLs(ctx)
+	if err != nil {
+		return h, err
+	}
+	names := make([]string, 0, len(remotes))
+	for n := range remotes {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	seen := map[string]bool{}
+	for _, n := range names {
+		public := false
+		for _, u := range remotes[n] {
+			slug, ok := Slug(u)
+			if !ok {
+				continue
+			}
+			if p, ok := ws.Find(slug); ok && strings.EqualFold(p.Public, slug) {
+				public = true
+				if !seen[slug] {
+					seen[slug] = true
+					h.Publics = append(h.Publics, slug)
+				}
+			}
+		}
+		if public {
+			h.Remotes = append(h.Remotes, n)
+		}
+	}
+	if len(h.Remotes) == 0 {
+		return h, contract.New(contract.NotAPairCheckout,
+			"no remote of %s points at a public repo registered in workspace %q; run ghostbranch init <owner/repo> first", co.Top, ws.Name)
+	}
+	return h, nil
 }
 
 // huskyDir reports whether any component of the hooks path is .husky. Husky

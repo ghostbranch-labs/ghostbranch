@@ -54,7 +54,11 @@ type Engine struct {
 	Token string
 	// TokenSource names where Token came from, for error messages.
 	TokenSource string
-	Now         func() time.Time
+	// LooksLikeAgent is auth.LooksLikeAgent for this run: it is likely an
+	// agent or a script, not a person at a terminal. Doctor and agents
+	// status read it to spot an agent on a person's stored login.
+	LooksLikeAgent bool
+	Now            func() time.Time
 	// Sleep waits d, or returns ctx.Err() as soon as ctx is done.
 	Sleep        func(context.Context, time.Duration) error
 	Rand         io.Reader

@@ -431,3 +431,27 @@ func TestCheckoutObjects(t *testing.T) {
 		t.Fatal("a missing object is an error for is-ancestor, not a no")
 	}
 }
+
+func TestReadHookRoundTripsAndSpotsAnOlderScript(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	co := &guard.Checkout{Dir: dir, Top: dir, GitDir: dir, HooksDir: dir}
+	h := guard.Hook{Remotes: []string{"origin", "upstream"}, Publics: []string{"acme/widget"}, Workspace: "default", Binary: "/opt/gb/ghostbranch"}
+	if _, installed, _, err := guard.ReadHook(co); err != nil || installed {
+		t.Fatalf("empty: %v %v", installed, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "pre-push"), []byte(guard.Script(h)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got, installed, current, err := guard.ReadHook(co)
+	if err != nil || !installed || !current || !reflect.DeepEqual(got, h) {
+		t.Fatalf("got %+v installed %v current %v err %v", got, installed, current, err)
+	}
+	older := strings.Replace(guard.Script(h), `u2=$(norm "$2")`, "", 1)
+	if err := os.WriteFile(filepath.Join(dir, "pre-push"), []byte(older), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, installed, current, err := guard.ReadHook(co); err != nil || !installed || current {
+		t.Fatalf("older: installed %v current %v err %v", installed, current, err)
+	}
+}
