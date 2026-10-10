@@ -553,5 +553,7 @@ func TestInitRefusesThePublicRepoAsItsOwnShadow(t *testing.T) {
 		t.Fatalf("a shadow was created: %v", err)
 	}
 	_, _, err := h.eng.FeatureStart(h.ctx, workspace.Pair{Public: publicName, Shadow: publicName}, "feat-x")
-	wantCode(t, err, contract.BadFlag)
+	if ce := wantCode(t, err, contract.BadFlag); ce.Field != "shadow" {
+		t.Fatalf("feature start on such a pair: %+v", ce)
+	}
 }
