@@ -39,7 +39,8 @@ func TestRenderListsEveryCodeFromTheRegistry(t *testing.T) {
 	// 343: the final review's fixes (an unreadable record may be a passing read error; where a newer merged feature shows).
 	// 347: the four sub-project 6.1 error rows (LOGIN_EXPIRED, LOGIN_UNAVAILABLE, TOKEN_PERMISSION_MISSING, DOCTOR_FAILED).
 	// 376: 6.1 (doctor, guided init, TOKEN_PERMISSION_MISSING, the agent rule, the Tokens section, the isolation check), plus 6.1's error rows
-	if n := strings.Count(out, "\n"); n > 376 {
+	// 377: the 6.1 final review's fixes (doctor's fix command only when there is one; pick the public and shadow repos when installing the app).
+	if n := strings.Count(out, "\n"); n > 377 {
 		t.Errorf("the guide is %d lines; keep it short (spec: about 150 plus the tables)", n)
 	}
 }
@@ -351,6 +352,8 @@ func TestGuideTeachesSetup(t *testing.T) {
 	for _, want := range []string{
 		"**`ghostbranch doctor --json` checks the setup and changes nothing.**",
 		"`DOCTOR_FAILED` lists the failing checks in `error.details.failed`",
+		"with a `fix` command when there is one.",
+		"When you install the app, pick both the public repo and its shadow repo.",
 		"`init` asks questions only when a person runs it at a terminal; with `--json` it never asks.",
 		"`--guard`/`--no-guard`, `--sync`/`--no-sync`",
 		"`TOKEN_PERMISSION_MISSING` names the permission and the repo in `error.details.permission` and `error.details.repo`",

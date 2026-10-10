@@ -74,8 +74,9 @@ main, green CI, and a leak scan of exactly what will be published.
 
 0. **`ghostbranch doctor --json` checks the setup and changes nothing.** `data.checks[]` holds
    `tools`, `token`, `pair`, `guard`, `state` and `ci`, each `ok`, `warn`, `fail` or `skipped`, with a
-   `fix` command. Exit 1 with `DOCTOR_FAILED` lists the failing checks in `error.details.failed`, and
-   `next` gives their fixes. Run it first, and whenever a command fails in a way you don't understand.
+   `fix` command when there is one. Exit 1 with `DOCTOR_FAILED` lists the failing checks in
+   `error.details.failed`, and `next` gives their fixes. Run it first, and whenever a command fails in
+   a way you don't understand.
 1. Shadow repo already exists (another machine, or a fresh `GHOSTBRANCH_HOME`)? Run
    `ghostbranch init <public> --adopt --plan --json`, then without `--plan`: it only registers the pair
    here and checks the shadow repo. Otherwise the same without `--adopt`. If the person named a shadow
@@ -272,10 +273,10 @@ Ghostbranch uses the first token it finds: `GHOSTBRANCH_TOKEN`, then your stored
 `GH_TOKEN`, `GITHUB_TOKEN`, then `gh auth token`. With `GHOSTBRANCH_TOKEN` set, the stored login is
 never read.
 
-- `ghostbranch login` signs you in with the Ghostbranch GitHub App in your browser; you choose the
-  repos it may reach. The login lives in your OS keychain and refreshes itself; `LOGIN_EXPIRED` means
-  log in again. `ghostbranch login --with-token` stores a token you pipe in on stdin instead. With no
-  keychain (`LOGIN_UNAVAILABLE`), set `GHOSTBRANCH_TOKEN`.
+- `ghostbranch login` signs you in with the Ghostbranch GitHub App in your browser. When you install
+  the app, pick both the public repo and its shadow repo. The login lives in your OS keychain and
+  refreshes itself; `LOGIN_EXPIRED` means log in again. `ghostbranch login --with-token` stores a
+  token you pipe in on stdin instead. With no keychain (`LOGIN_UNAVAILABLE`), set `GHOSTBRANCH_TOKEN`.
 - `ghostbranch auth status` shows the source, account, kind, expiry and whether it can publish;
   `ghostbranch logout` deletes the stored login. It doesn't revoke the app at GitHub: for an app
   login it returns `revoke_url`, where you do that.
