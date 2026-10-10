@@ -26,6 +26,12 @@ var ErrForbidden = errors.New("forbidden")
 // current state.
 var ErrConflict = errors.New("conflict")
 
+// ErrStacksUnavailable means the host won't make a native stack of these
+// PRs: it has no stacks API (a 404), or it refused this list (a 422: the
+// PRs don't chain, one is from a fork, or one is already stacked). Promote
+// then leaves them as plain chained PRs, each based on the branch below.
+var ErrStacksUnavailable = errors.New("forge: native stacks unavailable")
+
 // PermissionError is a permission refusal whose missing permission the
 // host named. It unwraps to ErrForbidden, so every errors.Is(err,
 // ErrForbidden) check still holds. Its text never includes a token.
@@ -199,4 +205,24 @@ type PushAccess struct {
 // token may push to a repo without pushing.
 type PushProber interface {
 	PushAccess(ctx context.Context, full string) PushAccess
+}
+
+// Stack is a native stack of PRs: its number, from the repo's issue and PR
+// sequence, and its PRs, bottom first. Merged PRs stay in it.
+type Stack struct {
+	Number int
+	PRs    []int
+}
+
+// Stacker is an optional interface for forges with native stacked PRs.
+type Stacker interface {
+	// CreateStack makes a stack of prs, bottom first. Each PR's base must be
+	// the head of the PR below it.
+	CreateStack(ctx context.Context, repo string, prs []int) (Stack, error)
+	// AddToStack appends prs, bottom first, on top of stack number stack. A
+	// 409 (another change to the stack is in progress) is ErrConflict.
+	AddToStack(ctx context.Context, repo string, stack int, prs []int) (Stack, error)
+	// StackOf is the stack PR pr is in, or nil when it isn't stacked, which
+	// is every PR on a host without native stacks.
+	StackOf(ctx context.Context, repo string, pr int) (*Stack, error)
 }

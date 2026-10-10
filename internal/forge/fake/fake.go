@@ -19,6 +19,10 @@ type Forge struct {
 	root  string
 	repos map[string]*forge.Repo
 	prs   map[string][]forge.PR
+	// next is each repo's last issue, PR or stack number: GitHub numbers
+	// them from one sequence.
+	next   map[string]int
+	stacks map[string][]*stack
 
 	// User is returned by CurrentUser.
 	User    forge.User
@@ -68,8 +72,9 @@ type Forge struct {
 	// MissingPermission scripts a 403 that names its permission: the method
 	// named (GetRepo, CreatePrivateRepo, SetDefaultBranch, FindOpenPR,
 	// CreatePR, GetPR, ListChecks, SecretNames, PushRuns, CancelRun,
-	// ForceCancelRun, ClosePullRequest) fails with a *forge.PermissionError
-	// naming that permission and the repo, for any repo.
+	// ForceCancelRun, ClosePullRequest, CreateStack, AddToStack, StackOf)
+	// fails with a *forge.PermissionError naming that permission and the
+	// repo, for any repo.
 	MissingPermission map[string]string
 	// Scopes is OAuthScopes' answer; nil means GitHub sent no X-OAuth-Scopes
 	// header (a fine-grained or App token). PermsDenied makes
@@ -83,6 +88,15 @@ type Forge struct {
 	// CreateRefused makes CreatePrivateRepo under these owners fail with
 	// ErrForbidden, carrying the message as GitHub's (a *forge.HostError).
 	CreateRefused map[string]string
+	// StacksUnavailable makes CreateStack and AddToStack fail with
+	// forge.ErrStacksUnavailable and StackOf answer nil, as a host without
+	// native stacks does. StackConflicts makes that many next CreateStack
+	// or AddToStack calls fail with forge.ErrConflict (GitHub's 409 while
+	// another change to the stack is in progress). StackCalls records each
+	// Stacker call: "create 1,2", "add 4: 3", "of 2".
+	StacksUnavailable bool
+	StackConflicts    int
+	StackCalls        []string
 }
 
 // view is r, the repo stored as full, as GitHub answers it. Callers hold f.mu.
@@ -127,6 +141,7 @@ type Run struct {
 // New stores bare repos under root.
 func New(root string) *Forge {
 	return &Forge{root: root, repos: map[string]*forge.Repo{}, prs: map[string][]forge.PR{},
+		next: map[string]int{}, stacks: map[string][]*stack{},
 		User: forge.User{Login: "octo", ID: 42}}
 }
 
@@ -214,6 +229,17 @@ func (f *Forge) SetPRMerged(full string, n int) {
 		if f.prs[full][i].Number == n {
 			f.prs[full][i].State = "closed"
 			f.prs[full][i].Merged = true
+		}
+	}
+}
+
+// SetPRBase retargets PR n in full to base, as a base change on GitHub does.
+func (f *Forge) SetPRBase(full string, n int, base string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.prs[full] {
+		if f.prs[full][i].Number == n {
+			f.prs[full][i].Base = base
 		}
 	}
 }
@@ -320,7 +346,8 @@ func (f *Forge) CreatePR(_ context.Context, full string, in forge.NewPR) (forge.
 	if !f.branchExists(full, in.Head) {
 		return forge.PR{}, fmt.Errorf("create PR in %s: head branch %s does not exist", full, in.Head)
 	}
-	n := len(f.prs[full]) + 1
+	f.next[full]++
+	n := f.next[full]
 	pr := forge.PR{Number: n, Head: in.Head, Base: in.Base, State: "open", Draft: in.Draft,
 		URL: fmt.Sprintf("https://github.example/%s/pull/%d", full, n)}
 	f.prs[full] = append(f.prs[full], pr)
