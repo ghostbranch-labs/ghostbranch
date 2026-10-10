@@ -31,8 +31,8 @@ const (
 // install page. Both are empty in builds made before the app was registered;
 // login then offers only --with-token.
 var (
-	ClientID = ""
-	AppSlug  = ""
+	ClientID = "Iv23liqDTESZ1JStXO0g"
+	AppSlug  = "ghostbranch-cli"
 )
 
 // Kind names a token's type from its prefix.
