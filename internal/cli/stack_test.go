@@ -156,7 +156,7 @@ func TestUnreadableRecordNextIsItsConsoleClose(t *testing.T) {
 		code, env := te.runJSON(args...)
 		e, _ := env["error"].(map[string]any)
 		n := nextOf(t, env)
-		if code != contract.Internal.Exit() || e["code"] != "INTERNAL" || len(n) != 2 || n[0]["needs_human"] != true ||
+		if code != contract.HasChildren.Exit() || e["code"] != "HAS_CHILDREN" || len(n) != 2 || n[0]["needs_human"] != true ||
 			!reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "feature", "close", "feat-bad", "--repo", "acme/widget"}) ||
 			!reflect.DeepEqual(argv(n[1]), append(append([]string{"ghostbranch"}, args...), "--repo", "acme/widget")) {
 			t.Fatalf("%v: exit %d, error %v, next = %v", args, code, e, n)

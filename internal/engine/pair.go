@@ -360,16 +360,17 @@ func (e *Engine) saveMeta(ctx context.Context, pc *pairCtx, m feature.Meta, pare
 	return sha, nil
 }
 
-// updateMeta saves and pushes new metadata, leased on the previous commit.
-func (e *Engine) updateMeta(ctx context.Context, pc *pairCtx, m feature.Meta, parent string) ([]contract.Warning, error) {
+// updateMeta saves and pushes new metadata, leased on the previous commit,
+// and returns the new metadata commit.
+func (e *Engine) updateMeta(ctx context.Context, pc *pairCtx, m feature.Meta, parent string) (string, []contract.Warning, error) {
 	sha, err := e.saveMeta(ctx, pc, m, parent)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	opt := gitx.PushOptions{Leases: []gitx.Lease{{Ref: remoteMetaRef(m.Name), Expect: parent}}}
 	if err := e.push(ctx, pc, remoteShadow, opt, sha+":"+remoteMetaRef(m.Name)); err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	// The shadow repo has the metadata: a stale mirror is only a warning.
-	return e.updateMirror(ctx, pc.git, metaRef(m.Name), sha), nil
+	return sha, e.updateMirror(ctx, pc.git, metaRef(m.Name), sha), nil
 }

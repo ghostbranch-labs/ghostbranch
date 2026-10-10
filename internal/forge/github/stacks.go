@@ -40,7 +40,8 @@ func (c *Client) AddToStack(ctx context.Context, full string, stack int, prs []i
 
 // StackOf is the stack PR pr is in (forge.Stacker). The PR carries its
 // stack's number even once merged; a PR without one, as on a host without
-// native stacks, is nil.
+// native stacks, is nil, and so is one whose stack dissolved between the
+// two reads (the stack is a 404).
 func (c *Client) StackOf(ctx context.Context, full string, pr int) (*forge.Stack, error) {
 	owner, name, err := forge.SplitName(full)
 	if err != nil {
@@ -55,6 +56,9 @@ func (c *Client) StackOf(ctx context.Context, full string, pr int) (*forge.Stack
 	}
 	n := p.GetStack().GetNumber()
 	s, resp, err := c.c.PullRequests.GetStack(ctx, owner, name, n)
+	if err != nil && ctx.Err() == nil && statusOf(resp) == http.StatusNotFound {
+		return nil, nil
+	}
 	if err := stackErr(ctx, full, fmt.Sprintf("read stack %d", n), resp, err); err != nil {
 		return nil, err
 	}

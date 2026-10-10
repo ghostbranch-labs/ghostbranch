@@ -678,7 +678,11 @@ func featureShowText(b *strings.Builder, v *engine.FeatureShowResult) {
 		if len(r.Children) > 0 {
 			kids = oneLine(strings.Join(r.Children, ", "))
 		}
-		fmt.Fprintf(b, "  stack: on %s; branches on it: %s\n", oneLine(r.Parent), kids)
+		parent := r.Parent
+		if parent == "" {
+			parent = "unknown" // the record couldn't be read
+		}
+		fmt.Fprintf(b, "  stack: on %s; branches on it: %s\n", oneLine(parent), kids)
 	}
 	if len(r.Drift.Files) > 0 {
 		files := make([]string, len(r.Drift.Files))

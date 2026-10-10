@@ -104,7 +104,7 @@ func (e *Engine) refreshPublished(ctx context.Context, pc *pairCtx, rs []Feature
 			continue
 		}
 		e.progressf("GitHub restacked feature %s's public branch %s onto %s (the same changes, new commits); recording it", r.Name, branch, pr.Base)
-		mw, err := e.updateMeta(ctx, pc, nm, r.metaSHA)
+		sha, mw, err := e.updateMeta(ctx, pc, nm, r.metaSHA)
 		warns = addWarnings(warns, mw...)
 		if err != nil {
 			ce := contract.From(err)
@@ -114,9 +114,7 @@ func (e *Engine) refreshPublished(ctx context.Context, pc *pairCtx, rs []Feature
 			continue
 		}
 		// The closes below lease on the record as it is now.
-		if sha, ok, _ := g.Resolve(ctx, metaRef(r.Name)); ok {
-			r.meta, r.metaSHA = &nm, sha
-		}
+		r.meta, r.metaSHA = &nm, sha
 	}
 	return warns
 }
@@ -187,9 +185,35 @@ func unreadableReports(rs []FeatureReport) []string {
 // branch. feature close and fold refuse for the same reason.
 func closeBlocked(name string, unread []string) contract.Warning {
 	return contract.Warning{Code: contract.FeatureNotClosed,
-		Message: fmt.Sprintf("sync left merged feature %s open: the record of feature %s couldn't be read as a whole, so it can't be told whether it is stacked on %s; a person closes %s at the console (ghostbranch feature close %s), or fixes its record, and the next sync closes %s",
-			name, strings.Join(unread, ", "), name, unread[0], unread[0], name),
+		Message: fmt.Sprintf("sync left merged feature %s open: %s, so it can't be told whether %s stacked on %s; a person closes %s at the console (%s), or fixes %s, and the next sync closes %s",
+			name, unreadableWhat(unread), itOrThey(unread, "it is", "they are"), name, itOrThey(unread, "it", "each"),
+			consoleCloses(unread), itOrThey(unread, "its record", "their records"), name),
 		Details: map[string]any{"feature": name, "unreadable": unread}}
+}
+
+// unreadableWhat says which records couldn't be read as a whole.
+func unreadableWhat(unread []string) string {
+	if len(unread) == 1 {
+		return "the record of feature " + unread[0] + " couldn't be read as a whole"
+	}
+	return "the records of features " + strings.Join(unread, ", ") + " couldn't be read as a whole"
+}
+
+// itOrThey is one when unread names one feature, else many.
+func itOrThey(unread []string, one, many string) string {
+	if len(unread) == 1 {
+		return one
+	}
+	return many
+}
+
+// consoleCloses is the feature close command for each name, joined.
+func consoleCloses(names []string) string {
+	out := make([]string, len(names))
+	for i, n := range names {
+		out[i] = "ghostbranch feature close " + n
+	}
+	return strings.Join(out, "; ")
 }
 
 // reparent is a child's record rewritten to stand on main. It is saved but
@@ -206,8 +230,13 @@ type reparent struct {
 // deleted parent, and if that push fails nothing changes.
 //
 // A child keeps its own commits. Its forked_at becomes the parent's
-// published feature head, so its next gate replays only the commits after
-// it, and its PR's base becomes main, as GitHub retargets it. When the PRs
+// published feature head when the child contains it, so its next gate
+// replays only the commits after it; a child that forked before the parent
+// moved on (and wasn't restacked) keeps its own forked_at, which is an
+// ancestor of that head, so forked_at..head is still only its own commits.
+// Its PR's base becomes main, as GitHub retargets it. A parent whose
+// published head nothing records stops the close (HAS_CHILDREN), as its
+// children's fork point can't be told. When the PRs
 // were plain chained PRs (no native stack) and the parent's published head
 // isn't in public main (a squash or rebase merge), the child's open public
 // PR still carries the parent's old commits: it is marked
@@ -231,6 +260,16 @@ func (e *Engine) reparentChildren(ctx context.Context, pc *pairCtx, parent Featu
 			}
 		}
 	}
+	if forkedAt == "" {
+		names := make([]string, 0, len(kids))
+		for _, k := range kids {
+			names = append(names, k.Name)
+		}
+		return nil, contract.New(contract.HasChildren,
+			"feature %s has %d feature(s) stacked on it (%s), and nothing records the head %s was published from, so where they fork from it can't be told; %s stays until each of them is moved onto main (ghostbranch feature restack <child> --onto main)",
+			parent.Name, len(names), strings.Join(names, ", "), parent.Name, parent.Name).WithField("feature").
+			WithDetails(map[string]any{"feature": parent.Name, "children": names, "op": "close", "reason": "parent_head_unknown"})
+	}
 	out := make([]reparent, 0, len(kids))
 	for _, k := range kids {
 		if k.meta == nil || k.unreadable != "" {
@@ -241,8 +280,16 @@ func (e *Engine) reparentChildren(ctx context.Context, pc *pairCtx, parent Featu
 		}
 		m := *k.meta
 		m.SchemaVersion, m.Parent = feature.SchemaVersion, ""
-		if forkedAt != "" {
-			m.ForkedAt = forkedAt
+		// Only a fork point the child contains: one it lacks would make its
+		// next gate refuse (fork_point_lost) and strand it.
+		if k.Head != "" {
+			has, err := g.IsAncestor(ctx, forkedAt, k.Head)
+			if err != nil {
+				return nil, internalErr(err, "check whether "+k.Name+" contains "+parent.Name+"'s published head")
+			}
+			if has {
+				m.ForkedAt = forkedAt
+			}
 		}
 		if m.Promoted != nil {
 			p := *m.Promoted

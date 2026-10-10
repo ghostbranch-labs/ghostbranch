@@ -211,7 +211,7 @@ func (e *Engine) recordFinish(ctx context.Context, pc *pairCtx, name string, res
 		final.Checks, final.FailedChecks, final.At = res.Checks, res.FailedChecks, e.now()
 		m.Gate = &final
 		m.SchemaVersion = feature.SchemaVersion
-		warns, err := e.updateMeta(ctx, pc, m, sha)
+		_, warns, err := e.updateMeta(ctx, pc, m, sha)
 		if err == nil || attempt > 0 || contract.From(err).Code != contract.RefMoved {
 			return warns, err
 		}

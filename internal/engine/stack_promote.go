@@ -776,7 +776,7 @@ func (e *Engine) applyStack(ctx context.Context, pc *pairCtx, pl plan.Plan, yes 
 			}
 			m.SchemaVersion = feature.SchemaVersion
 			m.Promoted.Stack = num
-			mw, err := e.updateMeta(ctx, pc, m, sha)
+			_, mw, err := e.updateMeta(ctx, pc, m, sha)
 			warns = addWarnings(warns, mw...)
 			if err != nil {
 				return res, warns, err
@@ -803,7 +803,8 @@ func (e *Engine) recordPublished(ctx context.Context, pc *pairCtx, name string, 
 	}
 	m.SchemaVersion = feature.SchemaVersion
 	m.Promoted = &p
-	return e.updateMeta(ctx, pc, m, sha)
+	_, mw, err := e.updateMeta(ctx, pc, m, sha)
+	return mw, err
 }
 
 // stackUp registers prs, bottom first, as a native GitHub stack: added to
@@ -868,6 +869,13 @@ func (e *Engine) stackUp(ctx context.Context, pc *pairCtx, bottom stackBranch, p
 	}
 	if len(missing) == 0 {
 		return have, nil
+	}
+	// A native stack grows only at its top: PRs that would go above one
+	// lower down (a second branch on the same parent) stay chained.
+	if i := slices.Index(want, missing[0]); i > 0 && len(have.PRs) > 0 && want[i-1] != have.PRs[len(have.PRs)-1] {
+		e.progressf("PR #%d isn't the top of native stack #%d (#%d is), and a native stack only grows at its top; PRs %s stay chained, each based on the branch below",
+			want[i-1], have.Number, have.PRs[len(have.PRs)-1], prNumbers(missing))
+		return nil, nil
 	}
 	e.progressf("adding PRs %s to native stack #%d", prNumbers(missing), have.Number)
 	s, err := st.AddToStack(ctx, repo, have.Number, missing)

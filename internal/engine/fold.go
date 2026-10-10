@@ -87,6 +87,13 @@ func (e *Engine) FeatureFold(ctx context.Context, p workspace.Pair, opt FoldOpti
 	if !ok || pr.head == "" {
 		return nil, warns, parentRewritten(name, parent, m.ForkedAt, reasonParentGone)
 	}
+	// Fold moves the parent's branch: a newer Ghostbranch's record of it may
+	// track what this binary doesn't know, so it is never moved from here.
+	if pr.newer {
+		ce := contract.NewerRecord("feature", pr.meta.SchemaVersion).WithField("feature")
+		ce.Details["feature"] = parent
+		return nil, warns, ce
+	}
 	rs, sw, err := e.survey(ctx, pc, name)
 	warns = addWarnings(warns, sw...)
 	if err != nil {

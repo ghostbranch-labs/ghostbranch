@@ -167,7 +167,7 @@ func (a *app) steps(err error) []contract.Next {
 			if fs := stringList(ce.Details["features"]); len(fs) > 1 {
 				if pub, _ := ce.Details["public"].(string); pub != "" {
 					return []contract.Next{{Command: a.gb(append(append([]string{"promote"}, fs...), "--plan", "--repo", pub)...),
-						Why: "the stack moved since the plan was made; make a new plan for the whole stack"}}
+						Why: "the stack moved since the plan was made; make a new plan for the whole stack, passing again any --mode, --mode-for and --title-for the old plan was made with (this command doesn't carry them)"}}
 				}
 			}
 			f, _ := ce.Details["feature"].(string)
@@ -250,20 +250,6 @@ func (a *app) steps(err error) []contract.Next {
 				return []contract.Next{{Command: a.scoped("log", "--feature", r.Feature, "--op", "feature fold"), NeedsHuman: true,
 					Why: "the fold landed: " + r.Parent + " holds the feature's commits, and the ledger lists its deleted refs with their SHAs; a person closes its gate draft PR in the shadow repo on GitHub (error.message names it)"}}
 			}
-		case contract.Internal:
-			// close or fold refused beside a record that can't be read.
-			if bad, ok := ce.Details["unreadable"].([]string); ok && len(bad) > 0 {
-				var out []contract.Next
-				for _, b := range bad {
-					out = append(out, contract.Next{Command: a.scoped("feature", "close", b), NeedsHuman: true,
-						Why: "feature " + b + "'s record can't be read, so it may be stacked on this one: a person closes it at the console, or fixes its record"})
-				}
-				if f, _ := ce.Details["feature"].(string); f != "" {
-					op, _ := ce.Details["op"].(string)
-					out = append(out, contract.Next{Command: a.scoped("feature", op, f), Why: "then " + op + " " + f + " again"})
-				}
-				return out
-			}
 		case contract.CurateInvalid, contract.CurateConflict, contract.CurateTreeMismatch:
 			why := map[contract.Code]string{
 				contract.CurateInvalid:      "fix the --curate file (error.details lists the problem SHAs; the gate result lists the feature's commits) and run this again",
@@ -319,6 +305,19 @@ func (a *app) steps(err error) []contract.Next {
 					"then run the restack again: it records "+f+" where you put it and goes on with the features above it")
 			}
 		case contract.HasChildren:
+			// close or fold refused beside a record that can't be read.
+			if bad, ok := ce.Details["unreadable"].([]string); ok && len(bad) > 0 {
+				var out []contract.Next
+				for _, b := range bad {
+					out = append(out, contract.Next{Command: a.scoped("feature", "close", b), NeedsHuman: true,
+						Why: "feature " + b + "'s record can't be read, so it may be stacked on this one: a person closes it at the console, or fixes its record"})
+				}
+				if f, _ := ce.Details["feature"].(string); f != "" {
+					op, _ := ce.Details["op"].(string)
+					out = append(out, contract.Next{Command: a.scoped("feature", op, f), Why: "then " + op + " " + f + " again"})
+				}
+				return out
+			}
 			kids, _ := ce.Details["children"].([]string)
 			op, _ := ce.Details["op"].(string)
 			var out []contract.Next
@@ -564,7 +563,7 @@ func (a *app) syncNext() []contract.Next {
 // must close, the ones to gate again, and the stacks to restack (one
 // restack per moved parent). Abandoned features need nothing.
 func (a *app) featureNexts(out []contract.Next, rs []engine.FeatureReport) []contract.Next {
-	newer := a.newerRecords()
+	newer, intoParent := a.newerRecords(), a.mergedIntoParent()
 	var merged []string
 	var rest []contract.Next
 	restacks := map[string]bool{}
@@ -573,6 +572,11 @@ func (a *app) featureNexts(out []contract.Next, rs []engine.FeatureReport) []con
 		if newer[r.Name] && (r.State == feature.StateMerged || (r.State == feature.StateBranchGone && r.PRState == "merged")) {
 			rest = append(rest, contract.Next{Command: closeCmd, NeedsHuman: true,
 				Why: "its PR merged, but a newer Ghostbranch wrote its record, so this binary won't close it unattended: upgrade ghostbranch on this machine and sync, or a person closes it at the console"})
+			continue
+		}
+		if base, ok := intoParent[r.Name]; ok {
+			rest = append(rest, contract.Next{Command: closeCmd, NeedsHuman: true,
+				Why: "its PR merged into " + base + "'s public branch, not main, so sync left it open: a person checks that branch holds its changes, then closes it"})
 			continue
 		}
 		if engine.ClosableWithoutConsole(r) {
@@ -643,6 +647,21 @@ func (a *app) newerRecords() map[string]bool {
 	for _, w := range a.warnings {
 		if f, _ := w.Details["feature"].(string); w.Code == contract.RecordNewer && f != "" {
 			out[f] = true
+		}
+	}
+	return out
+}
+
+// mergedIntoParent maps each feature sync left open because its PR merged
+// into the public branch below it, not main, to that branch: the
+// FEATURE_NOT_CLOSED warnings with reason merged_into_parent_branch.
+func (a *app) mergedIntoParent() map[string]string {
+	out := map[string]string{}
+	for _, w := range a.warnings {
+		f, _ := w.Details["feature"].(string)
+		if w.Code == contract.FeatureNotClosed && w.Details["reason"] == "merged_into_parent_branch" && f != "" {
+			base, _ := w.Details["base"].(string)
+			out[f] = base
 		}
 	}
 	return out

@@ -57,6 +57,9 @@ type FeatureReport struct {
 	// flagged: sync found its public branch holding changes Ghostbranch
 	// didn't publish (PUBLIC_BRANCH_CHANGED).
 	flagged bool
+	// prBase is the base branch of its public PR as the survey read it; ""
+	// when that couldn't be read or nothing was published.
+	prBase string
 }
 
 // Drift is whether a feature still merges cleanly onto public main.
@@ -217,7 +220,7 @@ func (e *Engine) surveyOne(ctx context.Context, pc *pairCtx, name, pm, O string)
 				Message: fmt.Sprintf("couldn't read public PR #%d of feature %s: %v", n, name, err),
 				Details: map[string]any{"feature": name, "public_pr": n}})
 		case pr.Merged:
-			r.PRState = prMerged
+			r.PRState, r.prBase = prMerged, pr.Base
 		case pr.State == prClosed:
 			r.PRState = prClosed
 		default:

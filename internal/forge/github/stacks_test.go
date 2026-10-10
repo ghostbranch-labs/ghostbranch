@@ -70,8 +70,19 @@ func TestStackOf(t *testing.T) {
 	mux.HandleFunc("GET /repos/o/r/stacks/4", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, stackBody(4, 1, 2, 3))
 	})
+	// PR 7 names stack 9, which dissolved before it was read.
+	mux.HandleFunc("GET /repos/o/r/pulls/7", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{"number": 7, "state": "open", "head": map[string]any{"ref": "g"}, "base": map[string]any{"ref": "main"},
+			"stack": map[string]any{"id": 1980667, "number": 9, "size": 2, "position": 1, "base": map[string]any{"ref": "main"}}})
+	})
+	mux.HandleFunc("GET /repos/o/r/stacks/9", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+	})
 	c := newClient(t, mux)
 	ctx := context.Background()
+	if s, err := c.StackOf(ctx, "o/r", 7); err != nil || s != nil {
+		t.Fatalf("StackOf(7), stack dissolved = %+v %v, want nil", s, err)
+	}
 	s, err := c.StackOf(ctx, "o/r", 2)
 	if err != nil || s == nil || s.Number != 4 || !slices.Equal(s.PRs, []int{1, 2, 3}) {
 		t.Fatalf("StackOf(2) = %+v %v", s, err)

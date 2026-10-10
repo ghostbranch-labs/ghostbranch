@@ -141,8 +141,8 @@ main, green CI, and a leak scan of exactly what will be published.
   `--mode-for b=squash` or `--title-for b="<title>"`. `NOT_A_STACK` names the branch that breaks the
   list (`error.details.feature`) and why (`error.details.reason`): follow `next`.
 - `ghostbranch feature fold <c> --repo <public> --json` folds a finished top branch into its parent
-  (fast-forward only; `FOLD_NEEDS_REBASE` gives git steps). `abandon` and `close` refuse a branch with
-  children (`HAS_CHILDREN`): fold them, abandon them, or `feature restack <child> --onto main`.
+  (fast-forward only; `FOLD_NEEDS_REBASE` gives git steps). `abandon` and `close` refuse a branch with children
+  (`HAS_CHILDREN`): fold each, `feature restack <child> --onto main` it, or abandon it (for `close`: `close <child>`, as an abandoned child still blocks `close`).
 - After a PR of a stack merges, `sync` closes its feature and moves the branch above onto main.
   `public_pr_needs_update` means that branch's open PR still carries the merged one's old commits:
   restack it with `--onto main` and gate it; a person updates the public PR by hand for now.

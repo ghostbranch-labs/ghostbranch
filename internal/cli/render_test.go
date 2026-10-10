@@ -91,6 +91,7 @@ func TestFeatureShowTextNamesTheStack(t *testing.T) {
 		{engine.FeatureReport{Name: "b", Parent: "a", Children: []string{"c", "d"}}, "  stack: on a; branches on it: c, d\n"},
 		{engine.FeatureReport{Name: "c", Parent: "b", Children: []string{}}, "  stack: on b; branches on it: none\n"},
 		{engine.FeatureReport{Name: "a", Parent: "main", Children: []string{"b"}}, "  stack: on main; branches on it: b\n"},
+		{engine.FeatureReport{Name: "x", Parent: "", Children: []string{"y"}}, "  stack: on unknown; branches on it: y\n"},
 		{engine.FeatureReport{Name: "solo", Parent: "main", Children: []string{}}, ""},
 	} {
 		var b strings.Builder

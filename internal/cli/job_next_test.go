@@ -510,3 +510,30 @@ func TestNextForStacks(t *testing.T) {
 		}
 	}
 }
+
+// A stale stack plan's re-plan can't carry the old plan's per-branch
+// flags: its why says to pass them again.
+func TestStackPlanStaleNextSaysToPassTheFlagsAgain(t *testing.T) {
+	t.Parallel()
+	a := testApp("apply", "apply")
+	next := a.next(contract.New(contract.PlanStale, "x").WithDetails(map[string]any{
+		"feature": "feat-a", "public": "acme/widget", "mode": "squash", "moved": []string{"public_main"}, "features": []string{"feat-a", "feat-b"}}))
+	if len(next) != 1 || !strings.Contains(next[0].Why, "--mode, --mode-for and --title-for") {
+		t.Fatalf("next = %+v", next)
+	}
+}
+
+// Sync leaves a feature whose PR merged into the branch below it open; next
+// hands its close to a person, who checks that branch first.
+func TestNextForAFeatureMergedIntoItsParentsBranch(t *testing.T) {
+	t.Parallel()
+	a := testApp("sync", "sync")
+	a.warnings = []contract.Warning{{Code: contract.FeatureNotClosed,
+		Details: map[string]any{"feature": "feat-b", "reason": "merged_into_parent_branch", "base": "feat-a"}}}
+	a.result = &engine.SyncResult{Surveyed: true, Attention: []engine.FeatureReport{{Name: "feat-b", State: feature.StateMerged, PRState: "merged"}}}
+	next := a.next(nil)
+	if len(next) != 1 || !slices.Equal(next[0].Command, []string{"ghostbranch", "feature", "close", "feat-b", "--repo", "acme/widget"}) ||
+		!next[0].NeedsHuman || !strings.Contains(next[0].Why, "feat-a's public branch") {
+		t.Fatalf("next = %+v", next)
+	}
+}

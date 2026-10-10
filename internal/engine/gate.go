@@ -27,7 +27,8 @@ type GateResult struct {
 	// public main.
 	Parent string `json:"parent"`
 	// Base is the commit the feature's own commits were replayed onto:
-	// public main, or R, the rebased tip of the features below it.
+	// public main, or R, the rebased tip of the features below it; "" when
+	// a stacked gate stopped before the features below it were built.
 	Base          string          `json:"base"`
 	Overlay       string          `json:"overlay"`
 	Candidate     string          `json:"candidate"`
@@ -250,13 +251,18 @@ func (e *Engine) build(ctx context.Context, pc *pairCtx, name, mode string, waiv
 		mode = cfg.Promote.DefaultMode
 	}
 	// parent is set before the stack is walked, so a gate that stops there
-	// (PARENT_REWRITTEN) still names the feature below it.
-	b := &built{cfg: cfg, meta: m, metaSHA: metaSHA, head: head, pm: pm, O: O, scannedAs: mode, base: pm, parent: parentFeature(m)}
+	// (PARENT_REWRITTEN) still names the feature below it; base stays ""
+	// until what it replays onto (the stack below) is built.
+	b := &built{cfg: cfg, meta: m, metaSHA: metaSHA, head: head, pm: pm, O: O, scannedAs: mode, parent: parentFeature(m)}
+	if b.parent == "" {
+		b.base = pm
+	}
 	levels, err := e.stackBelow(ctx, pc, name, m, head)
 	if err != nil {
 		return b, warns, err
 	}
 	if len(levels) == 0 {
+		b.base = pm
 		e.progressf("replaying %s onto public main %s", name, short(pm))
 	} else {
 		below := levels[len(levels)-1].name
@@ -550,7 +556,8 @@ func (e *Engine) gateRecord(res *GateResult, commits []feature.GateCommit) featu
 func (e *Engine) writeGate(ctx context.Context, pc *pairCtx, m feature.Meta, metaSHA string, g feature.Gate) ([]contract.Warning, error) {
 	m.SchemaVersion = feature.SchemaVersion
 	m.Gate = &g
-	return e.updateMeta(ctx, pc, m, metaSHA)
+	_, mw, err := e.updateMeta(ctx, pc, m, metaSHA)
+	return mw, err
 }
 
 // replay cherry-picks commits onto onto in a throwaway worktree and returns

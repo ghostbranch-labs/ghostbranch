@@ -98,11 +98,14 @@ func (e *Engine) readableRecords(ctx context.Context, pc *pairCtx, name, op stri
 	if len(others) == 0 {
 		return recs, nil
 	}
+	// Any of them may be a child: HAS_CHILDREN, with no child known by name.
 	done := map[string]string{"close": "closed", "fold": "folded"}[op]
-	return nil, contract.New(contract.Internal,
-		"feature %s's record couldn't be read as a whole: it is corrupt, so it can't be told whether it is stacked on %s, and %s can't be %s until it is dealt with; a person closes it at the console (ghostbranch feature close %s), or its record is fixed",
-		others[0], name, name, done, others[0]).WithField("feature").
-		WithDetails(map[string]any{"feature": name, "op": op, "unreadable": others})
+	return nil, contract.New(contract.HasChildren,
+		"%s: %s corrupt, so it can't be told whether %s stacked on %s, and %s can't be %s until %s dealt with; a person closes %s at the console (%s), or %s fixed",
+		unreadableWhat(others), itOrThey(others, "it is", "they are"), itOrThey(others, "it is", "they are"), name, name, done,
+		itOrThey(others, "it is", "they are"), itOrThey(others, "it", "each"), consoleCloses(others),
+		itOrThey(others, "its record is", "their records are")).WithField("feature").
+		WithDetails(map[string]any{"feature": name, "op": op, "children": []string{}, "unreadable": others})
 }
 
 // childrenOf lists the features stacked directly on name, sorted; abandoned

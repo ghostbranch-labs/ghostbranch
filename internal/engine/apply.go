@@ -298,7 +298,7 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 	m.SchemaVersion = feature.SchemaVersion
 	m.Promoted = &feature.Promoted{PublicPR: pr.Number, PlanID: pl.ID, FeatureHead: pl.Fingerprint.FeatureHead,
 		Branch: branch, Base: "main", PublishedHead: P, PatchIDs: ids, Stack: stackOfRecord(m, pr.Number)}
-	mw, err := e.updateMeta(ctx, pc, m, metaSHA)
+	_, mw, err := e.updateMeta(ctx, pc, m, metaSHA)
 	warns = addWarnings(warns, mw...)
 	if err != nil {
 		return res, warns, err

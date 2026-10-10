@@ -252,7 +252,10 @@ func TestSyncMarksAPlainChainedChildNeedsUpdate(t *testing.T) {
 		if mergeCommit {
 			parents = append(parents, aTip)
 		}
-		tree, _ := h.pubGit.TreeOf(h.ctx, aTip)
+		tree, err := h.pubGit.TreeOf(h.ctx, aTip)
+		if err != nil {
+			t.Fatal(err)
+		}
 		merged, err := h.pubGit.CommitTree(h.ctx, tree, parents, "merge a", testutil.Author(60), testutil.Author(60))
 		if err != nil {
 			t.Fatal(err)
@@ -346,6 +349,188 @@ func TestSyncLeavesAParentOpenBesideAnUnreadableRecord(t *testing.T) {
 	for ref, sha := range want {
 		if after[ref] != sha {
 			t.Fatalf("%s is %q, want %s", ref, after[ref], sha)
+		}
+	}
+}
+
+// A parent that moved on after its child forked, then merged without the
+// child being restacked: the child doesn't contain the parent's published
+// head, so sync keeps the child's own fork point (still an ancestor of the
+// parent's head, so forked_at..head is only the child's commits). Its gate
+// then replays only its own commits, and restack --onto main works.
+func TestSyncKeepsAForkPointTheChildStillHas(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.startFeature("a", map[string]string{"a.txt": "a\n"})
+	bHead := h.startOn("b", "a", map[string]string{"b.txt": "b\n"})
+	fork := h.meta("b").ForkedAt
+	testutil.Commit(t, h.shadowGit(), "a", "more a", map[string]string{"a2.txt": "a2\n"})
+	h.gateFeature("a")
+	h.grant(time.Hour)
+	res, err := promote(h, engine.PromoteOptions{Feature: "a", Mode: "squash", Message: "Add a", Yes: true})
+	if err != nil || res.Applied == nil {
+		t.Fatalf("promote a = %+v %v", res, err)
+	}
+	h.eng.Approver = nil
+	h.forge.SetPRMerged(publicName, res.Applied.PublicPR)
+	sres, _ := h.syncOK(engine.SyncOptions{})
+	if len(sres.Closed) != 1 || sres.Closed[0].Name != "a" || !reflect.DeepEqual(sres.Closed[0].Reparented, []string{"b"}) {
+		t.Fatalf("closed = %+v", sres.Closed)
+	}
+	if mb := h.shadowMeta("b"); mb.ParentName() != "main" || mb.ForkedAt != fork {
+		t.Fatalf("b's record = parent %q, forked_at %q; want main, %s", mb.ParentName(), mb.ForkedAt, fork)
+	}
+	h.gateFeature("b")
+	if got := gateSources(h.meta("b")); !reflect.DeepEqual(got, []string{bHead}) {
+		t.Fatalf("b's gate replayed %v, want only b's own commit %s", got, bHead)
+	}
+	rres, _, err := h.eng.FeatureRestack(h.ctx, h.pair, engine.RestackOptions{Feature: "b", Onto: "main"})
+	if err != nil || len(rres.Restacked) != 1 {
+		t.Fatalf("restack b --onto main = %+v %v", rres, err)
+	}
+	bNew := h.head("b")
+	if _, ok := h.fileAt(bNew, "a.txt"); ok {
+		t.Fatal("b still carries a's commit")
+	}
+	if _, ok := h.fileAt(bNew, "b.txt"); !ok {
+		t.Fatal("b lost its own commit")
+	}
+}
+
+// Plain chained PRs: a person merged b's PR into a's public branch, not
+// main. Sync leaves b open, in attention, with a FEATURE_NOT_CLOSED that
+// says so, and touches neither b nor a.
+func TestSyncLeavesAFeatureMergedIntoItsParentsBranchOpen(t *testing.T) {
+	t.Parallel()
+	h := gatedStack(t, "a", "b")
+	h.grant(time.Hour)
+	h.forge.StacksUnavailable = true
+	res, _, err := promoteStack(h, engine.PromoteOptions{Features: []string{"a", "b"}, Mode: "squash", Yes: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.eng.Approver = nil
+	prs := res.Applied.PRs
+	if prs[1].Base != "a" {
+		t.Fatalf("b's PR base = %q, want a", prs[1].Base)
+	}
+	h.forge.SetPRMerged(publicName, prs[1].Number)
+	before := h.shadowRefs()
+	sres, warns := h.syncOK(engine.SyncOptions{})
+	if len(sres.Closed) != 0 {
+		t.Fatalf("closed = %+v", sres.Closed)
+	}
+	ws := warningsFor(warns, contract.FeatureNotClosed)
+	if len(ws) != 1 || ws[0].Details["feature"] != "b" || ws[0].Details["reason"] != "merged_into_parent_branch" ||
+		ws[0].Details["base"] != "a" || !strings.Contains(ws[0].Message, "ghostbranch feature close b") {
+		t.Fatalf("warnings = %+v", warns)
+	}
+	if !reflect.DeepEqual(attentionNames(sres.Attention), []string{"b"}) {
+		t.Fatalf("attention = %v", attentionNames(sres.Attention))
+	}
+	if !reflect.DeepEqual(h.shadowRefs(), before) {
+		t.Fatal("sync changed the shadow repo")
+	}
+}
+
+// A parent whose published head nothing records can't tell its children's
+// fork point: re-parenting them refuses (HAS_CHILDREN, parent_head_unknown)
+// rather than write a record with no fork point.
+func TestReparentRefusesWhenTheParentsHeadIsUnknown(t *testing.T) {
+	t.Parallel()
+	h, _ := publishedStack(t, "a", "b")
+	err := h.eng.ReparentChildrenForTest(h.ctx, h.pair, "a", func(m *feature.Meta) {
+		p := *m.Promoted
+		p.FeatureHead, p.PlanID = "", ""
+		m.Promoted = &p
+	})
+	ce := wantCode(t, err, contract.HasChildren)
+	if ce.Details["reason"] != "parent_head_unknown" || !reflect.DeepEqual(ce.Details["children"], []string{"b"}) {
+		t.Fatalf("details = %v", ce.Details)
+	}
+	if mb := h.shadowMeta("b"); mb.Parent != "a" {
+		t.Fatalf("b's parent is %q", mb.Parent)
+	}
+}
+
+// With several unreadable records, the warning names a console close for
+// each of them.
+func TestSyncNamesEveryUnreadableRecord(t *testing.T) {
+	t.Parallel()
+	h, prs := publishedStack(t, "a", "b", "c")
+	h.forge.SetPRMerged(publicName, prs[0].Number)
+	h.corruptMeta("b")
+	h.corruptMeta("c")
+	res, warns := h.syncOK(engine.SyncOptions{})
+	ws := warningsFor(warns, contract.FeatureNotClosed)
+	if len(res.Closed) != 0 || len(ws) != 1 || !reflect.DeepEqual(ws[0].Details["unreadable"], []string{"b", "c"}) ||
+		!strings.Contains(ws[0].Message, "ghostbranch feature close b; ghostbranch feature close c") {
+		t.Fatalf("closed %+v, warnings %+v", res.Closed, warns)
+	}
+}
+
+// A child whose record a newer Ghostbranch wrote can't be moved onto main:
+// sync leaves its merged parent open (HAS_CHILDREN behind the
+// FEATURE_NOT_CLOSED) and changes nothing.
+func TestSyncLeavesAParentOpenBesideANewerChild(t *testing.T) {
+	t.Parallel()
+	h, prs := publishedStack(t, "a", "b")
+	h.forge.SetPRMerged(publicName, prs[0].Number)
+	h.newerMeta("b")
+	before := h.shadowRefs()
+	res, warns := h.syncOK(engine.SyncOptions{})
+	ws := warningsFor(warns, contract.FeatureNotClosed)
+	if len(res.Closed) != 0 || len(ws) != 1 || ws[0].Details["feature"] != "a" || ws[0].Details["error_code"] != string(contract.HasChildren) {
+		t.Fatalf("closed %+v, warnings %+v", res.Closed, warns)
+	}
+	if !reflect.DeepEqual(h.shadowRefs(), before) {
+		t.Fatal("sync changed the shadow repo")
+	}
+}
+
+// Recording GitHub's restack is leased: a record someone moved meanwhile
+// is left as it is, with SYNC_PUSH_FAILED, and the rest of sync goes on.
+func TestSyncRestackRecordPushFailureWarns(t *testing.T) {
+	t.Parallel()
+	h, prs := publishedStack(t, "a", "b", "c")
+	published := h.shadowMeta("c").Promoted.PublishedHead
+	h.squashMergeBottom(prs)
+	h.moveMetaOnPush("c", 1)
+	res, warns := h.syncOK(engine.SyncOptions{})
+	ws := warningsFor(warns, contract.SyncPushFailed)
+	if len(ws) != 1 || ws[0].Details["branch"] != "refs/ghostbranch/features/c" || !strings.Contains(ws[0].Message, "next sync tries again") {
+		t.Fatalf("warnings = %+v", warns)
+	}
+	if got := h.shadowMeta("c").Promoted.PublishedHead; got != published {
+		t.Fatalf("c's published head became %s", got)
+	}
+	if len(res.Closed) != 1 || res.Closed[0].Name != "a" {
+		t.Fatalf("closed = %+v", res.Closed)
+	}
+}
+
+// A moved stacked branch that can't be compared (its PR's base isn't in
+// the public repo) is skipped with PR_STATE_UNKNOWN, never flagged or
+// recorded.
+func TestSyncSkipsAStackedBranchItCantCompare(t *testing.T) {
+	t.Parallel()
+	h, prs := publishedStack(t, "a", "b", "c")
+	published := h.shadowMeta("c").Promoted.PublishedHead
+	h.squashMergeBottom(prs)
+	h.forge.SetPRBase(publicName, prs[2].Number, "no-such-branch")
+	res, warns := h.syncOK(engine.SyncOptions{})
+	ws := warningsFor(warns, contract.PRStateUnknown)
+	if len(ws) != 1 || ws[0].Details["feature"] != "c" || !strings.Contains(ws[0].Message, "no-such-branch is not in the public repo") ||
+		len(warningsFor(warns, contract.PublicBranchChanged)) != 0 {
+		t.Fatalf("warnings = %+v", warns)
+	}
+	if got := h.shadowMeta("c").Promoted.PublishedHead; got != published {
+		t.Fatalf("c's published head became %s", got)
+	}
+	for _, r := range res.Attention {
+		if r.Name == "c" {
+			t.Fatal("c was put in attention")
 		}
 	}
 }

@@ -8,6 +8,7 @@ import (
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
+	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
 )
 
@@ -138,5 +139,45 @@ func TestStackedGateConflictNamesTheLevelBelow(t *testing.T) {
 	}
 	if res == nil || res.Parent != "b" {
 		t.Fatalf("a gate stopped below names its parent: %+v", res)
+	}
+}
+
+// wait finishes a detached gate with the same stack view as gate: a bottom
+// feature names the features stacked on it.
+func TestWaitOnABottomFeatureNamesItsChildren(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.startFeature("a", map[string]string{"a.txt": "a\n"})
+	h.startOn("b", "a", map[string]string{"b.txt": "b\n"})
+	jres, _, err := h.eng.GateDetached(h.ctx, h.pair, "a")
+	if err != nil || jres.Job == nil {
+		t.Fatalf("detached gate a = %+v %v", jres, err)
+	}
+	res, _, err := h.eng.Wait(h.ctx, h.pair, *jres.Job, engine.WaitOptions{})
+	if err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	validateResult(t, "gate.schema.json", res)
+	if res.Parent != "main" || !reflect.DeepEqual(res.Children, []string{"b"}) || !reflect.DeepEqual(res.Chain, []string{"a"}) {
+		t.Fatalf("wait a: parent %q, children %v, chain %v", res.Parent, res.Children, res.Chain)
+	}
+}
+
+// A fork point that can't be checked (a commit the repo doesn't have)
+// falls back to every commit public main lacks, as a lost one does.
+func TestFeatureShowFallsBackOnAnUncheckableForkPoint(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.startFeature("a", map[string]string{"a.txt": "a\n"})
+	h.startOn("b", "a", map[string]string{"b.txt": "b\n"})
+	h.editRemoteMeta("b", func(m *feature.Meta) { m.ForkedAt = "0123456789abcdef0123456789abcdef01234567" })
+	res, _, err := h.eng.FeatureShow(h.ctx, h.pair, "b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Commits) != 2 {
+		t.Fatalf("feature show b lists %+v, want a's and b's commits", res.Commits)
 	}
 }

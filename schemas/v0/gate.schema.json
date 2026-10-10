@@ -11,7 +11,7 @@
     "feature_head": { "$ref": "common.schema.json#/$defs/sha" },
     "public_main": { "$ref": "common.schema.json#/$defs/sha" },
     "parent": { "description": "the feature the gate stacked on; main for a bottom feature with children (gate and wait); \"\" when it built on public main and nothing is stacked on it", "type": "string" },
-    "base": { "description": "the commit the feature's own commits were replayed onto: public main, or the rebased tip of the features below it", "$ref": "common.schema.json#/$defs/sha" },
+    "base": { "description": "the commit the feature's own commits were replayed onto: public main, or the rebased tip of the features below it; \"\" when a stacked gate stopped before the features below it were built", "$ref": "common.schema.json#/$defs/shaOrEmpty" },
     "overlay": { "$ref": "common.schema.json#/$defs/sha" },
     "candidate": { "$ref": "common.schema.json#/$defs/shaOrEmpty" },
     "published_tree": { "$ref": "common.schema.json#/$defs/shaOrEmpty" },

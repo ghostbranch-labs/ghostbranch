@@ -156,12 +156,13 @@ func (e *Engine) FeatureShow(ctx context.Context, p workspace.Pair, name string)
 		}
 		// Only its own commits: forked_at..head when it records a fork point
 		// (stacked, or moved onto main off a parent), else every commit
-		// public main lacks. A lost fork point falls back to the latter.
+		// public main lacks. A lost fork point, or one that can't be
+		// checked (an unknown commit), falls back to the latter.
 		var sources []string
 		var own bool
 		if m := res.Feature.meta; m != nil {
 			if sources, own, err = ownCommits(ctx, g, *m, head, pm); err != nil {
-				return nil, warns, internalErr(err, "list the feature's commits")
+				own = false
 			}
 		}
 		if !own {

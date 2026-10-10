@@ -78,33 +78,33 @@ func TestPromoteRefusesWhatIsNotAStack(t *testing.T) {
 	t.Parallel()
 	h := gatedStack(t, "a", "b", "c")
 	before := h.publicRefs()
-	refuse := func(list []string, reason, name string) *contract.Error {
+	// refuse fails the test unless promote refuses list with reason, naming
+	// name, and, when want is set, suggesting want as the stack.
+	refuse := func(list []string, reason, name string, want []string) {
 		t.Helper()
 		_, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Features: list, Mode: "squash", PlanOnly: true})
 		ce := wantCode(t, err, contract.NotAStack)
 		if ce.Details["reason"] != reason || ce.Details["feature"] != name {
 			t.Fatalf("promote %v: details = %v, want reason %s naming %s", list, ce.Details, reason, name)
 		}
-		return ce
+		if want != nil && !reflect.DeepEqual(ce.Details["want"], want) {
+			t.Fatalf("promote %v (%s): want = %v, expected %v", list, reason, ce.Details["want"], want)
+		}
 	}
 	// A gap: b is missing between a and c.
-	if ce := refuse([]string{"a", "c"}, "gap", "c"); !reflect.DeepEqual(ce.Details["want"], []string{"a", "b", "c"}) {
-		t.Fatalf("gap: want = %v", ce.Details["want"])
-	}
+	refuse([]string{"a", "c"}, "gap", "c", []string{"a", "b", "c"})
 	// Not bottom first.
-	refuse([]string{"b", "a"}, "order", "b")
-	refuse([]string{"a", "b", "a"}, "duplicate", "a")
+	refuse([]string{"b", "a"}, "order", "b", nil)
+	refuse([]string{"a", "b", "a"}, "duplicate", "a", nil)
 	// The bottom's parent is neither main nor public, and isn't listed.
-	if ce := refuse([]string{"b", "c"}, "parent_not_public", "b"); !reflect.DeepEqual(ce.Details["want"], []string{"a", "b", "c"}) {
-		t.Fatalf("parent_not_public: want = %v", ce.Details["want"])
-	}
-	refuse([]string{"c"}, "parent_not_public", "c")
+	refuse([]string{"b", "c"}, "parent_not_public", "b", []string{"a", "b", "c"})
+	refuse([]string{"c"}, "parent_not_public", "c", nil)
 	// A stale gate anywhere in the chain: a moves, so a's gate is stale ...
 	testutil.Commit(t, h.shadowGit(), "a", "more a", map[string]string{"a2.txt": "a2\n"})
-	refuse([]string{"a", "b", "c"}, "stale_gate", "a")
+	refuse([]string{"a", "b", "c"}, "stale_gate", "a", nil)
 	// ... and once a is gated again, b's gate no longer builds on a as it is.
 	h.gateFeature("a")
-	refuse([]string{"a", "b", "c"}, "stale_gate", "b")
+	refuse([]string{"a", "b", "c"}, "stale_gate", "b", nil)
 
 	if !reflect.DeepEqual(h.publicRefs(), before) {
 		t.Fatal("a refused stack promote changed the public repo")
@@ -620,5 +620,34 @@ func TestApplyRefusesAPlanRefAboveThePlansCommit(t *testing.T) {
 	_, _, err = h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: res.Plan.ID, Yes: true})
 	if ce := wantCode(t, err, contract.PlanStale); !reflect.DeepEqual(ce.Details["moved"], []string{"publish.commit"}) {
 		t.Fatalf("details = %v", ce.Details)
+	}
+}
+
+// A native stack grows only at its top: a second branch on a parent that
+// already has one stacked above it stays a chained PR, and promote says
+// why instead of blaming the repo for having no native stacks.
+func TestPromoteOnAParentBelowTheTopOfItsStackSaysWhy(t *testing.T) {
+	t.Parallel()
+	h := gatedStack(t, "a", "b")
+	h.grant(time.Hour)
+	res, _, err := promoteStack(h, engine.PromoteOptions{Features: []string{"a", "b"}, Mode: "squash", Yes: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.startOn("c", "a", map[string]string{"c.txt": "c\n"})
+	h.gateFeature("c")
+	var progress strings.Builder
+	h.eng.Progress = &progress
+	resC, _, err := promoteStack(h, engine.PromoteOptions{Feature: "c", Mode: "squash", Message: "Add c", Yes: true})
+	if err != nil || resC.Applied == nil || resC.Applied.StackNumber != nil {
+		t.Fatalf("promote c = %+v %v", resC, err)
+	}
+	a, b := res.Applied.PRs[0].Number, res.Applied.PRs[1].Number
+	if want := fmt.Sprintf("PR #%d isn't the top of native stack #%d (#%d is)", a, *res.Applied.StackNumber, b); !strings.Contains(progress.String(), want) ||
+		strings.Contains(progress.String(), "no native stacked PRs") {
+		t.Fatalf("progress = %q, want %q", progress.String(), want)
+	}
+	if st := h.forge.Stacks(publicName); len(st) != 1 || len(st[0].PRs) != 2 {
+		t.Fatalf("native stacks = %+v", st)
 	}
 }

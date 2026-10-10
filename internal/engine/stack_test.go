@@ -482,13 +482,13 @@ func TestCloseAndFoldRefuseBesideAnUnreadableRecord(t *testing.T) {
 	h.corruptMeta("feat-c")
 	before := h.shadowRefs()
 	_, _, err := h.eng.FeatureClose(h.ctx, h.pair, "feat-a")
-	ce := wantCode(t, err, contract.Internal)
+	ce := wantCode(t, err, contract.HasChildren)
 	if ce.Field != "feature" || ce.Details["op"] != "close" || !reflect.DeepEqual(ce.Details["unreadable"], []string{"feat-c"}) ||
 		!strings.Contains(ce.Message, "ghostbranch feature close feat-c") || len(h.approver.asked) != 0 {
 		t.Fatalf("close = %+v, console asked %d time(s)", ce, len(h.approver.asked))
 	}
 	_, _, err = h.eng.FeatureFold(h.ctx, h.pair, engine.FoldOptions{Feature: "feat-b"})
-	if ce := wantCode(t, err, contract.Internal); ce.Details["op"] != "fold" || !reflect.DeepEqual(ce.Details["unreadable"], []string{"feat-c"}) {
+	if ce := wantCode(t, err, contract.HasChildren); ce.Details["op"] != "fold" || !reflect.DeepEqual(ce.Details["unreadable"], []string{"feat-c"}) {
 		t.Fatalf("fold = %+v", ce)
 	}
 	if !reflect.DeepEqual(h.shadowRefs(), before) {
@@ -501,5 +501,21 @@ func TestCloseAndFoldRefuseBesideAnUnreadableRecord(t *testing.T) {
 	}
 	if _, _, err := h.eng.FeatureFold(h.ctx, h.pair, engine.FoldOptions{Feature: "feat-b"}); err != nil {
 		t.Fatalf("fold after feat-c closed: %v", err)
+	}
+}
+
+// Fold moves the parent's branch: a parent whose record a newer
+// Ghostbranch wrote is refused (UPGRADE_NEEDED) before anything moves.
+func TestFoldRefusesAParentWithANewerRecord(t *testing.T) {
+	t.Parallel()
+	h := threeDeep(t)
+	h.newerMeta("feat-a")
+	before := h.shadowRefs()
+	_, _, err := h.eng.FeatureFold(h.ctx, h.pair, engine.FoldOptions{Feature: "feat-b"})
+	if ce := wantCode(t, err, contract.UpgradeNeeded); ce.Details["feature"] != "feat-a" {
+		t.Fatalf("fold = %+v", ce)
+	}
+	if !reflect.DeepEqual(h.shadowRefs(), before) {
+		t.Fatal("a refused fold changed the shadow repo")
 	}
 }

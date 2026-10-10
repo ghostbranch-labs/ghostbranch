@@ -266,11 +266,11 @@ func (e *Engine) closeMerged(ctx context.Context, pc *pairCtx, p *workspace.Pair
 	// fold refuse likewise), so none closes until it is dealt with.
 	unread := unreadableReports(rs)
 	for _, r := range rs {
-		closable := ClosableWithoutConsole(r)
+		closable := ClosableWithoutConsole(r) && !mergedIntoParent(r)
 		if !r.Abandoned && !closable {
 			res.ActiveFeatures++
 		}
-		attention := r.flagged || (closable && len(unread) > 0)
+		attention := r.flagged || (closable && len(unread) > 0) || mergedIntoParent(r)
 		switch r.State {
 		// A merged feature that isn't closable has a record from a newer
 		// Ghostbranch: RECORD_NEWER says why it waits for a person.
@@ -284,6 +284,10 @@ func (e *Engine) closeMerged(ctx context.Context, pc *pairCtx, p *workspace.Pair
 	for _, i := range bottomUp(rs) {
 		r := rs[i]
 		if !ClosableWithoutConsole(r) {
+			continue
+		}
+		if mergedIntoParent(r) {
+			warns = addWarnings(warns, mergedIntoParentWarning(r))
 			continue
 		}
 		if len(unread) > 0 {
@@ -337,6 +341,31 @@ func (e *Engine) closeMerged(ctx context.Context, pc *pairCtx, p *workspace.Pair
 		}
 	}
 	return warns
+}
+
+// mergedIntoParent is whether r is a plain chained PR (no native stack)
+// that merged into a base other than main: a person merged it into the
+// public branch of the feature below. Its changes aren't in main yet, so
+// sync leaves it open, and doesn't move its children, until a person has
+// checked that branch and closes it (mergedIntoParentWarning).
+func mergedIntoParent(r FeatureReport) bool {
+	if r.PRState != prMerged || r.prBase == "" || r.prBase == feature.MainParent || r.meta == nil {
+		return false
+	}
+	return r.meta.Promoted == nil || r.meta.Promoted.Stack == 0
+}
+
+// mergedIntoParentWarning is the FEATURE_NOT_CLOSED warning for a feature
+// mergedIntoParent leaves open.
+func mergedIntoParentWarning(r FeatureReport) contract.Warning {
+	pr := 0
+	if r.PublicPR != nil {
+		pr = *r.PublicPR
+	}
+	return contract.Warning{Code: contract.FeatureNotClosed,
+		Message: fmt.Sprintf("sync left merged feature %s open: its PR #%d merged into %s, not main, so its changes reach main only with %s's PR; a person checks public branch %s, then closes %s (ghostbranch feature close %s)",
+			r.Name, pr, r.prBase, r.prBase, r.prBase, r.Name, r.Name),
+		Details: map[string]any{"feature": r.Name, "reason": "merged_into_parent_branch", "base": r.prBase}}
 }
 
 // notClosed is the FEATURE_NOT_CLOSED warning for a merged feature sync
