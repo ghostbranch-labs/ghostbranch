@@ -315,6 +315,21 @@ func updatePlanJSON(fields string) string {
 	return strings.Replace(planJSON(""), `"dropped_empty":[]}`, `"dropped_empty":[]`+fields+`}`, 1)
 }
 
+// gateResultJSON is gate data, a first publish's, with extra fields added.
+func gateResultJSON(extra string) string {
+	g := `{"feature":"a","feature_head":"SHA","public_main":"SHA","parent":"","base":"SHA","overlay":"SHA","candidate":"SHA",` +
+		`"published_tree":"SHA","scanned_as":"preserve","commits":[],"checks":"passed","failed_checks":[],"leak":"clean","findings":[],` +
+		`"waived":[],"repo_guards":null,"shadow_pr":3,"job":"gate/a/0123456789ab","reused":false,"preview":null` + extra + `}`
+	return strings.ReplaceAll(g, "SHA", sha40)
+}
+
+// gateRecordJSON is a feature record whose gate has extra fields added.
+func gateRecordJSON(extra string) string {
+	g := `{"feature_head":"SHA","public_main":"SHA","overlay":"SHA","candidate":"SHA","published_tree":"SHA",` +
+		`"commits":[],"checks":"passed","leak":"clean","at":"2026-10-10T12:00:00Z"` + extra + `}`
+	return strings.Replace(recordJSON(""), `"gate":null`, `"gate":`+strings.ReplaceAll(g, "SHA", sha40), 1)
+}
+
 // The 6.1a-2 fields: what Tasks 3 to 8 emit, and what they must never emit.
 // All are optional, so plans and reports from before 0.12, and every first
 // publish, still validate.
@@ -342,6 +357,17 @@ func TestSubProject61a2Schemas(t *testing.T) {
 				`{"feature":"b","base":"a","number":0,"url":""}],"stack_number":null`), // a new PR above an updated one
 		},
 		"apply.schema.json": {applyJSON(`,"prs":[{"feature":"a","base":"main","number":14,"url":"u","update":true,"style":"append"}],"stack_number":null`)},
+		// A gate of an open PR's update (Task 4), as gate data and as the record.
+		"gate.schema.json": {
+			gateResultJSON(""), // a first publish
+			gateResultJSON(`,"update":{"pr":14,"head":"` + sha40 + `","base":"main","style":"append"}`),
+			gateResultJSON(`,"update":{"pr":14,"head":"` + sha40 + `","base":"main","style":"replace","replace_reason":"rebase"}`),
+		},
+		"feature.schema.json": {
+			gateRecordJSON(""),
+			gateRecordJSON(`,"base":"` + sha40 + `","update":{"pr":14,"head":"` + sha40 + `","base":"main","style":"append"}`),
+			gateRecordJSON(`,"update":{"pr":14,"head":"` + sha40 + `","base":"release","style":"replace","replace_reason":"base_changed"}`),
+		},
 		"feature-report.schema.json": {
 			reportJSON("pr_behind", `,"parent":"main","children":[],"stack":null,"pr":{"behind":2,"foreign":0}`),
 			reportJSON("published", `,"parent":"main","children":[],"stack":null,"pr":{"behind":0,"foreign":1}`),
@@ -374,6 +400,14 @@ func TestSubProject61a2Schemas(t *testing.T) {
 		{"plan.schema.json", emptyTitle("")}, // a first publish needs a title
 		{"plan.schema.json", planJSON(`,"prs":[{"feature":"a","base":"main","number":14,"url":"u","style":"append"}]`)},
 		{"plan.schema.json", planJSON(`,"prs":[{"feature":"a","base":"main","number":14,"url":"u","update":true}]`)},
+		{"gate.schema.json", gateResultJSON(`,"update":{"pr":14,"head":"` + sha40 + `","base":"main","style":"replace"}`)},                          // replace without a reason
+		{"gate.schema.json", gateResultJSON(`,"update":{"pr":14,"head":"` + sha40 + `","base":"main","style":"append","replace_reason":"rebase"}`)}, // append with a reason
+		{"gate.schema.json", gateResultJSON(`,"update":{"pr":14,"head":"` + sha40 + `","base":"main","style":"merge"}`)},                            // unknown style
+		{"gate.schema.json", gateResultJSON(`,"update":{"pr":14,"head":"abc","base":"main","style":"append"}`)},                                     // not a sha
+		{"gate.schema.json", gateResultJSON(`,"update":{"pr":0,"head":"` + sha40 + `","base":"main","style":"append"}`)},                            // no PR
+		{"feature.schema.json", gateRecordJSON(`,"update":{"pr":14,"head":"` + sha40 + `","base":"main","style":"replace","replace_reason":"other"}`)},
+		{"feature.schema.json", gateRecordJSON(`,"update":{"pr":14,"head":"` + sha40 + `","style":"append"}`)}, // no base branch
+		{"feature.schema.json", gateRecordJSON(`,"update":{"pr":14,"head":"` + sha40 + `","base":"main","style":"replace"}`)},
 		{"feature-report.schema.json", reportJSON("pr_behind", `,"parent":"main","children":[],"stack":null,"pr":{"behind":-1,"foreign":0}`)},
 		{"feature-report.schema.json", reportJSON("pr_behind", `,"parent":"main","children":[],"stack":null,"pr":{"behind":1}`)},
 		{"feature-report.schema.json", reportJSON("pr_behind", `,"parent":"main","children":[],"stack":null,"pr":{"behind":1,"foreign":0,"x":1}`)},

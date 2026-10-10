@@ -11,7 +11,7 @@
     "feature_head": { "$ref": "common.schema.json#/$defs/sha" },
     "public_main": { "$ref": "common.schema.json#/$defs/sha" },
     "parent": { "description": "the feature the gate stacked on; main for a bottom feature with children (gate and wait); \"\" when it built on public main and nothing is stacked on it", "type": "string" },
-    "base": { "description": "the commit the feature's own commits were replayed onto: public main, or the rebased tip of the features below it; \"\" when a stacked gate stopped before the features below it were built", "$ref": "common.schema.json#/$defs/shaOrEmpty" },
+    "base": { "description": "the commit the feature's own commits were replayed onto: public main, the rebased tip of the features below it, or the open PR's head for an append (update.head); \"\" when a stacked gate stopped before the features below it were built", "$ref": "common.schema.json#/$defs/shaOrEmpty" },
     "overlay": { "$ref": "common.schema.json#/$defs/sha" },
     "candidate": { "$ref": "common.schema.json#/$defs/shaOrEmpty" },
     "published_tree": { "$ref": "common.schema.json#/$defs/shaOrEmpty" },
@@ -44,6 +44,9 @@
     "update": {
       "description": "how the gate built the update of the feature's open PR (append onto its head, or replace); absent for a first publish",
       "type": "object", "additionalProperties": false, "required": ["pr", "head", "base", "style"],
+      "if": { "properties": { "style": { "const": "replace" } } },
+      "then": { "required": ["replace_reason"] },
+      "else": { "not": { "required": ["replace_reason"] } },
       "properties": {
         "pr": { "type": "integer", "minimum": 1 },
         "head": { "$ref": "common.schema.json#/$defs/sha" },

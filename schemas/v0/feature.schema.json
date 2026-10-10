@@ -49,6 +49,9 @@
             "update": {
               "description": "how the gate built the update of the feature's open PR; absent for a first publish. An append gate's base is head",
               "type": "object", "additionalProperties": false, "required": ["pr", "head", "base", "style"],
+              "if": { "properties": { "style": { "const": "replace" } } },
+              "then": { "required": ["replace_reason"] },
+              "else": { "not": { "required": ["replace_reason"] } },
               "properties": {
                 "pr": { "type": "integer", "minimum": 1 },
                 "head": { "$ref": "common.schema.json#/$defs/sha" },
