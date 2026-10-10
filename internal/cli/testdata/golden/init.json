@@ -39,7 +39,9 @@
         }
       ]
     },
-    "preview": null
+    "preview": null,
+    "guard_installed": false,
+    "doctor": null
   },
   "warnings": [
     {

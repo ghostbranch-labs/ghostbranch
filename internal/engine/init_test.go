@@ -453,3 +453,31 @@ func TestAdoptFastForwardIsLeased(t *testing.T) {
 		t.Fatal("a failed adopt registered the pair")
 	}
 }
+
+func TestInitWithAScheduleTurnsOnScheduledSync(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	if _, _, err := h.eng.Init(h.ctx, engine.InitOptions{Public: publicName, Schedule: engine.DefaultSyncSchedule}); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := h.status()
+	if !st.ScheduledSync || st.OverlayStatus != "current" {
+		t.Fatalf("status %+v", st)
+	}
+}
+
+func TestInitRefusesAScheduleTheOverlayContradicts(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	pushes := len(h.pushes)
+	_, _, err := h.eng.Init(h.ctx, engine.InitOptions{Public: publicName, Schedule: engine.DefaultSyncSchedule})
+	ce := wantCode(t, err, contract.BadFlag)
+	if ce.Field != "sync" || !strings.Contains(ce.Message, "ghostbranch upgrade") || len(h.pushes) != pushes {
+		t.Fatalf("%+v; pushes %d -> %d", ce, pushes, len(h.pushes))
+	}
+	// The same schedule as the overlay's resumes as before.
+	if _, _, err := h.eng.Init(h.ctx, engine.InitOptions{Public: publicName, Schedule: config.ScheduleOff}); err != nil {
+		t.Fatal(err)
+	}
+}

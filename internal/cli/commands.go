@@ -8,7 +8,6 @@ import (
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
-	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
 func (a *app) root() *cobra.Command {
@@ -43,33 +42,50 @@ Coding agents: run "ghostbranch guide" first.`,
 }
 
 func (a *app) initCmd() *cobra.Command {
-	var o engine.InitOptions
-	var yes bool
+	var f initFlags
+	var guardOn, guardOff, syncOn, syncOff bool
 	c := &cobra.Command{
-		Use:   "init <owner/repo>",
+		Use:   "init [<owner/repo>]",
 		Short: "Create or adopt the private shadow repo for a public repo",
 		Long: `init creates <owner/repo>-shadow as a private repo (or adopts an existing one with --adopt),
 mirrors the public repo's branches and tags into it, and creates the "ghostbranch" overlay branch,
 which holds .ghostbranch.yml and is the shadow repo's default branch. It never writes to the public
-repo. Running it again resumes a partial setup.`,
-		Args: cobra.ExactArgs(1),
+repo. Running it again resumes a partial setup.
+Run by a person at a terminal with an answer missing, it asks: the public repo (from origin), a
+login if there is none, the shadow repo, the push guard (in a clone of the public repo) and
+scheduled sync. It shows the --plan preview, then runs init, guard install and doctor, and ends
+with how to start a first feature. Flags answer the questions; --json, --non-interactive and --yes
+never ask.`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			e, err := a.engine(cmd.Context())
-			if err != nil {
+			var err error
+			if f.guard, err = onOff("guard", guardOn, guardOff); err != nil {
+				a.ran = true
 				return err
 			}
-			o.Public = args[0]
-			res, w, err := e.Init(cmd.Context(), o)
-			if res != nil {
-				a.pairFull = workspace.Pair{Public: res.Public, Shadow: res.Shadow}
+			if f.sync, err = onOff("sync", syncOn, syncOff); err != nil {
+				a.ran = true
+				return err
 			}
-			return done(a, res, w, err)
+			if a.wantsGuide(args, f) {
+				return a.guidedInit(cmd.Context(), args, f)
+			}
+			if len(args) == 0 {
+				a.ran = true
+				return contract.New(contract.BadFlag, "init needs the public repo: ghostbranch init <owner/repo>").WithField("public")
+			}
+			return a.plainInit(cmd.Context(), args[0], f)
 		},
 	}
-	c.Flags().StringVar(&o.Shadow, "shadow", "", "shadow repo name (default <owner/repo>-shadow)")
-	c.Flags().BoolVar(&o.Adopt, "adopt", false, "take over an existing, empty or mirror-only, private repo")
-	c.Flags().BoolVar(&yes, "yes", false, "accepted for consistency; init never asks")
-	c.Flags().BoolVar(&a.dryRun, "plan", false, "preview exactly what would change, and change nothing (same as --dry-run)")
+	fl := c.Flags()
+	fl.StringVar(&f.shadow, "shadow", "", "shadow repo name (default <owner/repo>-shadow)")
+	fl.BoolVar(&f.adopt, "adopt", false, "take over an existing, empty or mirror-only, private repo")
+	fl.BoolVar(&f.yes, "yes", false, "never ask: use the flags given and the defaults")
+	fl.BoolVar(&a.dryRun, "plan", false, "preview exactly what would change, and change nothing (same as --dry-run)")
+	fl.BoolVar(&guardOn, "guard", false, "install the push guard in this checkout, a clone of the public repo, after init")
+	fl.BoolVar(&guardOff, "no-guard", false, "don't install the push guard, and don't ask")
+	fl.BoolVar(&syncOn, "sync", false, `turn on scheduled sync in the new overlay (sync.schedule "23 */6 * * *", about 120 Actions minutes a month)`)
+	fl.BoolVar(&syncOff, "no-sync", false, "leave scheduled sync off, and don't ask")
 	return c
 }
 

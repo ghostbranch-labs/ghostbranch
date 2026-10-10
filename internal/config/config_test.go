@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"bytes"
 	"reflect"
 	"strings"
 	"testing"
@@ -403,5 +404,16 @@ func TestAScalarSyncOrCIIsAClearError(t *testing.T) {
 		if ce == nil || ce.Code != contract.ConfigInvalid || ce.Field != want.field || ce.Message != want.msg || ce.Details["unknown_key"] != nil {
 			t.Errorf("%q: got %+v", extra, ce)
 		}
+	}
+}
+
+func TestRenderScheduleParses(t *testing.T) {
+	t.Parallel()
+	if !bytes.Equal(config.Render("acme/widget", "acme/widget-shadow"), config.RenderSchedule("acme/widget", "acme/widget-shadow", config.ScheduleOff)) {
+		t.Fatal("Render changed")
+	}
+	cfg, _, err := config.Parse(config.RenderSchedule("acme/widget", "acme/widget-shadow", "23 */6 * * *"))
+	if err != nil || cfg.Sync.Schedule != "23 */6 * * *" {
+		t.Fatalf("%+v %v", cfg.Sync, err)
 	}
 }

@@ -14,7 +14,9 @@
     "overlay_created": false,
     "default_branch_set": false,
     "audit": null,
-    "preview": null
+    "preview": null,
+    "guard_installed": false,
+    "doctor": null
   },
   "warnings": [],
   "next": [

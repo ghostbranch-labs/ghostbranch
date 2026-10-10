@@ -144,9 +144,8 @@ func TestSubProject61Schemas(t *testing.T) {
 	t.Parallel()
 	for name, raw := range map[string][]string{
 		"init.schema.json": {
-			`{` + initBase + `}`,
-			`{` + initBase + `,"guard_installed":true,"doctor":{"ok":5,"warn":0,"fail":1,"skipped":0,"failed":["guard"]}}`,
 			`{` + initBase + `,"guard_installed":false,"doctor":null}`,
+			`{` + initBase + `,"guard_installed":true,"doctor":{"ok":5,"warn":0,"fail":1,"skipped":0,"failed":["guard"]}}`,
 		},
 		"agents-status.schema.json": {
 			`{"pair":"acme/widget","grants":[],"token_can_publish":"false","token":{"source":"GHOSTBRANCH_TOKEN","http_status":403},"token_kind":"fine-grained"}`,
@@ -167,4 +166,7 @@ func TestSubProject61Schemas(t *testing.T) {
 	} {
 		schemaRejects(t, name, raw)
 	}
+	// guard_installed and doctor are always present: doctor is null unless
+	// a guided init ran it.
+	schemaRejects(t, "init.schema.json", `{`+initBase+`}`)
 }

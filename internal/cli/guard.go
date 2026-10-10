@@ -66,28 +66,38 @@ func (a *app) guardInstallCmd() *cobra.Command {
 		Short: "Install the pre-push guard in this checkout",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			co, ws, err := a.here(cmd.Context())
+			res, err := a.installGuard(cmd.Context())
 			if err != nil {
 				return err
 			}
-			h, err := guard.PublicRemotes(cmd.Context(), co, ws)
-			if err != nil {
-				return err
-			}
-			bin, err := a.env.Executable()
-			if err != nil {
-				return contract.Wrap(contract.Internal, err, "find this binary's path")
-			}
-			h.Binary = filepath.ToSlash(bin)
-			res, err := guard.Install(cmd.Context(), co, h, a.dryRun)
-			if err != nil {
-				return err
-			}
-			return done(a, &res, nil, nil)
+			return done(a, res, nil, nil)
 		},
 	}
 	c.Flags().BoolVar(&a.dryRun, "plan", false, "show what would change, and change nothing")
 	return c
+}
+
+// installGuard installs the guard in the current checkout, as guard
+// install does.
+func (a *app) installGuard(ctx context.Context) (*guard.Result, error) {
+	co, ws, err := a.here(ctx)
+	if err != nil {
+		return nil, err
+	}
+	h, err := guard.PublicRemotes(ctx, co, ws)
+	if err != nil {
+		return nil, err
+	}
+	bin, err := a.env.Executable()
+	if err != nil {
+		return nil, contract.Wrap(contract.Internal, err, "find this binary's path")
+	}
+	h.Binary = filepath.ToSlash(bin)
+	res, err := guard.Install(ctx, co, h, a.dryRun)
+	if err != nil {
+		return nil, err
+	}
+	return &res, nil
 }
 
 func (a *app) guardUninstallCmd() *cobra.Command {

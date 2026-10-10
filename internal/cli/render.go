@@ -123,6 +123,20 @@ func human(r any) string {
 		if v.Audit != nil {
 			auditText(&b, v.Audit)
 		}
+		if v.GuardInstalled {
+			b.WriteString("  the push guard is installed in this checkout\n")
+		}
+		if v.Doctor != nil {
+			fmt.Fprintf(&b, "Doctor: %d ok, %d warning(s), %d failed, %d skipped\n", v.Doctor.OK, v.Doctor.Warn, v.Doctor.Fail, v.Doctor.Skipped)
+			for _, c := range v.DoctorChecks {
+				if c.Status != engine.DoctorOK {
+					doctorLine(&b, c)
+				}
+			}
+		}
+		if v.Guided && v.Ready {
+			b.WriteString(walkthrough)
+		}
 	case *engine.AuditResult:
 		auditText(&b, v)
 	case *engine.UpgradeResult:
@@ -642,3 +656,13 @@ func doctorLine(b *strings.Builder, c engine.DoctorCheck) {
 		fmt.Fprintf(b, "    fix: %s\n", c.Fix)
 	}
 }
+
+// walkthrough ends a guided init: the first feature, and agents' tokens.
+const walkthrough = `
+Your first feature:
+  1. ghostbranch feature start <name>   creates the branch in the shadow repo; commit and push to it there
+  2. ghostbranch gate <name>            rebases on public main, scans for leaks and runs CI
+  3. ghostbranch promote <name>         publishes it to the public repo as a PR, once you confirm
+Coding agents: give each agent its own token that reaches only the shadow repo, as GHOSTBRANCH_TOKEN
+in its environment, never your login. See "Tokens" in ghostbranch guide.
+`

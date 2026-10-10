@@ -33,6 +33,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/grant"
 	"github.com/ghostbranch-labs/ghostbranch/internal/keychain"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
+	"github.com/ghostbranch-labs/ghostbranch/internal/prompt"
 	"github.com/ghostbranch-labs/ghostbranch/internal/waiver"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
@@ -51,11 +52,15 @@ type Env struct {
 	ConsoleUsable bool
 	// OpenConsole opens the console device for the approval code.
 	OpenConsole func() (io.ReadWriteCloser, error)
-	Now         func() time.Time
-	Sleep       func(context.Context, time.Duration) error
-	Rand        io.Reader
-	NewForge    func(token string) (forge.Forge, error)
-	GHToken     func() (string, error)
+	// Asker opens the console for guided init's questions: the console
+	// device, never stdin. DefaultEnv's is prompt.OnConsole over
+	// ConsoleUsable and OpenConsole.
+	Asker    func() (prompt.Asker, error)
+	Now      func() time.Time
+	Sleep    func(context.Context, time.Duration) error
+	Rand     io.Reader
+	NewForge func(token string) (forge.Forge, error)
+	GHToken  func() (string, error)
 	// Keychain holds the stored login. nil means no login is consulted or
 	// stored; tests use keychain.NewFake().
 	Keychain keychain.Store
@@ -99,7 +104,7 @@ type Env struct {
 
 // DefaultEnv is the real process environment.
 func DefaultEnv() Env {
-	return Env{
+	env := Env{
 		Stdout: os.Stdout, Stderr: os.Stderr, Stdin: os.Stdin, Getenv: os.Getenv, UserHome: os.UserHomeDir,
 		ConsoleUsable: console.Usable(os.Stdin, os.Stderr), OpenConsole: console.Open,
 		Now: time.Now, Sleep: sleepCtx, Rand: rand.Reader,
@@ -125,6 +130,8 @@ func DefaultEnv() Env {
 		GitVersion:   gitx.Version,
 		Build:        buildInfo,
 	}
+	env.Asker = func() (prompt.Asker, error) { return prompt.OnConsole(env.ConsoleUsable, env.OpenConsole) }
+	return env
 }
 
 type app struct {
