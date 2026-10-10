@@ -24,6 +24,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/auth"
+	"github.com/ghostbranch-labs/ghostbranch/internal/cli/style"
 	"github.com/ghostbranch-labs/ghostbranch/internal/console"
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
@@ -100,6 +101,23 @@ type Env struct {
 	// "(unknown)" for both.
 	GitVersion func(context.Context) (string, error)
 	Build      func() (version, commit string)
+	// StdoutColor and StderrColor say each stream is a terminal that takes
+	// ANSI colour and the environment allows it (NO_COLOR, TERM=dumb);
+	// DefaultEnv sets them, tests leave them false. The app also drops
+	// colour for --json and --no-color. TrueColor picks 24-bit colours.
+	StdoutColor, StderrColor, TrueColor bool
+}
+
+// colorAllowed is the environment's say on colour: NO_COLOR set to any
+// non-empty value, or TERM=dumb, turns it off.
+func colorAllowed(getenv func(string) string) bool {
+	return getenv("NO_COLOR") == "" && getenv("TERM") != "dumb"
+}
+
+// trueColorTerm is true when COLORTERM promises 24-bit colour.
+func trueColorTerm(getenv func(string) string) bool {
+	v := getenv("COLORTERM")
+	return v == "truecolor" || v == "24bit"
 }
 
 // DefaultEnv is the real process environment.
@@ -130,6 +148,11 @@ func DefaultEnv() Env {
 		GitVersion:   gitx.Version,
 		Build:        buildInfo,
 	}
+	if colorAllowed(env.Getenv) {
+		env.StdoutColor = console.ColorCapable(os.Stdout)
+		env.StderrColor = console.ColorCapable(os.Stderr)
+		env.TrueColor = trueColorTerm(env.Getenv)
+	}
 	env.Asker = func() (prompt.Asker, error) { return prompt.OnConsole(env.ConsoleUsable, env.OpenConsole) }
 	return env
 }
@@ -137,6 +160,7 @@ func DefaultEnv() Env {
 type app struct {
 	env            Env
 	jsonOut        bool
+	noColor        bool
 	ndjson         bool // wait --json: events stream first, so the envelope is one line too
 	nonInteractive bool
 	dryRun         bool
@@ -200,6 +224,14 @@ func Run(args []string, env Env) int {
 	return a.render(err)
 }
 
+// styler is the colour for one stream, given whether Env says the stream
+// takes it. Human output only: --json, --no-color, NO_COLOR and TERM=dumb
+// each turn it off, so no escape byte reaches JSON.
+func (a *app) styler(streamColor bool) style.Styler {
+	on := streamColor && !a.jsonOut && !a.noColor && colorAllowed(a.env.Getenv)
+	return style.New(on, a.env.TrueColor)
+}
+
 // asInterrupted makes an error that came back after Ctrl-C an INTERRUPTED,
 // so every command reports a cancel the same way. It keeps the error's
 // details and adds details.error_code, the code the cancel turned into.
@@ -252,18 +284,20 @@ func (a *app) render(err error) int {
 		_ = enc.Encode(env)
 		return env.ExitCode
 	}
+	outSt := a.styler(a.env.StdoutColor)
+	errSt := a.styler(a.env.StderrColor)
 	for _, w := range a.warnings {
-		_, _ = fmt.Fprintf(a.env.Stderr, "warning: %s\n", w.Message)
+		_, _ = fmt.Fprintf(a.env.Stderr, "%s %s\n", errSt.Warn("warning:"), w.Message)
 	}
 	if a.result != nil {
-		_, _ = fmt.Fprint(a.env.Stdout, human(a.result))
+		_, _ = fmt.Fprint(a.env.Stdout, human(a.result, outSt))
 	}
 	if env.Error != nil {
-		_, _ = fmt.Fprintf(a.env.Stderr, "error: %s [%s]\n", env.Error.Message, env.Error.Code)
+		_, _ = fmt.Fprintf(a.env.Stderr, "%s %s [%s]\n", errSt.Fail("error:"), env.Error.Message, env.Error.Code)
 		printSteps(a.env.Stderr, env.Error)
-		printNext(a.env.Stderr, next)
+		printNext(a.env.Stderr, next, errSt)
 	} else {
-		printNext(a.env.Stdout, next)
+		printNext(a.env.Stdout, next, outSt)
 	}
 	return env.ExitCode
 }
@@ -307,11 +341,11 @@ func printSteps(w io.Writer, e *contract.ErrorBody) {
 	}
 }
 
-func printNext(w io.Writer, next []contract.Next) {
+func printNext(w io.Writer, next []contract.Next, st style.Styler) {
 	if len(next) == 0 {
 		return
 	}
-	_, _ = fmt.Fprintln(w, "Next:")
+	_, _ = fmt.Fprintln(w, st.Bold("Next:"))
 	for _, n := range next {
 		line := shellJoin(n.Command)
 		for _, in := range n.NeedsInput {
@@ -325,7 +359,7 @@ func printNext(w io.Writer, next []contract.Next) {
 		if n.NeedsHuman {
 			who = " (a person must run this)"
 		}
-		_, _ = fmt.Fprintf(w, "  %s%s\n    %s\n", line, who, n.Why)
+		_, _ = fmt.Fprintf(w, "  %s\n    %s\n", st.Bold(line+who), st.Dim(n.Why))
 	}
 }
 

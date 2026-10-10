@@ -10,6 +10,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/ghostbranch-labs/ghostbranch/internal/cli/style"
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
@@ -55,7 +56,7 @@ func previewText(b *strings.Builder, p *preview.Preview) {
 }
 
 // human renders a result for people. It never prints secret values.
-func human(r any) string {
+func human(r any, st style.Styler) string {
 	var b strings.Builder
 	switch v := r.(type) {
 	case *guide.Printed:
@@ -68,7 +69,7 @@ func human(r any) string {
 		fmt.Fprintf(&b, "Skill for %s %s: %s\n", v.Target, v.Action, v.Path)
 	case *engine.DoctorResult:
 		for _, c := range v.Checks {
-			doctorLine(&b, c)
+			doctorLine(&b, c, st)
 		}
 	case *guard.Result:
 		if v.Preview != nil {
@@ -86,7 +87,7 @@ func human(r any) string {
 		}
 		fmt.Fprintf(&b, "The guard is installed in %s, covering %s via %s.\n", v.HooksDir, strings.Join(v.Publics, ", "), strings.Join(v.Remotes, ", "))
 		if !v.BinaryFound {
-			fmt.Fprintf(&b, "  warning: %s is gone, so public pushes are refused until you reinstall\n", v.Binary)
+			fmt.Fprintf(&b, "  %s %s is gone, so public pushes are refused until you reinstall\n", st.Warn("warning:"), v.Binary)
 		}
 	case *guard.CheckResult:
 		// It runs inside every public git push: a pass says nothing.
@@ -131,7 +132,7 @@ func human(r any) string {
 			fmt.Fprintf(&b, "Doctor: %d ok, %d warning(s), %d failed, %d skipped\n", v.Doctor.OK, v.Doctor.Warn, v.Doctor.Fail, v.Doctor.Skipped)
 			for _, c := range v.DoctorChecks {
 				if c.Status != engine.DoctorOK {
-					doctorLine(&b, c)
+					doctorLine(&b, c, st)
 				}
 			}
 		}
@@ -145,7 +146,7 @@ func human(r any) string {
 			previewText(&b, v.Preview)
 			for _, f := range v.Files {
 				if f.ReplacesLocalEdits {
-					fmt.Fprintf(&b, "  warning: %s was edited by hand; upgrade replaces those edits\n", f.Path)
+					fmt.Fprintf(&b, "  %s %s was edited by hand; upgrade replaces those edits\n", st.Warn("warning:"), f.Path)
 				}
 			}
 			break
@@ -653,8 +654,19 @@ var doctorMarks = map[string]string{engine.DoctorOK: "✓", engine.DoctorWarn: "
 
 // doctorLine is one check: mark, id and message, with the fix indented
 // below.
-func doctorLine(b *strings.Builder, c engine.DoctorCheck) {
-	fmt.Fprintf(b, "%s %-6s %s\n", doctorMarks[c.Status], c.ID, c.Message)
+func doctorLine(b *strings.Builder, c engine.DoctorCheck, st style.Styler) {
+	mark := doctorMarks[c.Status]
+	switch c.Status {
+	case engine.DoctorOK:
+		mark = st.OK(mark)
+	case engine.DoctorWarn:
+		mark = st.Warn(mark)
+	case engine.DoctorFail:
+		mark = st.Fail(mark)
+	case engine.DoctorSkipped:
+		mark = st.Dim(mark)
+	}
+	fmt.Fprintf(b, "%s %-6s %s\n", mark, c.ID, c.Message)
 	if c.Fix != "" {
 		fmt.Fprintf(b, "    fix: %s\n", c.Fix)
 	}

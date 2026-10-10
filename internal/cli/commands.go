@@ -28,6 +28,7 @@ Coding agents: run "ghostbranch guide" first.`,
 	}
 	pf := root.PersistentFlags()
 	pf.BoolVar(&a.jsonOut, "json", a.jsonOut, "print JSON on stdout: one object (wait streams one event per line, the result last)")
+	pf.BoolVar(&a.noColor, "no-color", false, "never colour human output (NO_COLOR does the same)")
 	pf.StringVar(&a.repo, "repo", "", "public or shadow repo (owner/name) to act on")
 	pf.StringVar(&a.workspace, "workspace", "", `workspace name (default $GHOSTBRANCH_WORKSPACE or "default")`)
 	pf.BoolVar(&a.nonInteractive, "non-interactive", false, "never prompt; missing input is an error")

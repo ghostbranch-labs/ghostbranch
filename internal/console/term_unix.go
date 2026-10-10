@@ -35,3 +35,7 @@ func flush(dev io.ReadWriteCloser) {
 	}
 	_ = rc.Control(func(fd uintptr) { flushFD(int(fd)) })
 }
+
+// ColorCapable reports whether f is a terminal, which takes ANSI escape
+// codes.
+func ColorCapable(f *os.File) bool { return isTerminal(f) }

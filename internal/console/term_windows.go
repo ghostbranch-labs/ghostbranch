@@ -62,3 +62,21 @@ func Open() (io.ReadWriteCloser, error) {
 	}
 	return winConsole{in, out}, nil
 }
+
+// ColorCapable reports whether f is a console that now accepts ANSI escape
+// codes: it is a real console handle and enabling virtual-terminal
+// processing on it succeeded. A failure means no colour for that stream.
+func ColorCapable(f *os.File) bool {
+	if !isTerminal(f) {
+		return false
+	}
+	h := windows.Handle(f.Fd())
+	var mode uint32
+	if windows.GetConsoleMode(h, &mode) != nil {
+		return false
+	}
+	if mode&windows.ENABLE_VIRTUAL_TERMINAL_PROCESSING != 0 {
+		return true
+	}
+	return windows.SetConsoleMode(h, mode|windows.ENABLE_VIRTUAL_TERMINAL_PROCESSING) == nil
+}

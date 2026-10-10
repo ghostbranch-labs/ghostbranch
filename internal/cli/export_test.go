@@ -32,3 +32,9 @@ func CommandPaths() []string {
 	sort.Strings(out)
 	return out
 }
+
+// ColorAllowed and TrueColorTerm expose DefaultEnv's colour decisions.
+var (
+	ColorAllowed  = colorAllowed
+	TrueColorTerm = trueColorTerm
+)
