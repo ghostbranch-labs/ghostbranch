@@ -229,16 +229,31 @@ func permList(m map[string][]string) string {
 	return strings.Join(parts, ", ")
 }
 
+// tokenErrFix is the token check's message and fix for why no token
+// resolved. Only a missing or expired login, and a corrupt stored one, have
+// a command that fixes them: a locked keychain must not be fixed by logout,
+// which would delete a login that works once it is unlocked.
+func tokenErrFix(ce *contract.Error) (string, []string) {
+	switch ce.Code {
+	case contract.AuthMissing, contract.LoginExpired:
+		return ce.Message, []string{"ghostbranch", "login"}
+	case contract.LoginUnavailable:
+		if r, _ := ce.Details["reason"].(string); r == "corrupt" {
+			return ce.Message, []string{"ghostbranch", "logout"}
+		}
+	case contract.UpgradeNeeded:
+		return ce.Message + "; upgrade ghostbranch on this machine to use the stored login, or set GHOSTBRANCH_TOKEN", nil
+	}
+	return ce.Message, nil
+}
+
 func (d *doctorRun) token(ctx context.Context) DoctorCheck {
 	e := d.e
 	det := map[string]any{"source": e.TokenSource, "kind": "", "account": "", "can_publish": "unknown"}
 	if e.Token == "" || e.Forge == nil {
 		msg, fix := "no GitHub token: set GHOSTBRANCH_TOKEN, or log in", []string{"ghostbranch", "login"}
 		if ce := contract.From(d.opt.TokenErr); ce != nil {
-			msg = ce.Message
-			if ce.Code == contract.LoginUnavailable {
-				fix = []string{"ghostbranch", "logout"}
-			}
+			msg, fix = tokenErrFix(ce)
 		}
 		return DoctorCheck{Status: DoctorFail, Message: msg, Details: det}.withFix(fix...)
 	}
@@ -273,7 +288,7 @@ func (d *doctorRun) token(ctx context.Context) DoctorCheck {
 	head := fmt.Sprintf("the %s token from %s", kind, e.TokenSource)
 	if l != nil && !l.Expires.IsZero() && !now.Before(l.Expires) {
 		v.add(DoctorWarn, "its access token expired at "+l.Expires.UTC().Format(time.RFC3339)+
-			"; the next command that uses GitHub refreshes it (doctor doesn't, as it writes nothing), so it wasn't checked", "")
+			"; the next command that uses GitHub refreshes it (doctor doesn't, as it writes nothing), so it wasn't checked")
 		return v.result(head, "", det)
 	}
 	u, err := e.Forge.CurrentUser(ctx)

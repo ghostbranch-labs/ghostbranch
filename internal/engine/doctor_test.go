@@ -23,6 +23,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/guard"
+	"github.com/ghostbranch-labs/ghostbranch/internal/keychain"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
@@ -278,6 +279,26 @@ func TestDoctorWritesNothing(t *testing.T) {
 	}
 }
 
+// lockedKeychain fails every call as a locked OS keychain does: an error
+// that isn't keychain.ErrUnavailable.
+type lockedKeychain struct{}
+
+func (lockedKeychain) Get(string, string) (string, error) { return "", errors.New("keychain locked") }
+func (lockedKeychain) Set(string, string, string) error   { return errors.New("keychain locked") }
+func (lockedKeychain) Delete(string, string) error        { return errors.New("keychain locked") }
+
+// noToken is a run with no env token and the stored login in kc, resolved
+// as the CLI does for doctor (no refresh): no token, and Resolve's error.
+func noToken(h *harness, opt *engine.DoctorOptions, kc keychain.Store) {
+	h.t.Helper()
+	tok, _, err := auth.Resolve(h.ctx, auth.Source{Getenv: func(string) string { return "" }, Store: kc, Now: h.clock.Now})
+	if tok != "" || err == nil {
+		h.t.Fatalf("resolve: %q %v", tok, err)
+	}
+	h.eng.Forge, h.eng.Token, h.eng.TokenSource = nil, "", ""
+	opt.TokenErr = err
+}
+
 func TestDoctorTokenCheck(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC) // the harness clock
@@ -342,9 +363,27 @@ func TestDoctorTokenCheck(t *testing.T) {
 			h.forge.UserErr = errors.New("GET https://api.github.com/user: 401 Bad credentials []")
 		}, engine.DoctorFail, "GitHub refused the token from login", "ghostbranch login", nil},
 		{"a corrupt stored login", func(h *harness, opt *engine.DoctorOptions) {
-			h.eng.Forge, h.eng.Token, h.eng.TokenSource = nil, "", ""
-			opt.TokenErr = contract.New(contract.LoginUnavailable, "the stored login can't be read; run ghostbranch logout, then ghostbranch login")
-		}, engine.DoctorFail, "the stored login can't be read", "ghostbranch logout", nil},
+			kc := keychain.NewFake()
+			_ = kc.Set(auth.Service, auth.Account, "not json")
+			noToken(h, opt, kc)
+		}, engine.DoctorFail, "can't be read", "ghostbranch logout", nil},
+		// A locked keychain: logout would delete a login that works once
+		// it is unlocked, so there is no fix to run.
+		{"a keychain that can't be used", func(h *harness, opt *engine.DoctorOptions) {
+			noToken(h, opt, lockedKeychain{})
+		}, engine.DoctorFail, "unlock it", "", nil},
+		{"a stored login from a newer Ghostbranch", func(h *harness, opt *engine.DoctorOptions) {
+			kc := keychain.NewFake()
+			_ = kc.Set(auth.Service, auth.Account, `{"schema_version":"0.99","token":"ghu_test","account":"octo","kind":"app"}`)
+			noToken(h, opt, kc)
+		}, engine.DoctorFail, "upgrade ghostbranch on this machine", "", nil},
+		{"an expired stored login", func(h *harness, opt *engine.DoctorOptions) {
+			kc := keychain.NewFake()
+			if err := auth.SaveLogin(kc, *login(now.Add(-2*time.Hour), now.Add(-time.Hour))); err != nil {
+				h.t.Fatal(err)
+			}
+			noToken(h, opt, kc)
+		}, engine.DoctorFail, "expired", "ghostbranch login", nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
