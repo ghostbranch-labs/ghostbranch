@@ -106,6 +106,8 @@ func TestGoldenContract(t *testing.T) {
 			te.shadowCommit("feat-x", map[string]string{"feature.txt": "rewritten\n"})
 		}, []string{"gate", "feat-y"}, contract.ParentRewritten.Exit()},
 		{"promote_plan", gatedFeature, []string{"promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--plan"}, 0},
+		{"promote_stack_plan", withGatedStack, []string{"promote", "feat-a", "feat-b", "--mode", "squash", "--plan"}, 0},
+		{"promote_not_a_stack", withGatedStack, []string{"promote", "feat-b", "--plan"}, contract.NotAStack.Exit()},
 		{"promote_needs_human", func(te *testEnv) { gatedFeature(te); te.vars["GHOSTBRANCH_ACTOR"] = "agent:claude-code" },
 			[]string{"promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--yes"}, 5},
 		{"promote_plan_under_grant", publishable, []string{"promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--plan"}, 0},
@@ -461,4 +463,16 @@ func TestWaiverArtifactsMatchTheirSchemas(t *testing.T) {
 	if err := sc.Err(); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// withGatedStack is feat-a on main and feat-b on feat-a, one commit each,
+// both gated.
+func withGatedStack(te *testEnv) {
+	initOnly(te)
+	te.mustRun("feature", "start", "feat-a")
+	te.shadowCommit("feat-a", map[string]string{"a.txt": "a\n"})
+	te.mustRun("feature", "start", "feat-b", "--from", "feat-a")
+	te.shadowCommit("feat-b", map[string]string{"b.txt": "b\n"})
+	te.mustRun("gate", "feat-a")
+	te.mustRun("gate", "feat-b")
 }

@@ -204,6 +204,25 @@ func planJSON(extra string) string {
 	return strings.ReplaceAll(p, "SHA", sha40)
 }
 
+// stackPlanJSON is a plan of two PRs: its chain repeats the top-level
+// shapes, entry by entry, with mode as given for the second.
+func stackPlanJSON(mode ...string) string {
+	m := "preserve"
+	if len(mode) > 0 {
+		m = mode[0]
+	}
+	entry := func(f, mode string) string {
+		e := `{"feature":"` + f + `","mode":"` + mode + `",` +
+			`"fingerprint":{"public_main":"SHA","feature_head":"SHA","overlay":"SHA","gate_candidate":"SHA"},` +
+			`"publish":{"commit":"SHA","tree":"SHA","parent":"SHA","target_branch":"` + f + `","pr":{"title":"Add ` + f + `","body":""},` +
+			`"commits":[{"commit":"SHA","tree":"SHA","parent":"SHA","sources":["SHA"],` +
+			`"author":{"name":"octo","email":"42+octo@users.noreply.github.com","date":"2026-10-10T12:00:00Z"},"subject":"Add ` + f + `"}],"dropped_empty":[]},` +
+			`"typed":{"title":false,"body":false},"ci":{"repo_guards":{"mode":"rewrite","rewritten":[],"unrewritable":[],"skipped":[]}}}`
+		return strings.ReplaceAll(e, "SHA", sha40)
+	}
+	return planJSON(`,"chain":[` + entry("a", "squash") + `,` + entry("b", m) + `]` + plannedPRs)
+}
+
 const (
 	openedPRs = `,"prs":[{"feature":"a","base":"main","number":11,"url":"https://github.com/acme/widget/pull/11"},` +
 		`{"feature":"b","base":"a","number":12,"url":"https://github.com/acme/widget/pull/12"}],"stack_number":13`
@@ -219,6 +238,8 @@ func TestSubProject61aSchemas(t *testing.T) {
 		"feature.schema.json": {
 			recordJSON(""), // a record from before 0.11: parent main
 			recordJSON(`,"parent":"a","forked_at":"` + sha40 + `"`),
+			strings.Replace(recordJSON(""), `"promoted":null`, `"promoted":{"public_pr":2,"plan_id":"20261010T120000Z-0a0b0c","branch":"b","base":"a",`+
+				`"published_head":"`+sha40+`","patch_ids":["p1"],"stack":4}`, 1),
 		},
 		"feature-report.schema.json": {
 			reportJSON("draft", ""),
@@ -226,9 +247,9 @@ func TestSubProject61aSchemas(t *testing.T) {
 			reportJSON("public_pr_needs_update", `,"parent":"main","children":[],"stack":13`),
 			reportJSON("unreadable", `,"parent":"","error":"x"`),
 		},
-		"apply.schema.json":   {applyJSON(""), applyJSON(openedPRs), applyJSON(`,"prs":[],"stack_number":null`)},
-		"promote.schema.json": {promoteJSON(""), promoteJSON(openedPRs)},
-		"plan.schema.json":    {planJSON(""), planJSON(plannedPRs)},
+		"apply.schema.json":   {applyJSON(openedPRs), applyJSON(`,"prs":[],"stack_number":null`)},
+		"promote.schema.json": {promoteJSON(openedPRs)},
+		"plan.schema.json":    {planJSON(""), planJSON(plannedPRs), stackPlanJSON()},
 		"envelope.schema.json": {
 			`{"schema_version":"` + contract.SchemaVersion + `","command":"feature fold","ok":false,"exit_code":4,"data":{},"warnings":[],"next":[],` +
 				`"error":{"code":"FOLD_NEEDS_REBASE","message":"m","field":null,"retryable":false,"details":{"parent":"a"}}}`,
@@ -252,10 +273,16 @@ func TestSubProject61aSchemas(t *testing.T) {
 		{"feature-report.schema.json", reportJSON("stacked", "")},
 		{"feature-report.schema.json", reportJSON("draft", `,"stack":0`)},
 		{"feature-report.schema.json", reportJSON("draft", `,"children":"c"`)},
-		{"apply.schema.json", applyJSON(`,"stack_number":0`)},
-		{"apply.schema.json", applyJSON(`,"prs":[{"feature":"a","number":11,"url":""}]`)},
-		{"apply.schema.json", applyJSON(`,"prs":[{"feature":"a","base":"main","number":11,"url":"","sha":"` + sha40 + `"}]`)},
+		// prs and stack_number are required in results from 0.11 (Task 6); plans
+		// keep them optional, as plan files from before 0.11 lack them.
+		{"apply.schema.json", applyJSON("")},
+		{"promote.schema.json", promoteJSON("")},
+		{"apply.schema.json", applyJSON(`,"prs":[],"stack_number":0`)},
+		{"apply.schema.json", applyJSON(`,"prs":[{"feature":"a","number":11,"url":""}],"stack_number":null`)},
+		{"apply.schema.json", applyJSON(`,"prs":[{"feature":"a","base":"main","number":11,"url":"","sha":"` + sha40 + `"}],"stack_number":null`)},
 		{"plan.schema.json", planJSON(`,"prs":[{"feature":"a","base":"main","number":-1,"url":""}]`)},
+		{"plan.schema.json", stackPlanJSON("rebase")},
+		{"plan.schema.json", planJSON(`,"chain":[]`)},
 		{"envelope.schema.json", `{"schema_version":"` + contract.SchemaVersion + `","command":"feature stack","ok":true,"exit_code":0,"data":{},"warnings":[],"next":[],"error":null}`},
 	} {
 		schemaRejects(t, x.name, x.raw)

@@ -124,6 +124,20 @@ type Promoted struct {
 	// record written before 0.6. A feature has moved when its branch head
 	// is no longer FeatureHead.
 	FeatureHead string `json:"feature_head,omitempty"`
+	// Branch is the public branch it was published to; empty in a record
+	// written before 0.11 (the feature's name then, unless --branch named one).
+	Branch string `json:"branch,omitempty"`
+	// Base is its PR's base branch: main, or the public branch of the
+	// feature below it in a stack. Sync records GitHub's retargeting.
+	Base string `json:"base,omitempty"`
+	// PublishedHead is the public branch's head as Ghostbranch last knew it:
+	// the plan's tip at publish, and GitHub's restack of it once sync saw
+	// one with the same patch-ids.
+	PublishedHead string `json:"published_head,omitempty"`
+	// PatchIDs are the published commits' stable patch-ids, oldest first.
+	PatchIDs []string `json:"patch_ids,omitempty"`
+	// Stack is the native GitHub stack its PR is in; 0 when none.
+	Stack int `json:"stack,omitempty"`
 }
 
 // Meta is feature.json.

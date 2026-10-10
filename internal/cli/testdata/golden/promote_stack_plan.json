@@ -1,0 +1,223 @@
+{
+  "schema_version": "0.11",
+  "command": "promote",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "gate": null,
+    "plan": {
+      "schema_version": "0.11",
+      "id": "20261005T120010Z-121314",
+      "kind": "promote",
+      "actor": "human:octo",
+      "created_at": "2026-10-05T12:00:10Z",
+      "pair": {
+        "public": "acme/widget",
+        "shadow": "acme/widget-shadow"
+      },
+      "feature": "feat-a",
+      "mode": "squash",
+      "fingerprint": {
+        "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+        "feature_head": "bbd420d3c5e21ee95ebc81464a424a47714e3fb8",
+        "overlay": "a1ef151295bf2b53d15b18523ab0184d02178bbd",
+        "gate_candidate": "a5f14bdf6c4579dd29821bcf8108be9c6b5fee11"
+      },
+      "curate": null,
+      "publish": {
+        "commit": "fdbdd961a40b1633b04895ab8c7938c79028445e",
+        "tree": "5fb33c6a6e2905ad3b9591d536c4eec7bade485c",
+        "parent": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+        "target_branch": "feat-a",
+        "pr": {
+          "title": "work",
+          "body": ""
+        },
+        "commits": [
+          {
+            "commit": "fdbdd961a40b1633b04895ab8c7938c79028445e",
+            "tree": "5fb33c6a6e2905ad3b9591d536c4eec7bade485c",
+            "parent": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+            "sources": [
+              "bbd420d3c5e21ee95ebc81464a424a47714e3fb8"
+            ],
+            "author": {
+              "name": "octo",
+              "email": "42+octo@users.noreply.github.com",
+              "date": "2026-10-05T12:00:10Z"
+            },
+            "subject": "work"
+          }
+        ],
+        "dropped_empty": []
+      },
+      "typed": {
+        "title": false,
+        "body": false
+      },
+      "leak": {
+        "findings": [],
+        "waived": [],
+        "warnings": [],
+        "scanner_version": "gitleaks v8.30.1"
+      },
+      "ci": {
+        "repo_guards": {
+          "mode": "rewrite",
+          "rewritten": [],
+          "unrewritable": [],
+          "skipped": []
+        }
+      },
+      "chain": [
+        {
+          "feature": "feat-a",
+          "mode": "squash",
+          "fingerprint": {
+            "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+            "feature_head": "bbd420d3c5e21ee95ebc81464a424a47714e3fb8",
+            "overlay": "a1ef151295bf2b53d15b18523ab0184d02178bbd",
+            "gate_candidate": "a5f14bdf6c4579dd29821bcf8108be9c6b5fee11"
+          },
+          "publish": {
+            "commit": "fdbdd961a40b1633b04895ab8c7938c79028445e",
+            "tree": "5fb33c6a6e2905ad3b9591d536c4eec7bade485c",
+            "parent": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+            "target_branch": "feat-a",
+            "pr": {
+              "title": "work",
+              "body": ""
+            },
+            "commits": [
+              {
+                "commit": "fdbdd961a40b1633b04895ab8c7938c79028445e",
+                "tree": "5fb33c6a6e2905ad3b9591d536c4eec7bade485c",
+                "parent": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+                "sources": [
+                  "bbd420d3c5e21ee95ebc81464a424a47714e3fb8"
+                ],
+                "author": {
+                  "name": "octo",
+                  "email": "42+octo@users.noreply.github.com",
+                  "date": "2026-10-05T12:00:10Z"
+                },
+                "subject": "work"
+              }
+            ],
+            "dropped_empty": []
+          },
+          "typed": {
+            "title": false,
+            "body": false
+          },
+          "ci": {
+            "repo_guards": {
+              "mode": "rewrite",
+              "rewritten": [],
+              "unrewritable": [],
+              "skipped": []
+            }
+          }
+        },
+        {
+          "feature": "feat-b",
+          "mode": "squash",
+          "fingerprint": {
+            "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+            "feature_head": "ee3faf62ddad2889d7e08bf0866efbde7c79ee7e",
+            "overlay": "a1ef151295bf2b53d15b18523ab0184d02178bbd",
+            "gate_candidate": "776bf8a43e5473c183d47f9cbd9b5f237bf0133f"
+          },
+          "publish": {
+            "commit": "3f55f01aba5c834d4915c93f06971db5a53e9c2a",
+            "tree": "4ad86912c4df49d33c31aeae5c55f13ae05ac642",
+            "parent": "fdbdd961a40b1633b04895ab8c7938c79028445e",
+            "target_branch": "feat-b",
+            "pr": {
+              "title": "work",
+              "body": ""
+            },
+            "commits": [
+              {
+                "commit": "3f55f01aba5c834d4915c93f06971db5a53e9c2a",
+                "tree": "4ad86912c4df49d33c31aeae5c55f13ae05ac642",
+                "parent": "fdbdd961a40b1633b04895ab8c7938c79028445e",
+                "sources": [
+                  "ee3faf62ddad2889d7e08bf0866efbde7c79ee7e"
+                ],
+                "author": {
+                  "name": "octo",
+                  "email": "42+octo@users.noreply.github.com",
+                  "date": "2026-10-05T12:00:10Z"
+                },
+                "subject": "work"
+              }
+            ],
+            "dropped_empty": []
+          },
+          "typed": {
+            "title": false,
+            "body": false
+          },
+          "ci": {
+            "repo_guards": {
+              "mode": "rewrite",
+              "rewritten": [],
+              "unrewritable": [],
+              "skipped": []
+            }
+          }
+        }
+      ],
+      "prs": [
+        {
+          "feature": "feat-a",
+          "base": "main",
+          "number": 0,
+          "url": ""
+        },
+        {
+          "feature": "feat-b",
+          "base": "feat-a",
+          "number": 0,
+          "url": ""
+        }
+      ],
+      "stack_number": null
+    },
+    "plan_path": "<ROOT>/home/workspaces/default/plans/20261005T120010Z-121314.json",
+    "findings": [],
+    "waived": [],
+    "applied": null,
+    "preview": null,
+    "prs": [
+      {
+        "feature": "feat-a",
+        "base": "main",
+        "number": 0,
+        "url": ""
+      },
+      {
+        "feature": "feat-b",
+        "base": "feat-a",
+        "number": 0,
+        "url": ""
+      }
+    ],
+    "stack_number": null
+  },
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "apply",
+        "20261005T120010Z-121314"
+      ],
+      "why": "publish the plan: a person runs this in their own terminal and types the code it shows (or allows agents first with ghostbranch agents allow)",
+      "needs_human": true,
+      "needs_input": []
+    }
+  ],
+  "error": null
+}

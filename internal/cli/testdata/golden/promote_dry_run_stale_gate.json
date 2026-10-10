@@ -22,7 +22,9 @@
           "op": "run_gate"
         }
       ]
-    }
+    },
+    "prs": [],
+    "stack_number": null
   },
   "warnings": [],
   "next": [],

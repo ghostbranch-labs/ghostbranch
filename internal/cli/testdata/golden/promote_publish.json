@@ -103,7 +103,16 @@
           "unrewritable": [],
           "skipped": []
         }
-      }
+      },
+      "prs": [
+        {
+          "feature": "feat-x",
+          "base": "main",
+          "number": 0,
+          "url": ""
+        }
+      ],
+      "stack_number": null
     },
     "plan_path": "<ROOT>/home/workspaces/default/plans/20261005T120005Z-0c0d0e.json",
     "findings": [],
@@ -120,9 +129,27 @@
         "created_by": "human:octo"
       },
       "waived": [],
-      "preview": null
+      "preview": null,
+      "prs": [
+        {
+          "feature": "feat-x",
+          "base": "main",
+          "number": 1,
+          "url": "https://github.example/acme/widget/pull/1"
+        }
+      ],
+      "stack_number": null
     },
-    "preview": null
+    "preview": null,
+    "prs": [
+      {
+        "feature": "feat-x",
+        "base": "main",
+        "number": 1,
+        "url": "https://github.example/acme/widget/pull/1"
+      }
+    ],
+    "stack_number": null
   },
   "warnings": [],
   "next": [],

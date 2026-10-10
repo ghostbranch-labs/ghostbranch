@@ -45,7 +45,9 @@
     "findings": [],
     "waived": [],
     "applied": null,
-    "preview": null
+    "preview": null,
+    "prs": [],
+    "stack_number": null
   },
   "warnings": [],
   "next": [

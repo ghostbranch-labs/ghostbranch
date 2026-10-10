@@ -825,7 +825,7 @@ var valueFlags = map[string]bool{
 	"--repo": true, "--workspace": true, "--shadow": true, "--for": true, "--reason": true, "--timeout": true,
 	"--mode": true, "--message": true, "-m": true, "--curate": true, "--title": true, "--body": true, "--branch": true,
 	"--install": true, "--uninstall": true, "--feature": true, "--op": true, "--actor": true, "--since": true,
-	"--limit": true, "--from": true, "--onto": true,
+	"--limit": true, "--from": true, "--onto": true, "--mode-for": true, "--title-for": true,
 }
 
 // shortValue splits "-mVALUE" or "-m=VALUE" into "-m" and VALUE when -m

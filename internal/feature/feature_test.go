@@ -217,3 +217,18 @@ func TestStateOfParentStale(t *testing.T) {
 		t.Fatalf("abandoned wins: %s", s)
 	}
 }
+
+func TestPromotedKeepsWhatWasPublished(t *testing.T) {
+	t.Parallel()
+	m := feature.Meta{Name: "b", Promoted: &feature.Promoted{PublicPR: 2, PlanID: "p", Branch: "b", Base: "a",
+		PublishedHead: "abc", PatchIDs: []string{"p1"}, Stack: 4}}
+	got, err := feature.Decode(feature.Encode(m))
+	if err != nil || !reflect.DeepEqual(got.Promoted, m.Promoted) {
+		t.Fatalf("decoded %+v %v", got.Promoted, err)
+	}
+	// A record written before 0.11 has none of it.
+	old, err := feature.Decode([]byte(`{"name":"x","promoted":{"public_pr":1,"plan_id":"p"}}`))
+	if err != nil || old.Promoted.Branch != "" || old.Promoted.PatchIDs != nil || old.Promoted.Stack != 0 {
+		t.Fatalf("old record = %+v %v", old.Promoted, err)
+	}
+}

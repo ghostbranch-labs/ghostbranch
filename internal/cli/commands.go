@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -282,17 +283,31 @@ func (a *app) waitCmd() *cobra.Command {
 
 func (a *app) promoteCmd() *cobra.Command {
 	var o engine.PromoteOptions
+	var modeFor, titleFor []string
 	c := &cobra.Command{
-		Use:   "promote <feature>",
-		Short: "Publish a gated feature to the public repo as a branch and PR",
+		Use:   "promote <feature>...",
+		Short: "Publish a gated feature, or a stack of them, to the public repo as PRs",
 		Long: `promote reuses a fresh green gate (or runs one), builds the public commits (each feature commit
 with --mode preserve, one with squash, or the groups of a --curate file) on public main, ending on
 exactly the gated tree, scans every commit's files, message and author, the branch name and PR text
 for leaks, and saves a plan.
-With --plan it stops there. Otherwise a person confirms by typing a code shown on the console, or, if they have allowed agents with "ghostbranch agents allow", --yes publishes. Without either it stops at the plan with exit 5.`,
-		Args: cobra.ExactArgs(1),
+With --plan it stops there. Otherwise a person confirms by typing a code shown on the console, or, if they have allowed agents with "ghostbranch agents allow", --yes publishes. Without either it stops at the plan with exit 5.
+Several features, bottom first (promote a b c), publish a stack: each branch's PR is based on the
+branch below (a's on main) and shows only that branch's commits, and one approval covers every PR.
+Each branch needs a fresh green gate built on the branch below. Where GitHub offers native stacked
+PRs, they are registered as one stack. --mode-for and --title-for set one branch's mode and PR title.`,
+		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			o.Feature = args[0]
+			o.Features, o.Feature = args, args[0]
+			var err error
+			if o.Modes, err = keyValues("mode-for", modeFor); err != nil {
+				a.ran = true
+				return err
+			}
+			if o.Titles, err = keyValues("title-for", titleFor); err != nil {
+				a.ran = true
+				return err
+			}
 			// Usage problems fail before any network work (`--mode --json`
 			// parses "--json" as the mode).
 			if err := engine.ValidatePromoteOptions(&o); err != nil {
@@ -322,6 +337,8 @@ With --plan it stops there. Otherwise a person confirms by typing a code shown o
 	f.BoolVar(&o.PlanOnly, "plan", false, "save and print the plan without publishing")
 	f.BoolVar(&o.Yes, "yes", false, "publish under an agent grant (ghostbranch agents allow); on its own it never skips the console")
 	f.BoolVar(&o.Detach, "detach", false, "if a gate is needed, start it and return its job instead of waiting")
+	f.StringArrayVar(&modeFor, "mode-for", nil, "one branch's history mode in a stack promote: <feature>=squash or <feature>=preserve (repeatable); default --mode")
+	f.StringArrayVar(&titleFor, "title-for", nil, "one branch's PR title in a stack promote: <feature>=<title> (repeatable)")
 	return c
 }
 
@@ -344,4 +361,21 @@ func (a *app) applyCmd() *cobra.Command {
 	}
 	c.Flags().BoolVar(&o.Yes, "yes", false, "publish under an agent grant (ghostbranch agents allow); on its own it never skips the console")
 	return c
+}
+
+// keyValues reads repeated --<flag> <feature>=<value> flags. A value without
+// "=" or a feature named twice is BAD_FLAG.
+func keyValues(flag string, vals []string) (map[string]string, error) {
+	out := map[string]string{}
+	for _, v := range vals {
+		k, val, ok := strings.Cut(v, "=")
+		if !ok || k == "" {
+			return nil, contract.New(contract.BadFlag, "--%s %q: use <feature>=<value>", flag, v).WithField(flag)
+		}
+		if _, dup := out[k]; dup {
+			return nil, contract.New(contract.BadFlag, "--%s names %s twice", flag, k).WithField(flag)
+		}
+		out[k] = val
+	}
+	return out, nil
 }

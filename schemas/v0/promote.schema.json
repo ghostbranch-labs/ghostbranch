@@ -3,7 +3,7 @@
   "title": "promote data",
   "type": "object",
   "additionalProperties": false,
-  "required": ["gate", "plan", "plan_path", "findings", "waived", "applied", "preview"],
+  "required": ["gate", "plan", "plan_path", "findings", "waived", "applied", "preview", "prs", "stack_number"],
   "properties": {
     "prs": { "description": "the chain's PRs, bottom first", "type": "array", "items": { "$ref": "common.schema.json#/$defs/stackPR" } },
     "stack_number": { "$ref": "common.schema.json#/$defs/stackNumber" },

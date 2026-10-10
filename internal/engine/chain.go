@@ -4,6 +4,7 @@ package engine
 // built from the gate's rebased chain, and the checks every commit passes.
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -35,6 +36,7 @@ type chainInput struct {
 	mode     string               // config.ModeSquash | ModePreserve | ModeCurated
 	pm       string               // public main
 	baseTree string               // the published tree the chain starts from; "" means public main's (pm's) tree
+	onto     string               // the rebased commit curated groups replay onto; "" means pm (a stacked branch: its gate's Base)
 	T        string               // the gated published tree (stripped tip)
 	tEntries []gitx.TreeEntry     // T's entries
 	commits  []feature.GateCommit // the gate's rebased chain, oldest first
@@ -122,7 +124,7 @@ func deriveChain(ctx context.Context, g *gitx.Git, cfg config.Config, in chainIn
 		if replay == nil {
 			return nil, nil, contract.New(contract.Internal, "curated mode needs a replay")
 		}
-		replayed, err := replay(order, in.pm)
+		replayed, err := replay(order, cmp.Or(in.onto, in.pm))
 		if err != nil {
 			var ce *gitx.ConflictError
 			if errors.As(err, &ce) {
