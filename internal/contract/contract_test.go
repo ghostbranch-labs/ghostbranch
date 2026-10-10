@@ -203,8 +203,10 @@ func TestFeatureNotClosedIsRegistered(t *testing.T) {
 	}
 	es, err := contract.Explain("FEATURE_NOT_CLOSED")
 	if err != nil || len(es) != 1 || es[0].Kind != contract.KindWarning ||
-		es[0].Summary != "Sync didn't close a merged feature: the close failed, or sync couldn't survey the features and so closed none." ||
-		!strings.HasPrefix(es[0].WhatToDo, "If details.deleted is set, the feature is gone: close its gate draft PR in the shadow repo by hand. Otherwise run ghostbranch feature show <name>, then feature close <name>.") ||
+		es[0].Summary != "Sync didn't close a merged feature: the close failed, sync couldn't survey the features and so closed none, or another feature's record couldn't be read, so sync left the merged features open." ||
+		!strings.HasPrefix(es[0].WhatToDo, "If details.deleted is set, the feature is gone: close its gate draft PR in the shadow repo by hand.") ||
+		!strings.Contains(es[0].WhatToDo, "Otherwise run ghostbranch feature show <name>, then feature close <name>.") ||
+		!strings.Contains(es[0].WhatToDo, "With details.unreadable") ||
 		!strings.Contains(es[0].WhatToDo, "With no details.feature") {
 		t.Fatalf("FEATURE_NOT_CLOSED is not documented: %+v %v", es, err)
 	}

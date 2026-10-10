@@ -40,7 +40,7 @@ type FeatureListResult struct {
 // FeatureShowResult is one feature in full.
 type FeatureShowResult struct {
 	Feature FeatureReport  `json:"feature"`
-	Commits []CommitInfo   `json:"commits"` // feature commits since public main, oldest first; [] when the branch is gone
+	Commits []CommitInfo   `json:"commits"` // the feature's own commits (since its fork point, else since public main), oldest first; [] when the branch is gone
 	Ledger  []ledger.Entry `json:"ledger"`  // this pair's entries for this feature, oldest first
 }
 
@@ -121,9 +121,10 @@ func (e *Engine) FeatureList(ctx context.Context, p workspace.Pair, all bool) (*
 	return res, warns, nil
 }
 
-// FeatureShow reports one feature in full: its survey report, its commits
-// since public main and its ledger entries. It only reads. A feature whose
-// record can't be read returns the read error.
+// FeatureShow reports one feature in full: its survey report, its own
+// commits (since its fork point, or since public main) and its ledger
+// entries. It only reads. A feature whose record can't be read returns the
+// read error.
 func (e *Engine) FeatureShow(ctx context.Context, p workspace.Pair, name string) (*FeatureShowResult, []contract.Warning, error) {
 	pc, err := e.open(ctx, "feature show", p, false)
 	if err != nil {
@@ -153,9 +154,20 @@ func (e *Engine) FeatureShow(ctx context.Context, p workspace.Pair, name string)
 		if err != nil {
 			return nil, warns, internalErr(err, "read public main")
 		}
-		sources, err := g.SourceCommits(ctx, pm, head)
-		if err != nil {
-			return nil, warns, internalErr(err, "list the feature's commits")
+		// Only its own commits: forked_at..head when it records a fork point
+		// (stacked, or moved onto main off a parent), else every commit
+		// public main lacks. A lost fork point falls back to the latter.
+		var sources []string
+		var own bool
+		if m := res.Feature.meta; m != nil {
+			if sources, own, err = ownCommits(ctx, g, *m, head, pm); err != nil {
+				return nil, warns, internalErr(err, "list the feature's commits")
+			}
+		}
+		if !own {
+			if sources, err = g.SourceCommits(ctx, pm, head); err != nil {
+				return nil, warns, internalErr(err, "list the feature's commits")
+			}
 		}
 		if res.Commits, err = sourceCommitInfos(ctx, g, cfg, pm, sources); err != nil {
 			return nil, warns, err

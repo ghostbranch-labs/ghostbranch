@@ -37,6 +37,10 @@
     "shadow_pr": 1,
     "job": "gate/feat-y/03de6d459bbf",
     "reused": false,
+    "chain": [
+      "feat-x",
+      "feat-y"
+    ],
     "preview": null
   },
   "warnings": [],
@@ -45,6 +49,7 @@
       "command": [
         "ghostbranch",
         "promote",
+        "feat-x",
         "feat-y",
         "--mode",
         "preserve",
@@ -52,7 +57,7 @@
         "--repo",
         "acme/widget"
       ],
-      "why": "the gate passed; plan the publish",
+      "why": "the gate passed; plan the publish of the stack up to here: one PR per branch, each on the branch below, one approval for all. A branch below whose gate is missing or stale stops it with NOT_A_STACK, and next names that branch. A branch with more than one commit needs --title-for <feature>=<title>",
       "needs_human": false,
       "needs_input": []
     }

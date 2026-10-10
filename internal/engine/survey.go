@@ -14,18 +14,24 @@ import (
 
 // FeatureReport is one feature as the survey sees it.
 type FeatureReport struct {
-	Name      string        `json:"name"`
-	State     feature.State `json:"state"`
-	Branch    string        `json:"branch"`
-	Head      string        `json:"head"` // "" when the branch is gone
-	Base      string        `json:"base"`
-	Drift     Drift         `json:"drift"`
-	Gate      *GateSummary  `json:"gate"`      // nil when never gated
-	PublicPR  *int          `json:"public_pr"` // nil when never published
-	PRState   string        `json:"pr_state"`  // "", open, merged, closed, unknown
-	PlanID    string        `json:"plan_id"`
-	Moved     bool          `json:"moved"` // since publish; false when unpublished; meaningless when the branch is gone (branch_gone reads only PRState)
-	Abandoned bool          `json:"abandoned"`
+	Name   string        `json:"name"`
+	State  feature.State `json:"state"`
+	Branch string        `json:"branch"`
+	Head   string        `json:"head"` // "" when the branch is gone
+	Base   string        `json:"base"`
+	// Parent is the feature it is stacked on, or "main"; "" when the record
+	// couldn't be read. Children are the live features stacked directly on
+	// it, by name, never null. Stack is the native GitHub stack its PR is in.
+	Parent    string       `json:"parent"`
+	Children  []string     `json:"children"`
+	Stack     *int         `json:"stack"`
+	Drift     Drift        `json:"drift"`
+	Gate      *GateSummary `json:"gate"`      // nil when never gated
+	PublicPR  *int         `json:"public_pr"` // nil when never published
+	PRState   string       `json:"pr_state"`  // "", open, merged, closed, unknown
+	PlanID    string       `json:"plan_id"`
+	Moved     bool         `json:"moved"` // since publish; false when unpublished; meaningless when the branch is gone (branch_gone reads only PRState)
+	Abandoned bool         `json:"abandoned"`
 	// Error is why the feature couldn't be surveyed; set only with state
 	// unreadable. feature show returns it as its error.
 	Error string `json:"error,omitempty"`
@@ -139,6 +145,18 @@ func (e *Engine) survey(ctx context.Context, pc *pairCtx, names ...string) ([]Fe
 		out = append(out, r)
 		warns = addWarnings(warns, ws...)
 	}
+	// Children come from every record, not only the surveyed ones, so that
+	// feature show a still names the features stacked on a.
+	recs, err := e.records(ctx, pc)
+	if err != nil && ctx.Err() != nil {
+		return nil, warns, err
+	}
+	for i := range out {
+		out[i].Children = []string{}
+		if err == nil {
+			out[i].Children = childrenOf(recs, out[i].Name, false)
+		}
+	}
 	return out, warns, nil
 }
 
@@ -164,6 +182,11 @@ func (e *Engine) surveyOne(ctx context.Context, pc *pairCtx, name, pm, O string)
 	r := FeatureReport{Name: name, Branch: m.Branch, Head: head, Base: m.Base, Abandoned: m.Abandoned,
 		Drift: Drift{Status: driftNA, Files: []string{}}}
 	r.meta, r.metaSHA = &m, metaSHA
+	r.Parent, r.Children = stackParent(m), []string{}
+	if m.Promoted != nil && m.Promoted.Stack != 0 {
+		n := m.Promoted.Stack
+		r.Stack = &n
+	}
 	if newer {
 		r.unreadable = unreadableNewer
 	}

@@ -7,7 +7,7 @@
     "feature": "feat-y",
     "feature_head": "a80b011a96e35ed4ece66a7071d69d205af6e967",
     "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
-    "parent": "",
+    "parent": "feat-x",
     "base": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
     "overlay": "a1ef151295bf2b53d15b18523ab0184d02178bbd",
     "candidate": "",
@@ -23,6 +23,10 @@
     "shadow_pr": null,
     "job": null,
     "reused": false,
+    "chain": [
+      "feat-x",
+      "feat-y"
+    ],
     "preview": null
   },
   "warnings": [],

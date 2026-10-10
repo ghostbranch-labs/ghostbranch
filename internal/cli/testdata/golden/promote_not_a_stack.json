@@ -15,7 +15,22 @@
     "stack_number": null
   },
   "warnings": [],
-  "next": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "promote",
+        "feat-a",
+        "feat-b",
+        "--plan",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "promote the stack from its bottom, each branch right after its parent",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
   "error": {
     "code": "NOT_A_STACK",
     "message": "feat-b's parent feat-a isn't public and isn't in the list: promote the stack from its bottom, each branch right after its parent",

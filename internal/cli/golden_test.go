@@ -108,6 +108,22 @@ func TestGoldenContract(t *testing.T) {
 		{"promote_plan", gatedFeature, []string{"promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--plan"}, 0},
 		{"promote_stack_plan", withGatedStack, []string{"promote", "feat-a", "feat-b", "--mode", "squash", "--plan"}, 0},
 		{"promote_not_a_stack", withGatedStack, []string{"promote", "feat-b", "--plan"}, contract.NotAStack.Exit()},
+		{"gate_stack_bottom", func(te *testEnv) {
+			initOnly(te)
+			te.mustRun("feature", "start", "feat-a")
+			te.shadowCommit("feat-a", map[string]string{"a.txt": "a\n"})
+			te.mustRun("feature", "start", "feat-b", "--from", "feat-a")
+			te.shadowCommit("feat-b", map[string]string{"b.txt": "b\n"})
+		}, []string{"gate", "feat-a"}, 0},
+		{"gate_stack_top", func(te *testEnv) {
+			initOnly(te)
+			te.mustRun("feature", "start", "feat-a")
+			te.shadowCommit("feat-a", map[string]string{"a.txt": "a\n"})
+			te.mustRun("feature", "start", "feat-b", "--from", "feat-a")
+			te.shadowCommit("feat-b", map[string]string{"b.txt": "b\n"})
+			te.mustRun("gate", "feat-a")
+		}, []string{"gate", "feat-b"}, 0},
+		{"status_stack", withGatedStack, []string{"status"}, 0},
 		{"promote_needs_human", func(te *testEnv) { gatedFeature(te); te.vars["GHOSTBRANCH_ACTOR"] = "agent:claude-code" },
 			[]string{"promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--yes"}, 5},
 		{"promote_plan_under_grant", publishable, []string{"promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--plan"}, 0},

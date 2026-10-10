@@ -164,6 +164,12 @@ func (a *app) steps(err error) []contract.Next {
 			return []contract.Next{{Command: a.gb(args...), NeedsHuman: true,
 				Why: "a person first creates the empty private repo and adds it to the token (error.details.steps 1 and 2); then run this to adopt it"}}
 		case contract.PlanStale:
+			if fs := stringList(ce.Details["features"]); len(fs) > 1 {
+				if pub, _ := ce.Details["public"].(string); pub != "" {
+					return []contract.Next{{Command: a.gb(append(append([]string{"promote"}, fs...), "--plan", "--repo", pub)...),
+						Why: "the stack moved since the plan was made; make a new plan for the whole stack"}}
+				}
+			}
 			f, _ := ce.Details["feature"].(string)
 			pub, _ := ce.Details["public"].(string)
 			mode, _ := ce.Details["mode"].(string)
@@ -354,6 +360,17 @@ func (a *app) steps(err error) []contract.Next {
 					Why: "once " + parent + "'s public PR merges, sync closes " + parent + " and moves its children onto main; gate and promote them then"}}
 			case reason == "parent_merged", reason == "parent_moved":
 				return []contract.Next{{Command: a.scoped("sync"), Why: "sync records what changed on the public side; then restack and gate what moved"}}
+			case reason == "stale_gate":
+				if f, _ := ce.Details["feature"].(string); f != "" {
+					return []contract.Next{{Command: a.scoped("gate", f),
+						Why: "its gate is missing or stale; gate it, then each branch above it, then promote the stack again"}}
+				}
+			}
+			// The list could be a stack in another order, or with the
+			// branches it left out: promote that one.
+			if want := stringList(ce.Details["want"]); len(want) > 0 {
+				return []contract.Next{{Command: a.scoped(append(append([]string{"promote"}, want...), "--plan")...),
+					Why: "promote the stack from its bottom, each branch right after its parent"}}
 			}
 		case contract.BadFlag:
 			switch ce.Field {
@@ -397,13 +414,27 @@ func (a *app) steps(err error) []contract.Next {
 		}
 	case *engine.GateResult:
 		if r.Preview == nil && r.Checks == feature.ChecksPassed && r.Leak == feature.LeakClean {
-			mode := r.ScannedAs
-			need := modeInputs(mode)
-			if mode != config.ModeSquash && len(r.Commits) > 1 {
-				need = append(need, "--title")
+			switch {
+			case len(r.Children) > 0:
+				// Up the stack: each branch above builds on this gate.
+				for _, c := range r.Children {
+					out = append(out, contract.Next{Command: a.scoped("gate", c),
+						Why: "the gate passed; gate " + c + " next: it is stacked on this one, and its gate builds on this gate"})
+				}
+			case len(r.Chain) > 1:
+				args := append(append([]string{"promote"}, r.Chain...), "--mode", r.ScannedAs, "--plan")
+				out = append(out, contract.Next{Command: a.scoped(args...),
+					Why: "the gate passed; plan the publish of the stack up to here: one PR per branch, each on the branch below, one approval for all. A branch below whose gate is missing or stale stops it with NOT_A_STACK, and next names that branch. A branch with more than one commit needs --title-for <feature>=<title>"})
+			default:
+				// A feature on its own, or one on a published parent.
+				mode := r.ScannedAs
+				need := modeInputs(mode)
+				if mode != config.ModeSquash && len(r.Commits) > 1 {
+					need = append(need, "--title")
+				}
+				out = append(out, contract.Next{Command: a.scoped("promote", r.Feature, "--mode", mode, "--plan"),
+					Why: "the gate passed; plan the publish", NeedsInput: need})
 			}
-			out = append(out, contract.Next{Command: a.scoped("promote", r.Feature, "--mode", mode, "--plan"),
-				Why: "the gate passed; plan the publish", NeedsInput: need})
 		} else if r.Checks == feature.ChecksPending && r.Job != nil {
 			out = append(out, a.waitNext(*r.Job))
 		}
@@ -530,11 +561,13 @@ func (a *app) syncNext() []contract.Next {
 // (which leads with syncNext's sync when shadow main is behind). Sync
 // closes merged, unmoved features, so they share one sync step, folded into
 // that leading sync when there is one; then, by name, the features a person
-// must close and the ones to gate again. Abandoned features need nothing.
+// must close, the ones to gate again, and the stacks to restack (one
+// restack per moved parent). Abandoned features need nothing.
 func (a *app) featureNexts(out []contract.Next, rs []engine.FeatureReport) []contract.Next {
 	newer := a.newerRecords()
 	var merged []string
 	var rest []contract.Next
+	restacks := map[string]bool{}
 	for _, r := range rs {
 		closeCmd := a.scoped("feature", "close", r.Name)
 		if newer[r.Name] && (r.State == feature.StateMerged || (r.State == feature.StateBranchGone && r.PRState == "merged")) {
@@ -571,6 +604,21 @@ func (a *app) featureNexts(out []contract.Next, rs []engine.FeatureReport) []con
 				rest = append(rest, contract.Next{Command: a.scoped("gate", r.Name),
 					Why: "no longer merges cleanly onto public main"})
 			}
+		case feature.StateParentStale:
+			// Several branches on one moved parent share its restack.
+			cmd := a.scoped("feature", "restack", r.Parent)
+			why := "the branch below it, " + r.Parent + ", moved since it was started or restacked: restack the branches above " + r.Parent + ", then gate them again"
+			if r.Parent == feature.MainParent {
+				cmd = a.scoped("feature", "restack", r.Name, "--onto", "main")
+				why = "the branch it stood on merged: move its own commits onto main, then gate it again"
+			}
+			if k := shellJoin(cmd); !restacks[k] {
+				restacks[k] = true
+				rest = append(rest, contract.Next{Command: cmd, Why: why})
+			}
+		case feature.StatePublicPRNeedsUpdate:
+			rest = append(rest, contract.Next{Command: a.scoped("feature", "restack", r.Name, "--onto", "main"),
+				Why: "the PR below it merged by squash or rebase, and its open public PR still carries that PR's old commits: restack it onto main and gate it; a person updates the public PR by hand until re-publishing an open PR arrives"})
 		}
 	}
 	if len(merged) > 0 {
@@ -1303,4 +1351,22 @@ func (a *app) leakNext(ce *contract.Error) []contract.Next {
 			Why:        "only if a person judges these findings false positives: they review them at their console and give a reason"})
 	}
 	return out
+}
+
+// stringList reads a details value that is a list of strings, as the
+// engine sets it ([]string) or as JSON decodes it ([]any).
+func stringList(v any) []string {
+	switch l := v.(type) {
+	case []string:
+		return l
+	case []any:
+		out := make([]string, 0, len(l))
+		for _, x := range l {
+			if s, ok := x.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return nil
 }

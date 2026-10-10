@@ -369,6 +369,11 @@ func (e *Engine) Wait(ctx context.Context, p workspace.Pair, job string, opt Wai
 		return nil, nil, err
 	}
 	defer pc.unlock()
+	defer func() {
+		if res != nil {
+			e.stackView(ctx, pc, res)
+		}
+	}()
 	m, _, err := e.readMeta(ctx, pc, ref.Feature)
 	if err != nil {
 		return nil, nil, err

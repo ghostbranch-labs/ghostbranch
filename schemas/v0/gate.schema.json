@@ -10,7 +10,7 @@
     "feature": { "type": "string" },
     "feature_head": { "$ref": "common.schema.json#/$defs/sha" },
     "public_main": { "$ref": "common.schema.json#/$defs/sha" },
-    "parent": { "description": "the feature the gate stacked on; \"\" when it built on public main", "type": "string" },
+    "parent": { "description": "the feature the gate stacked on; main for a bottom feature with children (gate and wait); \"\" when it built on public main and nothing is stacked on it", "type": "string" },
     "base": { "description": "the commit the feature's own commits were replayed onto: public main, or the rebased tip of the features below it", "$ref": "common.schema.json#/$defs/sha" },
     "overlay": { "$ref": "common.schema.json#/$defs/sha" },
     "candidate": { "$ref": "common.schema.json#/$defs/shaOrEmpty" },
@@ -39,6 +39,8 @@
       "type": ["string", "null"]
     },
     "reused": { "type": "boolean" },
+    "children": { "description": "the live features stacked directly on it (gate and wait); absent when there are none", "type": "array", "items": { "type": "string" } },
+    "chain": { "description": "the unpublished stack from its bottom up to it, as promote lists it (gate and wait); absent for a feature with neither parent nor children", "type": "array", "minItems": 1, "items": { "type": "string" } },
     "preview": { "oneOf": [{ "type": "null" }, { "$ref": "preview.schema.json" }] }
   }
 }

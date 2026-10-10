@@ -125,6 +125,28 @@ main, green CI, and a leak scan of exactly what will be published.
   closes it.
 - Never close or abandon a feature a person is still working on.
 
+## Stacks
+
+- A big change can go public as a series of PRs, each on the one before (a ← b ← c). Start each
+  branch on the one below: `ghostbranch feature start <b> --from <a> --repo <public> --json`.
+  `status` and `feature list` show stacks as trees, with each feature's `parent` and `children`.
+- Gate from the bottom up: `gate a`, then `gate b`. A branch's gate builds on the branch below and
+  scans only its own commits; it goes stale when the branch below moves. `next` walks you up the stack.
+- `parent_stale` means the branch below moved since this one was started or restacked: run
+  `ghostbranch feature restack <parent> --repo <public> --json` (it rebases each branch above, in
+  order), then gate them again. A restack never resolves a conflict: it stops with git steps.
+- `ghostbranch promote a b c --repo <public> --plan --json` plans the whole stack, bottom first: a's PR
+  on main, b's on a's branch, each showing only its own commits. One approval publishes every PR, and
+  GitHub groups them as a native stack where it offers one. Set one branch's mode or PR title with
+  `--mode-for b=squash` or `--title-for b="<title>"`. `NOT_A_STACK` names the branch that breaks the
+  list (`error.details.feature`) and why (`error.details.reason`): follow `next`.
+- `ghostbranch feature fold <c> --repo <public> --json` folds a finished top branch into its parent
+  (fast-forward only; `FOLD_NEEDS_REBASE` gives git steps). `abandon` and `close` refuse a branch with
+  children (`HAS_CHILDREN`): fold them, abandon them, or `feature restack <child> --onto main`.
+- After a PR of a stack merges, `sync` closes its feature and moves the branch above onto main.
+  `public_pr_needs_update` means that branch's open PR still carries the merged one's old commits:
+  restack it with `--onto main` and gate it; a person updates the public PR by hand for now.
+
 ## Keeping up with public
 
 - Sync is manual by default. When a result warns `SHADOW_BEHIND`, run `ghostbranch sync --repo <public>`

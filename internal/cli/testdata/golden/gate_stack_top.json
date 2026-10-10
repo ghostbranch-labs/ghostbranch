@@ -1,0 +1,66 @@
+{
+  "schema_version": "0.11",
+  "command": "gate",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "feature": "feat-b",
+    "feature_head": "ee3faf62ddad2889d7e08bf0866efbde7c79ee7e",
+    "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+    "parent": "feat-a",
+    "base": "7c21a4d36a37f6728bbe309c060e1f8099cfa00e",
+    "overlay": "a1ef151295bf2b53d15b18523ab0184d02178bbd",
+    "candidate": "776bf8a43e5473c183d47f9cbd9b5f237bf0133f",
+    "published_tree": "4ad86912c4df49d33c31aeae5c55f13ae05ac642",
+    "scanned_as": "preserve",
+    "commits": [
+      {
+        "source": "ee3faf62ddad2889d7e08bf0866efbde7c79ee7e",
+        "subject": "work",
+        "author": "Test Author <author@example.com>",
+        "files": [
+          "b.txt"
+        ]
+      }
+    ],
+    "checks": "passed",
+    "failed_checks": [],
+    "leak": "clean",
+    "findings": [],
+    "waived": [],
+    "repo_guards": {
+      "mode": "rewrite",
+      "rewritten": [],
+      "unrewritable": [],
+      "skipped": []
+    },
+    "shadow_pr": 2,
+    "job": "gate/feat-b/776bf8a43e54",
+    "reused": false,
+    "chain": [
+      "feat-a",
+      "feat-b"
+    ],
+    "preview": null
+  },
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "promote",
+        "feat-a",
+        "feat-b",
+        "--mode",
+        "preserve",
+        "--plan",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "the gate passed; plan the publish of the stack up to here: one PR per branch, each on the branch below, one approval for all. A branch below whose gate is missing or stale stops it with NOT_A_STACK, and next names that branch. A branch with more than one commit needs --title-for <feature>=<title>",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
+  "error": null
+}

@@ -51,8 +51,15 @@ type GateResult struct {
 	// didn't wait on).
 	Job *string `json:"job"`
 	// Reused is set by promote when it reuses a fresh green gate instead of re-running it.
-	Reused  bool             `json:"reused"`
-	Preview *preview.Preview `json:"preview"`
+	Reused bool `json:"reused"`
+	// Children and Chain place a stacked feature, with Parent: the features
+	// stacked directly on it, and the unpublished stack from its bottom up
+	// to it, which a promote of the stack lists. Both are empty, and Parent
+	// is "", for a feature with neither a parent nor children; a bottom
+	// feature with children has Parent "main" (stackView).
+	Children []string         `json:"children,omitempty"`
+	Chain    []string         `json:"chain,omitempty"`
+	Preview  *preview.Preview `json:"preview"`
 
 	// mapping is the gate's rebased chain, for promote to publish from.
 	mapping []feature.GateCommit `json:"-"`
@@ -151,6 +158,11 @@ func (e *Engine) runGate(ctx context.Context, p workspace.Pair, name string, det
 		return nil, nil, err
 	}
 	defer pc.unlock()
+	defer func() {
+		if res != nil {
+			e.stackView(ctx, pc, res)
+		}
+	}()
 	// A pending job for exactly these inputs is reused, not gated again. A
 	// dry run never reuses one: finishing it would wait on CI and write.
 	var pending *feature.Gate
@@ -237,7 +249,9 @@ func (e *Engine) build(ctx context.Context, pc *pairCtx, name, mode string, waiv
 	if mode == "" {
 		mode = cfg.Promote.DefaultMode
 	}
-	b := &built{cfg: cfg, meta: m, metaSHA: metaSHA, head: head, pm: pm, O: O, scannedAs: mode, base: pm}
+	// parent is set before the stack is walked, so a gate that stops there
+	// (PARENT_REWRITTEN) still names the feature below it.
+	b := &built{cfg: cfg, meta: m, metaSHA: metaSHA, head: head, pm: pm, O: O, scannedAs: mode, base: pm, parent: parentFeature(m)}
 	levels, err := e.stackBelow(ctx, pc, name, m, head)
 	if err != nil {
 		return b, warns, err
@@ -485,6 +499,40 @@ func guardNames(pc *pairCtx) workflow.Names {
 		n = workflow.Names{Public: pc.pair.Public, Shadow: pc.pair.Shadow}
 	}
 	return n
+}
+
+// stackView fills res's Parent, Children and Chain from the feature records
+// in the mirror: the feature below it ("main" for a bottom one), the live
+// features stacked directly on it, and the unpublished stack from its
+// bottom up to it. A feature with neither a parent nor children gets none.
+// It only reads, and when the records can't be read it leaves the fields
+// as they are.
+func (e *Engine) stackView(ctx context.Context, pc *pairCtx, res *GateResult) {
+	recs, err := e.records(ctx, pc)
+	if err != nil {
+		return
+	}
+	r, ok := recs[res.Feature]
+	if !ok {
+		return
+	}
+	parent := stackParent(r.meta)
+	kids := childrenOf(recs, res.Feature, false)
+	if parent == feature.MainParent && len(kids) == 0 {
+		return
+	}
+	chain := []string{res.Feature}
+	seen := map[string]bool{res.Feature: true}
+	for p := parent; p != feature.MainParent && !seen[p]; {
+		pr, ok := recs[p]
+		if !ok || pr.meta.Promoted != nil {
+			break
+		}
+		seen[p] = true
+		chain = append([]string{p}, chain...)
+		p = stackParent(pr.meta)
+	}
+	res.Parent, res.Children, res.Chain = parent, kids, chain
 }
 
 // gateRecord is the metadata record of res's gate, stamped now.

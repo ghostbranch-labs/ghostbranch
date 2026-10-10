@@ -7,7 +7,7 @@
   "properties": {
     "feature": { "$ref": "feature-report.schema.json" },
     "commits": {
-      "description": "the feature's commits since public main, oldest first; empty when the branch is gone. Each one's files are what it changes from its parent, overlay paths left out.",
+      "description": "the feature's own commits, since its fork point when it records one (a stacked feature) and else since public main, oldest first; empty when the branch is gone. Each one's files are what it changes from its parent, overlay paths left out.",
       "type": "array",
       "items": { "$ref": "common.schema.json#/$defs/commitInfo" }
     },

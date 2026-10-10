@@ -219,7 +219,7 @@ func (e *Engine) FeatureClose(ctx context.Context, p workspace.Pair, name string
 // choice), and its head is whatever the mirror has.
 func (e *Engine) unreadableReport(ctx context.Context, pc *pairCtx, name string) (FeatureReport, error) {
 	r := FeatureReport{Name: name, Branch: name, State: feature.StateUnreadable, unreadable: unreadableCorrupt,
-		Drift: Drift{Status: driftUnknown, Files: []string{}}}
+		Drift: Drift{Status: driftUnknown, Files: []string{}}, Children: []string{}}
 	head, ok, err := pc.git.Resolve(ctx, shadowRef(name))
 	if err != nil {
 		return r, internalErr(err, "read feature branch "+name)

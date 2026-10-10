@@ -564,8 +564,13 @@ func featureTable(b *strings.Builder, rs []engine.FeatureReport) {
 	}
 	tw := tabwriter.NewWriter(b, 0, 0, 2, ' ', 0)
 	_, _ = fmt.Fprintln(tw, "NAME\tSTATE\tDRIFT\tGATE\tPR")
-	for _, r := range rs {
-		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", oneLine(r.Name), r.State, oneLine(r.Drift.Status), gateCell(r.Gate), prCell(r))
+	for _, row := range treeOrder(rs) {
+		r := rs[row.i]
+		name := oneLine(r.Name)
+		if row.depth > 0 {
+			name = strings.Repeat("  ", row.depth-1) + "└─ " + name
+		}
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", name, r.State, oneLine(r.Drift.Status), gateCell(r.Gate), prCell(r))
 	}
 	_ = tw.Flush()
 	for _, r := range rs {
@@ -573,6 +578,50 @@ func featureTable(b *strings.Builder, rs []engine.FeatureReport) {
 			fmt.Fprintf(b, "%s couldn't be read: %s\n", oneLine(r.Name), oneLine(r.Error))
 		}
 	}
+}
+
+// treeRow is a feature's line in featureTable: its index in the reports
+// and its depth below main.
+type treeRow struct{ i, depth int }
+
+// treeOrder lists rs as trees, in rs's (name) order: each feature whose
+// parent is main, or isn't among rs, then its children under it, depth
+// first. Records whose parents loop (a corrupt pair) have no root; they
+// are listed flat at the end.
+func treeOrder(rs []engine.FeatureReport) []treeRow {
+	idx := map[string]int{}
+	for i, r := range rs {
+		idx[r.Name] = i
+	}
+	kids := map[string][]int{}
+	var roots []int
+	for i, r := range rs {
+		if _, in := idx[r.Parent]; in && r.Parent != r.Name {
+			kids[r.Parent] = append(kids[r.Parent], i)
+		} else {
+			roots = append(roots, i)
+		}
+	}
+	var out []treeRow
+	seen := map[int]bool{}
+	var walk func(i, depth int)
+	walk = func(i, depth int) {
+		if seen[i] {
+			return
+		}
+		seen[i] = true
+		out = append(out, treeRow{i, depth})
+		for _, k := range kids[rs[i].Name] {
+			walk(k, depth+1)
+		}
+	}
+	for _, i := range roots {
+		walk(i, 0)
+	}
+	for i := range rs {
+		walk(i, 0)
+	}
+	return out
 }
 
 // gateCell is a feature's last gate in a word: passed, a failed check
@@ -598,14 +647,18 @@ func gateCell(g *engine.GateSummary) string {
 	return oneLine(out)
 }
 
-// prCell is a feature's public PR and its state, or "-".
+// prCell is a feature's public PR and its state, or "-", then the native
+// GitHub stack the PR is in, if any.
 func prCell(r engine.FeatureReport) string {
-	if r.PublicPR == nil {
-		return "-"
+	out := "-"
+	if r.PublicPR != nil {
+		out = fmt.Sprintf("#%d", *r.PublicPR)
+		if r.PRState != "" {
+			out += " " + oneLine(r.PRState)
+		}
 	}
-	out := fmt.Sprintf("#%d", *r.PublicPR)
-	if r.PRState != "" {
-		out += " " + oneLine(r.PRState)
+	if r.Stack != nil {
+		out += fmt.Sprintf(" stack #%d", *r.Stack)
 	}
 	return out
 }
@@ -619,6 +672,13 @@ func featureShowText(b *strings.Builder, v *engine.FeatureShowResult) {
 		fmt.Fprintf(b, "  branch: %s (deleted), based on %s\n", oneLine(r.Branch), short(r.Base))
 	} else {
 		fmt.Fprintf(b, "  branch: %s at %s, based on %s\n", oneLine(r.Branch), short(r.Head), short(r.Base))
+	}
+	if (r.Parent != "" && r.Parent != feature.MainParent) || len(r.Children) > 0 {
+		kids := "none"
+		if len(r.Children) > 0 {
+			kids = oneLine(strings.Join(r.Children, ", "))
+		}
+		fmt.Fprintf(b, "  stack: on %s; branches on it: %s\n", oneLine(r.Parent), kids)
 	}
 	if len(r.Drift.Files) > 0 {
 		files := make([]string, len(r.Drift.Files))

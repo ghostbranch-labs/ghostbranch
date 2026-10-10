@@ -43,7 +43,8 @@ func TestRenderListsEveryCodeFromTheRegistry(t *testing.T) {
 	// 378: guided init asks where an org's shadow repo lives, and --shadow sets it (6.1 Task 10).
 	// 379: one line on terminal colour, --no-color and NO_COLOR.
 	// 383: the four sub-project 6.1a error rows (FOLD_NEEDS_REBASE, HAS_CHILDREN, NOT_A_STACK, PARENT_REWRITTEN).
-	if n := strings.Count(out, "\n"); n > 383 {
+	// 405: the Stacks section (sub-project 6.1a, 22 lines).
+	if n := strings.Count(out, "\n"); n > 405 {
 		t.Errorf("the guide is %d lines; keep it short (spec: about 150 plus the tables)", n)
 	}
 }
@@ -368,6 +369,33 @@ func TestGuideTeachesSetup(t *testing.T) {
 		"It doesn't revoke the app at GitHub",
 		"`AGENT_ON_PERSON_LOGIN`",
 		"`\"token_kind\"`",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the guide lacks %q", want)
+		}
+	}
+}
+
+// An agent that promotes a stack's branches one by one, gates out of
+// order, or restacks by hand publishes the wrong thing or nothing.
+func TestGuideTeachesStacks(t *testing.T) {
+	t.Parallel()
+	out := strings.Join(strings.Fields(guide.Render(contract.Registry())), " ")
+	for _, want := range []string{
+		"## Stacks",
+		"`ghostbranch feature start <b> --from <a> --repo <public> --json`",
+		"Gate from the bottom up",
+		"scans only its own commits",
+		"`next` walks you up the stack",
+		"`parent_stale`",
+		"`ghostbranch feature restack <parent> --repo <public> --json`",
+		"`ghostbranch promote a b c --repo <public> --plan --json` plans the whole stack, bottom first",
+		"One approval publishes every PR",
+		"`--title-for b=\"<title>\"`",
+		"`NOT_A_STACK`", "`error.details.reason`",
+		"`ghostbranch feature fold <c> --repo <public> --json`",
+		"`HAS_CHILDREN`", "`feature restack <child> --onto main`",
+		"`public_pr_needs_update`",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the guide lacks %q", want)

@@ -3,7 +3,7 @@
   "title": "One feature as the survey reports it (status, feature list, feature show)",
   "type": "object",
   "additionalProperties": false,
-  "required": ["name", "state", "branch", "head", "base", "drift", "gate", "public_pr", "pr_state", "plan_id", "moved", "abandoned"],
+  "required": ["name", "state", "branch", "head", "base", "drift", "gate", "public_pr", "pr_state", "plan_id", "moved", "abandoned", "parent", "children", "stack"],
   "properties": {
     "name": { "type": "string" },
     "state": { "enum": ["draft", "in_review", "gate_passed", "published", "merged", "merged_moved", "pr_closed", "branch_gone", "abandoned", "unreadable", "parent_stale", "public_pr_needs_update"] },

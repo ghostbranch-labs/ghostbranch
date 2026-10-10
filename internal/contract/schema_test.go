@@ -242,10 +242,10 @@ func TestSubProject61aSchemas(t *testing.T) {
 				`"published_head":"`+sha40+`","patch_ids":["p1"],"stack":4}`, 1),
 		},
 		"feature-report.schema.json": {
-			reportJSON("draft", ""),
+			reportJSON("draft", `,"parent":"main","children":[],"stack":null`),
 			reportJSON("parent_stale", `,"parent":"a","children":["c"],"stack":null`),
 			reportJSON("public_pr_needs_update", `,"parent":"main","children":[],"stack":13`),
-			reportJSON("unreadable", `,"parent":"","error":"x"`),
+			reportJSON("unreadable", `,"parent":"","children":[],"stack":null,"error":"x"`),
 		},
 		"apply.schema.json":   {applyJSON(openedPRs), applyJSON(`,"prs":[],"stack_number":null`)},
 		"promote.schema.json": {promoteJSON(openedPRs)},
@@ -270,9 +270,14 @@ func TestSubProject61aSchemas(t *testing.T) {
 	for _, x := range []struct{ name, raw string }{
 		{"feature.schema.json", recordJSON(`,"parent":""`)},
 		{"feature.schema.json", recordJSON(`,"parent":"a","forked_at":"not-a-sha"`)},
-		{"feature-report.schema.json", reportJSON("stacked", "")},
-		{"feature-report.schema.json", reportJSON("draft", `,"stack":0`)},
-		{"feature-report.schema.json", reportJSON("draft", `,"children":"c"`)},
+		{"feature-report.schema.json", reportJSON("stacked", `,"parent":"main","children":[],"stack":null`)},
+		{"feature-report.schema.json", reportJSON("draft", `,"parent":"main","children":[],"stack":0`)},
+		{"feature-report.schema.json", reportJSON("draft", `,"parent":"main","children":"c","stack":null`)},
+		// parent, children and stack are required from 0.11 (Task 8).
+		{"feature-report.schema.json", reportJSON("draft", "")},
+		{"feature-report.schema.json", reportJSON("draft", `,"children":[],"stack":null`)},
+		{"feature-report.schema.json", reportJSON("draft", `,"parent":"main","stack":null`)},
+		{"feature-report.schema.json", reportJSON("draft", `,"parent":"main","children":[]`)},
 		// prs and stack_number are required in results from 0.11 (Task 6); plans
 		// keep them optional, as plan files from before 0.11 lack them.
 		{"apply.schema.json", applyJSON("")},
