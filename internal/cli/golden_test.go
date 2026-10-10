@@ -77,6 +77,13 @@ func TestGoldenContract(t *testing.T) {
 			testutil.Commit(te.t, te.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
 		}, []string{"feature", "start", "feat-x"}, 4},
 		{"feature_start_exists", withFeature, []string{"feature", "start", "feat-x"}, 4},
+		{"feature_start_from", withFeature, []string{"feature", "start", "feat-y", "--from", "feat-x"}, 0},
+		{"feature_start_from_plan", withFeature, []string{"feature", "start", "feat-y", "--from", "feat-x", "--plan"}, 0},
+		{"feature_start_from_unknown", initOnly, []string{"feature", "start", "feat-y", "--from", "nope"}, 2},
+		{"feature_start_from_behind", func(te *testEnv) {
+			withFeature(te)
+			testutil.Commit(te.t, te.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
+		}, []string{"feature", "start", "feat-y", "--from", "feat-x"}, 4},
 		{"gate", withFeature, []string{"gate", "feat-x"}, 0},
 		{"gate_checks_failed", func(te *testEnv) { withFeature(te); te.forge.Checks = failing }, []string{"gate", "feat-x"}, 3},
 		{"gate_leak", withLeakyFeature, []string{"gate", "feat-x"}, 3},

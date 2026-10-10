@@ -136,3 +136,35 @@ func TestAPendingRecordWithoutAShadowPRIsNoJob(t *testing.T) {
 		t.Fatal("a pending record with its PR is not a job")
 	}
 }
+
+// A record from before 0.11 has no parent: it is stacked on main.
+func TestAnOlderRecordDecodesWithParentMain(t *testing.T) {
+	t.Parallel()
+	raw := `{"schema_version":"0.10","name":"feat-x","branch":"feat-x","created_by":"human:octo","created_at":"2026-10-05T12:00:00Z",` +
+		`"base":"007a3f6399026b4d9b9af3c155edf5ad99c6baa7","abandoned":false,"gate":null,"promoted":null}`
+	m, err := feature.Decode([]byte(raw))
+	if err != nil || m.Parent != "" || m.ForkedAt != "" || m.ParentName() != feature.MainParent || m.Stacked() {
+		t.Fatalf("older record = %+v %v", m, err)
+	}
+}
+
+// A stacked record round-trips with its parent and fork point and matches
+// the schema. An unstacked one is written without either key.
+func TestStackedRecordsRoundTrip(t *testing.T) {
+	t.Parallel()
+	const sha = "007a3f6399026b4d9b9af3c155edf5ad99c6baa7"
+	m := feature.Meta{SchemaVersion: feature.SchemaVersion, Name: "b", Branch: "b", CreatedBy: "human:octo",
+		CreatedAt: time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC), Base: sha, Parent: "a", ForkedAt: sha}
+	raw := feature.Encode(m)
+	testutil.ValidateSchema(t, "feature.schema.json", raw)
+	got, err := feature.Decode(raw)
+	if err != nil || !reflect.DeepEqual(got, m) || got.ParentName() != "a" || !got.Stacked() {
+		t.Fatalf("round trip = %+v %v", got, err)
+	}
+	m.Parent, m.ForkedAt = "", ""
+	raw = feature.Encode(m)
+	testutil.ValidateSchema(t, "feature.schema.json", raw)
+	if strings.Contains(string(raw), "parent") || strings.Contains(string(raw), "forked_at") {
+		t.Fatalf("an unstacked record names a parent:\n%s", raw)
+	}
+}

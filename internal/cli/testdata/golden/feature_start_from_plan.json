@@ -1,0 +1,49 @@
+{
+  "schema_version": "0.11",
+  "command": "feature start",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "name": "feat-y",
+    "branch": "feat-y",
+    "base": "d7407485ce685c126afcfc258f0a9eeb0092d776",
+    "parent": "feat-x",
+    "checkout": [
+      [
+        "git",
+        "fetch",
+        "shadow"
+      ],
+      [
+        "git",
+        "switch",
+        "feat-y"
+      ]
+    ],
+    "checkout_hint": "git fetch shadow && git switch feat-y",
+    "preview": {
+      "fingerprint": {
+        "shadow_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7"
+      },
+      "ops": [
+        {
+          "from": null,
+          "op": "push_ref",
+          "ref": "refs/heads/feat-y",
+          "repo": "acme/widget-shadow",
+          "to": "d7407485ce685c126afcfc258f0a9eeb0092d776"
+        },
+        {
+          "from": null,
+          "op": "push_ref",
+          "ref": "refs/ghostbranch/features/feat-y",
+          "repo": "acme/widget-shadow",
+          "to": null
+        }
+      ]
+    }
+  },
+  "warnings": [],
+  "next": [],
+  "error": null
+}

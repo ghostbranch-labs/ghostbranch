@@ -97,6 +97,13 @@ type Meta struct {
 	Abandoned     bool      `json:"abandoned"`
 	Gate          *Gate     `json:"gate"`
 	Promoted      *Promoted `json:"promoted"`
+	// Parent is the feature this one is stacked on; "" means main, as in
+	// every record before 0.11. ParentName reads it.
+	Parent string `json:"parent,omitempty"`
+	// ForkedAt is the parent's commit the feature was branched from or last
+	// restacked onto: the feature's own commits are ForkedAt..head. Empty
+	// for a feature started from main.
+	ForkedAt string `json:"forked_at,omitempty"`
 }
 
 // Encode serializes m as indented JSON with a trailing newline.
@@ -111,6 +118,20 @@ func Decode(b []byte) (Meta, error) {
 	err := json.Unmarshal(b, &m)
 	return m, err
 }
+
+// MainParent is the parent of a feature that isn't stacked on another.
+const MainParent = "main"
+
+// ParentName is the feature's parent: a feature name, or "main".
+func (m Meta) ParentName() string {
+	if m.Parent == "" {
+		return MainParent
+	}
+	return m.Parent
+}
+
+// Stacked reports whether the feature is stacked on another feature.
+func (m Meta) Stacked() bool { return m.ParentName() != MainParent }
 
 // State is a feature's computed lifecycle state.
 type State string

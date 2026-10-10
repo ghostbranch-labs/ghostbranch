@@ -176,10 +176,11 @@ is replaced; --plan shows that first. It writes only the shadow repo's overlay b
 
 func (a *app) featureStartCmd() *cobra.Command {
 	var yes bool
+	var from string
 	c := &cobra.Command{
 		Use:   "start <name>",
 		Short: "Start a feature branch in the shadow repo",
-		Long:  `feature start creates <name> from shadow main in the shadow repo and records it as a feature. It does not touch your checkout; fetch and switch to the branch afterwards.`,
+		Long:  `feature start creates <name> from shadow main in the shadow repo and records it as a feature. It does not touch your checkout; fetch and switch to the branch afterwards. With --from <feature> it starts at that feature's tip instead and records it as the parent, stacking the new feature on it.`,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			e, err := a.engine(cmd.Context())
@@ -191,7 +192,8 @@ func (a *app) featureStartCmd() *cobra.Command {
 				return err
 			}
 			a.startName = args[0]
-			res, w, err := e.FeatureStart(cmd.Context(), p, args[0])
+			a.startFrom = from
+			res, w, err := e.FeatureStart(cmd.Context(), p, args[0], engine.FeatureStartOptions{From: from})
 			if res != nil && a.env.ShadowRemote != nil {
 				remote, free, in := a.env.ShadowRemote(p.Shadow)
 				res.SetCheckout(checkoutArgv(res.Name, p.Shadow, remote, free, in))
@@ -200,6 +202,7 @@ func (a *app) featureStartCmd() *cobra.Command {
 			return done(a, res, w, err)
 		},
 	}
+	c.Flags().StringVar(&from, "from", "", "stack the feature on another feature: start it at that feature's tip in the shadow repo (default: shadow main)")
 	c.Flags().BoolVar(&yes, "yes", false, "accepted for consistency; feature start never asks")
 	c.Flags().BoolVar(&a.dryRun, "plan", false, "preview exactly what would change, and change nothing (same as --dry-run)")
 	return c

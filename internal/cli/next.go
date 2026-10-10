@@ -183,7 +183,7 @@ func (a *app) steps(err error) []contract.Next {
 		case contract.ShadowBehindError:
 			return []contract.Next{
 				{Command: a.scoped("sync"), Why: "shadow main is behind public main; sync it (fast-forward only)"},
-				{Command: a.startAgain(), Why: "then start the feature again, from the synced shadow main"},
+				{Command: a.startAgain(), Why: startAgainWhy(a.startFrom)},
 			}
 		case contract.SyncDiverged:
 			// A person sorts out the diverged branch (error.what_to_do), but
@@ -400,10 +400,21 @@ func (a *app) gateAgain(ce *contract.Error, why string) []contract.Next {
 // the sync before it, with --plan when this run had it.
 func (a *app) startAgain() []string {
 	args := []string{"feature", "start", a.startName}
+	if a.startFrom != "" {
+		args = append(args, "--from", a.startFrom)
+	}
 	if a.dryRun {
 		args = append(args, "--plan")
 	}
 	return a.scoped(args...)
+}
+
+// startAgainWhy is the reason for starting the feature again after a sync.
+func startAgainWhy(from string) string {
+	if from == "" || from == feature.MainParent {
+		return "then start the feature again, from the synced shadow main"
+	}
+	return "then start the feature again on " + from
 }
 
 // syncNext leads next when shadow main is behind public main. Syncing moves
@@ -728,7 +739,7 @@ var valueFlags = map[string]bool{
 	"--repo": true, "--workspace": true, "--shadow": true, "--for": true, "--reason": true, "--timeout": true,
 	"--mode": true, "--message": true, "-m": true, "--curate": true, "--title": true, "--body": true, "--branch": true,
 	"--install": true, "--uninstall": true, "--feature": true, "--op": true, "--actor": true, "--since": true,
-	"--limit": true,
+	"--limit": true, "--from": true,
 }
 
 // shortValue splits "-mVALUE" or "-m=VALUE" into "-m" and VALUE when -m

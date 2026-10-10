@@ -203,6 +203,10 @@ func human(r any, st style.Styler) string {
 			previewText(&b, v.Preview)
 			break
 		}
+		if v.Parent != "" && v.Parent != feature.MainParent {
+			fmt.Fprintf(&b, "Started feature %s on %s, at its tip %s.\nCheck it out with: %s\n", v.Name, v.Parent, short(v.Base), v.CheckoutHint)
+			break
+		}
 		fmt.Fprintf(&b, "Started feature %s from shadow main %s.\nCheck it out with: %s\n", v.Name, short(v.Base), v.CheckoutHint)
 	case *engine.GateResult:
 		if pendingJob(v) {
