@@ -342,6 +342,19 @@ func (a *app) steps(err error) []contract.Next {
 					{Command: a.again(false), Why: "then run this again"},
 				}
 			}
+		case contract.NotAStack:
+			// The bottom's published parent merged or moved: gating or
+			// promoting again can't help until sync has recorded it. Never
+			// "promote again", which would refuse the same way.
+			reason, _ := ce.Details["reason"].(string)
+			parent, _ := ce.Details["parent"].(string)
+			switch {
+			case reason == "parent_moved" && ce.Details["public_main_moved"] == true && parent != "":
+				return []contract.Next{{Command: a.scoped("sync"),
+					Why: "once " + parent + "'s public PR merges, sync closes " + parent + " and moves its children onto main; gate and promote them then"}}
+			case reason == "parent_merged", reason == "parent_moved":
+				return []contract.Next{{Command: a.scoped("sync"), Why: "sync records what changed on the public side; then restack and gate what moved"}}
+			}
 		case contract.BadFlag:
 			switch ce.Field {
 			case "message":

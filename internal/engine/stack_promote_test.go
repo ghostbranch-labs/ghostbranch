@@ -302,6 +302,10 @@ func TestApplyResumesAStackAfterAFailure(t *testing.T) {
 	if prs := h.forge.PRs(publicName); len(prs) != 1 || h.shadowMeta("a").Promoted == nil || h.shadowMeta("b").Promoted != nil {
 		t.Fatalf("after the failure: PRs %+v", prs)
 	}
+	// The stopped apply's plan file already records a's PR.
+	if part, _, err := plan.Load(h.eng.WS.PlansDir(), id); err != nil || part.PRs[0].Number == 0 || part.PRs[1].Number != 0 {
+		t.Fatalf("after the failure the plan file records %+v %v", part.PRs, err)
+	}
 	h.forge.MissingPermission = nil
 	ar, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: id, Yes: true})
 	if err != nil || !ar.Resumed || ar.StackNumber == nil || len(h.forge.PRs(publicName)) != 2 || len(h.forge.Stacks(publicName)) != 1 {
@@ -385,10 +389,21 @@ func TestStackPromoteFlagsTakeOneFeature(t *testing.T) {
 		{engine.PromoteOptions{Features: two, Modes: map[string]string{"c": "squash"}}, "mode-for"},
 		{engine.PromoteOptions{Features: two, Modes: map[string]string{"b": "curated"}}, "mode-for"},
 		{engine.PromoteOptions{Features: two, Titles: map[string]string{"c": "t"}}, "title-for"},
+		// --mode or --title beside --mode-for or --title-for of the same
+		// feature would leave which one wins to the code path.
+		{engine.PromoteOptions{Features: []string{"a"}, Mode: "squash", Modes: map[string]string{"a": "preserve"}}, "mode-for"},
+		{engine.PromoteOptions{Features: []string{"a"}, Title: "t", Titles: map[string]string{"a": "T"}}, "title-for"},
 	} {
 		err := engine.ValidatePromoteOptions(&c.opt)
 		if ce := wantCode(t, err, contract.BadFlag); ce.Field != c.field {
 			t.Errorf("%+v: field %q, want %q", c.opt, ce.Field, c.field)
+		}
+	}
+	// The error names the same feature every run, whatever the map order.
+	for range 20 {
+		o := engine.PromoteOptions{Features: two, Titles: map[string]string{"d": "t", "c": "t", "e": "t"}}
+		if ce := wantCode(t, engine.ValidatePromoteOptions(&o), contract.BadFlag); !strings.Contains(ce.Message, "names c,") {
+			t.Fatalf("named %q, want c", ce.Message)
 		}
 	}
 	one := engine.PromoteOptions{Features: []string{"a"}, Modes: map[string]string{"a": "squash"}, Titles: map[string]string{"a": "T"}}
@@ -439,5 +454,171 @@ func TestPromoteCountsOnlyOwnCommitsAfterReparentingToMain(t *testing.T) {
 		Groups: []plan.Group{{From: []string{bHead}, Message: "Add b"}}, PlanOnly: true})
 	if err != nil || res.Plan == nil || !reflect.DeepEqual(publishedSources(res.Plan.Publish.Commits), []string{bHead}) {
 		t.Fatalf("curated promote of feat-b = %+v %v", res, err)
+	}
+}
+
+// publishedParent is a published on its own (PR #1) and b started on it
+// and gated: b is promoted on its own, on a's public branch.
+func publishedParent(t *testing.T) (*harness, int) {
+	t.Helper()
+	h := newHarness(t)
+	h.init()
+	h.startFeature("a", map[string]string{"a.txt": "a\n"})
+	h.gateFeature("a")
+	h.grant(time.Hour)
+	res, err := promote(h, engine.PromoteOptions{Feature: "a", Mode: "squash", Message: "Add a", Yes: true})
+	if err != nil || res.Applied == nil {
+		t.Fatalf("promote a = %+v %v", res, err)
+	}
+	h.startOn("b", "a", map[string]string{"b.txt": "b\n"})
+	h.gateFeature("b")
+	return h, res.Applied.PublicPR
+}
+
+// promoteB is promote b --plan, which must be refused with reason.
+func promoteB(h *harness, reason string) *contract.Error {
+	h.t.Helper()
+	before := h.publicRefs()
+	_, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "b", Mode: "squash", Message: "Add b", PlanOnly: true})
+	ce := wantCode(h.t, err, contract.NotAStack)
+	if ce.Details["reason"] != reason || ce.Details["feature"] != "b" {
+		h.t.Fatalf("promote b: %s %v, want reason %s", ce.Message, ce.Details, reason)
+	}
+	if !reflect.DeepEqual(h.publicRefs(), before) {
+		h.t.Fatal("a refused promote changed the public repo")
+	}
+	return ce
+}
+
+// Public main moving after a was published leaves b nothing to gate onto:
+// b's gate builds on a replayed onto the new main, never on the tree a's
+// PR published. The refusal says so, again after b is gated, instead of
+// asking for a gate that can never link.
+func TestPromoteOnAParentPublishedBeforeMainMovedSaysWhy(t *testing.T) {
+	t.Parallel()
+	h, _ := publishedParent(t)
+	testutil.Commit(t, h.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
+	for round := range 2 {
+		ce := promoteB(h, "parent_moved")
+		if ce.Details["public_main_moved"] != true || ce.Details["parent"] != "a" || !strings.Contains(ce.Message, "once a merges and sync moves b onto main") {
+			t.Fatalf("round %d: %s %v", round, ce.Message, ce.Details)
+		}
+		h.gateFeature("b") // what a stale_gate would have asked for
+	}
+}
+
+// The bottom's published parent must still be what was published, with an
+// open PR.
+func TestPromoteRefusesAParentNoLongerAsPublished(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name, reason string
+		change       func(h *harness, pr int)
+	}{
+		{"merged", "parent_merged", func(h *harness, pr int) { h.forge.SetPRMerged(publicName, pr) }},
+		{"closed", "parent_not_public", func(h *harness, pr int) { h.forge.ClosePR(publicName, pr) }},
+		{"branch moved", "parent_moved", func(h *harness, _ int) {
+			testutil.Commit(h.t, h.shadowGit(), "a", "more a", map[string]string{"a2.txt": "a2\n"})
+		}},
+		{"public tip moved", "parent_moved", func(h *harness, _ int) {
+			testutil.Commit(h.t, h.pubGit, "a", "pushed by someone", map[string]string{"x.txt": "x\n"})
+		}},
+		{"tip tree is not the gated tree", "parent_moved", func(h *harness, _ int) {
+			h.editRemoteMeta("a", func(m *feature.Meta) { m.Gate.PublishedTree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904" })
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			h, pr := publishedParent(t)
+			c.change(h, pr)
+			if ce := promoteB(h, c.reason); ce.Details["public_main_moved"] != nil {
+				t.Fatalf("details = %v", ce.Details)
+			}
+		})
+	}
+}
+
+// A stack plan whose branch moved before apply is stale, and says which
+// stack to plan again.
+func TestAStackPlanGoesStaleBeforeApply(t *testing.T) {
+	t.Parallel()
+	h := gatedStack(t, "a", "b")
+	h.grant(time.Hour)
+	res, _, err := promoteStack(h, engine.PromoteOptions{Features: []string{"a", "b"}, Mode: "squash", PlanOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := h.publicRefs()
+	testutil.Commit(t, h.shadowGit(), "b", "more b", map[string]string{"b2.txt": "b2\n"})
+	_, _, err = h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: res.Plan.ID, Yes: true})
+	ce := wantCode(t, err, contract.PlanStale)
+	if !reflect.DeepEqual(ce.Details["features"], []string{"a", "b"}) || !reflect.DeepEqual(h.publicRefs(), before) {
+		t.Fatalf("details = %v", ce.Details)
+	}
+}
+
+// The plan file is local and unsigned: a stack plan edited to base a PR
+// elsewhere, or to name another parent, is refused.
+func TestATamperedStackPlanIsRefused(t *testing.T) {
+	t.Parallel()
+	h := gatedStack(t, "a", "b")
+	h.grant(time.Hour)
+	res, _, err := promoteStack(h, engine.PromoteOptions{Features: []string{"a", "b"}, Mode: "squash", PlanOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig := *res.Plan
+	pm := h.pubTip("main")
+	before := h.publicRefs()
+	for _, c := range []struct {
+		name, moved string
+		edit        func(p *plan.Plan)
+	}{
+		{"base", "prs", func(p *plan.Plan) { p.PRs[1].Base = "main" }},
+		{"parent", "publish.parent", func(p *plan.Plan) { p.Chain[1].Publish.Parent = pm }},
+	} {
+		p := orig
+		p.PRs = append([]plan.StackPR(nil), orig.PRs...)
+		p.Chain = append([]plan.Entry(nil), orig.Chain...)
+		c.edit(&p)
+		if _, err := plan.Save(h.eng.WS.PlansDir(), p); err != nil {
+			t.Fatal(err)
+		}
+		_, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: p.ID, Yes: true})
+		ce := wantCode(t, err, contract.PlanStale)
+		if moved, _ := ce.Details["moved"].([]string); !reflect.DeepEqual(moved, []string{c.moved}) || !reflect.DeepEqual(ce.Details["features"], []string{"a", "b"}) {
+			t.Fatalf("%s: details = %v", c.name, ce.Details)
+		}
+	}
+	if !reflect.DeepEqual(h.publicRefs(), before) {
+		t.Fatal("a tampered plan changed the public repo")
+	}
+}
+
+// A plan of one feature publishes exactly the plan ref's commit: a ref
+// moved to a commit above it is not the plan.
+func TestApplyRefusesAPlanRefAboveThePlansCommit(t *testing.T) {
+	t.Parallel()
+	h := gated(t)
+	h.grant(time.Hour)
+	res, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "Add feature", PlanOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sg, P := h.shadowGit(), res.Plan.Publish.Commit
+	tree, err := sg.TreeOf(h.ctx, P)
+	if err != nil {
+		t.Fatal(err)
+	}
+	above, err := sg.CommitTree(h.ctx, tree, []string{P}, "above the plan", testutil.Author(2), testutil.Author(2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sg.UpdateRef(h.ctx, "refs/ghostbranch/plans/"+res.Plan.ID, above); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: res.Plan.ID, Yes: true})
+	if ce := wantCode(t, err, contract.PlanStale); !reflect.DeepEqual(ce.Details["moved"], []string{"publish.commit"}) {
+		t.Fatalf("details = %v", ce.Details)
 	}
 }

@@ -312,7 +312,7 @@ func (e *Engine) verifyChain(ctx context.Context, pc *pairCtx, pl plan.Plan, m f
 	if err != nil {
 		return "", nil, internalErr(err, "read plan "+pl.ID+"'s commit")
 	}
-	return e.verifyEntry(ctx, pc, pl, m, cfg, live, live.PublicMain, live.PublicMain, tip)
+	return e.verifyEntry(ctx, pc, pl, m, cfg, live, live.PublicMain, live.PublicMain, tip, false)
 }
 
 // verifyEntry checks that plan pl (a plan of one feature, or one branch of
@@ -322,7 +322,8 @@ func (e *Engine) verifyChain(ctx context.Context, pc *pairCtx, pl plan.Plan, m f
 //   - its rebased chain runs from onto (public main, or the commit a
 //     stacked gate replayed its own commits onto) to the candidate's parent;
 //   - the plan ref holds the plan's commit (planTip, "" when the ref is
-//     missing), or, for a lower branch of a stack, a commit above it;
+//     missing), or, for a branch below the top of a stack (below), a
+//     commit above it;
 //   - the published tree is what this binary's strip gives;
 //   - the curate groups fit the mode and the gated commits;
 //   - the chain derived again from the gate is the plan's, commit by commit,
@@ -331,7 +332,7 @@ func (e *Engine) verifyChain(ctx context.Context, pc *pairCtx, pl plan.Plan, m f
 // It returns the plan's commit P and the derived links, whose sources and
 // entries the scan uses.
 func (e *Engine) verifyEntry(ctx context.Context, pc *pairCtx, pl plan.Plan, m feature.Meta, cfg config.Config, live plan.Fingerprint,
-	onto, pubParent, planTip string) (string, []link, error) {
+	onto, pubParent, planTip string, below bool) (string, []link, error) {
 	g := pc.git
 	pm, gateC := live.PublicMain, live.GateCandidate
 	// The plan only stands while the recorded gate is green, fresh, and for
@@ -357,7 +358,7 @@ func (e *Engine) verifyEntry(ctx context.Context, pc *pairCtx, pl plan.Plan, m f
 	}
 	P := pl.Publish.Commit
 	inPlan := planTip != "" && planTip == P
-	if !inPlan && planTip != "" {
+	if !inPlan && below && planTip != "" {
 		// A lower branch of a stack plan: its tip is under the plan ref's.
 		var err error
 		if inPlan, err = g.IsAncestor(ctx, P, planTip); err != nil {

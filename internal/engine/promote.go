@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -493,18 +494,19 @@ func ValidatePromoteOptions(opt *PromoteOptions) error {
 			return err
 		}
 	}
+	// Map keys in order, so the error names the same feature every run.
 	for _, fl := range []struct {
 		flag string
 		m    map[string]string
 	}{{"mode-for", opt.Modes}, {"title-for", opt.Titles}} {
-		for f := range fl.m {
+		for _, f := range slices.Sorted(maps.Keys(fl.m)) {
 			if !slices.Contains(opt.Features, f) {
 				return contract.New(contract.BadFlag, "--%s names %s, which this promote doesn't list", fl.flag, f).WithField(fl.flag)
 			}
 		}
 	}
-	for f, m := range opt.Modes {
-		switch {
+	for _, f := range slices.Sorted(maps.Keys(opt.Modes)) {
+		switch m := opt.Modes[f]; {
 		case m == config.ModeSquash || m == config.ModePreserve:
 		case m == config.ModeCurated && len(opt.Features) == 1:
 		case m == config.ModeCurated:
@@ -515,10 +517,18 @@ func ValidatePromoteOptions(opt *PromoteOptions) error {
 	}
 	if len(opt.Features) == 1 {
 		// One feature: its --mode-for and --title-for are --mode and --title.
-		if m := opt.Modes[opt.Feature]; m != "" && opt.Mode == "" {
+		// Both at once would leave which one wins to the code path, so it
+		// is refused.
+		if m, ok := opt.Modes[opt.Feature]; ok {
+			if opt.Mode != "" {
+				return contract.New(contract.BadFlag, "--mode and --mode-for %s both set %s's mode: pass one", opt.Feature, opt.Feature).WithField("mode-for")
+			}
 			opt.Mode = m
 		}
-		if t := opt.Titles[opt.Feature]; t != "" && opt.Title == "" {
+		if t, ok := opt.Titles[opt.Feature]; ok {
+			if strings.TrimSpace(opt.Title) != "" {
+				return contract.New(contract.BadFlag, "--title and --title-for %s both set %s's PR title: pass one", opt.Feature, opt.Feature).WithField("title-for")
+			}
 			opt.Title = t
 		}
 	}

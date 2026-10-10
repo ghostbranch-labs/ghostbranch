@@ -185,7 +185,7 @@ func (e *Engine) resolveStack(ctx context.Context, pc *pairCtx, cfg config.Confi
 		case p == feature.MainParent:
 			b.base, b.pubParent = "main", pm
 		default:
-			t, err := e.publicParent(ctx, pc, b, p, names)
+			t, err := e.publicParent(ctx, pc, b, p, pm, names)
 			if err != nil {
 				if ce := contract.From(err); ce.Code == contract.NotAStack {
 					return nil, e.withWant(ctx, pc, ce, names)
@@ -247,8 +247,10 @@ func chainStartsOn(ctx context.Context, g *gitx.Git, commits []feature.GateCommi
 // p: p's PR must be open, p's branch unmoved since it was published, its
 // public branch still at the published head, and its gate the one whose
 // tree it published. It returns that tree, which b's gate must have built
-// on. A missing ref or a mismatch is parent_moved; a git failure INTERNAL.
-func (e *Engine) publicParent(ctx context.Context, pc *pairCtx, b *stackBranch, p string, names []string) (string, error) {
+// on. A missing ref or a mismatch is parent_moved, and so is public main
+// having moved since p was gated (details.public_main_moved); a git
+// failure is INTERNAL.
+func (e *Engine) publicParent(ctx context.Context, pc *pairCtx, b *stackBranch, p, pm string, names []string) (string, error) {
 	g := pc.git
 	pmeta, _, _, err := e.readMetaAny(ctx, pc, p)
 	if ce := contract.From(err); ce != nil && ce.Code == contract.FeatureNotFound {
@@ -296,6 +298,18 @@ func (e *Engine) publicParent(ctx context.Context, pc *pairCtx, b *stackBranch, 
 	}
 	if tree != pmeta.Gate.PublishedTree {
 		return "", moved
+	}
+	// Public main moved since p was gated and published: b's gate can only
+	// build on p replayed onto the new main, which is not the tree p's PR
+	// published, so gating b again would never link. Only p's merge (and
+	// sync moving b onto main) gets b out of this.
+	if pmeta.Gate.PublicMain != pm {
+		ce := notAStack("parent_moved", b.name, names,
+			"public main moved since %s was published; %s can be promoted once %s merges and sync moves %s onto main (updating %s's PR is 6.1a-2)",
+			p, b.name, p, b.name, p)
+		ce.Details["parent"] = p
+		ce.Details["public_main_moved"] = true
+		return "", ce
 	}
 	b.base, b.pubParent = branch, tip
 	b.parentPR, b.parentStack = pmeta.Promoted.PublicPR, pmeta.Promoted.Stack
@@ -573,7 +587,7 @@ func chainNames(pl plan.Plan) []string {
 // PR in that feature's record at once. Last, it registers the native GitHub
 // stack (stackUp). Every step is safe to run again: an apply that stopped
 // resumes at the first PR it hadn't opened.
-func (e *Engine) applyStack(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool) (*ApplyResult, []contract.Warning, error) {
+func (e *Engine) applyStack(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool) (res *ApplyResult, warns []contract.Warning, err error) {
 	g := pc.git
 	n := len(pl.Chain)
 	cfg, O, warns, err := e.readConfig(ctx, pc)
@@ -604,7 +618,19 @@ func (e *Engine) applyStack(ctx context.Context, pc *pairCtx, pl plan.Plan, yes 
 	if err != nil {
 		return nil, warns, internalErr(err, "read plan "+pl.ID+"'s commit")
 	}
-	res := &ApplyResult{PlanID: pl.ID, Waived: []WaivedFinding{}, PRs: append([]plan.StackPR(nil), pl.PRs...)}
+	res = &ApplyResult{PlanID: pl.ID, Waived: []WaivedFinding{}, PRs: append([]plan.StackPR(nil), pl.PRs...)}
+	// The plan file records the PRs opened and the stack, also when the
+	// apply stops part-way; the feature records are what later commands read.
+	defer func() {
+		if e.DryRun || res == nil || !slices.ContainsFunc(res.PRs, func(p plan.StackPR) bool { return p.Number != 0 }) {
+			return
+		}
+		saved := pl
+		saved.PRs, saved.StackNumber = res.PRs, res.StackNumber
+		if _, serr := plan.Save(e.WS.PlansDir(), saved); serr != nil {
+			warns = addWarnings(warns, mirrorNotUpdated("couldn't record the PRs in the local plan file "+pl.ID+".json", serr, map[string]any{"plan_id": pl.ID}))
+		}
+	}()
 	shown := make([][]plan.Commit, n)
 	authors := make([][]string, n)
 	files := make([][]string, n)
@@ -630,7 +656,7 @@ func (e *Engine) applyStack(ctx context.Context, pc *pairCtx, pl plan.Plan, yes 
 			return nil, warns, stackStale(pl, i, moved, "the repos changed since plan %s was made (%s of %s); make a new plan with ghostbranch promote",
 				pl.ID, strings.Join(moved, ", "), en.Feature)
 		}
-		P, links, err := e.verifyEntry(ctx, pc, ep, b.meta, cfg, live, b.onto, b.pubParent, planTip)
+		P, links, err := e.verifyEntry(ctx, pc, ep, b.meta, cfg, live, b.onto, b.pubParent, planTip, i < n-1)
 		if err != nil {
 			if ce := contract.From(err); ce.Code == contract.PlanStale {
 				ce.Details["features"] = names
@@ -756,13 +782,6 @@ func (e *Engine) applyStack(ctx context.Context, pc *pairCtx, pl plan.Plan, yes 
 				return res, warns, err
 			}
 		}
-	}
-	// The plan file records the PRs and the stack too; the feature records
-	// are what later commands read.
-	saved := pl
-	saved.PRs, saved.StackNumber = res.PRs, res.StackNumber
-	if _, err := plan.Save(e.WS.PlansDir(), saved); err != nil {
-		warns = addWarnings(warns, mirrorNotUpdated("couldn't record the PRs in the local plan file "+pl.ID+".json", err, map[string]any{"plan_id": pl.ID}))
 	}
 	return res, warns, nil
 }
