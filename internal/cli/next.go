@@ -132,6 +132,25 @@ func (a *app) steps(err error) []contract.Next {
 		case contract.TokenPermissionMissing:
 			return []contract.Next{{Command: a.scoped("doctor"),
 				Why: "doctor lists every permission the token lacks, for each command; a person grants them, then runs this command again"}}
+		case contract.LoginExpired:
+			return []contract.Next{{Command: a.gb("login"), NeedsHuman: true,
+				Why: "the stored GitHub login expired; a person logs in again at a terminal"}}
+		case contract.LoginUnavailable:
+			// no_keychain and keychain_error get no next: their fix (setting
+			// GHOSTBRANCH_TOKEN or unlocking the keychain) isn't a command.
+			switch r, _ := ce.Details["reason"].(string); r {
+			case "corrupt":
+				return []contract.Next{
+					{Command: a.gb("logout"), Why: "remove the unreadable stored login"},
+					{Command: a.gb("login"), NeedsHuman: true, Why: "then a person logs in again at a terminal"},
+				}
+			case "no_console", "denied", "expired_code", "refresh_failed":
+				return []contract.Next{{Command: a.gb("login"), NeedsHuman: true,
+					Why: "a person runs this in their own terminal and approves it on GitHub"}}
+			case "no_client_id":
+				return []contract.Next{{Command: a.gb("login", "--with-token"), NeedsHuman: true,
+					Why: "pipe a GitHub token on stdin, for example: gh auth token | ghostbranch login --with-token"}}
+			}
 		case contract.ShadowCreateDenied:
 			pub, _ := ce.Details["public"].(string)
 			sh, _ := ce.Details["shadow"].(string)

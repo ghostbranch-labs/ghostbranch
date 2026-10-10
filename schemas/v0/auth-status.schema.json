@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "auth status data",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["source", "account", "token_kind", "valid", "can_publish", "pair", "problem", "stored_login_checked", "stored_login"],
+  "properties": {
+    "source": { "description": "where the token comes from; empty with no usable token", "enum": ["", "GHOSTBRANCH_TOKEN", "login", "GH_TOKEN", "GITHUB_TOKEN", "gh auth token"] },
+    "account": { "type": "string" },
+    "token_kind": { "description": "empty with no token", "oneOf": [{ "const": "" }, { "$ref": "common.schema.json#/$defs/tokenKind" }] },
+    "valid": { "description": "unknown when offline or with no token", "enum": ["true", "false", "unknown"] },
+    "can_publish": { "description": "push access to pair", "enum": ["true", "false", "unknown"] },
+    "pair": { "description": "the public repo probed; empty when there is no pair", "type": "string" },
+    "problem": { "description": "the error code that stopped token resolution; empty otherwise", "type": "string" },
+    "stored_login_checked": { "description": "false when GHOSTBRANCH_TOKEN is set: the keychain isn't touched", "type": "boolean" },
+    "stored_login": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["account", "kind", "expires", "refresh_expires"],
+          "properties": {
+            "account": { "type": "string" },
+            "kind": { "enum": ["app", "pat"] },
+            "expires": { "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/time" }] },
+            "refresh_expires": { "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/time" }] }
+          }
+        }
+      ]
+    }
+  }
+}

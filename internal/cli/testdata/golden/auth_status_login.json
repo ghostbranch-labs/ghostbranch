@@ -1,0 +1,30 @@
+{
+  "schema_version": "0.10",
+  "command": "auth status",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "source": "login",
+    "account": "octo",
+    "token_kind": "app",
+    "valid": "true",
+    "can_publish": "true",
+    "pair": "acme/widget",
+    "problem": "",
+    "stored_login_checked": true,
+    "stored_login": {
+      "account": "octo",
+      "kind": "app",
+      "expires": "2026-10-05T20:00:00Z",
+      "refresh_expires": "2027-03-21T04:00:00Z"
+    }
+  },
+  "warnings": [
+    {
+      "code": "AGENT_ON_PERSON_LOGIN",
+      "message": "this looks like an agent or a script using a person's stored login, which can publish; give the agent its own shadow-only GHOSTBRANCH_TOKEN (ghostbranch guide, Tokens)"
+    }
+  ],
+  "next": [],
+  "error": null
+}

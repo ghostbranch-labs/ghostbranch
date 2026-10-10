@@ -1,0 +1,20 @@
+{
+  "schema_version": "0.10",
+  "command": "auth status",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "source": "GHOSTBRANCH_TOKEN",
+    "account": "octo",
+    "token_kind": "unknown",
+    "valid": "true",
+    "can_publish": "unknown",
+    "pair": "",
+    "problem": "",
+    "stored_login_checked": false,
+    "stored_login": null
+  },
+  "warnings": [],
+  "next": [],
+  "error": null
+}

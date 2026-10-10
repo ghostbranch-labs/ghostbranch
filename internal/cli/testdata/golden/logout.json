@@ -1,0 +1,16 @@
+{
+  "schema_version": "0.10",
+  "command": "logout",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "removed": true,
+    "account": "octo",
+    "kind": "app",
+    "revoke_url": "https://github.com/settings/apps/authorizations",
+    "env_token": "GHOSTBRANCH_TOKEN"
+  },
+  "warnings": [],
+  "next": [],
+  "error": null
+}

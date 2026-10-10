@@ -64,6 +64,10 @@ type Env struct {
 	ClientID     string
 	OAuthBaseURL string
 	HTTPClient   *http.Client
+	// AppSlug is the GitHub App's URL name (auth.AppSlug), for its install
+	// page. OpenBrowser opens a URL in the person's browser, best effort.
+	AppSlug      string
+	OpenBrowser  func(url string) error
 	CwdRemotes   func() []workspace.Remote
 	NewScanner   func(leak.Rules) (leak.Scanner, error)
 	PollInterval time.Duration
@@ -102,6 +106,7 @@ func DefaultEnv() Env {
 		},
 		GHToken:  auth.GHCLI,
 		Keychain: keychain.OS(), ClientID: auth.ClientID, OAuthBaseURL: "https://github.com",
+		AppSlug: auth.AppSlug, OpenBrowser: openBrowser,
 		HTTPClient:   &http.Client{Timeout: 30 * time.Second},
 		CwdRemotes:   cwdRemotes,
 		NewScanner:   func(r leak.Rules) (leak.Scanner, error) { return leak.NewGitleaks(r) },

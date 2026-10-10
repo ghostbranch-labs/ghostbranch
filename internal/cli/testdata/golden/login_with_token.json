@@ -1,0 +1,18 @@
+{
+  "schema_version": "0.10",
+  "command": "login",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "account": "octo",
+    "kind": "pat",
+    "token_kind": "classic",
+    "expires": null,
+    "replaced": false,
+    "install_url": "",
+    "env_token": "GHOSTBRANCH_TOKEN"
+  },
+  "warnings": [],
+  "next": [],
+  "error": null
+}

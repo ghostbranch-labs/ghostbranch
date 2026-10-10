@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "logout data",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["removed", "account", "kind", "revoke_url", "env_token"],
+  "properties": {
+    "removed": { "description": "a stored login, readable or not, was removed", "type": "boolean" },
+    "account": { "type": "string" },
+    "kind": { "description": "the removed login's kind; empty when nothing readable was stored", "enum": ["app", "pat", ""] },
+    "revoke_url": { "description": "app logins: where the person revokes the app's access at GitHub (logout can't); empty otherwise", "type": "string" },
+    "env_token": { "description": "an environment token commands still use; empty when none is set", "type": "string" }
+  }
+}

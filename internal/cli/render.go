@@ -345,6 +345,66 @@ func human(r any) string {
 			fmt.Fprintf(&b, "  %s  %s\n", oneLine(ref), short(v.Deleted[ref]))
 		}
 		b.WriteString("The ledger keeps each SHA (ghostbranch log), so a deleted branch can be pushed back.\n")
+	case *LoginResult:
+		who := v.Account
+		if who == "" {
+			who = "an account GitHub didn't name"
+		}
+		if v.Kind == "app" {
+			fmt.Fprintf(&b, "Logged in to GitHub as %s with the Ghostbranch GitHub App (token expires %s; it refreshes itself).\n", who, when(v.Expires))
+		} else {
+			fmt.Fprintf(&b, "Stored the %s token for %s in the OS keychain.\n", v.TokenKind, who)
+		}
+		if v.InstallURL != "" {
+			fmt.Fprintf(&b, "Next, pick the repos Ghostbranch may use (your public repo and its shadow): %s\n", v.InstallURL)
+		}
+		if v.EnvToken != "" {
+			fmt.Fprintf(&b, "Note: %s is set in this shell and wins over the stored login.\n", v.EnvToken)
+		}
+	case *LogoutResult:
+		switch {
+		case v.Removed && v.Account != "":
+			fmt.Fprintf(&b, "Removed the stored GitHub login for %s.\n", v.Account)
+		case v.Removed:
+			b.WriteString("Removed the unreadable stored GitHub login.\n")
+		default:
+			b.WriteString("No GitHub login was stored.\n")
+		}
+		if v.RevokeURL != "" {
+			fmt.Fprintf(&b, "To revoke the app's access at GitHub too: %s\n", v.RevokeURL)
+		}
+		if v.EnvToken != "" {
+			fmt.Fprintf(&b, "Note: %s is still set, so commands keep using it.\n", v.EnvToken)
+		}
+	case *AuthStatusResult:
+		switch {
+		case v.Source == "" && v.Problem != "":
+			fmt.Fprintf(&b, "No usable token: %s (see ghostbranch explain %s).\n", v.Problem, v.Problem)
+		case v.Source == "":
+			b.WriteString("No GitHub token. Run ghostbranch login, or set GHOSTBRANCH_TOKEN.\n")
+		default:
+			who := v.Account
+			if who == "" {
+				who = "unknown account"
+			}
+			fmt.Fprintf(&b, "Token: from %s, %s token, %s (valid: %s)\n", v.Source, v.TokenKind, who, v.Valid)
+			if v.Pair != "" {
+				fmt.Fprintf(&b, "Can publish to %s: %s\n", v.Pair, v.CanPublish)
+			}
+		}
+		switch {
+		case v.StoredLogin != nil:
+			s := v.StoredLogin
+			fmt.Fprintf(&b, "Stored login: %s (%s)", s.Account, s.Kind)
+			if s.Expires != nil {
+				fmt.Fprintf(&b, ", token expires %s, refreshable until %s", when(s.Expires), when(s.RefreshExpires))
+			}
+			b.WriteString("\n")
+		case v.StoredLoginChecked:
+			b.WriteString("Stored login: none\n")
+		default:
+			b.WriteString("Stored login: not checked (GHOSTBRANCH_TOKEN wins)\n")
+		}
 	case *engine.AgentsStatusResult:
 		if len(v.Grants) == 0 {
 			b.WriteString("No agent grants on this machine.\n")
@@ -557,4 +617,12 @@ func featureShowText(b *strings.Builder, v *engine.FeatureShowResult) {
 		}
 		b.WriteString(line + "\n")
 	}
+}
+
+// when formats a time for people; nil is "never".
+func when(t *time.Time) string {
+	if t == nil {
+		return "never"
+	}
+	return t.UTC().Format("2006-01-02 15:04 UTC")
 }

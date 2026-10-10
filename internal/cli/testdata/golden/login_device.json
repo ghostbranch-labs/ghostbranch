@@ -1,0 +1,18 @@
+{
+  "schema_version": "0.10",
+  "command": "login",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "account": "octo",
+    "kind": "app",
+    "token_kind": "app",
+    "expires": "2026-10-05T20:00:10Z",
+    "replaced": false,
+    "install_url": "https://github.com/apps/ghostbranch-test/installations/new",
+    "env_token": "GHOSTBRANCH_TOKEN"
+  },
+  "warnings": [],
+  "next": [],
+  "error": null
+}
