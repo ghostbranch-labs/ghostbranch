@@ -12,6 +12,7 @@ import (
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/auth"
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
+	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/keychain"
 	"github.com/ghostbranch-labs/ghostbranch/internal/prompt"
@@ -340,8 +341,7 @@ func (a *app) authStatus(ctx context.Context) (*AuthStatusResult, []contract.War
 	}
 	res.Source, res.TokenKind = src, auth.Kind(tok)
 	if src == "login" && auth.LooksLikeAgent(a.env.Getenv, a.env.ConsoleUsable) {
-		warns = append(warns, contract.Warning{Code: contract.AgentOnPersonLogin,
-			Message: "this looks like an agent or a script using a person's stored login, which can publish; give the agent its own shadow-only GHOSTBRANCH_TOKEN (ghostbranch guide, Tokens)"})
+		warns = append(warns, contract.Warning{Code: contract.AgentOnPersonLogin, Message: engine.AgentOnLoginMessage})
 	}
 	if src == "login" && stored != nil {
 		res.Account = stored.Account

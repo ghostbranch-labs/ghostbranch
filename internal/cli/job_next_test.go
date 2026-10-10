@@ -443,3 +443,14 @@ func TestAgainForAPersonReplacesARelativeRepo(t *testing.T) {
 		t.Fatalf("again(false) = %v", got)
 	}
 }
+
+// A login GitHub refused offers `ghostbranch login` to a person, like the
+// other device-flow failures.
+func TestARefusedLoginOffersLogin(t *testing.T) {
+	t.Parallel()
+	a := testApp("sync", "sync", "--json")
+	next := a.next(contract.New(contract.LoginUnavailable, "x").WithDetails(map[string]any{"reason": "refused"}))
+	if len(next) != 1 || !slices.Equal(next[0].Command, []string{"ghostbranch", "login"}) || !next[0].NeedsHuman {
+		t.Fatalf("next = %+v", next)
+	}
+}

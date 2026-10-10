@@ -22,7 +22,7 @@
   "warnings": [
     {
       "code": "AGENT_ON_PERSON_LOGIN",
-      "message": "this looks like an agent or a script using a person's stored login, which can publish; give the agent its own shadow-only GHOSTBRANCH_TOKEN (ghostbranch guide, Tokens)"
+      "message": "this looks like an agent's session (GHOSTBRANCH_ACTOR names an agent, a coding agent's marker variable is set, or no person is at a console), and it is using the person's stored login, which can publish; give the agent its own token, reaching only the shadow repo, in GHOSTBRANCH_TOKEN (see \"Tokens\" in ghostbranch guide)"
     }
   ],
   "next": [],

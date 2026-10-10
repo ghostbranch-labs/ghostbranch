@@ -146,7 +146,7 @@ func (a *app) steps(err error) []contract.Next {
 					{Command: a.gb("logout"), Why: "remove the unreadable stored login"},
 					{Command: a.gb("login"), NeedsHuman: true, Why: "then a person logs in again at a terminal"},
 				}
-			case "no_console", "denied", "expired_code", "refresh_failed":
+			case "no_console", "denied", "expired_code", "refresh_failed", "refused":
 				return []contract.Next{{Command: a.gb("login"), NeedsHuman: true,
 					Why: "a person runs this in their own terminal and approves it on GitHub"}}
 			case "no_client_id":
