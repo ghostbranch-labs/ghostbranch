@@ -682,7 +682,7 @@ func TestGuidedInitPersonalAccountRefusedToo(t *testing.T) {
 			if !slices.Contains(p.said, `GitHub refused to create octo/widget-shadow on octo. GitHub said: "`+notInstalledMsg+`"`) {
 				t.Fatalf("never said the personal account refused: %q", p.said)
 			}
-			const notInstalled = "  - the Ghostbranch app isn't installed on octo: install it at " + installLink
+			const notInstalled = "  - the ghostbranch-cli GitHub App isn't installed on octo: install it at " + installLink
 			if got := slices.Contains(p.said, notInstalled); got != app {
 				t.Fatalf("app %v, said the install link %v: %q", app, got, p.said)
 			}
@@ -763,7 +763,7 @@ func TestGuidedInitAppLoginTexts(t *testing.T) {
 func TestGuidedInitSaysWhyCreationWasRefused(t *testing.T) {
 	t.Parallel()
 	const (
-		appMissing = "  - the Ghostbranch app isn't installed on %s: install it at " + installLink
+		appMissing = "  - the ghostbranch-cli GitHub App isn't installed on %s: install it at " + installLink
 		orgPolicy  = "  - acme's settings may not let members create private repos: ask an org owner to create acme/widget-shadow (%s), or choose your personal account"
 		tokenLacks = "  - your token may lack Administration: write (fine-grained) or the repo scope (classic) on acme: ghostbranch doctor shows what's missing"
 	)
@@ -824,5 +824,80 @@ func TestGuidedInitSaysWhyCreationWasRefused(t *testing.T) {
 			}
 			wantPair(t, te, tc.shadow)
 		})
+	}
+}
+
+// Choice 3 can't name the public repo itself: init says so and asks again.
+func TestGuidedInitRefusesThePublicRepoAsTheShadow(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	p := atOrgTerminal(te, "3", "ACME/widget", "octo/other", "", "", "")
+	if code, out, errOut := te.run("init", "acme/widget"); code != 0 {
+		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
+	}
+	hasPrefixes(t, p.asked, whereQ, "Shadow repo (owner/repo", "Shadow repo (owner/repo", "Create private repo octo/other?",
+		"Turn on scheduled sync?", "Proceed?")
+	if !slices.Contains(p.said, "ACME/widget is the public repo; the shadow repo must be a different repo from the public one.") {
+		t.Fatalf("said %q", p.said)
+	}
+	wantPair(t, te, "octo/other")
+}
+
+// A shadow repo named by --shadow, or by a registered pair, is the one the
+// person wants: a refusal goes straight to making that repo by hand.
+func TestGuidedInitOffersNoOtherAccountForANamedShadow(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name  string
+		args  []string
+		asked []string
+	}{
+		{"--shadow", []string{"--shadow", "acme/widget-shadow"}, []string{"Turn on scheduled sync?", "Proceed?", "Press Enter once acme/widget-shadow exists."}},
+		{"registered pair", nil, []string{"Proceed?", "Press Enter once acme/widget-shadow exists."}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			te := newTestEnv(t)
+			if tc.args == nil {
+				ws, err := workspace.Open(te.vars["GHOSTBRANCH_HOME"], "default")
+				if err != nil {
+					t.Fatal(err)
+				}
+				ws.AddPair(workspace.Pair{Public: "acme/widget", Shadow: "acme/widget-shadow"})
+				if err := ws.Save(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			refuseIn(te, "Repository creation failed.", "acme")
+			p := atOrgTerminal(te, "", "", "")
+			p.onWait = func() { _, _ = te.forge.AddRepo("acme/widget-shadow", true) }
+			if code, out, errOut := te.run(append([]string{"init", "acme/widget"}, tc.args...)...); code != 0 {
+				t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
+			}
+			hasPrefixes(t, p.asked, tc.asked...)
+			wantPair(t, te, "acme/widget-shadow")
+		})
+	}
+}
+
+// The org refuses and <login>/<repo>-shadow already exists, private and
+// empty: taking the offer adopts it.
+func TestGuidedInitAdoptsAnExistingPersonalShadowAfterARefusal(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	if _, err := te.forge.AddRepo("octo/widget-shadow", true); err != nil {
+		t.Fatal(err)
+	}
+	refuseIn(te, "Repository creation failed.", "acme")
+	p := atOrgTerminal(te, "", "", "", "", "y", "")
+	code, out, errOut := te.run("init", "acme/widget")
+	if code != 0 {
+		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
+	}
+	hasPrefixes(t, p.asked, whereQ, "Create private repo acme/widget-shadow?", "Turn on scheduled sync?", "Proceed?",
+		"Use octo/widget-shadow instead?", "octo/widget-shadow already exists. Adopt it")
+	wantPair(t, te, "octo/widget-shadow")
+	if shadowExists(te) {
+		t.Fatal("the org's shadow exists")
 	}
 }

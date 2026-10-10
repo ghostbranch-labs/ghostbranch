@@ -203,10 +203,27 @@ func shadowOf(o engine.InitOptions) string {
 	return o.Public + "-shadow"
 }
 
+// isPublic reports, and says, that name is the public repo itself, which
+// can't be its own shadow repo.
+func isPublic(ask prompt.Asker, o engine.InitOptions, name string) bool {
+	if !strings.EqualFold(name, o.Public) {
+		return false
+	}
+	ask.Say(name + " is the public repo; the shadow repo must be a different repo from the public one.")
+	return true
+}
+
 // askShadow settles the shadow repo, starting from name: create it, adopt
 // it if it exists, or take another name (adopted when it exists).
 func askShadow(ctx context.Context, ask prompt.Asker, f forge.Forge, o engine.InitOptions, name string) (engine.InitOptions, error) {
 	for {
+		if isPublic(ask, o, name) {
+			var aerr error
+			if name, aerr = askRepo(ctx, ask, "Shadow repo to use instead (owner/repo; an existing repo is adopted)", ""); aerr != nil {
+				return o, aerr
+			}
+			continue
+		}
 		sh, err := f.GetRepo(ctx, name)
 		var yes bool
 		var aerr error
@@ -312,11 +329,15 @@ func chooseShadow(ctx context.Context, ask prompt.Asker, f forge.Forge, o engine
 		case "2":
 			return askShadow(ctx, ask, f, o, personal)
 		case "3":
-			name, err := askRepo(ctx, ask, "Shadow repo (owner/repo; an existing repo is adopted)", "")
-			if err != nil {
-				return o, err
+			for {
+				name, err := askRepo(ctx, ask, "Shadow repo (owner/repo; an existing repo is adopted)", "")
+				if err != nil {
+					return o, err
+				}
+				if !isPublic(ask, o, name) {
+					return askShadow(ctx, ask, f, o, name)
+				}
 			}
-			return askShadow(ctx, ask, f, o, name)
 		}
 		ask.Say("Answer 1, 2 or 3.")
 	}
@@ -397,7 +418,7 @@ func explainRefusal(ask prompt.Asker, s setup, public, shadow string, err error)
 	appMissing := s.install != "" && strings.HasPrefix(msg, "Resource not accessible by integration")
 	switch {
 	case appMissing:
-		causes = append(causes, "the Ghostbranch app isn't installed on "+owner+": install it at "+s.install)
+		causes = append(causes, "the "+s.app+" GitHub App isn't installed on "+owner+": install it at "+s.install)
 	case s.install == "":
 		causes = append(causes, "your token may lack Administration: write (fine-grained) or the repo scope (classic) on "+owner+": ghostbranch doctor shows what's missing")
 	}
@@ -422,16 +443,16 @@ func explainRefusal(ask prompt.Asker, s setup, public, shadow string, err error)
 }
 
 // createRefused is the way on once GitHub refused to create the shadow
-// repo: it says why, offers the person's account when the refusal was the
-// organization's, and otherwise (or when that is refused too) waits for the
-// repo made by hand.
-func createRefused(ctx context.Context, ask prompt.Asker, e *engine.Engine, o engine.InitOptions, s setup, refusal error) (*engine.InitResult, []contract.Warning, error) {
+// repo: it says why, offers the person's account when offer is set (no
+// --shadow, no registered pair) and the refusal was the organization's, and
+// otherwise (or when that is refused too) waits for the repo made by hand.
+func createRefused(ctx context.Context, ask prompt.Asker, e *engine.Engine, o engine.InitOptions, s setup, offer bool, refusal error) (*engine.InitResult, []contract.Warning, error) {
 	shadow := shadowOf(o)
 	explainRefusal(ask, s, o.Public, shadow, refusal)
 	owner, _, _ := forge.SplitName(shadow)
 	pubOwner, _, _ := forge.SplitName(o.Public)
 	var w []contract.Warning
-	if s.login != "" && strings.EqualFold(owner, pubOwner) {
+	if offer && s.login != "" && strings.EqualFold(owner, pubOwner) {
 		personal := personalShadow(s.login, o.Public)
 		if l := s.appNeeded("For that, "); l != "" {
 			ask.Say(l)
@@ -567,7 +588,7 @@ func (a *app) guidedInit(ctx context.Context, args []string, f initFlags) error 
 	res, w, err := e.Init(ctx, o)
 	if createDenied(err) {
 		var w2 []contract.Warning
-		res, w2, err = createRefused(ctx, ask, e, o, s, err)
+		res, w2, err = createRefused(ctx, ask, e, o, s, f.shadow == "" && !registered, err)
 		w = append(w, w2...)
 	}
 	if res != nil {
