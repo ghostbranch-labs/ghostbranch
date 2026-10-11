@@ -136,11 +136,16 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 				cfg.Promote.AuthorEmail),
 			Details: map[string]any{"key": "promote.author_map"}})
 	}
-	// A list of several features, or one stacked on another feature, is a
-	// stack: one plan for every PR, each on the branch below.
-	if len(opt.Features) > 1 || e.stacked(ctx, pc, opt.Feature) {
+	// A list of several features, one stacked on another feature, or one
+	// with open PRs stacked on it is a stack: one plan for every PR, each on
+	// the branch below; an open PR above updates with it.
+	above, err := e.openAbove(ctx, pc, opt.Features)
+	if err != nil {
+		return res, warns, err
+	}
+	if len(opt.Features) > 1 || e.stacked(ctx, pc, opt.Feature) || len(above) > 0 {
 		var sw []contract.Warning
-		planID, sw, err = e.promoteStack(ctx, pc, cfg, O, opt, res)
+		planID, sw, err = e.promoteStack(ctx, pc, cfg, O, opt, above, res)
 		return res, addWarnings(warns, sw...), err
 	}
 	if err := curateFlags(mode, opt.Curate); err != nil {

@@ -1,0 +1,216 @@
+package engine
+
+// Updating a stack's open PRs. promote a, with open PRs above a, plans a
+// and every open PR above it together, under one approval (openAbove, in
+// update.go). Every branch with an open PR below the top of what changes is
+// replaced: the bottom because open PRs sit above it (its gate built a
+// restack), each branch above as its commits move onto the new commits
+// below it. Only a bottom on main with no open PR above it appends, as its
+// gate built it; the branches above it then publish for the first time.
+// Apply pushes bottom up, each update leased on the PR head the plan saw.
+
+import (
+	"context"
+	"slices"
+
+	"github.com/ghostbranch-labs/ghostbranch/internal/config"
+	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
+	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
+	"github.com/ghostbranch-labs/ghostbranch/internal/plan"
+	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
+)
+
+// levelUpdate is what resolveStack needs of a branch whose open PR the plan
+// updates: the PR head the plan saw, and whether the plan appends to it
+// (only a bottom on main whose gate built an append can).
+type levelUpdate struct {
+	head   string
+	append bool
+}
+
+// targetBranch is the public branch m publishes to: its PR's branch once it
+// is published, else its name.
+func targetBranch(m feature.Meta) string {
+	if m.Promoted != nil {
+		return publishedBranch(m)
+	}
+	return m.Name
+}
+
+// stackUpdates is, for each branch of the plan, how the plan updates its
+// open PR, read now (prHead); nil for a branch published for the first time
+// (or whose PR is no longer open: apply then refuses as for any first
+// publish to an existing branch). It works in two passes:
+//  1. Every branch's PR is read, bottom up, and a PR that holds commits
+//     Ghostbranch didn't publish stops the plan (prChangedErr, naming the
+//     branch) before anything else is checked: they are never overwritten.
+//  2. Each update gets its style:
+//     - The bottom on main updates as its gate built it (Gate.Update), which
+//     must fit this PR, mode and the open PRs above it now (gateFitsUpdate),
+//     else stale_gate. With open PRs above, that is a replace (restack).
+//     - A stacked branch keeps its first-publish gate, so it is replaced.
+//     Above the bottom the reason is restack, as the branch below gets new
+//     commits in this plan. A stacked bottom (on a published parent) gets
+//     squash in squash mode, else rebase.
+func (e *Engine) stackUpdates(ctx context.Context, pc *pairCtx, names, modes []string) ([]*prUpdate, error) {
+	out := make([]*prUpdate, len(names))
+	metas := make([]feature.Meta, len(names))
+	for i, n := range names {
+		m, _, err := e.readMeta(ctx, pc, n)
+		if err != nil {
+			return nil, err
+		}
+		u, err := e.prHead(ctx, pc, &m)
+		if err != nil {
+			return nil, err
+		}
+		if u != nil && len(u.Foreign) > 0 {
+			return nil, prChangedErr(n, u)
+		}
+		metas[i], out[i] = m, u
+	}
+	for i, n := range names {
+		m, u := metas[i], out[i]
+		if i == 0 && !m.Stacked() {
+			// The bottom on main: its gate built the update (or none), for the
+			// open PRs above it as the gate saw them.
+			if m.Gate == nil {
+				continue // resolveStack reports the missing gate
+			}
+			above := false
+			if u != nil {
+				var err error
+				if above, err = e.hasOpenAbove(ctx, pc, n); err != nil {
+					return nil, err
+				}
+			}
+			if !gateFitsUpdate(m.Gate, u, m, modes[i], above) {
+				return nil, staleGate(n, names)
+			}
+			if u != nil {
+				u.Style, u.Reason = m.Gate.Update.Style, m.Gate.Update.Reason
+			}
+			continue
+		}
+		if u == nil {
+			continue
+		}
+		switch {
+		case i > 0:
+			u.Style, u.Reason = plan.StyleReplace, plan.ReasonRestack
+		case modes[i] == config.ModeSquash:
+			u.Style, u.Reason = plan.StyleReplace, plan.ReasonSquash
+		default:
+			u.Style, u.Reason = plan.StyleReplace, plan.ReasonRebase
+		}
+	}
+	return out, nil
+}
+
+// restackedAbove refuses an update plan in which a branch above the bottom
+// wasn't restacked onto the branch below it after that branch moved
+// (parent_stale). Its gate could still pass, as it replays the branches
+// below, but its own branch would stay on the old commits. A branch listed
+// out of order is left to resolveStack, which names why.
+func (e *Engine) restackedAbove(ctx context.Context, pc *pairCtx, names []string, updates []*prUpdate) error {
+	if !slices.ContainsFunc(updates, func(u *prUpdate) bool { return u != nil }) {
+		return nil
+	}
+	for i := 1; i < len(names); i++ {
+		m, _, err := e.readMeta(ctx, pc, names[i])
+		if err != nil {
+			return err
+		}
+		p := stackParent(m)
+		if p != names[i-1] {
+			continue
+		}
+		st, err := e.stackState(ctx, pc, names[i], m)
+		if err != nil {
+			return err
+		}
+		if st.parentMoved {
+			ce := notAStack("parent_stale", names[i], names,
+				"%s's parent %s moved since %s was started or restacked on it: run ghostbranch feature restack %s, gate the branches above it from the bottom, then promote again",
+				names[i], p, names[i], p)
+			ce.Details["parent"] = p
+			return ce
+		}
+	}
+	return nil
+}
+
+// levelUpdates is resolveStack's view of a plan's updates, by feature.
+func levelUpdates(names []string, updates []*prUpdate) map[string]levelUpdate {
+	out := map[string]levelUpdate{}
+	for i, u := range updates {
+		if u != nil {
+			out[names[i]] = levelUpdate{head: u.Head, append: i == 0 && u.Style == plan.StyleAppend}
+		}
+	}
+	return out
+}
+
+// planUpdates is levelUpdates read back from a saved stack plan.
+func planUpdates(pl plan.Plan) map[string]levelUpdate {
+	out := map[string]levelUpdate{}
+	for i, en := range pl.Chain {
+		if en.Publish.Update {
+			out[en.Feature] = levelUpdate{head: en.Publish.ExpectedHead, append: i == 0 && en.Publish.Style == plan.StyleAppend}
+		}
+	}
+	return out
+}
+
+// levelPlan is branch i of stack plan pl as the plan of one feature
+// (entryPlan), with only that branch's PR in PRs, so the update helpers of
+// one feature (updateStands, updateLive, pushUpdate, recordUpdate) act on it.
+func levelPlan(pl plan.Plan, i int) plan.Plan {
+	ep := entryPlan(pl, i)
+	ep.PRs = []plan.StackPR{pl.PRs[i]}
+	return ep
+}
+
+// stackLevelErr names the whole stack in a PLAN_STALE from one level's
+// update helpers, so a re-plan names every branch.
+func stackLevelErr(err error, names []string) error {
+	if ce := contract.From(err); ce != nil && ce.Code == contract.PlanStale {
+		ce.Details["features"] = names
+	}
+	return err
+}
+
+// previewStackPublish adds what publishing entry en still needs. For an
+// update, that is the push leased on the PR head the plan saw
+// (previewUpdate); the PR is already open. Anything else goes through
+// previewPublish.
+func (e *Engine) previewStackPublish(ctx context.Context, pc *pairCtx, pv *preview.Preview, en plan.Entry, m feature.Meta, base string) error {
+	pub := en.Publish
+	if !pub.Update {
+		return e.previewPublish(ctx, pc, pv, en.Feature, publishedPlan(m), pub.TargetBranch, base, pub.Commit)
+	}
+	e.previewUpdate(ctx, pc, pv, pub.TargetBranch, pub.ExpectedHead, pub.Commit)
+	return nil
+}
+
+// updateLevelStands checks a stack plan's update of branch i (b) against
+// what the shadow repo holds, as updateStands does for one feature: the
+// plan file is local and unsigned. The update must name the feature's own
+// PR on its published branch. A bottom on main must be the very update its
+// gate built (updateStands); any other branch is a replace (its gate is a
+// first publish's).
+func updateLevelStands(pl plan.Plan, i int, b *stackBranch) error {
+	en, pr := pl.Chain[i], pl.PRs[i]
+	lp := levelPlan(pl, i)
+	if i == 0 && !b.meta.Stacked() {
+		return updateStands(b.meta, lp)
+	}
+	m := b.meta
+	if m.Promoted != nil && m.Promoted.PublicPR == pr.Number && pr.Update && pr.Style == en.Publish.Style &&
+		en.Publish.Style == plan.StyleReplace && publishedBranch(m) == en.Publish.TargetBranch {
+		return nil
+	}
+	return contract.New(contract.PlanStale,
+		"plan %s's update of %s doesn't match its record; make a new plan with ghostbranch promote", pl.ID, en.Feature).
+		WithDetails(stale(lp, []string{"prs"}))
+}

@@ -189,8 +189,9 @@ func tailLines(b *strings.Builder, waived []WaivedFinding, guards workflow.Guard
 }
 
 // stackSummary is the approval view of a stack plan: the number of PRs,
-// then each, bottom first, with the branch it is based on and what it
-// publishes (its files measured from the PR below it), then the waived
+// then each, bottom first, with the branch it is based on, how an open PR's
+// branch is updated (updateHeadline), and what it publishes (its files
+// measured from the PR below it, or from an open PR's head), then the waived
 // findings and warnings once. One code approves them all. shown holds each
 // branch's commits with their subjects as stored, authors each commit's
 // author as stored.
@@ -202,6 +203,12 @@ func stackSummary(pl plan.Plan, shown [][]plan.Commit, authors, files [][]string
 		pub := en.Publish
 		pub.Commits = shown[i]
 		fmt.Fprintf(&b, "PR %d of %d: %s, based on %s\n", i+1, n, visible(en.Feature), visible(pl.PRs[i].Base))
+		if pub.Update {
+			fmt.Fprintf(&b, "  %s\n", updateHeadline(pl.PRs[i].Number, pub))
+			if k := len(pub.Restores); k > 0 {
+				fmt.Fprintf(&b, "  puts back %s removed from PR #%d on GitHub\n", plural(k, "commit"), pl.PRs[i].Number)
+			}
+		}
 		publishLines(&b, en.Mode, pub, en.Typed, files[i], authors[i])
 		tailLines(&b, nil, en.CI.RepoGuards, nil)
 	}

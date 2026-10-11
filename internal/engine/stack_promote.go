@@ -139,8 +139,13 @@ func staleGate(name string, names []string) *contract.Error {
 //     link by tree, never by SHA: a parent gated again on the same content
 //     has a new rebased tip with the same tree.
 //
+// ups holds the branches whose open PRs the plan updates. An appending
+// bottom branch's gate must have replayed only its new commits onto the PR
+// head the plan saw (Gate.Base); it publishes on that head. A replacing
+// branch whose gate was built to append is stale_gate.
+//
 // It reads the mirror and, for a public parent, its PR; it writes nothing.
-func (e *Engine) resolveStack(ctx context.Context, pc *pairCtx, cfg config.Config, O, pm string, names []string) ([]stackBranch, error) {
+func (e *Engine) resolveStack(ctx context.Context, pc *pairCtx, cfg config.Config, O, pm string, names []string, ups map[string]levelUpdate) ([]stackBranch, error) {
 	g := pc.git
 	pos := map[string]int{}
 	for i, n := range names {
@@ -181,7 +186,7 @@ func (e *Engine) resolveStack(ctx context.Context, pc *pairCtx, cfg config.Confi
 			ce.Details["parent"] = p
 			return nil, e.withWant(ctx, pc, ce, names)
 		case i > 0:
-			b.base, belowTree = names[i-1], out[i-1].T
+			b.base, belowTree = targetBranch(out[i-1].meta), out[i-1].T
 		case p == feature.MainParent:
 			b.base, b.pubParent = "main", pm
 		default:
@@ -200,7 +205,19 @@ func (e *Engine) resolveStack(ctx context.Context, pc *pairCtx, cfg config.Confi
 		}
 		// A stacked gate links to the branch below by tree; a gate on main
 		// has no base tree.
-		if gt.BaseTree != belowTree {
+		up, updating := ups[b.name]
+		switch {
+		case updating && up.append && i == 0:
+			// An append's gate replayed only the new commits, onto the PR's
+			// head the plan saw: the PR gains exactly them, on that head.
+			if gt.Base != up.head {
+				return nil, staleGate(b.name, names)
+			}
+			b.pubParent = up.head
+		case updating && gt.Base == up.head:
+			// A gate built to append, for a plan that replaces.
+			return nil, staleGate(b.name, names)
+		case gt.BaseTree != belowTree:
 			return nil, staleGate(b.name, names)
 		}
 		stackFresh, err := e.gateStackFresh(ctx, pc, b.name, b.meta)
@@ -316,15 +333,22 @@ func (e *Engine) publicParent(ctx context.Context, pc *pairCtx, b *stackBranch, 
 	return tree, nil
 }
 
-// stackMessage is a squashed stack branch's commit message: -m or the
-// editor when it is the only feature listed; otherwise its --title-for
-// title, or, for a branch of one commit, that commit's message.
-func (e *Engine) stackMessage(ctx context.Context, g *gitx.Git, opt PromoteOptions, b *stackBranch, title string) (string, error) {
-	if len(opt.Features) <= 1 {
+// stackMessage is a squashed stack branch's commit message, from the first
+// of these that applies:
+//   - -m or the editor, when the person listed only this feature (own);
+//   - its --title-for title;
+//   - for an update whose PR holds one published commit, that commit's
+//     message as the PR has it (prev);
+//   - for a branch of one commit, that commit's message.
+func (e *Engine) stackMessage(ctx context.Context, g *gitx.Git, opt PromoteOptions, b *stackBranch, title, prev string, own bool) (string, error) {
+	if own {
 		return e.message(opt)
 	}
 	if title != "" {
 		return title, nil
+	}
+	if prev != "" {
+		return prev, nil
 	}
 	if cs := b.meta.Gate.Commits; len(cs) == 1 {
 		msg, err := g.CommitMessage(ctx, cs[0].Rebased)
@@ -337,19 +361,26 @@ func (e *Engine) stackMessage(ctx context.Context, g *gitx.Git, opt PromoteOptio
 		b.name, len(b.meta.Gate.Commits), b.name).WithField("title-for").WithDetails(map[string]any{"feature": b.name})
 }
 
-// promoteStack is promote for a stack: several features, bottom first, or
-// one whose parent is a feature. It never gates: every branch needs a
-// fresh green gate built on the branch below (NOT_A_STACK names the first
-// that hasn't one). It builds each branch's public commits on the public
-// commit below it, so each PR publishes only its own branch's commits,
-// scans each as it will be published, saves one plan listing every PR with
-// its base, and applies it once approved. It returns the plan ID.
-func (e *Engine) promoteStack(ctx context.Context, pc *pairCtx, cfg config.Config, O string, opt PromoteOptions, res *PromoteResult) (string, []contract.Warning, error) {
+// promoteStack is promote for a stack: several features, bottom first, one
+// whose parent is a feature, or one with open PRs stacked on it (above: the
+// open PRs above the listed top, bottom first, which update in the same
+// plan). It never gates: every branch needs a fresh green gate built on the
+// branch below (NOT_A_STACK names the first that hasn't one). It builds
+// each branch's public commits on the public commit below it, so each PR
+// publishes only its own branch's commits, scans each as it will be
+// published, saves one plan listing every PR with its base, and applies it
+// once approved. A branch whose PR is open is an update of that PR
+// (stackUpdates). It returns the plan ID.
+func (e *Engine) promoteStack(ctx context.Context, pc *pairCtx, cfg config.Config, O string, opt PromoteOptions, above []string, res *PromoteResult) (string, []contract.Warning, error) {
 	g := pc.git
-	names := opt.Features
-	if len(names) == 0 {
-		names = []string{opt.Feature}
+	listed := opt.Features
+	if len(listed) == 0 {
+		listed = []string{opt.Feature}
 	}
+	// -m, --title and --body belong to the one feature the person listed:
+	// the open PRs above it, added to the plan, never take them.
+	alone := len(listed) == 1
+	names := append(slices.Clone(listed), above...)
 	if opt.Branch != "" {
 		return "", nil, contract.New(contract.BadFlag, "--branch: a stacked feature publishes to a branch named after it, so the PR above it can name it as its base").WithField("branch")
 	}
@@ -361,15 +392,26 @@ func (e *Engine) promoteStack(ctx context.Context, pc *pairCtx, cfg config.Confi
 	if err != nil {
 		return "", warns, internalErr(err, "read public main")
 	}
-	branches, err := e.resolveStack(ctx, pc, cfg, O, pm, names)
+	modes := make([]string, len(names))
+	for i, n := range names {
+		modes[i] = cmp.Or(opt.Modes[n], opt.Mode, cfg.Promote.DefaultMode)
+	}
+	updates, err := e.stackUpdates(ctx, pc, names, modes)
 	if err != nil {
 		return "", warns, err
 	}
-	u, err := e.Forge.CurrentUser(ctx)
+	if err := e.restackedAbove(ctx, pc, names, updates); err != nil {
+		return "", warns, err
+	}
+	branches, err := e.resolveStack(ctx, pc, cfg, O, pm, names, levelUpdates(names, updates))
+	if err != nil {
+		return "", warns, err
+	}
+	user, err := e.Forge.CurrentUser(ctx)
 	if err != nil {
 		return "", warns, forgeErr(err, "look up the current user")
 	}
-	who := gitx.Identity{Name: u.Login, Email: forge.NoreplyEmail(u), When: e.now()}
+	who := gitx.Identity{Name: user.Login, Email: forge.NoreplyEmail(user), When: e.now()}
 	set := overlay.NewSet(cfg.LeakScan.Strip...)
 	wnames := guardNames(pc)
 	entries := make([]plan.Entry, len(branches))
@@ -382,8 +424,17 @@ func (e *Engine) promoteStack(ctx context.Context, pc *pairCtx, cfg config.Confi
 		if i > 0 {
 			b.pubParent = entries[i-1].Publish.Commit
 		}
-		mode := cmp.Or(opt.Modes[b.name], opt.Mode, cfg.Promote.DefaultMode)
-		if mode != config.ModeSquash && strings.TrimSpace(opt.Message) != "" {
+		up := updates[i]
+		if up != nil && up.Base != b.base {
+			ce := notAStack("parent_moved", b.name, names,
+				"PR #%d of %s is based on %s on GitHub, but %s now goes on %s: run ghostbranch sync (GitHub retargets a PR when the branch below it merges), or change the PR's base on GitHub, then promote again",
+				up.PR, b.name, up.Base, b.name, b.base)
+			ce.Details["parent"] = stackParent(b.meta)
+			return "", warns, ce
+		}
+		mode := modes[i]
+		own := alone && i == 0
+		if own && mode != config.ModeSquash && strings.TrimSpace(opt.Message) != "" {
 			return "", warns, messageNotSquash(mode)
 		}
 		commits := b.meta.Gate.Commits
@@ -407,11 +458,24 @@ func (e *Engine) promoteStack(ctx context.Context, pc *pairCtx, cfg config.Confi
 			}
 			firstGroups = groups
 		}
-		typedTitle := strings.TrimSpace(cmp.Or(opt.Titles[b.name], opt.Title))
-		title, body := typedTitle, strings.TrimSpace(opt.Body)
+		typedTitle := strings.TrimSpace(opt.Titles[b.name])
+		typedBody := ""
+		if own {
+			typedTitle = cmp.Or(typedTitle, strings.TrimSpace(opt.Title))
+			typedBody = strings.TrimSpace(opt.Body)
+		}
+		title, body := typedTitle, typedBody
 		var msg string
 		if mode == config.ModeSquash {
-			if msg, err = e.stackMessage(ctx, g, opt, b, typedTitle); err != nil {
+			prev := ""
+			if up != nil && b.meta.Promoted != nil && len(b.meta.Promoted.PatchIDs) == 1 {
+				m, err := g.CommitMessage(ctx, up.Head)
+				if err != nil {
+					return "", warns, internalErr(err, "read the message of "+b.name+"'s published commit")
+				}
+				prev = strings.TrimSpace(m)
+			}
+			if msg, err = e.stackMessage(ctx, g, opt, b, typedTitle, prev, own); err != nil {
 				return "", warns, err
 			}
 		}
@@ -452,6 +516,11 @@ func (e *Engine) promoteStack(ctx context.Context, pc *pairCtx, cfg config.Confi
 			}
 			body = strings.Join(lines, "\n")
 		}
+		if title == "" && up != nil {
+			// An update keeps its PR's title on GitHub. The plan records one
+			// for the scan and the summary.
+			title = chain[0].Subject
+		}
 		if title == "" {
 			field := "title"
 			if len(names) > 1 {
@@ -474,8 +543,18 @@ func (e *Engine) promoteStack(ctx context.Context, pc *pairCtx, cfg config.Confi
 		// A PR on public main scans its first tree whole, as a promote of one
 		// feature does; a PR on a public branch below it scans what it
 		// changes from that branch, which the PR below published and scanned.
-		rep, v, err := e.scanChainFrom(ctx, g, cfg, b.pubParent, b.pubParent == pm, steps, []leak.Text{
-			{Where: "branch", Content: b.name}, {Where: "pr_title", Content: title}, {Where: "pr_body", Content: body}})
+		texts := []leak.Text{{Where: "branch", Content: targetBranch(b.meta)}, {Where: "pr_title", Content: title}, {Where: "pr_body", Content: body}}
+		var rep leak.Report
+		var v string
+		if up != nil {
+			// An update scans what isn't public yet, from the PR's head as it
+			// is now (updateScan): each new commit's change and message, its
+			// author and committer, nothing public twice.
+			rep, v, err = e.updateScan(ctx, pc, cfg, up.Head, chain[len(chain)-1].Commit,
+				scanOpts{identities: true, sources: commitSources(chain, mode), texts: texts})
+		} else {
+			rep, v, err = e.scanChainFrom(ctx, g, cfg, b.pubParent, b.pubParent == pm, steps, texts)
+		}
 		if err != nil {
 			return "", warns, err
 		}
@@ -490,13 +569,20 @@ func (e *Engine) promoteStack(ctx context.Context, pc *pairCtx, cfg config.Confi
 			return "", warns, ce
 		}
 		planWarnings = mergeWarnings(planWarnings, rep.Warnings)
+		pub := plan.Publish{Commit: chain[len(chain)-1].Commit, Tree: b.T, Parent: b.pubParent, TargetBranch: targetBranch(b.meta),
+			PR: plan.PR{Title: title, Body: body}, Commits: chain, DroppedEmpty: dropped}
+		spr := plan.StackPR{Feature: b.name, Base: b.base}
+		if up != nil {
+			pub.Update, pub.Style, pub.ReplaceReason, pub.ExpectedHead = true, up.Style, up.Reason, up.Head
+			if up.Style == plan.StyleReplace {
+				pub.Restores = up.Restores // the published commits GitHub lost, which this replace puts back
+			}
+			spr.Number, spr.Update, spr.Style = up.PR, true, up.Style
+		}
 		entries[i] = plan.Entry{Feature: b.name, Mode: mode,
 			Fingerprint: plan.Fingerprint{PublicMain: pm, FeatureHead: b.head, Overlay: O, GateCandidate: b.meta.Gate.Candidate},
-			Publish: plan.Publish{Commit: chain[len(chain)-1].Commit, Tree: b.T, Parent: b.pubParent, TargetBranch: b.name,
-				PR: plan.PR{Title: title, Body: body}, Commits: chain, DroppedEmpty: dropped},
-			Typed: plan.Typed{Title: typedTitle != "", Body: strings.TrimSpace(opt.Body) != ""},
-			CI:    plan.CI{RepoGuards: b.guards}}
-		prs[i] = plan.StackPR{Feature: b.name, Base: b.base}
+			Publish:     pub, Typed: plan.Typed{Title: typedTitle != "", Body: typedBody != ""}, CI: plan.CI{RepoGuards: b.guards}}
+		prs[i] = spr
 	}
 
 	planID, err := plan.NewID(e.now(), e.Rand)
@@ -517,7 +603,7 @@ func (e *Engine) promoteStack(ctx context.Context, pc *pairCtx, cfg config.Confi
 			preview.WriteFile(filepath.Join(e.WS.PlansDir(), planID+".json")))
 		if !opt.PlanOnly {
 			for i, en := range entries {
-				if err := e.previewPublish(ctx, pc, pv, en.Feature, publishedPlan(branches[i].meta), en.Publish.TargetBranch, prs[i].Base, en.Publish.Commit); err != nil {
+				if err := e.previewStackPublish(ctx, pc, pv, en, branches[i].meta, prs[i].Base); err != nil {
 					return planID, warns, err
 				}
 			}
@@ -607,7 +693,7 @@ func (e *Engine) applyStack(ctx context.Context, pc *pairCtx, pl plan.Plan, yes 
 	if err != nil {
 		return nil, warns, internalErr(err, "read public main")
 	}
-	branches, err := e.resolveStack(ctx, pc, cfg, O, pm, names)
+	branches, err := e.resolveStack(ctx, pc, cfg, O, pm, names, planUpdates(pl))
 	if err != nil {
 		if ce := contract.From(err); ce.Code == contract.NotAStack {
 			return nil, warns, stackStale(pl, 0, []string{"stack"}, "the stack of plan %s no longer stands (%s); make a new plan with ghostbranch promote", pl.ID, ce.Message)
@@ -635,6 +721,8 @@ func (e *Engine) applyStack(ctx context.Context, pc *pairCtx, pl plan.Plan, yes 
 	authors := make([][]string, n)
 	files := make([][]string, n)
 	exists := make([]bool, n)
+	// landed: an update whose push already landed (a resumed apply).
+	landed := make([]bool, n)
 	ids := make([][]string, n)
 	var scanWarnings []contract.Warning
 	for i, en := range pl.Chain {
@@ -643,9 +731,16 @@ func (e *Engine) applyStack(ctx context.Context, pc *pairCtx, pl plan.Plan, yes 
 			b.pubParent = pl.Chain[i-1].Publish.Commit
 		}
 		ep := entryPlan(pl, i)
-		if pl.PRs[i].Feature != en.Feature || pl.PRs[i].Base != b.base || en.Publish.TargetBranch != en.Feature {
+		if pl.PRs[i].Feature != en.Feature || pl.PRs[i].Base != b.base || en.Publish.TargetBranch != targetBranch(b.meta) {
 			return nil, warns, stackStale(pl, i, []string{"prs"}, "plan %s bases %s's PR on %s, but it now goes on %s; make a new plan with ghostbranch promote",
 				pl.ID, en.Feature, pl.PRs[i].Base, b.base)
+		}
+		if en.Publish.Update {
+			// The plan file is local and unsigned: an update must name the
+			// feature's own PR, and the bottom on main the update its gate built.
+			if err := updateLevelStands(pl, i, b); err != nil {
+				return nil, warns, stackLevelErr(err, names)
+			}
 		}
 		gateC, _, err := g.Resolve(ctx, shadowRef(gateBranch(en.Feature)))
 		if err != nil {
@@ -668,7 +763,15 @@ func (e *Engine) applyStack(ctx context.Context, pc *pairCtx, pl plan.Plan, yes 
 			return nil, warns, err
 		}
 		authors[i], shown[i] = au, sh
-		rep, _, err := e.scanChainFrom(ctx, g, cfg, b.pubParent, b.pubParent == pm, steps, planTexts(ep))
+		var rep leak.Report
+		if en.Publish.Update {
+			// An update scans what isn't public yet, from the PR head the plan
+			// saw, with the commits as stored.
+			rep, _, err = e.updateScan(ctx, pc, cfg, en.Publish.ExpectedHead, P,
+				scanOpts{identities: true, sources: commitSources(en.Publish.Commits, en.Mode), texts: planTexts(ep)})
+		} else {
+			rep, _, err = e.scanChainFrom(ctx, g, cfg, b.pubParent, b.pubParent == pm, steps, planTexts(ep))
+		}
 		if err != nil {
 			return nil, warns, err
 		}
@@ -686,11 +789,21 @@ func (e *Engine) applyStack(ctx context.Context, pc *pairCtx, pl plan.Plan, yes 
 		if err != nil {
 			return nil, warns, internalErr(err, "read public branch "+en.Publish.TargetBranch)
 		}
-		if ok && existing != P {
+		filesFrom := b.pubParent
+		switch {
+		case en.Publish.Update:
+			// The lease: the PR's branch must still be where the plan saw it
+			// (or already at P: the push landed), and the PR open on its base.
+			if landed[i], err = e.updateLive(ctx, pc, levelPlan(pl, i), b.meta, existing, ok, P); err != nil {
+				return nil, warns, stackLevelErr(err, names)
+			}
+			exists[i], filesFrom = landed[i], en.Publish.ExpectedHead
+		case ok && existing != P:
 			return res, warns, branchExists(en.Publish.TargetBranch, existing, "")
+		default:
+			exists[i] = ok
 		}
-		exists[i] = ok
-		if files[i], err = g.DiffNames(ctx, b.pubParent, P); err != nil {
+		if files[i], err = g.DiffNames(ctx, filesFrom, P); err != nil {
 			return nil, warns, internalErr(err, "list the files going public")
 		}
 		if ids[i], err = g.PatchIDs(ctx, commitSHAs(en.Publish.Commits)); err != nil {
@@ -702,7 +815,7 @@ func (e *Engine) applyStack(ctx context.Context, pc *pairCtx, pl plan.Plan, yes 
 	if e.DryRun {
 		pv := preview.New(map[string]string{"public_main": pm})
 		for i, en := range pl.Chain {
-			if err := e.previewPublish(ctx, pc, pv, en.Feature, publishedPlan(branches[i].meta), en.Publish.TargetBranch, pl.PRs[i].Base, en.Publish.Commit); err != nil {
+			if err := e.previewStackPublish(ctx, pc, pv, en, branches[i].meta, pl.PRs[i].Base); err != nil {
 				return res, warns, err
 			}
 		}
@@ -716,6 +829,27 @@ func (e *Engine) applyStack(ctx context.Context, pc *pairCtx, pl plan.Plan, yes 
 	}
 	for i, en := range pl.Chain {
 		branch, base, P := en.Publish.TargetBranch, pl.PRs[i].Base, en.Publish.Commit
+		if en.Publish.Update {
+			lp := levelPlan(pl, i)
+			if landed[i] {
+				res.Resumed = true
+			} else if err := e.pushUpdate(ctx, pc, lp, P); err != nil {
+				// The branches below are updated; this one is left as it is.
+				return res, warns, stackLevelErr(err, names)
+			}
+			// The record first, so the next read of the PR never takes these
+			// commits for someone else's; then the texts the person typed.
+			pr, mw, err := e.recordUpdate(ctx, pc, lp, P)
+			warns = addWarnings(warns, mw...)
+			if err != nil {
+				return res, warns, err
+			}
+			res.PRs[i].Number, res.PRs[i].URL = pr.Number, pr.URL
+			if err := e.editUpdated(ctx, pc, lp); err != nil {
+				return res, warns, err
+			}
+			continue
+		}
 		if exists[i] {
 			res.Resumed = true
 		} else {
