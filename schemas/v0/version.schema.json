@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "version data",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "commit", "schema_version"],
+  "properties": {
+    "version": { "description": "the module version this binary was built from; (unknown) for a build that recorded none", "type": "string", "minLength": 1 },
+    "commit": { "description": "the VCS commit, first 12 characters; (unknown) when the build recorded none", "type": "string", "minLength": 1 },
+    "schema_version": { "description": "the JSON contract version this binary speaks", "type": "string", "pattern": "^0\\.[0-9]+$" }
+  }
+}

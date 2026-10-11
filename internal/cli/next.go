@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"context"
 	"path/filepath"
 	"regexp"
@@ -286,6 +287,29 @@ func (a *app) steps(err error) []contract.Next {
 			case "message":
 				return []contract.Next{{Command: withoutFlags(a.again(false), "-m", "--message"), NeedsInput: []string{"--message"},
 					Why: "write the squash commit's message"}}
+			case "title-for":
+				fs := stringList(ce.Details["features"])
+				if len(fs) == 0 {
+					if f, _ := ce.Details["feature"].(string); f != "" {
+						fs = []string{f}
+					}
+				}
+				need := make([]string, len(fs))
+				for i, f := range fs {
+					need[i] = "--title-for " + f + "=<title>"
+				}
+				cmd, why := a.again(false), "write a PR title for each branch in needs_input: each has more than one commit, so no one commit names it"
+				if stack := stringList(ce.Details["stack"]); len(stack) > 0 {
+					// The open PRs above the listed feature need titles too:
+					// list the whole line so --title-for may name them.
+					args := append([]string{"promote"}, stack...)
+					if mode, ok := flagValue(a.args, "--mode"); ok {
+						args = append(args, "--mode", mode)
+					}
+					cmd = a.scoped(append(args, "--plan")...)
+					why += "; list the whole stack so --title-for may name them, and pass again any --mode-for and --title-for you gave"
+				}
+				return []contract.Next{{Command: cmd, NeedsInput: need, Why: why}}
 			}
 		case contract.FoldNeedsRebase:
 			f, _ := ce.Details["feature"].(string)
@@ -361,8 +385,42 @@ func (a *app) steps(err error) []contract.Next {
 				return []contract.Next{{Command: a.scoped("sync"), Why: "sync records what changed on the public side; then restack and gate what moved"}}
 			case reason == "stale_gate":
 				if f, _ := ce.Details["feature"].(string); f != "" {
-					return []contract.Next{{Command: a.scoped("gate", f),
-						Why: "its gate is missing or stale; gate it, then each branch above it, then promote the stack again"}}
+					why := "its gate is missing or stale; gate it, then each branch above it, from the bottom up, then promote the stack again"
+					fs := stringList(ce.Details["features"])
+					if i := slices.Index(fs, f); i >= 0 && i < len(fs)-1 {
+						// An update of open PRs above it plans them together:
+						// each needs a fresh gate on the one below.
+						why = "its gate is missing or stale; gate it, then the branches above it from the bottom up (" + strings.Join(fs[i+1:], ", ") +
+							"), each gate on the one below, then promote again: the plan updates them all"
+					}
+					return []contract.Next{{Command: a.scoped("gate", f), Why: why}}
+				}
+			case reason == "parent_stale":
+				if parent != "" {
+					return []contract.Next{
+						{Command: a.scoped("feature", "restack", parent), Why: "the branches above " + parent + " still sit on its old commits; restack them onto its tip (a conflict stops it with git steps)"},
+						{Command: a.again(false), Why: "then gate each restacked branch from the bottom (next says which), and promote again"},
+					}
+				}
+			case reason == "open_above":
+				f, _ := ce.Details["feature"].(string)
+				kids := stringList(ce.Details["children"])
+				if f != "" && len(kids) > 0 {
+					// The line up to f, then the child: f may sit mid-list
+					// when a branch below the top has open PRs off the line.
+					line := stringList(ce.Details["features"])
+					if i := slices.Index(line, f); i >= 0 {
+						line = line[:i+1]
+					} else {
+						line = []string{f}
+					}
+					args := append(append(append([]string{"promote"}, line...), kids[0]), "--plan")
+					return []contract.Next{
+						{Command: a.scoped(args...), Why: f + " has open PRs on more than one line stacked on it (" + strings.Join(kids, ", ") +
+							"), and one plan updates one line: promote the line that includes " + kids[0] + ", listed from its bottom (another child's line works the same way); while the other lines' PRs stay open on " + f + ", an update of " + f + " is refused, as it would leave them on its old commits"},
+						{Command: a.scoped("status"), NeedsHuman: true,
+							Why: "or a person closes on GitHub the open PRs of the children of " + f + " that shouldn't be updated with it (" + strings.Join(kids, ", ") + "), then promotes again"},
+					}
 				}
 			}
 			// The list could be a stack in another order, or with the
@@ -426,6 +484,10 @@ func (a *app) steps(err error) []contract.Next {
 	switch r := a.result.(type) {
 	case *engine.FeatureStartResult:
 		if r.Preview == nil {
+			if first := r.GateFirst(); first != "" {
+				out = append(out, contract.Next{Command: a.scoped("gate", first),
+					Why: first + ", below " + r.Name + " in its stack, has no fresh green gate; gate it first (then each branch above it, bottom up), as " + r.Name + "'s gate builds on it"})
+			}
 			why := "check out with `" + r.CheckoutHint + "`, commit on " + r.Name + ", "
 			switch a.shadowRemote {
 			case "":
@@ -470,6 +532,12 @@ func (a *app) steps(err error) []contract.Next {
 		case r.Gate != nil && r.Gate.Checks == feature.ChecksPending && r.Gate.Job != nil:
 			out = append(out, a.waitNext(*r.Gate.Job),
 				contract.Next{Command: withoutSwitch(a.again(false), "--detach"), Why: "once the job has passed, promote again; it reuses the green gate"})
+		case r.Applied != nil && r.Applied.Preview == nil:
+			out = append(out, a.mergedThenSync(r.Applied))
+		}
+	case *engine.ApplyResult:
+		if r.Preview == nil && r.PublicPR != 0 {
+			out = append(out, a.mergedThenSync(r))
 		}
 	case *engine.FoldResult:
 		if r.Preview != nil {
@@ -486,7 +554,7 @@ func (a *app) steps(err error) []contract.Next {
 		case r.Preview != nil:
 			out = append(out, contract.Next{Command: a.scoped(args...), Why: "the preview lists the branches restacking rewrites; run it to restack"})
 		case len(r.Restacked) > 0:
-			out = append(out, contract.Next{Command: a.scoped("gate", r.Restacked[0].Feature),
+			out = append(out, contract.Next{Command: a.scoped("gate", cmp.Or(r.GateFirst(), r.Restacked[0].Feature)),
 				Why: "the restacked branches were rewritten; gate them again from the bottom (and in each checkout: git fetch, then git reset --keep <remote>/<branch>)"})
 		}
 	case *engine.PullResult:
@@ -536,6 +604,20 @@ func (a *app) steps(err error) []contract.Next {
 		}
 	}
 	return append(out, a.upgradeNext()...)
+}
+
+// mergedThenSync is the step after a publish or an update: a maintainer
+// merges on GitHub, then sync closes what merged. A native stack merges
+// whole from its top PR; plain chained PRs merge one by one, bottom first.
+func (a *app) mergedThenSync(r *engine.ApplyResult) contract.Next {
+	why := "a maintainer reviews and merges PR #" + strconv.Itoa(r.PublicPR) + " on GitHub; then sync closes the feature"
+	switch {
+	case len(r.PRs) > 1 && r.StackNumber != nil:
+		why = "a maintainer reviews and merges the stack on GitHub (merging its top PR, #" + strconv.Itoa(r.PublicPR) + ", merges them all); then sync closes the merged features and moves any branch above onto main"
+	case len(r.PRs) > 1:
+		why = "a maintainer reviews and merges the PRs on GitHub from the bottom up (#" + strconv.Itoa(r.PRs[0].Number) + " first, each into main); then sync closes each merged feature and moves the branches above it onto main"
+	}
+	return contract.Next{Command: a.scoped("sync"), Why: why}
 }
 
 // waitNext finishes the pending gate job.
@@ -617,6 +699,11 @@ func (a *app) featureNexts(out []contract.Next, rs []engine.FeatureReport) []con
 			merged = append(merged, r.Name)
 			continue
 		}
+		if r.PR != nil && r.PR.Foreign > 0 {
+			rest = append(rest, contract.Next{Command: a.scoped("feature", "pull", r.Name),
+				Why: "someone pushed commits to its public PR on GitHub; bring them into the feature branch (an update never overwrites them), then gate and promote"})
+			continue
+		}
 		switch r.State {
 		case feature.StateUnreadable:
 			rest = append(rest, contract.Next{Command: closeCmd, NeedsHuman: true,
@@ -656,7 +743,19 @@ func (a *app) featureNexts(out []contract.Next, rs []engine.FeatureReport) []con
 			}
 		case feature.StatePublicPRNeedsUpdate:
 			rest = append(rest, contract.Next{Command: a.scoped("feature", "restack", r.Name, "--onto", "main"),
-				Why: "the PR below it merged by squash or rebase, and its open public PR still carries that PR's old commits: restack it onto main and gate it; a person updates the public PR by hand until re-publishing an open PR arrives"})
+				Why: "the PR below it merged by squash or rebase, and its open public PR still carries that PR's old commits: restack it onto main, gate it, then promote it (the update replaces its PR's branch)"})
+		case feature.StatePRBehind:
+			switch {
+			case r.Gate != nil && r.Gate.Job != nil:
+				rest = append(rest, contract.Next{Command: a.scoped("wait", *r.Gate.Job),
+					Why: "its gate is waiting on CI; finish it, then promote: the update goes to its open PR"})
+			case r.Gate != nil && r.Gate.Fresh && r.Gate.Checks == feature.ChecksPassed && r.Gate.Leak == feature.LeakClean:
+				rest = append(rest, contract.Next{Command: a.scoped("promote", r.Name, "--plan"),
+					Why: "it has commits its open PR doesn't, and a green gate: plan the update of its PR (new commits are added; a changed history replaces the branch, leased)"})
+			default:
+				rest = append(rest, contract.Next{Command: a.scoped("gate", r.Name),
+					Why: "it has commits its open PR doesn't; gate them, then promote to update the PR"})
+			}
 		}
 	}
 	if len(merged) > 0 {

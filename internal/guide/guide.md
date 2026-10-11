@@ -145,7 +145,27 @@ main, green CI, and a leak scan of exactly what will be published.
   (`HAS_CHILDREN`): fold each, `feature restack <child> --onto main` it, or abandon it (for `close`: `close <child>`, as an abandoned child still blocks `close`).
 - After a PR of a stack merges, `sync` closes its feature and moves the branch above onto main.
   `public_pr_needs_update` means that branch's open PR still carries the merged one's old commits:
-  restack it with `--onto main` and gate it; a person updates the public PR by hand for now.
+  restack it with `--onto main`, gate it, and promote it: the update replaces its PR's branch.
+
+## Updating an open PR
+
+- After a review, commit the fixes on the feature branch, push to the shadow repo, then `gate` and
+  `ghostbranch promote <name> --repo <public> --plan --json` as before: promote updates the open PR
+  instead of opening another. `status` shows such a feature as `pr_behind`, its PR as `#14 (behind)`.
+- Only new commits: they are added to the PR's branch (`plan.publish.style` `append`), no force-push.
+  A changed history (restack, rebase, squash mode, a reworded message, a changed base, a conflict)
+  replaces the branch (`replace`; `replace_reason` says why), pushed with a lease on the head the plan
+  saw (`expected_head`). The approval summary says which. Every update needs the same approval.
+- In a stack, `promote a` updates the open PRs above a too, under one approval, bottom up. Restack and
+  gate them first (`feature restack a`, then `gate` a and each branch above it, from the bottom up);
+  `NOT_A_STACK` (`parent_stale`, `stale_gate`) and `next` say which. `open_above`: a has open PRs on
+  more than one line (`error.details.children`); promote the line that includes one of them, or close
+  the other PRs.
+- `PUBLIC_BRANCH_CHANGED`: someone pushed to the PR on GitHub (`status`: `#14 (changed on GitHub)`).
+  It is never overwritten. Run `ghostbranch feature pull <name> --repo <public> --json`: it brings
+  their commits into the feature branch, or gives git steps (merge, push to the shadow repo, pull
+  again). Then gate and promote as usual; the update keeps their commits.
+- `PLAN_STALE` with `public_branch` in `error.details.moved`: the PR moved after the plan; plan again.
 
 ## Keeping up with public
 

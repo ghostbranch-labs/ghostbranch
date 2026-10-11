@@ -15,19 +15,22 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
 )
 
-// refreshPublished compares each open published stacked feature's public
-// branch with the head Ghostbranch recorded. A branch that moved and holds
-// exactly the published changes (the same patch-ids, on its PR's base as it
-// is now) is GitHub's restack after a PR below it merged: the new head, and
+// refreshPublished compares each open published feature's public branch,
+// stacked or not, with the head Ghostbranch recorded. A branch that moved
+// and holds only commits Ghostbranch published (foreignCommits: the same
+// patch-id and message, on its PR's base as it is now), all of them in
+// order, is GitHub's restack after a PR below it merged: the new head, and
 // the retargeted base, are recorded. That is neither drift nor
-// public_pr_needs_update. A branch that moved and holds anything else was
-// changed by someone: PUBLIC_BRANCH_CHANGED, and the feature joins sync's
-// attention list; it is never adopted.
+// public_pr_needs_update. A branch that moved and holds a commit
+// Ghostbranch didn't publish was changed by someone: PUBLIC_BRANCH_CHANGED
+// (details.foreign counts them), and the feature joins sync's attention
+// list; it is never adopted, and the warning comes back each sync until
+// feature pull brings the commits in. A branch that only lost published
+// commits on GitHub is left as it is: no restack to record, nothing foreign
+// to flag; the next update puts them back and its summary says so.
 //
-// Skipped: records from before 0.11 (no patch-ids), records this binary
-// can't write, and, in 6.1a, a single feature on main (no native stack, its
-// parent and its PR's base main): flagging foreign pushes there is
-// deferred. A comparison that fails (a git error, or a base branch the
+// Skipped: records from before 0.11 (no patch-ids) and records this binary
+// can't write. A comparison that fails (a git error, or a base branch the
 // public repo doesn't have) is skipped with a PR_STATE_UNKNOWN warning,
 // never flagged. A record that can't be written is a SYNC_PUSH_FAILED
 // warning, and the next sync tries again. In a dry run (pv set) the writes
@@ -40,9 +43,6 @@ func (e *Engine) refreshPublished(ctx context.Context, pc *pairCtx, rs []Feature
 		m := r.meta
 		if m == nil || r.unreadable != "" || r.PRState != prOpen || m.Promoted == nil ||
 			m.Promoted.PublishedHead == "" || len(m.Promoted.PatchIDs) == 0 {
-			continue
-		}
-		if m.Promoted.Stack == 0 && m.ParentName() == feature.MainParent && m.Promoted.Base == feature.MainParent {
 			continue
 		}
 		branch := publishedBranch(*m)
@@ -81,18 +81,28 @@ func (e *Engine) refreshPublished(ctx context.Context, pc *pairCtx, rs []Feature
 			unknown(err.Error())
 			continue
 		}
+		foreign, err := e.foreignCommits(ctx, pc, *m, base, tip)
+		if err != nil {
+			unknown(err.Error())
+			continue
+		}
+		if len(foreign) > 0 {
+			r.flagged = true
+			warns = append(warns, contract.Warning{Code: contract.PublicBranchChanged,
+				Message: fmt.Sprintf("public branch %s of feature %s is at %s, not %s as published, and holds changes Ghostbranch didn't publish; they were not adopted: a person looks at PR #%d",
+					branch, r.Name, short(tip), short(m.Promoted.PublishedHead), m.Promoted.PublicPR),
+				Details: map[string]any{"feature": r.Name, "branch": branch, "published_head": m.Promoted.PublishedHead,
+					"public_head": tip, "public_pr": m.Promoted.PublicPR, "foreign": len(foreign)}})
+			continue
+		}
 		ids, err := g.PatchIDs(ctx, commits)
 		if err != nil {
 			unknown(err.Error())
 			continue
 		}
 		if !slices.Equal(ids, m.Promoted.PatchIDs) {
-			r.flagged = true
-			warns = append(warns, contract.Warning{Code: contract.PublicBranchChanged,
-				Message: fmt.Sprintf("public branch %s of feature %s is at %s, not %s as published, and holds changes Ghostbranch didn't publish; they were not adopted: a person looks at PR #%d",
-					branch, r.Name, short(tip), short(m.Promoted.PublishedHead), m.Promoted.PublicPR),
-				Details: map[string]any{"feature": r.Name, "branch": branch, "published_head": m.Promoted.PublishedHead,
-					"public_head": tip, "public_pr": m.Promoted.PublicPR}})
+			// Published commits were removed on GitHub, nothing added: not
+			// a restack to record. The next update puts them back.
 			continue
 		}
 		nm := *m
@@ -231,9 +241,12 @@ type reparent struct {
 //
 // A child keeps its own commits. Its forked_at becomes the parent's
 // published feature head when the child contains it, so its next gate
-// replays only the commits after it; a child that forked before the parent
-// moved on (and wasn't restacked) keeps its own forked_at, which is an
-// ancestor of that head, so forked_at..head is still only its own commits.
+// replays only the commits after it. A child that doesn't contain it (it
+// forked before the parent moved on and wasn't restacked, or was rebased
+// by hand) keeps its own forked_at: the fork point it was started or last
+// restacked at, which it does contain. Nothing here checks that forked_at
+// is in the parent's published head; the child's next gate and restack
+// read the fork point as it stands.
 // Its PR's base becomes main, as GitHub retargets it. A parent whose
 // published head nothing records stops the close (HAS_CHILDREN), as its
 // children's fork point can't be told. When the PRs

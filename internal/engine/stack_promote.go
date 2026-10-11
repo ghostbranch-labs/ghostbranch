@@ -423,6 +423,7 @@ func (e *Engine) promoteStack(ctx context.Context, pc *pairCtx, cfg config.Confi
 	prs := make([]plan.StackPR, len(branches))
 	planWarnings := []contract.Warning{}
 	var firstGroups []plan.Group
+	var needTitle []string
 	version := ""
 	for i := range branches {
 		b := &branches[i]
@@ -481,7 +482,12 @@ func (e *Engine) promoteStack(ctx context.Context, pc *pairCtx, cfg config.Confi
 				prev = strings.TrimSpace(m)
 			}
 			if msg, err = e.stackMessage(ctx, g, opt, b, typedTitle, prev, own); err != nil {
-				return "", warns, err
+				if ce := contract.From(err); ce.Code != contract.MissingInput || ce.Field != "title-for" {
+					return "", warns, err
+				}
+				// A stand-in, so the branches above can still be built and
+				// every missing title named at once; nothing is saved.
+				needTitle, msg = append(needTitle, b.name), "(title needed)"
 			}
 		}
 		parentTree, err := g.TreeOf(ctx, b.pubParent)
@@ -527,12 +533,10 @@ func (e *Engine) promoteStack(ctx context.Context, pc *pairCtx, cfg config.Confi
 			title = chain[0].Subject
 		}
 		if title == "" {
-			field := "title"
-			if len(names) > 1 {
-				field = "title-for"
+			if !slices.Contains(needTitle, b.name) {
+				needTitle = append(needTitle, b.name)
 			}
-			return "", warns, contract.New(contract.MissingInput, "the PR of %s needs a title: pass --%s", b.name, field).
-				WithField(field).WithDetails(map[string]any{"feature": b.name})
+			title = "(title needed)"
 		}
 		steps := make([]scanStep, len(links))
 		for j, l := range links {
@@ -588,6 +592,25 @@ func (e *Engine) promoteStack(ctx context.Context, pc *pairCtx, cfg config.Confi
 			Fingerprint: plan.Fingerprint{PublicMain: pm, FeatureHead: b.head, Overlay: O, GateCandidate: b.meta.Gate.Candidate},
 			Publish:     pub, Typed: plan.Typed{Title: typedTitle != "", Body: typedBody != ""}, CI: plan.CI{RepoGuards: b.guards}}
 		prs[i] = spr
+	}
+	if len(needTitle) > 0 {
+		field := "title-for"
+		if alone && len(needTitle) == 1 && needTitle[0] == names[0] {
+			field = "title"
+		}
+		flags := make([]string, len(needTitle))
+		for i, n := range needTitle {
+			flags[i] = "--title-for " + n + "=<title>"
+			if field == "title" {
+				flags[i] = "--title <title>"
+			}
+		}
+		d := map[string]any{"feature": needTitle[0], "features": needTitle}
+		if len(names) > len(listed) {
+			d["stack"] = names
+		}
+		return "", warns, contract.New(contract.MissingInput, "the PR(s) of %s need a title (each has more than one commit and no one message names it): pass %s",
+			strings.Join(needTitle, ", "), strings.Join(flags, " ")).WithField(field).WithDetails(d)
 	}
 
 	planID, err := plan.NewID(e.now(), e.Rand)

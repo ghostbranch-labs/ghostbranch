@@ -44,7 +44,8 @@ func TestRenderListsEveryCodeFromTheRegistry(t *testing.T) {
 	// 379: one line on terminal colour, --no-color and NO_COLOR.
 	// 383: the four sub-project 6.1a error rows (FOLD_NEEDS_REBASE, HAS_CHILDREN, NOT_A_STACK, PARENT_REWRITTEN).
 	// 406: the PUBLIC_BRANCH_CHANGED error row (sub-project 6.1a-2).
-	if n := strings.Count(out, "\n"); n > 406 {
+	// 426: the Updating an open PR section and feature pull (sub-project 6.1a-2, 20 lines, with the stack refusals).
+	if n := strings.Count(out, "\n"); n > 426 {
 		t.Errorf("the guide is %d lines; keep it short (spec: about 150 plus the tables)", n)
 	}
 }
@@ -400,5 +401,31 @@ func TestGuideTeachesStacks(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("the guide lacks %q", want)
 		}
+	}
+}
+
+// An agent that opens a second PR after a review, or force-pushes over a
+// maintainer's commit, loses the review or their work.
+func TestGuideTeachesUpdatingAnOpenPR(t *testing.T) {
+	t.Parallel()
+	out := strings.Join(strings.Fields(guide.Render(contract.Registry())), " ")
+	for _, want := range []string{
+		"## Updating an open PR",
+		"promote updates the open PR",
+		"`pr_behind`", "`#14 (behind)`",
+		"`append`", "`replace`", "`replace_reason`", "`expected_head`",
+		"`promote a` updates the open PRs above a too",
+		"from the bottom up", "`open_above`", "promote the line that includes one of them, or close the other PRs",
+		"`PUBLIC_BRANCH_CHANGED`", "`ghostbranch feature pull <name> --repo <public> --json`",
+		"the update keeps their commits",
+		"`PLAN_STALE` with `public_branch` in `error.details.moved`",
+		"promote it: the update replaces its PR's branch",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the guide lacks %q", want)
+		}
+	}
+	if strings.Contains(out, "a person updates the public PR by hand") {
+		t.Error("the guide still says a person updates the public PR by hand")
 	}
 }

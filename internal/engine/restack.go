@@ -38,7 +38,14 @@ type RestackResult struct {
 	Restacked []RestackedBranch `json:"restacked"` // never null
 	Pending   []string          `json:"pending"`   // not reached because it stopped, the one it stopped at first; never null
 	Preview   *preview.Preview  `json:"preview"`
+	// gateFirst is GateFirst's answer.
+	gateFirst string
 }
+
+// GateFirst is the lowest branch, from the bottom of the restacked stack
+// up, whose gate isn't fresh: the first one next gates. It is "" when
+// nothing was restacked.
+func (r *RestackResult) GateFirst() string { return r.gateFirst }
 
 // FeatureRestack replays, in an isolated worktree, each feature above
 // opt.Feature onto its parent's tip, bottom first, or with opt.Onto moves
@@ -79,7 +86,8 @@ func (e *Engine) FeatureRestack(ctx context.Context, p workspace.Pair, opt Resta
 		return nil, nil, err
 	}
 	defer pc.unlock()
-	if _, _, warns, err = e.readConfig(ctx, pc); err != nil {
+	_, O, warns, err := e.readConfig(ctx, pc)
+	if err != nil {
 		return nil, warns, err
 	}
 	recs, err := e.records(ctx, pc)
@@ -156,6 +164,11 @@ func (e *Engine) FeatureRestack(ctx context.Context, p workspace.Pair, opt Resta
 		tips[n] = b.To
 		if changed {
 			res.Restacked = append(res.Restacked, b)
+		}
+	}
+	if res.Preview == nil && len(res.Restacked) > 0 {
+		if pm, err := pc.git.MustResolve(ctx, publicRef("main")); err == nil {
+			res.gateFirst = e.firstToGate(ctx, pc, res.Restacked[0].Feature, pm, O)
 		}
 	}
 	return res, warns, nil

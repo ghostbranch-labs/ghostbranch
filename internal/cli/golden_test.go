@@ -34,6 +34,7 @@ var dataSchemas = map[string]string{
 	"feature abandon": "feature-abandon.schema.json", "feature close": "feature-close.schema.json",
 	"wait": "gate.schema.json", "login": "login.schema.json", "logout": "logout.schema.json", "auth status": "auth-status.schema.json",
 	"doctor": "doctor.schema.json", "feature fold": "feature-fold.schema.json", "feature restack": "feature-restack.schema.json", "feature pull": "feature-pull.schema.json",
+	"version": "version.schema.json",
 }
 
 var rootPath = regexp.MustCompile(`<ROOT>[^"]*`)
@@ -60,6 +61,8 @@ func TestGoldenContract(t *testing.T) {
 		exit int
 	}{
 		{"init", nil, []string{"init", "acme/widget"}, 0},
+		{"version", nil, []string{"version"}, 0},
+		{"version_flag", nil, []string{"--version"}, 0},
 		{"init_dry_run", nil, []string{"init", "acme/widget", "--dry-run"}, 0},
 		{"init_create_denied", func(te *testEnv) { te.forge.CreateForbidden = true }, []string{"init", "acme/widget"}, 1},
 		{"sync_noop", initOnly, []string{"sync"}, 0},

@@ -13,8 +13,8 @@ import (
 // PRSync is how a published feature's open public PR compares with the
 // feature: Behind counts the commits on the private branch the PR doesn't
 // have (gate and promote bring them). Foreign counts the commits on the
-// PR's branch Ghostbranch didn't publish; it is always 0 until the survey
-// learns to detect them.
+// PR's branch Ghostbranch didn't publish (foreignCommits): a person pushed
+// them on GitHub, and feature pull brings them in.
 type PRSync struct {
 	Behind  int `json:"behind"`
 	Foreign int `json:"foreign"`

@@ -20,7 +20,13 @@ type FeatureStartResult struct {
 	Checkout     [][]string       `json:"checkout"`      // argvs that get the branch into a checkout, in order
 	CheckoutHint string           `json:"checkout_hint"` // Checkout as one shell line
 	Preview      *preview.Preview `json:"preview"`
+	// gateFirst is GateFirst's answer.
+	gateFirst string
 }
+
+// GateFirst is the feature below the new one, in its stack, that next
+// gates first; "" when every one below has a fresh green gate.
+func (r *FeatureStartResult) GateFirst() string { return r.gateFirst }
 
 // SetCheckout sets Checkout and CheckoutHint, its one-line form.
 func (r *FeatureStartResult) SetCheckout(argvs [][]string) {
@@ -73,7 +79,8 @@ func (e *Engine) FeatureStart(ctx context.Context, p workspace.Pair, name string
 		return nil, nil, err
 	}
 	defer pc.unlock()
-	if _, _, warns, err = e.readConfig(ctx, pc); err != nil {
+	_, O, warns, err := e.readConfig(ctx, pc)
+	if err != nil {
 		return nil, warns, err
 	}
 	// A feature started from a stale shadow main would be based on old
@@ -129,6 +136,11 @@ func (e *Engine) FeatureStart(ctx context.Context, p workspace.Pair, name string
 	}
 	warns = addWarnings(warns, e.updateMirror(ctx, pc.git, shadowRef(name), base)...)
 	warns = addWarnings(warns, e.updateMirror(ctx, pc.git, metaRef(name), metaSHA)...)
+	if from != "" {
+		if pm, err := pc.git.MustResolve(ctx, publicRef("main")); err == nil {
+			res.gateFirst = e.firstToGate(ctx, pc, from, pm, O)
+		}
+	}
 	return res, warns, nil
 }
 

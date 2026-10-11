@@ -24,7 +24,7 @@
       "command": [
         "ghostbranch",
         "gate",
-        "feat-y",
+        "feat-x",
         "--repo",
         "acme/widget"
       ],

@@ -302,25 +302,27 @@ func TestSyncPlanPreviewsTheStackBookkeeping(t *testing.T) {
 	}
 }
 
-// Single features on main aren't checked for foreign pushes in 6.1a: a
-// commit someone pushed to one's public branch is neither flagged nor
-// adopted.
-func TestSyncLeavesASingleFeaturesPublicBranchAlone(t *testing.T) {
+// A commit someone pushed to a single feature's public branch is flagged,
+// never adopted, until feature pull brings it in.
+func TestSyncFlagsAForeignChangeOnASingleFeature(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	h.init()
 	h.publish("a")
 	published := h.shadowMeta("a").Promoted.PublishedHead
-	if published == "" || len(h.shadowMeta("a").Promoted.PatchIDs) == 0 {
-		t.Fatalf("a's record = %+v", h.shadowMeta("a").Promoted)
-	}
-	testutil.Commit(t, h.pubGit, "a", "someone else's change", map[string]string{"a.txt": "changed by hand\n"})
+	testutil.Commit(t, h.pubGit, "a", "someone else's change", map[string]string{"fix.txt": "fix\n"})
 	res, warns := h.syncOK(engine.SyncOptions{})
-	if len(warns) != 0 || len(res.Attention) != 0 {
-		t.Fatalf("warnings %+v, attention %v", warns, attentionNames(res.Attention))
+	if ws := warningsFor(warns, contract.PublicBranchChanged); len(ws) != 1 || ws[0].Details["feature"] != "a" {
+		t.Fatalf("warnings = %+v", warns)
 	}
-	if got := h.shadowMeta("a").Promoted.PublishedHead; got != published {
-		t.Fatalf("a's published head became %s", got)
+	if !reflect.DeepEqual(attentionNames(res.Attention), []string{"a"}) || h.shadowMeta("a").Promoted.PublishedHead != published {
+		t.Fatalf("attention %v, record %+v", attentionNames(res.Attention), h.shadowMeta("a").Promoted)
+	}
+	if _, _, err := h.eng.FeaturePull(h.ctx, h.pair, engine.PullOptions{Feature: "a"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, warns = h.syncOK(engine.SyncOptions{}); len(warningsFor(warns, contract.PublicBranchChanged)) != 0 {
+		t.Fatalf("after feature pull, sync still warns: %+v", warns)
 	}
 }
 

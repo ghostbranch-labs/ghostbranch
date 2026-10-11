@@ -29,6 +29,18 @@
       "command": [
         "ghostbranch",
         "gate",
+        "feat-x",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "feat-x, below feat-y in its stack, has no fresh green gate; gate it first (then each branch above it, bottom up), as feat-y's gate builds on it",
+      "needs_human": false,
+      "needs_input": []
+    },
+    {
+      "command": [
+        "ghostbranch",
+        "gate",
         "feat-y",
         "--repo",
         "acme/widget"

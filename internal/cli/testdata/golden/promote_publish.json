@@ -152,6 +152,18 @@
     "stack_number": null
   },
   "warnings": [],
-  "next": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "sync",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "a maintainer reviews and merges PR #1 on GitHub; then sync closes the feature",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
   "error": null
 }

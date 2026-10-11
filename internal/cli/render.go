@@ -60,6 +60,8 @@ func previewText(b *strings.Builder, p *preview.Preview) {
 func human(r any, st style.Styler) string {
 	var b strings.Builder
 	switch v := r.(type) {
+	case *VersionResult:
+		fmt.Fprintf(&b, "ghostbranch %s (commit %s), JSON contract %s\n", oneLine(v.Version), oneLine(v.Commit), v.SchemaVersion)
 	case *guide.Printed:
 		b.WriteString(v.Markdown)
 	case *guide.InstallResult:
@@ -688,13 +690,20 @@ func gateCell(g *engine.GateSummary) string {
 	return oneLine(out)
 }
 
-// prCell is a feature's public PR and its state, or "-", then the native
+// prCell is a feature's public PR and its state, `(behind)` when the
+// feature has commits its open PR doesn't, or `(changed on GitHub)` when the
+// PR holds commits Ghostbranch didn't publish, or "-"; then the native
 // GitHub stack the PR is in, if any.
 func prCell(r engine.FeatureReport) string {
 	out := "-"
 	if r.PublicPR != nil {
 		out = fmt.Sprintf("#%d", *r.PublicPR)
-		if r.PRState != "" {
+		switch {
+		case r.PR != nil && r.PR.Foreign > 0:
+			out += " (changed on GitHub)"
+		case r.State == feature.StatePRBehind:
+			out += " (behind)"
+		case r.PRState != "":
 			out += " " + oneLine(r.PRState)
 		}
 	}
