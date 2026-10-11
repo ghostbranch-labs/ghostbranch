@@ -157,11 +157,14 @@ main, green CI, and a leak scan of exactly what will be published.
   A changed history (restack, rebase, squash mode, a reworded message, a changed base, a conflict)
   replaces the branch (`replace`; `replace_reason` says why), pushed with a lease on the head the plan
   saw (`expected_head`). The approval summary says which. Every update needs the same approval.
+  A rebase onto a moved main replaces (`rebase`) even when no commit changed.
 - In a stack, `promote a` updates the open PRs above a too, under one approval, bottom up; a PR in a stack,
   or with open PRs above it, is always replaced (a leased force-push), never appended. Restack and gate
   first (`feature restack a`, then `gate` a and each branch above it, from the bottom up); `NOT_A_STACK`
   (`parent_stale`, `stale_gate`) and `next` say which. `open_above` (more than one line of open PRs on a,
   `error.details.children`): a person closes or merges every line's PRs but one, then `promote a` again.
+  `stale_gate` with `error.details.update_mode` (a's gate was built in another mode): promote a on
+  its own with that `--mode` (it gates itself), then the branches above; gating again won't help.
 - `PUBLIC_BRANCH_CHANGED`: someone pushed to the PR on GitHub (`status`: `#14 (changed on GitHub)`).
   It is never overwritten. Run `ghostbranch feature pull <name> --repo <public> --json`: it brings
   their commits into the feature branch, or gives git steps (merge, push to the shadow repo, pull
