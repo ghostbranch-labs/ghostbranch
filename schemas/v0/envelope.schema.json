@@ -23,7 +23,7 @@
                           "PUSH_TRIGGERS_ON_SYNC", "ACTIONS_MINUTES_BILLED", "SHADOW_BEHIND", "AUDIT_INCOMPLETE",
                           "CI_NOT_CANCELLED", "PR_STATE_UNKNOWN", "DRIFT_UNKNOWN", "FEATURE_NOT_CLOSED", "MIRROR_NOT_UPDATED",
                           "RECORD_NEWER", "RECORD_UNREADABLE", "LEDGER_NOT_WRITTEN",
-                          "SYNC_PUSH_FAILED", "PLAN_FILE_UNREADABLE", "AGENT_ON_PERSON_LOGIN", "PUBLIC_BRANCH_CHANGED"] },
+                          "SYNC_PUSH_FAILED", "PLAN_FILE_UNREADABLE", "AGENT_ON_PERSON_LOGIN", "PUBLIC_BRANCH_CHANGED", "PR_TEXT_NOT_SET"] },
           "message": { "type": "string" },
           "details": { "type": "object" }
         }

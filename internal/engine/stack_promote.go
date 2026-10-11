@@ -763,7 +763,7 @@ func (e *Engine) applyStack(ctx context.Context, pc *pairCtx, pl plan.Plan, yes 
 		}
 	}
 	if allLanded {
-		return e.finishLanded(ctx, pc, cfg, pl, warns)
+		return e.finishLanded(ctx, pc, cfg, pl, yes, warns)
 	}
 	pm, err := g.MustResolve(ctx, publicRef("main"))
 	if err != nil {

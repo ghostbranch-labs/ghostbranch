@@ -155,8 +155,12 @@ func TestApplyFinishesALandedUpdateAfterThingsMoved(t *testing.T) {
 	h.landByHand(pl.ID, map[string]string{"feat-x": pl.Publish.Commit})
 	testutil.Commit(t, h.shadowGit(), "feat-x", "later", map[string]string{"later.txt": "later\n"})
 	testutil.Commit(t, h.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
+	// Recording writes nothing public: no approval is needed.
+	approver := h.eng.Approver
+	h.eng.Approver = nil
 	ar, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: pl.ID, Yes: true})
-	if err != nil || !ar.Resumed {
+	h.eng.Approver = approver
+	if err != nil || !ar.Resumed || ar.Approval != nil {
 		t.Fatalf("apply = %+v %v", ar, err)
 	}
 	if m := h.shadowMeta("feat-x"); m.Promoted.PlanID != pl.ID || m.Promoted.PublishedHead != pl.Publish.Commit {

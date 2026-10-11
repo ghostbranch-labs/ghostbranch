@@ -210,7 +210,7 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 		if err != nil {
 			return nil, warns, err
 		}
-		return e.finishLanded(ctx, pc, cfg, pl, warns)
+		return e.finishLanded(ctx, pc, cfg, pl, yes, warns)
 	}
 	head, _, _ := g.Resolve(ctx, shadowRef(m.Branch))
 	pm, err := g.MustResolve(ctx, publicRef("main"))

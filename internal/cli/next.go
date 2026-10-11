@@ -563,6 +563,14 @@ func (a *app) steps(err error) []contract.Next {
 			out = append(out, a.mergedThenSync(r.Applied))
 		}
 	case *engine.ApplyResult:
+		for _, w := range a.warnings {
+			// A landed update was recorded, but its typed PR texts were not
+			// approved: setting them takes a new, approved plan.
+			if f, _ := w.Details["feature"].(string); w.Code == contract.PRTextNotSet && f != "" {
+				out = append(out, contract.Next{Command: a.scoped("promote", f, "--plan"), NeedsInput: []string{"--title", "--body"},
+					Why: "the PR texts plan " + r.PlanID + " types were not set (no approval); plan them again with --title and/or --body, and have a person approve the plan"})
+			}
+		}
 		if r.Preview == nil && r.PublicPR != 0 {
 			out = append(out, a.mergedThenSync(r))
 		}

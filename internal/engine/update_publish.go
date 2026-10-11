@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/config"
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
@@ -140,22 +141,29 @@ func (e *Engine) recordUpdate(ctx context.Context, pc *pairCtx, pl plan.Plan, P 
 		return pr, nil, internalErr(err, "compute the updated PR's patch-ids")
 	}
 	// The commits feature pull adopted stay recorded, so a later replace
-	// still can't drop them unseen. Those the updated PR no longer carries
-	// were folded by a squash or curated replace (approved in its summary;
-	// a preserve update that would drop one is refused): they stay too,
-	// marked Folded, so the next squash credits their authors again.
+	// still can't drop them unseen. Each one the updated PR carries now
+	// names the public commit that carries it: after a preserve replace the
+	// original commit is reachable from no branch, so another machine's
+	// mirror never has it, and this one's prunes it. Those the PR no longer
+	// carries were folded by a squash or curated replace (approved in its
+	// summary; a preserve update that would drop one is refused): they stay
+	// too, marked Folded, so the next squash credits their authors again.
 	m, _, err := e.readMeta(ctx, pc, pl.Feature)
 	if err != nil {
 		return pr, nil, err
 	}
 	var adopted []feature.AdoptedCommit
 	if m.Promoted != nil && m.Promoted.PublicPR == n && len(m.Promoted.Adopted) > 0 {
-		missing, err := missingAdopted(ctx, g, m.Promoted.Adopted, commits)
+		carriers, err := adoptedCarriers(ctx, g, m.Promoted.Adopted, commits)
 		if err != nil {
 			return pr, nil, err
 		}
-		for _, a := range m.Promoted.Adopted {
-			a.Folded = a.Folded || slices.Contains(missing, a)
+		for i, a := range m.Promoted.Adopted {
+			if carriers[i] == "" {
+				a.Folded = true
+			} else {
+				a.SHA = carriers[i]
+			}
 			adopted = append(adopted, a)
 		}
 	}
@@ -249,11 +257,16 @@ func (e *Engine) foldedAdopted(ctx context.Context, pc *pairCtx, name string, m 
 }
 
 // landedUpdate reports whether the update of PR pl.PRs[i] that pub plans
-// already landed: its push is on the PR's branch (the branch is at the
-// plan's commit, which the plan ref holds), and m's record names that PR on
-// that branch. Apply then only finishes the record (finishLanded), whatever
-// moved since (the feature, public main, the gate): the push was approved,
-// scanned and made when it happened, and nothing new goes public.
+// already landed: its push is on the PR's branch, and m's record names
+// that PR on that branch. The branch must be at the plan's commit for that
+// PR exactly as the plan ref holds it, the file being local and unsigned:
+// for a plan of one feature the plan ref itself, for branch i of a stack
+// plan the commit at i's place in the ref's chain (the ref's tip walked
+// back by the public commits of every branch above i), never just any
+// commit the ref holds (an append's PR head H is one). Apply then only
+// finishes the record (finishLanded), whatever moved since (the feature,
+// public main, the gate): the push was approved, scanned and made when it
+// happened, and recording writes nothing public.
 func (e *Engine) landedUpdate(ctx context.Context, pc *pairCtx, pl plan.Plan, pub plan.Publish, m feature.Meta, i int) (bool, error) {
 	if !pub.Update || i >= len(pl.PRs) || m.Promoted == nil || m.Promoted.PublicPR != pl.PRs[i].Number ||
 		publishedBranch(m) != pub.TargetBranch || pub.Commit == "" {
@@ -275,14 +288,27 @@ func (e *Engine) landedUpdate(ctx context.Context, pc *pairCtx, pl plan.Plan, pu
 	if !ok {
 		return false, nil
 	}
-	return g.IsAncestor(ctx, pub.Commit, planTip)
+	at := planTip
+	for j := len(pl.Chain) - 1; j > i; j-- {
+		for range pl.Chain[j].Publish.Commits {
+			if at, ok, err = g.Resolve(ctx, at+"^"); err != nil {
+				return false, internalErr(err, "walk plan "+pl.ID+"'s commits")
+			} else if !ok {
+				return false, nil
+			}
+		}
+	}
+	n := len(pub.Commits)
+	return at == pub.Commit && n > 0 && pub.Commits[n-1].Commit == pub.Commit, nil
 }
 
 // finishLanded finishes plan pl, whose every update already landed
-// (landedUpdate): it writes each PR's record and sets the PR texts the
-// person typed, both safe to repeat. Those texts are scanned first, as they
-// go public now. No approval is asked: the push it finishes was approved.
-func (e *Engine) finishLanded(ctx context.Context, pc *pairCtx, cfg config.Config, pl plan.Plan, warns []contract.Warning) (*ApplyResult, []contract.Warning, error) {
+// (landedUpdate): it writes each PR's record, which needs no approval, as
+// nothing public changes. Then, when the plan types PR texts, it scans
+// them and asks for approval (a grant or a console, as apply does) before
+// setting them, as they go public now and the plan file is unsigned.
+// Refused, the PRs keep their texts: PR_TEXT_NOT_SET says so.
+func (e *Engine) finishLanded(ctx context.Context, pc *pairCtx, cfg config.Config, pl plan.Plan, yes bool, warns []contract.Warning) (*ApplyResult, []contract.Warning, error) {
 	levels := []plan.Plan{pl}
 	if len(pl.Chain) > 0 {
 		levels = make([]plan.Plan, len(pl.Chain))
@@ -291,27 +317,6 @@ func (e *Engine) finishLanded(ctx context.Context, pc *pairCtx, cfg config.Confi
 		}
 	} else {
 		levels[0].PRs = []plan.StackPR{pl.PRs[0]}
-	}
-	for _, lp := range levels {
-		if !lp.Typed.Title && !lp.Typed.Body {
-			continue
-		}
-		var texts []leak.Text
-		if lp.Typed.Title {
-			texts = append(texts, leak.Text{Where: "pr_title", Content: lp.Publish.PR.Title})
-		}
-		if lp.Typed.Body {
-			texts = append(texts, leak.Text{Where: "pr_body", Content: lp.Publish.PR.Body})
-		}
-		rep, _, err := e.updateScan(ctx, pc, cfg, lp.Publish.Commit, lp.Publish.Commit, scanOpts{texts: texts})
-		if err != nil {
-			return nil, warns, err
-		}
-		blocking, _, ww := e.splitFindings(pc.pair, rep.Findings)
-		warns = addWarnings(addWarnings(warns, rep.Warnings...), ww...)
-		if len(blocking) > 0 {
-			return nil, warns, leakErr(lp.Feature, blocking)
-		}
 	}
 	top := levels[len(levels)-1]
 	res := &ApplyResult{PlanID: pl.ID, PublicBranch: top.Publish.TargetBranch, Resumed: true, Waived: []WaivedFinding{},
@@ -331,10 +336,72 @@ func (e *Engine) finishLanded(ctx context.Context, pc *pairCtx, cfg config.Confi
 			return res, warns, err
 		}
 		res.PRs[i].Number, res.PRs[i].URL = pr.Number, pr.URL
+	}
+	res.PublicPR, res.PRURL = res.PRs[len(res.PRs)-1].Number, res.PRs[len(res.PRs)-1].URL
+	var typed []plan.Plan
+	for _, lp := range levels {
+		if lp.Typed.Title || lp.Typed.Body {
+			typed = append(typed, lp)
+		}
+	}
+	if len(typed) == 0 {
+		return res, warns, nil
+	}
+	for _, lp := range typed {
+		var texts []leak.Text
+		if lp.Typed.Title {
+			texts = append(texts, leak.Text{Where: "pr_title", Content: lp.Publish.PR.Title})
+		}
+		if lp.Typed.Body {
+			texts = append(texts, leak.Text{Where: "pr_body", Content: lp.Publish.PR.Body})
+		}
+		rep, _, err := e.updateScan(ctx, pc, cfg, lp.Publish.Commit, lp.Publish.Commit, scanOpts{texts: texts})
+		if err != nil {
+			return res, warns, err
+		}
+		blocking, _, ww := e.splitFindings(pc.pair, rep.Findings)
+		warns = addWarnings(addWarnings(warns, rep.Warnings...), ww...)
+		if len(blocking) > 0 {
+			return res, warns, leakErr(lp.Feature, blocking)
+		}
+	}
+	approval, err := e.authorize(ctx, pc.pair, pl.ID, textsSummary(pl, typed), yes)
+	if err != nil {
+		if ctx.Err() != nil {
+			return res, warns, err
+		}
+		ce := contract.From(err)
+		return res, addWarnings(warns, contract.Warning{Code: contract.PRTextNotSet,
+			Message: fmt.Sprintf("plan %s's update is recorded, but the PR texts it types were not set (%s); to set them, make a new plan with ghostbranch promote %s --title/--body --plan and have a person approve it",
+				pl.ID, ce.Message, typed[0].Feature),
+			Details: map[string]any{"plan_id": pl.ID, "feature": typed[0].Feature, "public_pr": typed[0].PRs[0].Number, "code": string(ce.Code)}}), nil
+	}
+	res.Approval = approval
+	for _, lp := range typed {
 		if err := e.editUpdated(ctx, pc, lp); err != nil {
 			return res, warns, err
 		}
 	}
-	res.PublicPR, res.PRURL = res.PRs[len(res.PRs)-1].Number, res.PRs[len(res.PRs)-1].URL
 	return res, warns, nil
+}
+
+// textsSummary is the approval summary of setting the PR texts plan pl
+// types for its levels typed, whose updates already landed.
+func textsSummary(pl plan.Plan, typed []plan.Plan) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Set PR texts in %s (plan %s's update already landed; nothing else changes):\n", visible(pl.Pair.Public), visible(pl.ID))
+	for _, lp := range typed {
+		fmt.Fprintf(&b, "  PR #%d (%s)\n", lp.PRs[0].Number, visible(lp.Feature))
+		if lp.Typed.Title {
+			fmt.Fprintf(&b, "  PR title %s\n", visible(lp.Publish.PR.Title))
+		}
+		if lp.Typed.Body {
+			b.WriteString("  PR body\n")
+			for _, l := range strings.Split(strings.TrimSpace(lp.Publish.PR.Body), "\n") {
+				fmt.Fprintf(&b, "           %s\n", visible(strings.TrimSuffix(l, "\r")))
+			}
+		}
+	}
+	fmt.Fprintf(&b, "Plan %s", visible(pl.ID))
+	return b.String()
 }

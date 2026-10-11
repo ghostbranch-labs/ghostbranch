@@ -801,31 +801,49 @@ func unrecordedWarning(name, branch string, pr int, tip, id string) contract.War
 // branch it merged, and only its object leaves the PR. Neither is a folded
 // one (Folded): an earlier squash or curated update already holds it.
 func missingAdopted(ctx context.Context, g *gitx.Git, adopted []feature.AdoptedCommit, chain []string) ([]feature.AdoptedCommit, error) {
+	carriers, err := adoptedCarriers(ctx, g, adopted, chain)
+	if err != nil {
+		return nil, err
+	}
+	var out []feature.AdoptedCommit
+	for i, c := range carriers {
+		if c == "" {
+			out = append(out, adopted[i])
+		}
+	}
+	return out, nil
+}
+
+// adoptedCarriers is, for each adopted commit, the commit of chain that
+// carries it (missingAdopted's match), "" when none does, and the adopted
+// commit's own SHA when it needs no carrier: a folded one, or a merge.
+func adoptedCarriers(ctx context.Context, g *gitx.Git, adopted []feature.AdoptedCommit, chain []string) ([]string, error) {
+	out := make([]string, len(adopted))
 	if len(adopted) == 0 {
-		return nil, nil
+		return out, nil
 	}
 	type mark struct{ id, msg string }
 	ids, err := g.PatchIDs(ctx, chain)
 	if err != nil {
 		return nil, internalErr(err, "compute the update's patch-ids")
 	}
-	marks := map[mark]int{}
+	marks := map[mark][]string{}
 	for i, c := range chain {
 		msg, err := g.CommitMessage(ctx, c)
 		if err != nil {
 			return nil, internalErr(err, "read a commit message")
 		}
-		marks[mark{ids[i], strings.TrimSpace(msg)}]++
+		mk := mark{ids[i], strings.TrimSpace(msg)}
+		marks[mk] = append(marks[mk], c)
 	}
-	var out []feature.AdoptedCommit
-	for _, a := range adopted {
+	for i, a := range adopted {
 		if a.Folded {
+			out[i] = a.SHA
 			continue
 		}
 		if _, ok, err := g.Resolve(ctx, a.SHA); err != nil {
 			return nil, internalErr(err, "read adopted commit "+short(a.SHA))
 		} else if !ok {
-			out = append(out, a)
 			continue
 		}
 		parents, err := g.Run(ctx, "rev-list", "--parents", "-n", "1", a.SHA)
@@ -833,6 +851,7 @@ func missingAdopted(ctx context.Context, g *gitx.Git, adopted []feature.AdoptedC
 			return nil, internalErr(err, "read adopted commit "+short(a.SHA))
 		}
 		if len(strings.Fields(parents)) > 2 {
+			out[i] = a.SHA
 			continue
 		}
 		id, err := g.PatchIDs(ctx, []string{a.SHA})
@@ -843,10 +862,8 @@ func missingAdopted(ctx context.Context, g *gitx.Git, adopted []feature.AdoptedC
 		if err != nil {
 			return nil, internalErr(err, "read adopted commit "+short(a.SHA))
 		}
-		if mk := (mark{id[0], strings.TrimSpace(msg)}); marks[mk] > 0 {
-			marks[mk]--
-		} else {
-			out = append(out, a)
+		if mk := (mark{id[0], strings.TrimSpace(msg)}); len(marks[mk]) > 0 {
+			out[i], marks[mk] = marks[mk][0], marks[mk][1:]
 		}
 	}
 	return out, nil

@@ -332,6 +332,10 @@ const (
 	AgentOnPersonLogin WarningCode = "AGENT_ON_PERSON_LOGIN"
 	// PublicBranchChanged means a published feature's public branch holds commits Ghostbranch didn't publish, so sync didn't adopt them; feature pull brings them in.
 	PublicBranchChanged WarningCode = "PUBLIC_BRANCH_CHANGED"
+	// PRTextNotSet means apply finished recording an update whose push had
+	// already landed, but didn't set the PR title or body the plan types: no
+	// one approved them.
+	PRTextNotSet WarningCode = "PR_TEXT_NOT_SET"
 )
 
 var warningCodes = []WarningCode{ConfigKeyIgnored, PublicNotPublic, GateNotRecorded, ChecksLimited, ActorUnknown,
@@ -339,7 +343,7 @@ var warningCodes = []WarningCode{ConfigKeyIgnored, PublicNotPublic, GateNotRecor
 	OverlayOutdated, RepoGuard, RepoGuardUnrewritable, SecretsUnlisted, SecretsMissing, PushTriggersOnSync,
 	ActionsMinutesBilled, ShadowBehind, AuditIncomplete, CINotCancelled, PRStateUnknown, DriftUnknown, FeatureNotClosed,
 	MirrorNotUpdated, RecordNewer, RecordUnreadable, LedgerNotWritten, SyncPushFailed, PlanFileUnreadable, AgentOnPersonLogin,
-	PublicBranchChanged}
+	PublicBranchChanged, PRTextNotSet}
 
 // AllWarnings lists every warning code, sorted.
 func AllWarnings() []WarningCode {
