@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -509,8 +510,29 @@ func human(r any, st style.Styler) string {
 
 // publishedLine is what an apply did: published a new PR, or updated an
 // open one, by adding k commits (k < 0 when the count isn't at hand) or by
-// replacing its branch.
+// replacing its branch. A stack plan that updated a PR says, for each of
+// its PRs, bottom first, what happened to it.
 func publishedLine(r *engine.ApplyResult, k int) string {
+	if len(r.PRs) > 1 && slices.ContainsFunc(r.PRs, func(p plan.StackPR) bool { return p.Update }) {
+		var b strings.Builder
+		for i, p := range r.PRs {
+			// Each PR's branch is the base of the PR above it; the top's is
+			// the result's.
+			branch := r.PublicBranch
+			if i+1 < len(r.PRs) {
+				branch = r.PRs[i+1].Base
+			}
+			switch {
+			case !p.Update:
+				fmt.Fprintf(&b, "Published %s as PR #%d: %s\n", branch, p.Number, p.URL)
+			case p.Style == plan.StyleAppend:
+				fmt.Fprintf(&b, "Updated PR #%d on %s: %s\n", p.Number, branch, p.URL)
+			default:
+				fmt.Fprintf(&b, "Replaced PR #%d's branch %s: %s\n", p.Number, branch, p.URL)
+			}
+		}
+		return b.String()
+	}
 	if len(r.PRs) == 1 && r.PRs[0].Update {
 		if r.PRs[0].Style == plan.StyleAppend {
 			if k < 0 {
