@@ -744,6 +744,27 @@ func (e *Engine) applyStack(ctx context.Context, pc *pairCtx, pl plan.Plan, yes 
 			return nil, warns, contract.New(contract.NameInvalid, "plan %s would publish to the public default branch %q", pl.ID, def).WithField("plan")
 		}
 	}
+	// Every branch an update whose push already landed: only the records
+	// are left to write, whatever moved since (finishLanded). A plan with a
+	// first publish, or a branch not yet pushed, is checked in full below.
+	allLanded := true
+	for i, en := range pl.Chain {
+		m, _, err := e.readMeta(ctx, pc, en.Feature)
+		if err != nil {
+			return nil, warns, err
+		}
+		ok, err := e.landedUpdate(ctx, pc, pl, en.Publish, m, i)
+		if err != nil {
+			return nil, warns, err
+		}
+		if !ok {
+			allLanded = false
+			break
+		}
+	}
+	if allLanded {
+		return e.finishLanded(ctx, pc, cfg, pl, warns)
+	}
 	pm, err := g.MustResolve(ctx, publicRef("main"))
 	if err != nil {
 		return nil, warns, internalErr(err, "read public main")

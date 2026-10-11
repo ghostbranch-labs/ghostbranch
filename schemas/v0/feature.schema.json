@@ -95,7 +95,8 @@
             "needs_update": { "description": "the PR below it merged by squash or rebase while the PRs were plain chained PRs: its open public PR still carries that parent's old commits", "type": "boolean" },
             "adopted": { "description": "commits someone made on the public PR on GitHub that feature pull brought into the feature", "type": "array",
               "items": { "type": "object", "additionalProperties": false, "required": ["sha", "author", "subject"],
-                "properties": { "sha": { "$ref": "common.schema.json#/$defs/sha" }, "author": { "type": "string" }, "subject": { "type": "string" } } } }
+                "properties": { "sha": { "$ref": "common.schema.json#/$defs/sha" }, "author": { "type": "string" }, "subject": { "type": "string" },
+                  "folded": { "description": "a squash or curated update folded it into its commits; no longer on the PR by itself", "type": "boolean" } } } }
           }
         }
       ]

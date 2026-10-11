@@ -206,6 +206,12 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 	if err != nil {
 		return nil, warns, err
 	}
+	if ok, err := e.landedUpdate(ctx, pc, pl, pl.Publish, m, 0); err != nil || ok {
+		if err != nil {
+			return nil, warns, err
+		}
+		return e.finishLanded(ctx, pc, cfg, pl, warns)
+	}
 	head, _, _ := g.Resolve(ctx, shadowRef(m.Branch))
 	pm, err := g.MustResolve(ctx, publicRef("main"))
 	if err != nil {

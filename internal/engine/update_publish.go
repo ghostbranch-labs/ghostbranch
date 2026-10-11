@@ -13,6 +13,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
+	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
 	"github.com/ghostbranch-labs/ghostbranch/internal/plan"
 	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
 )
@@ -138,9 +139,11 @@ func (e *Engine) recordUpdate(ctx context.Context, pc *pairCtx, pl plan.Plan, P 
 	if err != nil {
 		return pr, nil, internalErr(err, "compute the updated PR's patch-ids")
 	}
-	// The commits feature pull adopted stay recorded while the PR carries
-	// them, so a later replace still can't drop them unseen; those a squash
-	// or curated replace folded (approved in its summary) are let go.
+	// The commits feature pull adopted stay recorded, so a later replace
+	// still can't drop them unseen. Those the updated PR no longer carries
+	// were folded by a squash or curated replace (approved in its summary;
+	// a preserve update that would drop one is refused): they stay too,
+	// marked Folded, so the next squash credits their authors again.
 	m, _, err := e.readMeta(ctx, pc, pl.Feature)
 	if err != nil {
 		return pr, nil, err
@@ -152,9 +155,8 @@ func (e *Engine) recordUpdate(ctx context.Context, pc *pairCtx, pl plan.Plan, P 
 			return pr, nil, err
 		}
 		for _, a := range m.Promoted.Adopted {
-			if !slices.Contains(missing, a) {
-				adopted = append(adopted, a)
-			}
+			a.Folded = a.Folded || slices.Contains(missing, a)
+			adopted = append(adopted, a)
 		}
 	}
 	mw, err := e.recordPublished(ctx, pc, pl.Feature, feature.Promoted{PublicPR: n, PlanID: pl.ID, FeatureHead: pl.Fingerprint.FeatureHead,
@@ -244,4 +246,95 @@ func (e *Engine) foldedAdopted(ctx context.Context, pc *pairCtx, name string, m 
 		return nil, adoptedMissingErr(name, pub.TargetBranch, n, pub.ExpectedHead, missing)
 	}
 	return missing, nil
+}
+
+// landedUpdate reports whether the update of PR pl.PRs[i] that pub plans
+// already landed: its push is on the PR's branch (the branch is at the
+// plan's commit, which the plan ref holds), and m's record names that PR on
+// that branch. Apply then only finishes the record (finishLanded), whatever
+// moved since (the feature, public main, the gate): the push was approved,
+// scanned and made when it happened, and nothing new goes public.
+func (e *Engine) landedUpdate(ctx context.Context, pc *pairCtx, pl plan.Plan, pub plan.Publish, m feature.Meta, i int) (bool, error) {
+	if !pub.Update || i >= len(pl.PRs) || m.Promoted == nil || m.Promoted.PublicPR != pl.PRs[i].Number ||
+		publishedBranch(m) != pub.TargetBranch || pub.Commit == "" {
+		return false, nil
+	}
+	g := pc.git
+	tip, ok, err := g.Resolve(ctx, publicRef(pub.TargetBranch))
+	if err != nil {
+		return false, internalErr(err, "read public branch "+pub.TargetBranch)
+	}
+	if !ok || tip != pub.Commit {
+		return false, nil
+	}
+	// The plan file is local and unsigned: the plan ref must hold the commit.
+	planTip, ok, err := g.Resolve(ctx, planRef(pl.ID))
+	if err != nil {
+		return false, internalErr(err, "read plan "+pl.ID+"'s commit")
+	}
+	if !ok {
+		return false, nil
+	}
+	return g.IsAncestor(ctx, pub.Commit, planTip)
+}
+
+// finishLanded finishes plan pl, whose every update already landed
+// (landedUpdate): it writes each PR's record and sets the PR texts the
+// person typed, both safe to repeat. Those texts are scanned first, as they
+// go public now. No approval is asked: the push it finishes was approved.
+func (e *Engine) finishLanded(ctx context.Context, pc *pairCtx, cfg config.Config, pl plan.Plan, warns []contract.Warning) (*ApplyResult, []contract.Warning, error) {
+	levels := []plan.Plan{pl}
+	if len(pl.Chain) > 0 {
+		levels = make([]plan.Plan, len(pl.Chain))
+		for i := range pl.Chain {
+			levels[i] = levelPlan(pl, i)
+		}
+	} else {
+		levels[0].PRs = []plan.StackPR{pl.PRs[0]}
+	}
+	for _, lp := range levels {
+		if !lp.Typed.Title && !lp.Typed.Body {
+			continue
+		}
+		var texts []leak.Text
+		if lp.Typed.Title {
+			texts = append(texts, leak.Text{Where: "pr_title", Content: lp.Publish.PR.Title})
+		}
+		if lp.Typed.Body {
+			texts = append(texts, leak.Text{Where: "pr_body", Content: lp.Publish.PR.Body})
+		}
+		rep, _, err := e.updateScan(ctx, pc, cfg, lp.Publish.Commit, lp.Publish.Commit, scanOpts{texts: texts})
+		if err != nil {
+			return nil, warns, err
+		}
+		blocking, _, ww := e.splitFindings(pc.pair, rep.Findings)
+		warns = addWarnings(addWarnings(warns, rep.Warnings...), ww...)
+		if len(blocking) > 0 {
+			return nil, warns, leakErr(lp.Feature, blocking)
+		}
+	}
+	top := levels[len(levels)-1]
+	res := &ApplyResult{PlanID: pl.ID, PublicBranch: top.Publish.TargetBranch, Resumed: true, Waived: []WaivedFinding{},
+		PRs: append([]plan.StackPR(nil), pl.PRs...)}
+	if e.DryRun {
+		res.Preview = preview.New(nil)
+		for _, lp := range levels {
+			e.previewUpdate(ctx, pc, res.Preview, lp.Publish.TargetBranch, lp.Publish.ExpectedHead, lp.Publish.Commit, lp.PRs[0].Number, lp.Typed)
+		}
+		return res, warns, nil
+	}
+	e.progressf("plan %s's update already landed; recording it", pl.ID)
+	for i, lp := range levels {
+		pr, mw, err := e.recordUpdate(ctx, pc, lp, lp.Publish.Commit)
+		warns = addWarnings(warns, mw...)
+		if err != nil {
+			return res, warns, err
+		}
+		res.PRs[i].Number, res.PRs[i].URL = pr.Number, pr.URL
+		if err := e.editUpdated(ctx, pc, lp); err != nil {
+			return res, warns, err
+		}
+	}
+	res.PublicPR, res.PRURL = res.PRs[len(res.PRs)-1].Number, res.PRs[len(res.PRs)-1].URL
+	return res, warns, nil
 }

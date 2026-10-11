@@ -164,11 +164,14 @@ type Promoted struct {
 	Adopted []AdoptedCommit `json:"adopted,omitempty"`
 }
 
-// AdoptedCommit is one public PR commit feature pull adopted.
+// AdoptedCommit is one public PR commit feature pull adopted. Folded: a
+// squash or curated update folded it into its own commits, which keep its
+// content (and credit its author); it is no longer on the PR by itself.
 type AdoptedCommit struct {
 	SHA     string `json:"sha"`
 	Author  string `json:"author"`
 	Subject string `json:"subject"`
+	Folded  bool   `json:"folded,omitempty"`
 }
 
 // Meta is feature.json.

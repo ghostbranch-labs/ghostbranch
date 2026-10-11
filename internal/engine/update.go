@@ -795,9 +795,11 @@ func unrecordedWarning(name, branch string, pr int, tip, id string) contract.War
 // message, each commit of chain carrying one. An adopted commit is a public
 // commit: the mirror fetched it from the PR's branch, and keeps the object
 // after a replace. One the mirror doesn't have (another machine whose
-// mirror never fetched it) is matched by its subject alone. A merge commit
+// mirror never fetched it) can't be matched by its patch-id, so it counts
+// as missing: a preserve update refuses rather than guess. A merge commit
 // (GitHub's Update branch) is never missing: its content comes in with the
-// branch it merged, and only its object leaves the PR.
+// branch it merged, and only its object leaves the PR. Neither is a folded
+// one (Folded): an earlier squash or curated update already holds it.
 func missingAdopted(ctx context.Context, g *gitx.Git, adopted []feature.AdoptedCommit, chain []string) ([]feature.AdoptedCommit, error) {
 	if len(adopted) == 0 {
 		return nil, nil
@@ -807,26 +809,23 @@ func missingAdopted(ctx context.Context, g *gitx.Git, adopted []feature.AdoptedC
 	if err != nil {
 		return nil, internalErr(err, "compute the update's patch-ids")
 	}
-	marks, subjects := map[mark]int{}, map[string]int{}
+	marks := map[mark]int{}
 	for i, c := range chain {
 		msg, err := g.CommitMessage(ctx, c)
 		if err != nil {
 			return nil, internalErr(err, "read a commit message")
 		}
-		msg = strings.TrimSpace(msg)
-		marks[mark{ids[i], msg}]++
-		subjects[subject(msg)]++
+		marks[mark{ids[i], strings.TrimSpace(msg)}]++
 	}
 	var out []feature.AdoptedCommit
 	for _, a := range adopted {
+		if a.Folded {
+			continue
+		}
 		if _, ok, err := g.Resolve(ctx, a.SHA); err != nil {
 			return nil, internalErr(err, "read adopted commit "+short(a.SHA))
 		} else if !ok {
-			if subjects[a.Subject] > 0 {
-				subjects[a.Subject]--
-			} else {
-				out = append(out, a)
-			}
+			out = append(out, a)
 			continue
 		}
 		parents, err := g.Run(ctx, "rev-list", "--parents", "-n", "1", a.SHA)
@@ -892,8 +891,14 @@ func adoptedIdentity(ctx context.Context, g *gitx.Git, a feature.AdoptedCommit) 
 		}
 		return id, true, nil
 	}
+	return recordedIdentity(a), false, nil
+}
+
+// recordedIdentity is the public author the record keeps for adopted
+// commit a, "Name <email>" as read from the PR when feature pull adopted it.
+func recordedIdentity(a feature.AdoptedCommit) gitx.Identity {
 	name, email, _ := strings.Cut(a.Author, " <")
-	return gitx.Identity{Name: strings.TrimSpace(name), Email: strings.TrimSuffix(strings.TrimSpace(email), ">")}, false, nil
+	return gitx.Identity{Name: strings.TrimSpace(name), Email: strings.TrimSuffix(strings.TrimSpace(email), ">")}
 }
 
 // keepAdoptedAuthors marks each preserve link that publishes a commit
@@ -903,21 +908,27 @@ func adoptedIdentity(ctx context.Context, g *gitx.Git, a feature.AdoptedCommit) 
 // commit marking one link. A marked link keeps the adopted commit's public
 // author (link.adopted): its email is already public, and author_email
 // (noreply, map) rewrites only the person's own commits. An adopted commit
-// the mirror doesn't have is matched by its subject, and the link keeps
-// the author its source carries (cherry-picks keep it).
+// the mirror doesn't have can't be matched by patch-id: a link matches it
+// only when its subject is the recorded subject exactly and its source's
+// author is the recorded public author (feature pull's cherry-picks keep
+// it), and then keeps that recorded author. A commit of the person's own
+// with the same subject never matches, so author_email still applies to
+// it and no private email goes public. Each adopted commit marks one link;
+// folded ones count too, as the feature still holds their commits.
 func keepAdoptedAuthors(ctx context.Context, g *gitx.Git, links []link, adopted []feature.AdoptedCommit) error {
 	if len(adopted) == 0 {
 		return nil
 	}
 	type mark struct{ id, msg string }
-	byMark, bySubject := map[mark][]gitx.Identity{}, map[string]int{}
+	byMark := map[mark][]gitx.Identity{}
+	var unread []feature.AdoptedCommit // not in the mirror: matched by subject and author
 	for _, a := range adopted {
 		id, ok, err := adoptedIdentity(ctx, g, a)
 		if err != nil {
 			return err
 		}
 		if !ok {
-			bySubject[a.Subject]++
+			unread = append(unread, a)
 			continue
 		}
 		pid, err := g.PatchIDs(ctx, []string{a.SHA})
@@ -945,10 +956,14 @@ func keepAdoptedAuthors(ctx context.Context, g *gitx.Git, links []link, adopted 
 			l.adopted, byMark[mk] = &ids[0], ids[1:]
 			continue
 		}
-		if s := subject(l.message); bySubject[s] > 0 {
-			bySubject[s]--
-			id := l.author
-			l.adopted = &id
+		for j, a := range unread {
+			rec := recordedIdentity(a)
+			if a.Subject == subject(l.message) && rec.Email != "" &&
+				strings.EqualFold(rec.Email, l.author.Email) && rec.Name == l.author.Name {
+				l.adopted = &rec
+				unread = slices.Delete(unread, j, j+1)
+				break
+			}
 		}
 	}
 	return nil
@@ -963,18 +978,19 @@ func adoptedOf(m feature.Meta) []feature.AdoptedCommit {
 }
 
 // withCoAuthors ends a squash update's message with one Co-authored-by
-// trailer for each distinct author of the adopted commits (folded into it),
-// first seen first, after a blank line. The publisher, who authors the
-// squash commit, is left out.
+// trailer for each distinct author (by email, any case) of the adopted
+// commits it folds, those folded by earlier updates (Folded) included, first
+// seen first, after a blank line. The publisher, who authors the squash
+// commit, is left out.
 func withCoAuthors(ctx context.Context, g *gitx.Git, msg string, adopted []feature.AdoptedCommit, publisher gitx.Identity) (string, error) {
-	seen := map[string]bool{strings.ToLower(identityText(publisher)): true}
+	seen := map[string]bool{strings.ToLower(publisher.Email): true}
 	var lines []string
 	for _, a := range adopted {
 		id, _, err := adoptedIdentity(ctx, g, a)
 		if err != nil {
 			return "", err
 		}
-		key := strings.ToLower(identityText(id))
+		key := strings.ToLower(id.Email)
 		if id.Email == "" || seen[key] {
 			continue
 		}

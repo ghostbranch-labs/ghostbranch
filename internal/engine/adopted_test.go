@@ -104,8 +104,8 @@ func TestSquashReplaceListsFoldedAdoptedCommits(t *testing.T) {
 	if !strings.Contains(s, want) {
 		t.Fatalf("summary lacks %q:\n%s", want, s)
 	}
-	if ad := h.shadowMeta("a").Promoted.Adopted; len(ad) != 0 {
-		t.Fatalf("a folded commit stays recorded as adopted: %+v", ad)
+	if ad := h.shadowMeta("a").Promoted.Adopted; len(ad) != 1 || ad[0].SHA != theirs || !ad[0].Folded {
+		t.Fatalf("the folded commit must stay recorded, marked folded: %+v", ad)
 	}
 }
 
