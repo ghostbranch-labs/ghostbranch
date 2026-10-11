@@ -98,8 +98,20 @@ func (e *Engine) authorize(ctx context.Context, p workspace.Pair, planID, summar
 // reorder text on the person's console.
 func planSummary(pl plan.Plan, files []string, authors []string, waived []WaivedFinding, warnings []contract.Warning) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "About to publish to %s:\n", visible(pl.Pair.Public))
-	publishLines(&b, pl.Mode, pl.Publish, files, authors)
+	if pl.Publish.Update && len(pl.PRs) == 1 {
+		n := pl.PRs[0].Number
+		fmt.Fprintf(&b, "%s in %s:\n", updateHeadline(n, pl.Publish), visible(pl.Pair.Public))
+		if k := len(pl.Publish.Restores); k > 0 {
+			that := "that was"
+			if k > 1 {
+				that = "that were"
+			}
+			fmt.Fprintf(&b, "  puts back %s %s removed from PR #%d on GitHub\n", plural(k, "commit"), that, n)
+		}
+	} else {
+		fmt.Fprintf(&b, "About to publish to %s:\n", visible(pl.Pair.Public))
+	}
+	publishLines(&b, pl.Mode, pl.Publish, pl.Typed, files, authors)
 	tailLines(&b, waived, pl.CI.RepoGuards, warnings)
 	fmt.Fprintf(&b, "Plan %s", visible(pl.ID))
 	return b.String()
@@ -107,8 +119,10 @@ func planSummary(pl plan.Plan, files []string, authors []string, waived []Waived
 
 // publishLines is one PR's part of an approval summary: its branch, its
 // history on the commit below it, each commit with its author as stored,
-// the commits dropped as empty, the PR text and the files it changes.
-func publishLines(b *strings.Builder, mode string, pub plan.Publish, files, authors []string) {
+// the commits dropped as empty, the PR text and the files it changes. An
+// update of an open PR shows only the texts the person typed (typed): the
+// others stay as they are on GitHub.
+func publishLines(b *strings.Builder, mode string, pub plan.Publish, typed plan.Typed, files, authors []string) {
 	fmt.Fprintf(b, "  branch   %s\n", visible(pub.TargetBranch))
 	fmt.Fprintf(b, "  history  %s, %d commit(s) on %s\n", visible(mode), len(pub.Commits), short(pub.Parent))
 	for i, c := range pub.Commits {
@@ -121,9 +135,20 @@ func publishLines(b *strings.Builder, mode string, pub plan.Publish, files, auth
 	if n := len(pub.DroppedEmpty); n > 0 {
 		fmt.Fprintf(b, "  dropped  %d commit(s) with nothing public in them\n", n)
 	}
-	fmt.Fprintf(b, "  PR title %s\n", visible(pub.PR.Title))
+	switch {
+	case !pub.Update || typed.Title:
+		fmt.Fprintf(b, "  PR title %s\n", visible(pub.PR.Title))
+	case !typed.Body:
+		b.WriteString("  PR       keeps its title and body\n")
+	default:
+		b.WriteString("  PR title keeps its title\n")
+	}
 	body := strings.Split(strings.TrimSpace(pub.PR.Body), "\n")
 	switch {
+	case pub.Update && !typed.Body:
+		if typed.Title {
+			b.WriteString("  PR body  keeps its body\n")
+		}
 	case len(body) == 1 && body[0] == "":
 		b.WriteString("  PR body  (empty)\n")
 	default:
@@ -177,7 +202,7 @@ func stackSummary(pl plan.Plan, shown [][]plan.Commit, authors, files [][]string
 		pub := en.Publish
 		pub.Commits = shown[i]
 		fmt.Fprintf(&b, "PR %d of %d: %s, based on %s\n", i+1, n, visible(en.Feature), visible(pl.PRs[i].Base))
-		publishLines(&b, en.Mode, pub, files[i], authors[i])
+		publishLines(&b, en.Mode, pub, en.Typed, files[i], authors[i])
 		tailLines(&b, nil, en.CI.RepoGuards, nil)
 	}
 	tailLines(&b, waived, workflow.GuardReport{}, warnings)

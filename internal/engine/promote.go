@@ -170,11 +170,28 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	if err != nil {
 		return res, warns, internalErr(err, "read public main")
 	}
+	// A feature whose PR is open is updated, not published again: read the
+	// PR now. Commits someone pushed to it stop the promote before any CI
+	// runs, and the update pushes to the PR's own branch.
+	upd, err := e.prHead(ctx, pc, &m)
+	if err != nil {
+		return res, warns, err
+	}
+	if upd != nil {
+		if len(upd.Foreign) > 0 {
+			return res, warns, prChangedErr(opt.Feature, upd)
+		}
+		if err := updateFlags(opt, upd); err != nil {
+			return res, warns, err
+		}
+		branch = upd.Branch
+	}
 	// A preserved history of several commits has no one message to take the
 	// PR title from: ask for it before any CI runs.
 	// The feature's own commits, as its gate counts them: forked_at..head
 	// for one moved onto main that keeps its fork point.
-	if mode == config.ModePreserve && strings.TrimSpace(opt.Title) == "" {
+	// An update keeps the PR's title unless one is typed.
+	if upd == nil && mode == config.ModePreserve && strings.TrimSpace(opt.Title) == "" {
 		sources, err := ownSources(ctx, g, opt.Feature, m, head, pm)
 		if err != nil {
 			return res, warns, err
@@ -185,7 +202,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	}
 	// A bad --curate file fails here, before any CI runs.
 	if mode == config.ModeCurated {
-		if len(opt.Groups) > 1 && strings.TrimSpace(opt.Title) == "" {
+		if upd == nil && len(opt.Groups) > 1 && strings.TrimSpace(opt.Title) == "" {
 			return res, warns, contract.New(contract.MissingInput, "the --curate file has %d groups, so the PR needs a title: pass --title", len(opt.Groups)).WithField("title")
 		}
 		sources, err := ownSources(ctx, g, opt.Feature, m, head, pm)
@@ -198,7 +215,25 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	}
 
 	names := guardNames(pc)
-	fresh, T2, entries, guardRep := e.reusableGate(ctx, pc, cfg, m, opt.Feature, head, pm, pm, O, names)
+	// A gate is reused only for the update it built, in the style that
+	// update needs now (gateFitsUpdate); an append gate's chain starts on
+	// the PR's head, not on public main.
+	reusable := func(m feature.Meta) (bool, string, []gitx.TreeEntry, workflow.GuardReport, string, error) {
+		onto := pm
+		if m.Gate != nil && m.Gate.Update != nil && m.Gate.Update.Style == plan.StyleAppend {
+			onto = m.Gate.Update.Head
+		}
+		ok, T2, entries, rep := e.reusableGate(ctx, pc, cfg, m, opt.Feature, head, pm, onto, O, names)
+		if !ok {
+			return false, T2, entries, rep, onto, nil
+		}
+		fits, _, err := e.updateFits(ctx, pc, m.Gate, m, mode)
+		return fits, T2, entries, rep, onto, err
+	}
+	fresh, T2, entries, guardRep, onto, err := reusable(m)
+	if err != nil {
+		return res, warns, err
+	}
 	var commits []feature.GateCommit
 	// A pending gate job for exactly these inputs is waited on, not gated
 	// again; --detach returns it at once. A dry run never reuses one:
@@ -231,19 +266,21 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 			if m, _, err = e.readMeta(ctx, pc, opt.Feature); err != nil {
 				return res, warns, err
 			}
-			fresh, T2, entries, guardRep = e.reusableGate(ctx, pc, cfg, m, opt.Feature, head, pm, pm, O, names)
+			if fresh, T2, entries, guardRep, onto, err = reusable(m); err != nil {
+				return res, warns, err
+			}
 		}
 	}
 	switch {
 	case fresh:
-		infos, err := gateCommitInfos(ctx, g, cfg, pm, m.Gate.Commits)
+		infos, err := gateCommitInfos(ctx, g, cfg, onto, m.Gate.Commits)
 		if err != nil {
 			return res, warns, err
 		}
 		res.Gate = &GateResult{Feature: opt.Feature, FeatureHead: head, PublicMain: pm, Parent: m.Gate.Parent, Base: cmp.Or(m.Gate.Base, pm), Overlay: O,
 			Candidate: m.Gate.Candidate, PublishedTree: m.Gate.PublishedTree, ScannedAs: m.Gate.ScannedAs, Commits: infos, Checks: m.Gate.Checks,
 			FailedChecks: []string{}, Leak: m.Gate.Leak, Findings: []leak.Finding{}, Waived: []WaivedFinding{},
-			RepoGuards: &guardRep, Reused: true}
+			RepoGuards: &guardRep, Reused: true, Update: m.Gate.Update}
 		if waited != nil {
 			// This promote waited on the gate job: keep its shadow PR and id.
 			res.Gate.ShadowPR, res.Gate.Job = waited.ShadowPR, waited.Job
@@ -291,12 +328,32 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 			return res, warns, err
 		}
 	}
-	links, dropped, err := deriveChain(ctx, g, cfg, chainInput{mode: mode, pm: pm, T: T, tEntries: entries, commits: commits, message: msg, groups: groups},
+	// The gate built the update this promote saw, or neither is one.
+	gu := res.Gate.Update
+	if (gu == nil) != (upd == nil) || (gu != nil && (gu.PR != upd.PR || gu.Head != upd.Head || gu.Base != upd.Base)) {
+		return res, warns, contract.New(contract.RefMoved, "feature %s's public PR changed while this promote ran; run it again", opt.Feature).WithField("feature")
+	}
+	pubParent := pm
+	in := chainInput{mode: mode, pm: pm, T: T, tEntries: entries, commits: commits, message: msg, groups: groups}
+	if gu != nil && gu.Style == plan.StyleAppend {
+		// An append publishes only the new commits, on the PR's head H.
+		pubParent, in.onto = gu.Head, gu.Head
+		if in.baseTree, err = g.TreeOf(ctx, gu.Head); err != nil {
+			return res, warns, internalErr(err, "read the public PR's head")
+		}
+	}
+	links, dropped, err := deriveChain(ctx, g, cfg, in,
 		func(cs []string, onto string) ([]string, error) { return e.replay(ctx, pc, cs, onto) })
 	if err != nil {
-		if ce := contract.From(err); ce.Code == contract.MarkerInvalid {
+		ce := contract.From(err)
+		if ce.Code == contract.MarkerInvalid {
 			err = namedMarkerErr(err, opt.Feature)
 			contract.From(err).Details["mode"] = mode
+		}
+		if gu != nil && gu.Style == plan.StyleAppend && ce.Code == contract.NothingToPublish {
+			return res, warns, contract.New(contract.NothingToPublish,
+				"public PR #%d already holds every change of feature %s; there is nothing to update", gu.PR, opt.Feature).
+				WithDetails(map[string]any{"feature": opt.Feature, "public_pr": gu.PR, "dropped_empty": ce.Details["dropped_empty"]})
 		}
 		return res, warns, err
 	}
@@ -309,17 +366,21 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	if err != nil {
 		return res, warns, err
 	}
-	chain, err := writeChain(ctx, g, links, authors, who, pm)
+	chain, err := writeChain(ctx, g, links, authors, who, pubParent)
 	if err != nil {
 		return res, warns, err
 	}
 	P := chain[len(chain)-1].Commit
-	if err := assertChain(ctx, g, chain, T, C, pm, set, names); err != nil {
+	if err := assertChain(ctx, g, chain, T, C, pubParent, set, names); err != nil {
 		return res, warns, err
 	}
 
 	var title, body string
 	switch {
+	case gu != nil:
+		// An update keeps the PR's title and body: only what is typed is
+		// planned, and apply edits just that.
+		title, body = strings.TrimSpace(opt.Title), strings.TrimSpace(opt.Body)
 	case mode == config.ModeSquash:
 		title, body = prTexts(msg, opt.Title, opt.Body)
 	case len(links) == 1:
@@ -334,23 +395,33 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 			body = strings.Join(lines, "\n")
 		}
 	}
-	if title == "" {
+	if title == "" && gu == nil {
 		return res, warns, contract.New(contract.MissingInput, "the PR needs a title: pass --title").WithField("title")
 	}
 
-	steps := make([]scanStep, len(links))
-	for i, l := range links {
-		var sources []string
-		if mode != config.ModeSquash {
-			sources = l.sources
+	texts := []leak.Text{{Where: "branch", Content: branch}, {Where: "pr_title", Content: title}, {Where: "pr_body", Content: body}}
+	var rep leak.Report
+	var version string
+	if gu != nil {
+		// An update scans what isn't public yet, from the PR's head H: the
+		// new commits (append) or the whole new history against H
+		// (replace), each with its message, author and committer as written
+		// (under author_email: map, the mapped identities).
+		rep, version, err = e.updateScan(ctx, pc, cfg, gu.Head, P, scanOpts{identities: true, sources: commitSources(chain, mode), texts: texts})
+	} else {
+		steps := make([]scanStep, len(links))
+		for i, l := range links {
+			var sources []string
+			if mode != config.ModeSquash {
+				sources = l.sources
+			}
+			steps[i] = scanStep{sources: sources, entries: l.entries, texts: []leak.Text{
+				{Where: "commit_message", Content: l.message},
+				{Where: "author", Content: identityText(authors[i])},
+				{Where: "committer", Content: identityText(who)}}}
 		}
-		steps[i] = scanStep{sources: sources, entries: l.entries, texts: []leak.Text{
-			{Where: "commit_message", Content: l.message},
-			{Where: "author", Content: identityText(authors[i])},
-			{Where: "committer", Content: identityText(who)}}}
+		rep, version, err = e.scanChain(ctx, g, cfg, pm, steps, texts)
 	}
-	rep, version, err := e.scanChain(ctx, g, cfg, pm, steps, []leak.Text{
-		{Where: "branch", Content: branch}, {Where: "pr_title", Content: title}, {Where: "pr_body", Content: body}})
 	if err != nil {
 		return res, warns, err
 	}
@@ -367,14 +438,23 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	if planID, err = plan.NewID(e.now(), e.Rand); err != nil {
 		return res, warns, internalErr(err, "make a plan id")
 	}
+	pub := plan.Publish{Commit: P, Tree: T, Parent: pubParent, TargetBranch: branch, PR: plan.PR{Title: title, Body: body},
+		Commits: chain, DroppedEmpty: dropped}
+	prs := []plan.StackPR{{Feature: opt.Feature, Base: "main"}}
+	if gu != nil {
+		pub.Update, pub.Style, pub.ReplaceReason, pub.ExpectedHead = true, gu.Style, gu.Reason, gu.Head
+		if gu.Style == plan.StyleReplace {
+			pub.Restores = upd.Restores // the published commits GitHub lost, which this replace puts back
+		}
+		prs = []plan.StackPR{{Feature: opt.Feature, Base: gu.Base, Number: gu.PR, Update: true, Style: gu.Style}}
+	}
 	pl := plan.Plan{SchemaVersion: plan.SchemaVersion, ID: planID, Kind: "promote", Actor: e.Actor, CreatedAt: e.now(),
 		Pair: plan.Pair{Public: p.Public, Shadow: p.Shadow}, Feature: opt.Feature, Mode: mode, Curate: groups,
 		Fingerprint: plan.Fingerprint{PublicMain: pm, FeatureHead: head, Overlay: O, GateCandidate: C},
-		Publish: plan.Publish{Commit: P, Tree: T, Parent: pm, TargetBranch: branch, PR: plan.PR{Title: title, Body: body},
-			Commits: chain, DroppedEmpty: dropped},
-		Typed: plan.Typed{Title: strings.TrimSpace(opt.Title) != "", Body: strings.TrimSpace(opt.Body) != ""},
-		Leak:  plan.Leak{Findings: []map[string]any{}, Waived: planWaived(waived), Warnings: append([]contract.Warning{}, rep.Warnings...), ScannerVersion: version},
-		CI:    plan.CI{RepoGuards: guardRep}, PRs: []plan.StackPR{{Feature: opt.Feature, Base: "main"}}}
+		Publish:     pub,
+		Typed:       plan.Typed{Title: strings.TrimSpace(opt.Title) != "", Body: strings.TrimSpace(opt.Body) != ""},
+		Leak:        plan.Leak{Findings: []map[string]any{}, Waived: planWaived(waived), Warnings: append([]contract.Warning{}, rep.Warnings...), ScannerVersion: version},
+		CI:          plan.CI{RepoGuards: guardRep}, PRs: prs}
 	res.Plan, res.PRs = &pl, pl.PRs
 	if e.DryRun {
 		pv := preview.New(map[string]string{"public_main": pm, "feature_head": head, "overlay": O, "gate_candidate": C})
@@ -385,7 +465,9 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 			res.Preview = pv
 			return res, warns, nil
 		}
-		if err := e.previewPublish(ctx, pc, pv, opt.Feature, publishedPlan(m), branch, "main", P); err != nil {
+		if gu != nil {
+			e.previewUpdate(ctx, pc, pv, branch, gu.Head, P)
+		} else if err := e.previewPublish(ctx, pc, pv, opt.Feature, publishedPlan(m), branch, "main", P); err != nil {
 			return res, warns, err
 		}
 		res.Preview = pv
@@ -420,6 +502,12 @@ func (e *Engine) stacked(ctx context.Context, pc *pairCtx, name string) bool {
 
 // publishSummary is the ledger's line for a publish.
 func publishSummary(r *ApplyResult) string {
+	if len(r.PRs) == 1 && r.PRs[0].Update {
+		if r.PRs[0].Style == plan.StyleAppend {
+			return fmt.Sprintf("updated PR #%d on %s", r.PublicPR, r.PublicBranch)
+		}
+		return fmt.Sprintf("replaced PR #%d's branch %s", r.PublicPR, r.PublicBranch)
+	}
 	if len(r.PRs) <= 1 {
 		return fmt.Sprintf("published %s as PR #%d", r.PublicBranch, r.PublicPR)
 	}

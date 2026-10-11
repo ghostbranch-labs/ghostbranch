@@ -289,19 +289,8 @@ func (e *Engine) openUpdate(ctx context.Context, pc *pairCtx, m *feature.Meta, m
 // u is changed only on success: until then Style stays "", which
 // gateUpdateOf never reports or records.
 func setStyle(ctx context.Context, g *gitx.Git, u *prUpdate, m *feature.Meta, mode string, above bool, publish []string) error {
-	var reason string
-	switch {
-	case mode == config.ModeSquash:
-		reason = plan.ReasonSquash
-	case mode == config.ModeCurated:
-		reason = plan.ReasonCurated
-	case u.Base != cmp.Or(m.Promoted.Base, feature.MainParent):
-		reason = plan.ReasonBaseChanged
-	case m.Promoted.NeedsUpdate || above:
-		reason = plan.ReasonRestack
-	case len(u.Restores) > 0:
-		reason = plan.ReasonRebase
-	default:
+	reason := forcedReason(u, m, mode, above)
+	if reason == "" {
 		r, err := prefixReason(ctx, g, u.Public, publish)
 		if err != nil {
 			return err
@@ -313,6 +302,26 @@ func setStyle(ctx context.Context, g *gitx.Git, u *prUpdate, m *feature.Meta, mo
 		u.Style = plan.StyleAppend
 	}
 	return nil
+}
+
+// forcedReason is why u must replace m's open PR's branch whatever the
+// new history is (setStyle): squash or curated mode, a changed base
+// branch, a pending restack or open PRs above, or published commits
+// removed on GitHub. It is "" when the new history decides (prefixReason).
+func forcedReason(u *prUpdate, m *feature.Meta, mode string, above bool) string {
+	switch {
+	case mode == config.ModeSquash:
+		return plan.ReasonSquash
+	case mode == config.ModeCurated:
+		return plan.ReasonCurated
+	case u.Base != cmp.Or(m.Promoted.Base, feature.MainParent):
+		return plan.ReasonBaseChanged
+	case m.Promoted.NeedsUpdate || above:
+		return plan.ReasonRestack
+	case len(u.Restores) > 0:
+		return plan.ReasonRebase
+	}
+	return ""
 }
 
 // prefixReason is "" when public is, by patch-id and message and in order,
@@ -579,12 +588,16 @@ func unpublished(ctx context.Context, g *gitx.Git, tip string) ([]string, error)
 }
 
 // gateFitsUpdate reports whether gate record gt was built for update u (as
-// prHead reads it now; nil when no PR is open) and promote mode. Either
-// both are nil, or the record names the same PR, head and base, with a
-// style mode still gives. Squash and curated replace for their own reason,
-// and a preserve promote may append, so a replace gate scanned for another
-// mode doesn't stand for it.
-func gateFitsUpdate(gt *feature.Gate, u *prUpdate, mode string) bool {
+// prHead reads it now; nil when no PR is open) of m, for promote mode, with
+// above telling whether open PRs sit above m now. Either both are nil, or
+// the record names the same PR, head and base, with the style and reason
+// they give now: a reason forced now (forcedReason) must be the recorded
+// one, and with none forced the recorded reason must be one the new
+// history alone gives (append, rebase, reworded or conflict), which the
+// gate decided on the same feature head and public main. So a gate built
+// to append never stands for an update that must replace (CI never ran on
+// that branch), nor one scanned for another mode.
+func gateFitsUpdate(gt *feature.Gate, u *prUpdate, m feature.Meta, mode string, above bool) bool {
 	if gt == nil {
 		return false
 	}
@@ -592,16 +605,37 @@ func gateFitsUpdate(gt *feature.Gate, u *prUpdate, mode string) bool {
 		return gt.Update == nil
 	}
 	w := gt.Update
-	if w == nil || w.PR != u.PR || w.Head != u.Head || w.Base != u.Base {
+	if w == nil || w.PR != u.PR || w.Head != u.Head || w.Base != u.Base || m.Promoted == nil {
 		return false
 	}
-	switch mode {
-	case config.ModeSquash:
-		return w.Reason == plan.ReasonSquash
-	case config.ModeCurated:
-		return w.Reason == plan.ReasonCurated
+	if forced := forcedReason(u, &m, mode, above); forced != "" {
+		return w.Style == plan.StyleReplace && w.Reason == forced
 	}
-	return w.Reason != plan.ReasonSquash && w.Reason != plan.ReasonCurated
+	switch {
+	case w.Style == plan.StyleAppend:
+		return w.Reason == ""
+	case w.Style == plan.StyleReplace:
+		return w.Reason == plan.ReasonRebase || w.Reason == plan.ReasonReworded || w.Reason == plan.ReasonConflict
+	}
+	return false
+}
+
+// updateFits reads m's open PR now and reports whether gate record gt still
+// stands for its update in mode (gateFitsUpdate), with that update (nil
+// when no PR is open). Foreign commits on the PR make it not fit: the gate
+// would refuse them.
+func (e *Engine) updateFits(ctx context.Context, pc *pairCtx, gt *feature.Gate, m feature.Meta, mode string) (bool, *prUpdate, error) {
+	u, err := e.prHead(ctx, pc, &m)
+	if err != nil || (u != nil && len(u.Foreign) > 0) {
+		return false, u, err
+	}
+	above := false
+	if u != nil {
+		if above, err = e.hasOpenAbove(ctx, pc, m.Name); err != nil {
+			return false, u, err
+		}
+	}
+	return gateFitsUpdate(gt, u, m, mode, above), u, nil
 }
 
 // gateUpdateOf is u as a gate records and reports it. It is nil for nil,

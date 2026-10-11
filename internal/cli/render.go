@@ -17,6 +17,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/guard"
 	"github.com/ghostbranch-labs/ghostbranch/internal/guide"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
+	"github.com/ghostbranch-labs/ghostbranch/internal/plan"
 	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
 )
 
@@ -234,7 +235,11 @@ func human(r any, st style.Styler) string {
 		case v.Preview != nil:
 			previewText(&b, v.Preview)
 		case v.Applied != nil:
-			fmt.Fprintf(&b, "Published %s as PR #%d: %s\n", v.Applied.PublicBranch, v.Applied.PublicPR, v.Applied.PRURL)
+			k := -1
+			if v.Plan != nil {
+				k = len(v.Plan.Publish.Commits)
+			}
+			b.WriteString(publishedLine(v.Applied, k))
 		case v.Plan != nil && v.PlanPath != "":
 			fmt.Fprintf(&b, "Plan %s saved to %s.\n", v.Plan.ID, v.PlanPath)
 			fmt.Fprintf(&b, "  %s: %d public commit(s)", v.Plan.Mode, len(v.Plan.Publish.Commits))
@@ -253,7 +258,7 @@ func human(r any, st style.Styler) string {
 			previewText(&b, v.Preview)
 			break
 		}
-		fmt.Fprintf(&b, "Published %s as PR #%d: %s\n", v.PublicBranch, v.PublicPR, v.PRURL)
+		b.WriteString(publishedLine(v, -1))
 		waivedLines(&b, v.Waived)
 	case *engine.AgentsAllowResult:
 		if v.Preview != nil {
@@ -485,6 +490,26 @@ func human(r any, st style.Styler) string {
 }
 
 // pendingJob is whether a gate result is a job still waiting on CI.
+// publishedLine is what an apply did: published a new PR, or updated an
+// open one, by adding k commits (k < 0 when the count isn't at hand) or by
+// replacing its branch.
+func publishedLine(r *engine.ApplyResult, k int) string {
+	if len(r.PRs) == 1 && r.PRs[0].Update {
+		if r.PRs[0].Style == plan.StyleAppend {
+			if k < 0 {
+				return fmt.Sprintf("Updated PR #%d on %s: %s\n", r.PublicPR, r.PublicBranch, r.PRURL)
+			}
+			s := "s"
+			if k == 1 {
+				s = ""
+			}
+			return fmt.Sprintf("Updated PR #%d (added %d commit%s): %s\n", r.PublicPR, k, s, r.PRURL)
+		}
+		return fmt.Sprintf("Replaced PR #%d's branch %s: %s\n", r.PublicPR, r.PublicBranch, r.PRURL)
+	}
+	return fmt.Sprintf("Published %s as PR #%d: %s\n", r.PublicBranch, r.PublicPR, r.PRURL)
+}
+
 func pendingJob(g *engine.GateResult) bool {
 	return g.Checks == feature.ChecksPending && g.Job != nil && g.ShadowPR != nil
 }

@@ -218,6 +218,10 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 			"the repos changed since plan %s was made (%s); make a new plan with ghostbranch promote", pl.ID, strings.Join(moved, ", ")).
 			WithDetails(stale(pl, moved))
 	}
+	// An update plan stands only on the gate that built that very update.
+	if err := updateStands(m, pl); err != nil {
+		return nil, warns, err
+	}
 	P, links, err := e.verifyChain(ctx, pc, pl, m, cfg, live)
 	if err != nil {
 		return nil, warns, err
@@ -227,7 +231,15 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 	if err != nil {
 		return nil, warns, err
 	}
-	rep, _, err := e.scanChain(ctx, g, cfg, pm, steps, planTexts(pl))
+	var rep leak.Report
+	if pl.Publish.Update {
+		// An update scans what isn't public yet, from the PR's head H, with
+		// each commit's message, author and committer as stored.
+		rep, _, err = e.updateScan(ctx, pc, cfg, pl.Publish.ExpectedHead, P,
+			scanOpts{identities: true, sources: commitSources(pl.Publish.Commits, pl.Mode), texts: planTexts(pl)})
+	} else {
+		rep, _, err = e.scanChain(ctx, g, cfg, pm, steps, planTexts(pl))
+	}
 	if err != nil {
 		return nil, warns, err
 	}
@@ -241,32 +253,71 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 	}
 
 	branch := pl.Publish.TargetBranch
-	res := &ApplyResult{PlanID: pl.ID, PublicBranch: branch, Waived: waived, PRs: []plan.StackPR{{Feature: pl.Feature, Base: "main"}}}
+	prs := []plan.StackPR{{Feature: pl.Feature, Base: "main"}}
+	if pl.Publish.Update {
+		prs = []plan.StackPR{pl.PRs[0]} // updateStands checked there is exactly one
+	}
+	res := &ApplyResult{PlanID: pl.ID, PublicBranch: branch, Waived: waived, PRs: prs}
 	existing, exists, _ := g.Resolve(ctx, publicRef(branch))
-	if exists && existing != P {
+	landed := false
+	if pl.Publish.Update {
+		// The open PR's branch is where the plan saw it (H), or already at P.
+		if landed, err = e.updateLive(ctx, pc, pl, m, existing, exists, P); err != nil {
+			return res, warns, err
+		}
+	} else if exists && existing != P {
 		return res, warns, branchExists(branch, existing, e.earlierPlan(pc.pair, pl.Feature, branch, existing, publishedPlan(m)))
 	}
-	ids, err := g.PatchIDs(ctx, commitSHAs(pl.Publish.Commits))
-	if err != nil {
-		return res, warns, internalErr(err, "compute the published commits' patch-ids")
+	var ids []string
+	if !pl.Publish.Update {
+		if ids, err = g.PatchIDs(ctx, commitSHAs(pl.Publish.Commits)); err != nil {
+			return res, warns, internalErr(err, "compute the published commits' patch-ids")
+		}
 	}
 	if e.DryRun {
 		pv := preview.New(map[string]string{"public_main": pm, "feature_head": head, "overlay": O, "gate_candidate": gateC})
-		if err := e.previewPublish(ctx, pc, pv, pl.Feature, publishedPlan(m), branch, "main", P); err != nil {
+		if pl.Publish.Update {
+			e.previewUpdate(ctx, pc, pv, branch, pl.Publish.ExpectedHead, P)
+		} else if err := e.previewPublish(ctx, pc, pv, pl.Feature, publishedPlan(m), branch, "main", P); err != nil {
 			return res, warns, err
 		}
 		res.Preview = pv
 		return res, warns, nil
 	}
-	files, err := g.DiffNames(ctx, pm, P)
+	from := pm
+	if pl.Publish.Update {
+		from = pl.Publish.ExpectedHead // the summary lists what the PR's branch changes by
+	}
+	files, err := g.DiffNames(ctx, from, P)
 	if err != nil {
 		return nil, warns, internalErr(err, "list the files going public")
 	}
 	summary := pl
 	summary.Publish.Commits = shown // subjects as stored in the commits
 	summary.Publish.Parent = pm     // the verified public main
+	if pl.Publish.Style == plan.StyleAppend {
+		summary.Publish.Parent = pl.Publish.ExpectedHead // the chain's verified parent
+	}
 	if res.Approval, err = e.authorize(ctx, pc.pair, pl.ID, planSummary(summary, files, authors, waived, rep.Warnings), yes); err != nil {
 		return nil, warns, err
+	}
+	if pl.Publish.Update {
+		if landed {
+			res.Resumed = true
+		} else if err := e.pushUpdate(ctx, pc, pl, P); err != nil {
+			return res, warns, err
+		}
+		pr, mw, err := e.recordUpdate(ctx, pc, pl, P)
+		warns = addWarnings(warns, mw...)
+		if err != nil {
+			return res, warns, err
+		}
+		res.PublicPR, res.PRURL = pr.Number, pr.URL
+		res.PRs[0].Number, res.PRs[0].URL = pr.Number, pr.URL
+		if err := e.editUpdated(ctx, pc, pl); err != nil {
+			return res, warns, err
+		}
+		return res, warns, nil
 	}
 	if !exists {
 		e.progressf("publishing %s to %s:%s", short(P), pc.pair.Public, branch)
@@ -306,13 +357,19 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 	return res, warns, nil
 }
 
-// verifyChain is verifyEntry for a plan of one feature on public main.
+// verifyChain is verifyEntry for a plan of one feature. Its chain sits on
+// public main, or, for an append to an open PR, on the PR's head H, where
+// the gate built it (updateStands checked that this is the gate's).
 func (e *Engine) verifyChain(ctx context.Context, pc *pairCtx, pl plan.Plan, m feature.Meta, cfg config.Config, live plan.Fingerprint) (string, []link, error) {
 	tip, _, err := pc.git.Resolve(ctx, planRef(pl.ID))
 	if err != nil {
 		return "", nil, internalErr(err, "read plan "+pl.ID+"'s commit")
 	}
-	return e.verifyEntry(ctx, pc, pl, m, cfg, live, live.PublicMain, live.PublicMain, tip, false)
+	onto := live.PublicMain
+	if pl.Publish.Update && pl.Publish.Style == plan.StyleAppend {
+		onto = pl.Publish.ExpectedHead
+	}
+	return e.verifyEntry(ctx, pc, pl, m, cfg, live, onto, onto, tip, false)
 }
 
 // verifyEntry checks that plan pl (a plan of one feature, or one branch of

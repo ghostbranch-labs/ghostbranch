@@ -318,10 +318,17 @@ func (e *Engine) pendingFor(ctx context.Context, pc *pairCtx, name, mode string)
 		mode = cfg.Promote.DefaultMode
 	}
 	if m.Gate.FreshFor(head, pm, O) && m.Gate.ScannedAs == mode && tip == m.Gate.Candidate {
-		// An update job is this gate only while the PR's branch is still at
-		// the head it built on.
-		if u := m.Gate.Update; u != nil {
-			if h, _, err := g.Resolve(ctx, publicRef(publishedBranch(m))); err != nil || h != u.Head {
+		// An update job is this gate only while it builds the update the
+		// open PR needs now: the same PR, still open on the same base, its
+		// branch at the head the job built on, with the same style (nothing
+		// new open above it, no restack flagged since). A first-publish job
+		// stands only while no PR is open.
+		if m.Gate.Update != nil || (m.Promoted != nil && parentFeature(m) == "") {
+			fits, _, err := e.updateFits(ctx, pc, m.Gate, m, mode)
+			if err != nil {
+				return nil, err
+			}
+			if !fits {
 				return nil, nil
 			}
 		}

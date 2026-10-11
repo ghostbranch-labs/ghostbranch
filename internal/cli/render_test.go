@@ -5,7 +5,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ghostbranch-labs/ghostbranch/internal/cli/style"
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
+	"github.com/ghostbranch-labs/ghostbranch/internal/plan"
 )
 
 func TestGateCell(t *testing.T) {
@@ -99,6 +101,37 @@ func TestFeatureShowTextNamesTheStack(t *testing.T) {
 		has := strings.Contains(b.String(), "  stack: ")
 		if (c.want == "" && has) || (c.want != "" && !strings.Contains(b.String(), c.want)) {
 			t.Errorf("%s: feature show =\n%s\nwant the line %q", c.r.Name, b.String(), c.want)
+		}
+	}
+}
+
+// M5/R13: an applied update says what happened to the open PR, not that a
+// PR was published.
+func TestHumanSaysHowAnOpenPRWasUpdated(t *testing.T) {
+	t.Parallel()
+	url := "https://github.example/acme/widget/pull/3"
+	applied := func(style string) *engine.ApplyResult {
+		prs := []plan.StackPR{{Feature: "feat-x", Base: "main", Number: 3, URL: url}}
+		if style != "" {
+			prs[0].Update, prs[0].Style = true, style
+		}
+		return &engine.ApplyResult{PublicBranch: "feat-x", PublicPR: 3, PRURL: url, PRs: prs}
+	}
+	commits := func(n int) *plan.Plan { return &plan.Plan{Publish: plan.Publish{Commits: make([]plan.Commit, n)}} }
+	for _, c := range []struct {
+		r    any
+		want string
+	}{
+		{&engine.PromoteResult{Applied: applied(plan.StyleAppend), Plan: commits(1)}, "Updated PR #3 (added 1 commit): " + url + "\n"},
+		{&engine.PromoteResult{Applied: applied(plan.StyleAppend), Plan: commits(2)}, "Updated PR #3 (added 2 commits): " + url + "\n"},
+		{&engine.PromoteResult{Applied: applied(plan.StyleReplace), Plan: commits(1)}, "Replaced PR #3's branch feat-x: " + url + "\n"},
+		{&engine.PromoteResult{Applied: applied(""), Plan: commits(1)}, "Published feat-x as PR #3: " + url + "\n"},
+		{applied(plan.StyleAppend), "Updated PR #3 on feat-x: " + url + "\n"},
+		{applied(plan.StyleReplace), "Replaced PR #3's branch feat-x: " + url + "\n"},
+		{applied(""), "Published feat-x as PR #3: " + url + "\n"},
+	} {
+		if got := human(c.r, style.Styler{}); !strings.HasPrefix(got, c.want) {
+			t.Errorf("human(%T) = %q, want it to start %q", c.r, got, c.want)
 		}
 	}
 }

@@ -1,0 +1,160 @@
+{
+  "schema_version": "0.12",
+  "command": "promote",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "gate": {
+      "feature": "feat-x",
+      "feature_head": "127b4a784cc83febecd756c649837e2893bf2706",
+      "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+      "parent": "",
+      "base": "ab259aef486ab5224da7f5499af6fab0a07f75db",
+      "overlay": "a1ef151295bf2b53d15b18523ab0184d02178bbd",
+      "candidate": "aac9b4224a41723578a1e35fe1ddf461f73f9ccb",
+      "published_tree": "bbdaad1cd319121f420fa6041767872b662f975e",
+      "scanned_as": "preserve",
+      "commits": [
+        {
+          "source": "127b4a784cc83febecd756c649837e2893bf2706",
+          "subject": "work",
+          "author": "Test Author <author@example.com>",
+          "files": [
+            "more.txt"
+          ]
+        }
+      ],
+      "checks": "passed",
+      "failed_checks": [],
+      "leak": "clean",
+      "findings": [],
+      "waived": [],
+      "repo_guards": {
+        "mode": "rewrite",
+        "rewritten": [],
+        "unrewritable": [],
+        "skipped": []
+      },
+      "shadow_pr": 1,
+      "job": "gate/feat-x/aac9b4224a41",
+      "reused": false,
+      "preview": null,
+      "update": {
+        "pr": 1,
+        "head": "ab259aef486ab5224da7f5499af6fab0a07f75db",
+        "base": "main",
+        "style": "append"
+      }
+    },
+    "plan": {
+      "schema_version": "0.12",
+      "id": "20261005T120010Z-121314",
+      "kind": "promote",
+      "actor": "human:octo",
+      "created_at": "2026-10-05T12:00:10Z",
+      "pair": {
+        "public": "acme/widget",
+        "shadow": "acme/widget-shadow"
+      },
+      "feature": "feat-x",
+      "mode": "preserve",
+      "fingerprint": {
+        "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+        "feature_head": "127b4a784cc83febecd756c649837e2893bf2706",
+        "overlay": "a1ef151295bf2b53d15b18523ab0184d02178bbd",
+        "gate_candidate": "aac9b4224a41723578a1e35fe1ddf461f73f9ccb"
+      },
+      "curate": null,
+      "publish": {
+        "commit": "8dd7c77d3747605085e22037916294dd5260ea57",
+        "tree": "bbdaad1cd319121f420fa6041767872b662f975e",
+        "parent": "ab259aef486ab5224da7f5499af6fab0a07f75db",
+        "target_branch": "feat-x",
+        "pr": {
+          "title": "",
+          "body": ""
+        },
+        "commits": [
+          {
+            "commit": "8dd7c77d3747605085e22037916294dd5260ea57",
+            "tree": "bbdaad1cd319121f420fa6041767872b662f975e",
+            "parent": "ab259aef486ab5224da7f5499af6fab0a07f75db",
+            "sources": [
+              "127b4a784cc83febecd756c649837e2893bf2706"
+            ],
+            "author": {
+              "name": "octo",
+              "email": "42+octo@users.noreply.github.com",
+              "date": "2026-01-01T00:02:00Z"
+            },
+            "subject": "work"
+          }
+        ],
+        "dropped_empty": [],
+        "update": true,
+        "style": "append",
+        "expected_head": "ab259aef486ab5224da7f5499af6fab0a07f75db"
+      },
+      "typed": {
+        "title": false,
+        "body": false
+      },
+      "leak": {
+        "findings": [],
+        "waived": [],
+        "warnings": [],
+        "scanner_version": "gitleaks v8.30.1"
+      },
+      "ci": {
+        "repo_guards": {
+          "mode": "rewrite",
+          "rewritten": [],
+          "unrewritable": [],
+          "skipped": []
+        }
+      },
+      "prs": [
+        {
+          "feature": "feat-x",
+          "base": "main",
+          "number": 1,
+          "url": "",
+          "update": true,
+          "style": "append"
+        }
+      ],
+      "stack_number": null
+    },
+    "plan_path": "<ROOT>/home/workspaces/default/plans/20261005T120010Z-121314.json",
+    "findings": [],
+    "waived": [],
+    "applied": null,
+    "preview": null,
+    "prs": [
+      {
+        "feature": "feat-x",
+        "base": "main",
+        "number": 1,
+        "url": "",
+        "update": true,
+        "style": "append"
+      }
+    ],
+    "stack_number": null
+  },
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "apply",
+        "20261005T120010Z-121314",
+        "--yes"
+      ],
+      "why": "a person allowed agents to publish here; publish the plan",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
+  "error": null
+}

@@ -132,6 +132,11 @@ func TestGoldenContract(t *testing.T) {
 		{"promote_needs_human", func(te *testEnv) { gatedFeature(te); te.vars["GHOSTBRANCH_ACTOR"] = "agent:claude-code" },
 			[]string{"promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--yes"}, 5},
 		{"promote_plan_under_grant", publishable, []string{"promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--plan"}, 0},
+		{"promote_update_plan", func(te *testEnv) {
+			publishable(te)
+			te.mustRun("promote", "feat-x", "--yes")
+			te.shadowCommit("feat-x", map[string]string{"more.txt": "more\n"})
+		}, []string{"promote", "feat-x", "--plan"}, 0},
 		{"promote_grant_needs_yes", publishable, []string{"promote", "feat-x", "--mode", "squash", "-m", "Add feature"}, 5},
 		{"promote_not_confirmed", func(te *testEnv) { gatedFeature(te); atConsole(te, func(string) string { return "n\n" }) },
 			[]string{"promote", "feat-x", "--mode", "squash", "-m", "Add feature"}, 5},
