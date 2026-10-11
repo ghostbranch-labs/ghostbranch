@@ -374,18 +374,24 @@ func (e *Engine) hasOpenAbove(ctx context.Context, pc *pairCtx, name string) (bo
 // pending restack or open PRs above (a stack level always replaces), and
 // published commits removed on GitHub (Restores: the update puts them
 // back) replace. Otherwise it appends when the commits on the PR are, by
-// patch-id and message and in order, the first commits of publish.
+// patch-id and message and in order, the first commits of publish, and the
+// private history wasn't rewritten since the publish (rewritten, from
+// historyRewritten): a clean rebase onto a moved main keeps every patch-id
+// and message, yet the PR must move onto the new base, so it is a replace
+// (rebase).
 //
 // u is changed only on success: until then Style stays "", which
 // gateUpdateOf never reports or records.
-func setStyle(ctx context.Context, g *gitx.Git, u *prUpdate, m *feature.Meta, mode string, above bool, publish []string) error {
+func setStyle(ctx context.Context, g *gitx.Git, u *prUpdate, m *feature.Meta, mode string, above, rewritten bool, publish []string) error {
 	reason := forcedReason(u, m, mode, above)
 	if reason == "" {
 		r, err := prefixReason(ctx, g, u.Public, publish)
 		if err != nil {
 			return err
 		}
-		reason = r
+		if reason = r; reason == "" && rewritten {
+			reason = plan.ReasonRebase
+		}
 	}
 	u.Style, u.Reason = plan.StyleReplace, reason
 	if reason == "" {
@@ -446,6 +452,31 @@ func prefixReason(ctx context.Context, g *gitx.Git, public, publish []string) (s
 		}
 	}
 	return "", nil
+}
+
+// historyRewritten reports whether the feature's private history was
+// rewritten since its last publish: the head the publish was planned from
+// (published, publishedHead) is no longer an ancestor of the feature's head.
+// A rebase, an amend or a squash does that; new commits on top, a merge of
+// main, or commits feature pull replayed on top don't. A published head
+// the mirror doesn't have was rewritten away (the mirror holds every
+// ancestor of the feature's head). An unknown published head ("", a record
+// from before 0.6 with no plan file here) can't tell: it is not rewritten,
+// and the patch-id prefix alone decides.
+func historyRewritten(ctx context.Context, g *gitx.Git, published, head string) (bool, error) {
+	if published == "" || published == head {
+		return false, nil
+	}
+	if _, ok, err := g.Resolve(ctx, published); err != nil {
+		return false, internalErr(err, "read the feature's published head")
+	} else if !ok {
+		return true, nil
+	}
+	in, err := g.IsAncestor(ctx, published, head)
+	if err != nil {
+		return false, internalErr(err, "compare the feature with its published head")
+	}
+	return !in, nil
 }
 
 // readUpdate reads, before anything is built, the open PR an unstacked
@@ -520,7 +551,11 @@ func (e *Engine) buildUpdate(ctx context.Context, pc *pairCtx, b *built, name st
 	if err != nil {
 		return err
 	}
-	if err := setStyle(ctx, g, u, &b.meta, b.scannedAs, above, commitSHAs(chain)); err != nil {
+	rewritten, err := historyRewritten(ctx, g, e.publishedHead(b.meta), b.head)
+	if err != nil {
+		return err
+	}
+	if err := setStyle(ctx, g, u, &b.meta, b.scannedAs, above, rewritten, commitSHAs(chain)); err != nil {
 		return err
 	}
 	b.scanTip, b.scanSources = b.pm, map[string][]string{}

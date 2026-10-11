@@ -34,6 +34,26 @@ func (h *harness) resetFeature() {
 	}
 }
 
+// moveMain adds a commit to public main and syncs it into the shadow repo,
+// as a merge on GitHub followed by ghostbranch sync does.
+func (h *harness) moveMain() {
+	h.t.Helper()
+	testutil.Commit(h.t, h.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
+	h.syncOK(engine.SyncOptions{})
+}
+
+// rebaseOntoMain replays feat-x's one commit (gated()'s) onto shadow main,
+// as a person's clean git rebase does: the same change and message on a
+// new base, so every patch-id stays the same.
+func (h *harness) rebaseOntoMain() {
+	h.t.Helper()
+	if err := h.shadowGit().UpdateRef(h.ctx, "refs/heads/feat-x", h.head("main")); err != nil {
+		h.t.Fatal(err)
+	}
+	testutil.Commit(h.t, h.shadowGit(), "feat-x", "work on feat-x",
+		map[string]string{"feature.txt": "new\n", ".ghostbranch/notes.md": "private\n"})
+}
+
 // Review Focus 4: append vs replace is chosen correctly.
 func TestUpdateStyle(t *testing.T) {
 	t.Parallel()
@@ -54,6 +74,24 @@ func TestUpdateStyle(t *testing.T) {
 			h.resetFeature()
 			testutil.Commit(h.t, h.shadowGit(), "feat-x", "work on feat-x", map[string]string{"feature.txt": "changed\n"})
 		}, plan.StyleReplace, plan.ReasonRebase},
+		// Acceptance 6.1a-2 bug 1: a clean rebase keeps every patch-id and
+		// message, yet the private history was rewritten onto a new base:
+		// the PR's branch is replaced, never left on the old main.
+		{"a clean rebase onto a moved main replaces", func(h *harness, _ int) {
+			h.moveMain()
+			h.rebaseOntoMain()
+		}, plan.StyleReplace, plan.ReasonRebase},
+		{"a clean rebase onto a moved main with a new commit replaces", func(h *harness, _ int) {
+			h.moveMain()
+			h.rebaseOntoMain()
+			testutil.Commit(h.t, h.shadowGit(), "feat-x", "more", more)
+		}, plan.StyleReplace, plan.ReasonRebase},
+		// Main moved but the person only added commits, never rebasing:
+		// still an append onto the PR's head.
+		{"a new commit while main moved appends", func(h *harness, _ int) {
+			h.moveMain()
+			testutil.Commit(h.t, h.shadowGit(), "feat-x", "more", more)
+		}, plan.StyleAppend, ""},
 		{"a reworded commit replaces", func(h *harness, _ int) {
 			h.resetFeature()
 			testutil.Commit(h.t, h.shadowGit(), "feat-x", "work on feat-x, reworded",

@@ -93,6 +93,45 @@ func TestPromoteReplacesAChangedHistory(t *testing.T) {
 	}
 }
 
+// Acceptance 6.1a-2 bug 1: after a clean rebase onto a moved main, status
+// says the PR is behind and promote replaces its branch onto the new main
+// (reason rebase), never NOTHING_TO_PUBLISH. Once it lands, the feature is
+// no longer behind.
+func TestPromoteReplacesACleanRebaseOntoAMovedMain(t *testing.T) {
+	t.Parallel()
+	h, pr := publishedFeature(t)
+	H := h.pubTip("feat-x")
+	h.moveMain()
+	h.rebaseOntoMain()
+	if r := h.report("feat-x"); r.State != feature.StatePRBehind {
+		t.Fatalf("before the update, feat-x is %s", r.State)
+	}
+	h.gateFeature("feat-x")
+	res, err := promote(h, engine.PromoteOptions{Yes: true})
+	if err != nil || res.Applied == nil {
+		t.Fatalf("promote = %+v %v", res, err)
+	}
+	validateResult(t, "promote.schema.json", res)
+	pub := res.Plan.Publish
+	if !pub.Update || pub.Style != plan.StyleReplace || pub.ReplaceReason != plan.ReasonRebase || pub.ExpectedHead != H ||
+		pub.Parent != h.pubTip("main") {
+		t.Fatalf("publish = %+v", pub)
+	}
+	if !res.Gate.Reused {
+		t.Fatal("promote ran the gate again: the person's gate built this replace")
+	}
+	tip := h.pubTip("feat-x")
+	if parent, _ := h.pubGit.MustResolve(h.ctx, tip+"^"); tip != pub.Commit || parent != h.pubTip("main") {
+		t.Fatalf("public branch at %s on %s, want %s on main %s", tip, parent, pub.Commit, h.pubTip("main"))
+	}
+	if s := h.approver.asked[len(h.approver.asked)-1]; !strings.Contains(s, fmt.Sprintf("Replace PR #%d's branch (history changed: rebase)", pr)) {
+		t.Fatalf("summary:\n%s", s)
+	}
+	if r := h.report("feat-x"); r.State != feature.StatePublished {
+		t.Fatalf("after the update, feat-x is %s", r.State)
+	}
+}
+
 // A restack replaces, and the update that lands clears needs_update.
 func TestAnUpdateClearsNeedsUpdate(t *testing.T) {
 	t.Parallel()
