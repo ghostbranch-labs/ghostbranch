@@ -59,3 +59,19 @@ func TestDeleteRefAndClosePR(t *testing.T) {
 		t.Fatalf("got  %q\nwant %q", got, want)
 	}
 }
+
+// An update's edit of the PR texts the person typed is a public write too.
+func TestEditPR(t *testing.T) {
+	t.Parallel()
+	p := preview.New(nil)
+	p.Add(preview.EditPR("acme/x", 7, true, false), preview.EditPR("acme/x", 7, false, true), preview.EditPR("acme/x", 7, true, true))
+	b, _ := json.Marshal(p.Ops[0])
+	if want := `{"body":false,"number":7,"op":"edit_pr","repo":"acme/x","title":true}`; string(b) != want {
+		t.Fatalf("got  %s\nwant %s", b, want)
+	}
+	got := strings.Join(p.Describe(), "\n")
+	want := "set PR #7's title in acme/x\nset PR #7's body in acme/x\nset PR #7's title and body in acme/x"
+	if got != want {
+		t.Fatalf("got  %q\nwant %q", got, want)
+	}
+}

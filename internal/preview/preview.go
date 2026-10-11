@@ -70,6 +70,12 @@ func DeleteRef(repo, ref, sha string) Op {
 	return Op{"op": "delete_ref", "repo": repo, "ref": ref, "sha": sha}
 }
 
+// EditPR sets the title and/or body (whichever is true) of open PR number
+// in repo; the other stays as it is on GitHub.
+func EditPR(repo string, number int, title, body bool) Op {
+	return Op{"op": "edit_pr", "repo": repo, "number": number, "title": title, "body": body}
+}
+
 // ClosePR closes PR number in repo without merging it.
 func ClosePR(repo string, number int) Op { return Op{"op": "close_pr", "repo": repo, "number": number} }
 
@@ -117,6 +123,15 @@ func (p *Preview) Describe() []string {
 			line = fmt.Sprintf("delete %s from %s (at %s)", o["ref"], o["repo"], short(o["sha"]))
 		case "close_pr":
 			line = fmt.Sprintf("close PR #%v in %s", o["number"], o["repo"])
+		case "edit_pr":
+			what := "title and body"
+			switch {
+			case o["title"] != true:
+				what = "body"
+			case o["body"] != true:
+				what = "title"
+			}
+			line = fmt.Sprintf("set PR #%v's %s in %s", o["number"], what, o["repo"])
 		case "wait_checks":
 			line = fmt.Sprintf("wait for CI on %s in %s", short(o["sha"]), o["repo"])
 		case "run_gate":
