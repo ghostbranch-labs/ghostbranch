@@ -158,6 +158,17 @@ type Promoted struct {
 	// were plain chained PRs (no native stack), so its open public PR still
 	// carries that parent's old commits. Republishing it is 6.1a-2.
 	NeedsUpdate bool `json:"needs_update,omitempty"`
+	// Adopted are commits someone made on the public PR's branch on GitHub
+	// that feature pull brought into the feature: they came from the public
+	// PR, not from Ghostbranch. Absent when none.
+	Adopted []AdoptedCommit `json:"adopted,omitempty"`
+}
+
+// AdoptedCommit is one public PR commit feature pull adopted.
+type AdoptedCommit struct {
+	SHA     string `json:"sha"`
+	Author  string `json:"author"`
+	Subject string `json:"subject"`
 }
 
 // Meta is feature.json.

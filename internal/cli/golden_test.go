@@ -33,7 +33,7 @@ var dataSchemas = map[string]string{
 	"status": "status.schema.json", "feature list": "feature-list.schema.json", "feature show": "feature-show.schema.json",
 	"feature abandon": "feature-abandon.schema.json", "feature close": "feature-close.schema.json",
 	"wait": "gate.schema.json", "login": "login.schema.json", "logout": "logout.schema.json", "auth status": "auth-status.schema.json",
-	"doctor": "doctor.schema.json", "feature fold": "feature-fold.schema.json", "feature restack": "feature-restack.schema.json",
+	"doctor": "doctor.schema.json", "feature fold": "feature-fold.schema.json", "feature restack": "feature-restack.schema.json", "feature pull": "feature-pull.schema.json",
 }
 
 var rootPath = regexp.MustCompile(`<ROOT>[^"]*`)
@@ -246,6 +246,8 @@ jobs:
 		}, []string{"feature", "restack", "feat-x"}, 0},
 		{"feature_restack_onto_main", withStack, []string{"feature", "restack", "feat-y", "--onto", "main"}, 0},
 		{"feature_restack_conflict", withConflictingStack, []string{"feature", "restack", "feat-x"}, contract.RebaseConflict.Exit()},
+		{"feature_pull", publishedWithForeign, []string{"feature", "pull", "feat-x"}, 0},
+		{"feature_pull_by_hand", publishedWithConflict, []string{"feature", "pull", "feat-x"}, contract.PRChangedOnGitHub.Exit()},
 		{"feature_abandon_has_children", withStack, []string{"feature", "abandon", "feat-x"}, contract.HasChildren.Exit()},
 		{"feature_close_has_children", withStack, []string{"feature", "close", "feat-x"}, contract.HasChildren.Exit()},
 		{"gate_detach", withFeature, []string{"gate", "feat-x", "--detach"}, 0},

@@ -371,6 +371,32 @@ func (a *app) steps(err error) []contract.Next {
 				return []contract.Next{{Command: a.scoped(append(append([]string{"promote"}, want...), "--plan")...),
 					Why: "promote the stack from its bottom, each branch right after its parent"}}
 			}
+		case contract.PRChangedOnGitHub:
+			// Commits someone made on the public PR: never overwritten.
+			// feature pull brings them in; when it can't by itself, the
+			// person merges them and runs it again.
+			f, _ := ce.Details["feature"].(string)
+			if f == "" {
+				break
+			}
+			if reason, _ := ce.Details["reason"].(string); reason != "" && a.command == "feature pull" {
+				branch, _ := ce.Details["branch"].(string)
+				remote := a.shadowRemote
+				if remote == "" {
+					remote = "shadow"
+				}
+				return []contract.Next{
+					{Command: []string{"git", "fetch", "origin", branch}, Why: "fetch the PR's branch from the public repo in your checkout (origin is its remote there)"},
+					{Command: []string{"git", "switch", f}, Why: "switch to the feature branch"},
+					{Command: []string{"git", "merge", "origin/" + branch}, Why: "merge the PR's commits into it; you resolve any conflict, Ghostbranch never does"},
+					{Command: []string{"git", "push", remote, f}, Why: "push the merged feature branch to the shadow repo, never to origin"},
+					{Command: a.scoped("feature", "pull", f), Why: "then pull again: it records the PR's commits as adopted"},
+				}
+			}
+			return []contract.Next{
+				{Command: a.scoped("feature", "pull", f), Why: "someone pushed commits to " + f + "'s public PR on GitHub (error.details.foreign); bring them into the feature branch: an update never overwrites them"},
+				{Command: a.scoped("gate", f), Why: "then gate it, and promote again: the update keeps their commits"},
+			}
 		case contract.BadFlag:
 			switch ce.Field {
 			case "message":
@@ -462,6 +488,14 @@ func (a *app) steps(err error) []contract.Next {
 		case len(r.Restacked) > 0:
 			out = append(out, contract.Next{Command: a.scoped("gate", r.Restacked[0].Feature),
 				Why: "the restacked branches were rewritten; gate them again from the bottom (and in each checkout: git fetch, then git reset --keep <remote>/<branch>)"})
+		}
+	case *engine.PullResult:
+		switch {
+		case r.Preview != nil:
+			out = append(out, contract.Next{Command: a.scoped("feature", "pull", r.Feature), Why: "the preview lists what pulling changes; run it to pull"})
+		case len(r.Adopted) > 0:
+			out = append(out, contract.Next{Command: a.scoped("gate", r.Feature),
+				Why: "the PR's commits are in the feature branch now; gate it, then promote: the update keeps them"})
 		}
 	case *engine.FeatureCloseResult:
 		if r.Preview != nil {

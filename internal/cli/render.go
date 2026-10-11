@@ -382,6 +382,22 @@ func human(r any, st style.Styler) string {
 		if len(v.Restacked) > 0 {
 			b.WriteString("These branches were rewritten in the shadow repo: in each checkout, git fetch, then git reset --keep <remote>/<branch>.\n")
 		}
+	case *engine.PullResult:
+		switch {
+		case v.Preview != nil:
+			previewText(&b, v.Preview)
+		case len(v.Adopted) == 0:
+			fmt.Fprintf(&b, "Nothing to pull: the public PR of %s holds only what Ghostbranch published.\n", oneLine(v.Feature))
+		default:
+			fmt.Fprintf(&b, "Brought %d commit(s) from the public PR into %s:\n", len(v.Adopted), oneLine(v.Feature))
+			for _, c := range v.Adopted {
+				fmt.Fprintf(&b, "  %s %s (%s)\n", short(c.SHA), oneLine(c.Subject), oneLine(c.Author))
+			}
+			if v.From != v.To {
+				fmt.Fprintf(&b, "%s moved %s -> %s in the shadow repo: in your checkout, git fetch, then git reset --keep <remote>/%s.\n",
+					oneLine(v.Feature), short(v.From), short(v.To), oneLine(v.Feature))
+			}
+		}
 	case *engine.FeatureCloseResult:
 		if v.Preview != nil {
 			previewText(&b, v.Preview)
