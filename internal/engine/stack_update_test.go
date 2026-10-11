@@ -558,6 +558,47 @@ func TestStackUpdateNamesABottomGateBuiltForAnotherMode(t *testing.T) {
 	}
 }
 
+// A bottom gate built in another mode than promote.default_mode (here by
+// an earlier promote --mode preserve, under default_mode squash) is plain
+// stale_gate: gating again builds in squash and fits, so the refusal never
+// claims it won't help, and after gate a the squash update plans.
+func TestStackUpdateAskForAGateWhenGatingAgainFits(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.grant(time.Hour)
+	h.startFeature("a", map[string]string{"a.txt": "a\n"})
+	h.gateFeature("a")
+	if pr, err := promote(h, engine.PromoteOptions{Feature: "a", Mode: "preserve", Yes: true}); err != nil || pr.Applied == nil {
+		t.Fatalf("promote a = %+v %v", pr, err)
+	}
+	h.startOn("b", "a", map[string]string{"b.txt": "b\n"})
+	testutil.Commit(t, h.shadowGit(), "a", "a second change", map[string]string{"a2.txt": "a2\n"})
+	if _, _, err := h.eng.FeatureRestack(h.ctx, h.pair, engine.RestackOptions{Feature: "a"}); err != nil {
+		t.Fatal(err)
+	}
+	h.setConfig("default_mode: preserve", "default_mode: squash")
+	h.gateFeature("b")
+	// An earlier promote in preserve gated a in preserve: an append.
+	if _, err := promote(h, engine.PromoteOptions{Feature: "a", Mode: "preserve", PlanOnly: true}); err != nil {
+		t.Fatal(err)
+	}
+	if g := h.meta("a").Gate; g.ScannedAs != "preserve" || g.Update == nil || g.Update.Style != plan.StyleAppend {
+		t.Fatalf("a's gate = %s %+v", g.ScannedAs, g.Update)
+	}
+	opt := engine.PromoteOptions{Features: []string{"a", "b"}, Mode: "squash", Titles: map[string]string{"a": "Add a", "b": "Add b"}, PlanOnly: true}
+	_, _, err := promoteStack(h, opt)
+	ce := wantCode(t, err, contract.NotAStack)
+	if ce.Details["reason"] != "stale_gate" || ce.Details["feature"] != "a" || ce.Details["update_mode"] != nil || strings.Contains(ce.Message, "won't") {
+		t.Fatalf("refusal = %s %+v", ce.Message, ce.Details)
+	}
+	h.gateFeature("a")
+	res, _, err := promoteStack(h, opt)
+	if err != nil || res.Plan == nil || res.Plan.Chain[0].Publish.ReplaceReason != plan.ReasonSquash {
+		t.Fatalf("promote a b after gate a = %+v %v", res, err)
+	}
+}
+
 // The plain chained-PR squash path end to end: after a squash merge of a,
 // sync marks b public_pr_needs_update; restack --onto main, gate and
 // promote b replace b's PR branch onto main, and the flag clears.

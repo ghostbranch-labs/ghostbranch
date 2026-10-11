@@ -394,14 +394,15 @@ func (a *app) steps(err error) []contract.Next {
 						// The bottom's gate built its PR's update in another
 						// mode, and gate builds in promote.default_mode: gating
 						// again would loop. Its own promote gates it in m.
-						out := []contract.Next{{Command: a.scoped("promote", f, "--mode", m, "--plan"),
-							Why: f + "'s gate built its PR's update in another history mode, and gate builds in promote.default_mode; promoting " + f + " on its own gates it in " + m + " mode and plans its update"}}
+						// One step: the branches above can be promoted only once
+						// that update is applied, so they are named in why, not
+						// offered as a command to run now.
+						why := f + "'s gate built its PR's update in promote.default_mode, which a " + m + " update can't use; promoting " + f + " on its own gates it in " + m + " mode and plans its update"
 						fs := stringList(ce.Details["features"])
 						if i := slices.Index(fs, f); i >= 0 && i < len(fs)-1 {
-							out = append(out, contract.Next{Command: a.scoped(append(append([]string{"promote"}, fs[i+1:]...), "--mode", m, "--plan")...),
-								Why: "once that update is applied, promote the branches above it on " + f + "'s new head"})
+							why += "; once that plan is applied, promote " + strings.Join(fs[i+1:], " ") + " --mode " + m + " --plan"
 						}
-						return out
+						return []contract.Next{{Command: a.scoped("promote", f, "--mode", m, "--plan"), Why: why}}
 					}
 					why := "its gate is missing or stale; gate it, then each branch above it, from the bottom up, then promote the stack again"
 					fs := stringList(ce.Details["features"])

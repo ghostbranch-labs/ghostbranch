@@ -401,7 +401,7 @@ func (e *Engine) promoteStack(ctx context.Context, pc *pairCtx, cfg config.Confi
 	if err := e.openOutside(ctx, pc, names); err != nil {
 		return "", warns, err
 	}
-	updates, err := e.stackUpdates(ctx, pc, names, modes)
+	updates, err := e.stackUpdates(ctx, pc, names, modes, cfg.Promote.DefaultMode)
 	if err != nil {
 		return "", warns, err
 	}

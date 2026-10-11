@@ -552,11 +552,12 @@ func TestNextForUpdates(t *testing.T) {
 		t.Errorf("stale_gate: next = %+v", next)
 	}
 	// A bottom gate built in another mode: gating again would loop, so next
-	// promotes the bottom on its own in that mode, then the branches above.
+	// promotes the bottom on its own in that mode; the branches above come
+	// once that plan is applied, so they are named in why, not offered now.
 	next = a.next(contract.New(contract.NotAStack, "x").WithDetails(map[string]any{
 		"reason": "stale_gate", "feature": "feat-a", "features": []string{"feat-a", "feat-b"}, "update_mode": "squash"}))
-	if len(next) != 2 || !slices.Equal(next[0].Command, cmd("promote", "feat-a", "--mode", "squash", "--plan")) ||
-		!slices.Equal(next[1].Command, cmd("promote", "feat-b", "--mode", "squash", "--plan")) {
+	if len(next) != 1 || !slices.Equal(next[0].Command, cmd("promote", "feat-a", "--mode", "squash", "--plan")) ||
+		!strings.Contains(next[0].Why, "once that plan is applied, promote feat-b --mode squash --plan") {
 		t.Errorf("stale_gate update_mode: next = %+v", next)
 	}
 	next = a.next(contract.New(contract.NotAStack, "x").WithDetails(map[string]any{
