@@ -132,6 +132,75 @@ func TestPromoteReplacesACleanRebaseOntoAMovedMain(t *testing.T) {
 	}
 }
 
+// A squash or curated promote reuses the person's preserve gate when that
+// gate built a replace (here after a clean rebase): the candidate is the
+// same in every mode. The plan and the approval say the mode's reason, not
+// the reason the gate recorded. What the mode writes that the gate never
+// saw (the squash or group message) is scanned by promote: a planted ID
+// refuses. Apply scans again: a tree finding waived for the gate and the
+// plan, its waiver revoked before apply, refuses there, and nothing moves.
+func TestAModeForcedReplaceOnAReusedGate(t *testing.T) {
+	t.Parallel()
+	for _, mode := range []string{"squash", "curated"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+			h, pr := publishedFeature(t)
+			h.setBlockPatterns("JIRA-[0-9]+")
+			H := h.pubTip("feat-x")
+			h.moveMain()
+			h.rebaseOntoMain()
+			testutil.Commit(t, h.shadowGit(), "feat-x", "add a fixture", fixture())
+			gr, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
+			if wantCode(t, err, contract.LeakFound); len(gr.Findings) != 1 || !gr.Findings[0].Waivable {
+				t.Fatalf("gate findings = %+v", gr.Findings)
+			}
+			secret := gr.Findings[0]
+			h.waive(secret, "test fixture")
+			h.gateFeature("feat-x")
+			m := h.meta("feat-x")
+			if g := m.Gate; g.ScannedAs != "preserve" || g.Update == nil || g.Update.Style != plan.StyleReplace || g.Update.Reason != plan.ReasonRebase {
+				t.Fatalf("gate = scanned as %s, update %+v", g.ScannedAs, g.Update)
+			}
+			opt := func(msg string, planOnly bool) engine.PromoteOptions {
+				o := engine.PromoteOptions{Mode: mode, PlanOnly: planOnly, Yes: !planOnly}
+				if mode == "squash" {
+					o.Message = msg
+				} else {
+					o.Curate, o.Groups = "c.json", []plan.Group{{From: gateSources(m), Message: msg}}
+				}
+				return o
+			}
+			res, err := promote(h, opt("Fix JIRA-123", true))
+			ce := wantCode(t, err, contract.LeakFound)
+			if ce.Details["mode"] != mode || res == nil || res.Gate == nil || !res.Gate.Reused || len(res.Findings) == 0 ||
+				res.Findings[0].Where != "commit_message" {
+				t.Fatalf("refusal %+v; result %+v", ce.Details, res)
+			}
+			res, err = promote(h, opt("Fix the review", true))
+			if err != nil || !res.Gate.Reused || res.Plan.Publish.Style != plan.StyleReplace || res.Plan.Publish.ReplaceReason != mode {
+				t.Fatalf("plan = %+v %v", res, err)
+			}
+			id := res.Plan.ID
+			if _, err := h.eng.Waivers.Revoke(publicName, []string{secret.ID}, false, h.clock.Now()); err != nil {
+				t.Fatal(err)
+			}
+			_, _, err = h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: id, Yes: true})
+			wantCode(t, err, contract.LeakFound)
+			if h.pubTip("feat-x") != H {
+				t.Fatal("a refused update moved the PR's branch")
+			}
+			h.waive(secret, "test fixture")
+			ar, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: id, Yes: true})
+			if err != nil || ar == nil || h.pubTip("feat-x") != res.Plan.Publish.Commit {
+				t.Fatalf("apply = %+v %v", ar, err)
+			}
+			if s := h.approver.asked[len(h.approver.asked)-1]; !strings.Contains(s, fmt.Sprintf("Replace PR #%d's branch (history changed: %s)", pr, mode)) {
+				t.Fatalf("summary:\n%s", s)
+			}
+		})
+	}
+}
+
 // A restack replaces, and the update that lands clears needs_update.
 func TestAnUpdateClearsNeedsUpdate(t *testing.T) {
 	t.Parallel()

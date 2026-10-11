@@ -33,9 +33,10 @@ func updateFlags(opt PromoteOptions, u *prUpdate) error {
 // updateStands checks an update plan against the feature's gate record,
 // which lives in the shadow repo and so is trusted where the local plan
 // file isn't. The gate must have built this very update (the same PR,
-// base, head H, style and reason), and the plan must push to the branch
-// the feature was published to. A first-publish plan stands only on a
-// gate that built no update.
+// base, head H and style, and the reason the gate recorded, or for a
+// replace in squash or curated mode that mode's: planReason), and the plan
+// must push to the branch the feature was published to. A first-publish
+// plan stands only on a gate that built no update.
 func updateStands(m feature.Meta, pl plan.Plan) error {
 	var gu *feature.GateUpdate
 	if m.Gate != nil {
@@ -45,7 +46,7 @@ func updateStands(m feature.Meta, pl plan.Plan) error {
 	if pl.Publish.Update && gu != nil && len(pl.PRs) == 1 && m.Promoted != nil {
 		p := pl.PRs[0]
 		ok = gu.PR == p.Number && gu.Base == p.Base && gu.Head == pl.Publish.ExpectedHead && gu.Style == pl.Publish.Style &&
-			gu.Reason == pl.Publish.ReplaceReason && p.Update && p.Style == gu.Style &&
+			planReason(gu.Style, gu.Reason, pl.Mode) == pl.Publish.ReplaceReason && p.Update && p.Style == gu.Style &&
 			m.Promoted.PublicPR == gu.PR && publishedBranch(m) == pl.Publish.TargetBranch &&
 			(gu.Style == plan.StyleReplace || len(pl.Publish.Restores) == 0)
 	}

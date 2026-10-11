@@ -406,10 +406,8 @@ func setStyle(ctx context.Context, g *gitx.Git, u *prUpdate, m *feature.Meta, mo
 // removed on GitHub. It is "" when the new history decides (prefixReason).
 func forcedReason(u *prUpdate, m *feature.Meta, mode string, above bool) string {
 	switch {
-	case mode == config.ModeSquash:
-		return plan.ReasonSquash
-	case mode == config.ModeCurated:
-		return plan.ReasonCurated
+	case modeReason(mode) != "":
+		return modeReason(mode)
 	case u.Base != cmp.Or(m.Promoted.Base, feature.MainParent):
 		return plan.ReasonBaseChanged
 	case m.Promoted.NeedsUpdate || above:
@@ -418,6 +416,29 @@ func forcedReason(u *prUpdate, m *feature.Meta, mode string, above bool) string 
 		return plan.ReasonRebase
 	}
 	return ""
+}
+
+// modeReason is the replace reason history mode mode forces on every
+// update: squash or curated; "" for preserve.
+func modeReason(mode string) string {
+	switch mode {
+	case config.ModeSquash:
+		return plan.ReasonSquash
+	case config.ModeCurated:
+		return plan.ReasonCurated
+	}
+	return ""
+}
+
+// planReason is the replace reason a plan in mode shows for an update the
+// gate built with reason gated: the mode's own (squash, curated) when it
+// forces one, so the same command reads the same whichever replace gate it
+// reused; else the gate's. An append has none.
+func planReason(style, gated, mode string) string {
+	if r := modeReason(mode); r != "" && style == plan.StyleReplace {
+		return r
+	}
+	return gated
 }
 
 // prefixReason is "" when public is, by patch-id and message and in order,

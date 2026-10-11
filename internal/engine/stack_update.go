@@ -89,7 +89,8 @@ func (e *Engine) stackUpdates(ctx context.Context, pc *pairCtx, names, modes []s
 				return nil, updateGateErr(n, names, m, u, modes[i], above)
 			}
 			if u != nil {
-				u.Style, u.Reason = m.Gate.Update.Style, m.Gate.Update.Reason
+				u.Style = m.Gate.Update.Style
+				u.Reason = planReason(u.Style, m.Gate.Update.Reason, modes[i])
 			}
 			continue
 		}

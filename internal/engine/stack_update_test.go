@@ -449,9 +449,12 @@ func TestStackUpdateInSquashModeStandsOnTheGatesAsBuilt(t *testing.T) {
 	if err != nil || res.Applied == nil {
 		t.Fatalf("promote a --mode squash = %+v %v", res, err)
 	}
+	// The bottom says the mode's reason, not the restack its gate recorded;
+	// the branch above moves onto it (restack), as in every mode.
+	reason := map[string]string{"a": plan.ReasonSquash, "b": plan.ReasonRestack}
 	for i, en := range res.Plan.Chain {
 		p := en.Publish
-		if !p.Update || p.Style != plan.StyleReplace || p.ExpectedHead != old[en.Feature] || len(p.Commits) != 1 {
+		if !p.Update || p.Style != plan.StyleReplace || p.ReplaceReason != reason[en.Feature] || p.ExpectedHead != old[en.Feature] || len(p.Commits) != 1 {
 			t.Fatalf("%s's publish = %+v", en.Feature, p)
 		}
 		if pr := res.Plan.PRs[i]; pr.Number != prs[i].Number || !pr.Update {
@@ -466,6 +469,43 @@ func TestStackUpdateInSquashModeStandsOnTheGatesAsBuilt(t *testing.T) {
 	}
 	if n := len(h.forge.PRs(publicName)); n != 2 {
 		t.Fatalf("%d public PRs, want the same 2", n)
+	}
+}
+
+// A squash stack update on preserve gates writes a message no gate saw:
+// promote scans it (a planted ID refuses). Apply scans again: a tree
+// finding on a, waived for its gate and the plan, its waiver revoked
+// before apply, refuses there. Nothing goes public.
+func TestStackSquashUpdateOnPreserveGatesScansWhatItWrites(t *testing.T) {
+	t.Parallel()
+	h, _ := publishedStack(t, "a", "b")
+	h.setBlockPatterns("JIRA-[0-9]+")
+	old := map[string]string{"a": h.pubTip("a"), "b": h.pubTip("b")}
+	testutil.Commit(t, h.shadowGit(), "a", "add a fixture", fixture())
+	gr, _, err := h.eng.Gate(h.ctx, h.pair, "a")
+	if wantCode(t, err, contract.LeakFound); len(gr.Findings) != 1 || !gr.Findings[0].Waivable {
+		t.Fatalf("gate findings = %+v", gr.Findings)
+	}
+	secret := gr.Findings[0]
+	h.waive(secret, "test fixture")
+	fixBottom(h, "a", "b")
+	from := len(h.pushes)
+	res, _, err := promoteStack(h, engine.PromoteOptions{Feature: "a", Mode: "squash", Message: "a, fixes JIRA-7", PlanOnly: true})
+	ce := wantCode(t, err, contract.LeakFound)
+	if ce.Details["mode"] != "squash" || res == nil || len(res.Findings) == 0 || res.Findings[0].Where != "commit_message" {
+		t.Fatalf("refusal %+v; result %+v", ce.Details, res)
+	}
+	res, _, err = promoteStack(h, engine.PromoteOptions{Feature: "a", Mode: "squash", Message: "a, reviewed", PlanOnly: true})
+	if err != nil || res.Plan == nil {
+		t.Fatalf("plan = %+v %v", res, err)
+	}
+	if _, err := h.eng.Waivers.Revoke(publicName, []string{secret.ID}, false, h.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: res.Plan.ID, Yes: true})
+	wantCode(t, err, contract.LeakFound)
+	if got := h.publicPushes(from); len(got) != 0 || h.pubTip("a") != old["a"] || h.pubTip("b") != old["b"] {
+		t.Fatalf("pushed %v publicly", got)
 	}
 }
 
