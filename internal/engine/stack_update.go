@@ -42,8 +42,9 @@ func targetBranch(m feature.Meta) string {
 // (or whose PR is no longer open: apply then refuses as for any first
 // publish to an existing branch). It works in two passes:
 //  1. Every branch's PR is read, bottom up, and a PR that holds commits
-//     Ghostbranch didn't publish stops the plan (prChangedErr, naming the
-//     branch) before anything else is checked: they are never overwritten.
+//     Ghostbranch didn't publish, or an update of it never recorded, stops
+//     the plan (prChangedErr, naming the branch) before anything else is
+//     checked: they are never overwritten.
 //  2. Each update gets its style:
 //     - The bottom on main updates as its gate built it (Gate.Update), which
 //     must fit this PR, mode and the open PRs above it now (gateFitsUpdate),
@@ -64,7 +65,7 @@ func (e *Engine) stackUpdates(ctx context.Context, pc *pairCtx, names, modes []s
 		if err != nil {
 			return nil, err
 		}
-		if u != nil && len(u.Foreign) > 0 {
+		if u != nil && u.changed() {
 			return nil, prChangedErr(n, u)
 		}
 		metas[i], out[i] = m, u
@@ -182,14 +183,14 @@ func stackLevelErr(err error, names []string) error {
 
 // previewStackPublish adds what publishing entry en still needs. For an
 // update, that is the push leased on the PR head the plan saw
-// (previewUpdate); the PR is already open. Anything else goes through
-// previewPublish.
-func (e *Engine) previewStackPublish(ctx context.Context, pc *pairCtx, pv *preview.Preview, en plan.Entry, m feature.Meta, base string) error {
+// (previewUpdate), then the edit of PR n's typed texts; the PR is already
+// open. Anything else goes through previewPublish.
+func (e *Engine) previewStackPublish(ctx context.Context, pc *pairCtx, pv *preview.Preview, en plan.Entry, m feature.Meta, base string, n int) error {
 	pub := en.Publish
 	if !pub.Update {
 		return e.previewPublish(ctx, pc, pv, en.Feature, publishedPlan(m), pub.TargetBranch, base, pub.Commit)
 	}
-	e.previewUpdate(ctx, pc, pv, pub.TargetBranch, pub.ExpectedHead, pub.Commit)
+	e.previewUpdate(ctx, pc, pv, pub.TargetBranch, pub.ExpectedHead, pub.Commit, n, en.Typed)
 	return nil
 }
 

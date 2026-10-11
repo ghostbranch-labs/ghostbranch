@@ -30,7 +30,11 @@ type PullResult struct {
 	// Adopted are the PR's commits Ghostbranch didn't publish, now in the
 	// feature, oldest first; never null.
 	Adopted []feature.AdoptedCommit `json:"adopted"`
-	Preview *preview.Preview        `json:"preview"`
+	// Children are the live features stacked directly on it, when it moved
+	// (To != From): they sit on its old commits until feature restack
+	// moves them; never null.
+	Children []string         `json:"children"`
+	Preview  *preview.Preview `json:"preview"`
 }
 
 // FeaturePull reads the feature's open PR and the commits on its branch
@@ -84,7 +88,13 @@ func (e *Engine) FeaturePull(ctx context.Context, p workspace.Pair, opt PullOpti
 		return nil, warns, contract.New(contract.BadFlag,
 			"feature pull brings in commits from a feature's open public PR, and %s has none (never published, its PR merged or closed, or its branch gone)", name).WithField("feature")
 	}
-	res = &PullResult{Feature: name, From: head, To: head, Adopted: []feature.AdoptedCommit{}}
+	// An update Ghostbranch pushed but never recorded is its own, not
+	// someone else's: adopting it would rewrite the feature with copies of
+	// its own commits. apply of that plan finishes the record.
+	if u.Unrecorded != "" {
+		return nil, warns, prChangedErr(name, u)
+	}
+	res = &PullResult{Feature: name, From: head, To: head, Adopted: []feature.AdoptedCommit{}, Children: []string{}}
 	if len(u.Foreign) == 0 {
 		return res, warns, nil
 	}
@@ -114,6 +124,13 @@ func (e *Engine) FeaturePull(ctx context.Context, p workspace.Pair, opt PullOpti
 	pp.Adopted = append(append([]feature.AdoptedCommit(nil), pp.Adopted...), adopted...)
 	nm.Promoted = &pp
 	res.To, res.Adopted = newHead, adopted
+	if newHead != head {
+		recs, err := e.records(ctx, pc)
+		if err != nil {
+			return res, warns, err
+		}
+		res.Children = childrenOf(recs, name, false)
+	}
 	branchRef, metaRemote := "refs/heads/"+m.Branch, remoteMetaRef(name)
 	if e.DryRun {
 		res.Preview = preview.New(map[string]string{"feature_head": head})
@@ -127,14 +144,13 @@ func (e *Engine) FeaturePull(ctx context.Context, p workspace.Pair, opt PullOpti
 	if err != nil {
 		return res, warns, err
 	}
-	popt := gitx.PushOptions{Atomic: true, Leases: []gitx.Lease{{Ref: metaRemote, Expect: metaSHA}}}
-	specs := []string{sha + ":" + metaRemote}
-	if newHead != head {
-		popt.Leases = append(popt.Leases, gitx.Lease{Ref: branchRef, Expect: head})
-		specs = append(specs, newHead+":"+branchRef)
-	}
+	// The branch is leased even when it doesn't move (a by-hand merge already
+	// holds the PR): a feature branch pushed to since it was read means
+	// what was read no longer stands, and nothing changes.
+	popt := gitx.PushOptions{Atomic: true, Leases: []gitx.Lease{{Ref: metaRemote, Expect: metaSHA}, {Ref: branchRef, Expect: head}}}
+	specs := []string{sha + ":" + metaRemote, newHead + ":" + branchRef}
 	if err := e.push(ctx, pc, remoteShadow, popt, specs...); err != nil {
-		res.To, res.Adopted = head, []feature.AdoptedCommit{}
+		res.To, res.Adopted, res.Children = head, []feature.AdoptedCommit{}, []string{}
 		if ce := contract.From(err); ce.Code == contract.RefMoved {
 			out := contract.New(contract.RefMoved, "feature %s changed in %s while its PR's commits were being pulled in, so nothing changed; run feature pull again", name, p.Shadow).
 				WithField("feature").WithDetails(map[string]any{"feature": name, "refs": ce.Details["refs"]})

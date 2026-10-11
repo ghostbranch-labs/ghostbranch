@@ -183,7 +183,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 		return res, warns, err
 	}
 	if upd != nil {
-		if len(upd.Foreign) > 0 {
+		if upd.changed() {
 			return res, warns, prChangedErr(opt.Feature, upd)
 		}
 		if err := updateFlags(opt, upd); err != nil {
@@ -367,6 +367,22 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 		return res, warns, forgeErr(err, "look up the current user")
 	}
 	who := gitx.Identity{Name: u.Login, Email: forge.NoreplyEmail(u), When: e.now()}
+	if gu != nil {
+		// Commits adopted from the PR keep their authors: as they are in
+		// preserve, as Co-authored-by trailers on a squash commit.
+		switch mode {
+		case config.ModePreserve:
+			if err := keepAdoptedAuthors(ctx, g, links, adoptedOf(m)); err != nil {
+				return res, warns, err
+			}
+		case config.ModeSquash:
+			if len(links) == 1 {
+				if links[0].message, err = withCoAuthors(ctx, g, links[0].message, adoptedOf(m), who); err != nil {
+					return res, warns, err
+				}
+			}
+		}
+	}
 	authors, err := chainAuthors(cfg.Promote, mode, links, who)
 	if err != nil {
 		return res, warns, err
@@ -378,6 +394,17 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	P := chain[len(chain)-1].Commit
 	if err := assertChain(ctx, g, chain, T, C, pubParent, set, names); err != nil {
 		return res, warns, err
+	}
+	// A preserve replace keeps every commit feature pull adopted from GitHub,
+	// or stops: the approval summary lists those squash or curated fold.
+	if gu != nil && gu.Style == plan.StyleReplace && mode == config.ModePreserve {
+		missing, err := missingAdopted(ctx, g, m.Promoted.Adopted, commitSHAs(chain))
+		if err != nil {
+			return res, warns, err
+		}
+		if len(missing) > 0 {
+			return res, warns, adoptedMissingErr(opt.Feature, branch, gu.PR, gu.Head, missing)
+		}
 	}
 
 	var title, body string
@@ -471,7 +498,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 			return res, warns, nil
 		}
 		if gu != nil {
-			e.previewUpdate(ctx, pc, pv, branch, gu.Head, P)
+			e.previewUpdate(ctx, pc, pv, branch, gu.Head, P, gu.PR, pl.Typed)
 		} else if err := e.previewPublish(ctx, pc, pv, opt.Feature, publishedPlan(m), branch, "main", P); err != nil {
 			return res, warns, err
 		}

@@ -504,6 +504,22 @@ func (e *Engine) promoteStack(ctx context.Context, pc *pairCtx, cfg config.Confi
 			}
 			return "", warns, err
 		}
+		if up != nil {
+			// Commits adopted from the PR keep their authors: as they are in
+			// preserve, as Co-authored-by trailers on a squash commit.
+			switch mode {
+			case config.ModePreserve:
+				if err := keepAdoptedAuthors(ctx, g, links, adoptedOf(b.meta)); err != nil {
+					return "", warns, err
+				}
+			case config.ModeSquash:
+				if len(links) == 1 {
+					if links[0].message, err = withCoAuthors(ctx, g, links[0].message, adoptedOf(b.meta), who); err != nil {
+						return "", warns, err
+					}
+				}
+			}
+		}
 		authors, err := chainAuthors(cfg.Promote, mode, links, who)
 		if err != nil {
 			return "", warns, err
@@ -514,6 +530,17 @@ func (e *Engine) promoteStack(ctx context.Context, pc *pairCtx, cfg config.Confi
 		}
 		if err := assertChain(ctx, g, chain, b.T, b.meta.Gate.Candidate, b.pubParent, set, wnames); err != nil {
 			return "", warns, err
+		}
+		// A preserve replace keeps every commit feature pull adopted from
+		// GitHub, or stops: the approval summary lists those squash folds.
+		if up != nil && up.Style == plan.StyleReplace && mode == config.ModePreserve {
+			missing, err := missingAdopted(ctx, g, b.meta.Promoted.Adopted, commitSHAs(chain))
+			if err != nil {
+				return "", warns, err
+			}
+			if len(missing) > 0 {
+				return "", warns, adoptedMissingErr(b.name, up.Branch, up.PR, up.Head, missing)
+			}
 		}
 		switch {
 		case mode == config.ModeSquash:
@@ -631,7 +658,7 @@ func (e *Engine) promoteStack(ctx context.Context, pc *pairCtx, cfg config.Confi
 			preview.WriteFile(filepath.Join(e.WS.PlansDir(), planID+".json")))
 		if !opt.PlanOnly {
 			for i, en := range entries {
-				if err := e.previewStackPublish(ctx, pc, pv, en, branches[i].meta, prs[i].Base); err != nil {
+				if err := e.previewStackPublish(ctx, pc, pv, en, branches[i].meta, prs[i].Base, prs[i].Number); err != nil {
 					return planID, warns, err
 				}
 			}
@@ -843,7 +870,7 @@ func (e *Engine) applyStack(ctx context.Context, pc *pairCtx, pl plan.Plan, yes 
 	if e.DryRun {
 		pv := preview.New(map[string]string{"public_main": pm})
 		for i, en := range pl.Chain {
-			if err := e.previewStackPublish(ctx, pc, pv, en, branches[i].meta, pl.PRs[i].Base); err != nil {
+			if err := e.previewStackPublish(ctx, pc, pv, en, branches[i].meta, pl.PRs[i].Base, pl.PRs[i].Number); err != nil {
 				return res, warns, err
 			}
 		}
@@ -852,7 +879,13 @@ func (e *Engine) applyStack(ctx context.Context, pc *pairCtx, pl plan.Plan, yes 
 	}
 	// One approval for every PR: a console code, or the pair's grant, which
 	// names no features and so covers the whole chain.
-	if res.Approval, err = e.authorize(ctx, pc.pair, pl.ID, stackSummary(pl, shown, authors, files, res.Waived, scanWarnings), yes); err != nil {
+	folded := make([][]feature.AdoptedCommit, n)
+	for i, en := range pl.Chain {
+		if folded[i], err = e.foldedAdopted(ctx, pc, en.Feature, branches[i].meta, en.Mode, en.Publish, pl.PRs[i].Number); err != nil {
+			return res, warns, stackLevelErr(err, names)
+		}
+	}
+	if res.Approval, err = e.authorize(ctx, pc.pair, pl.ID, stackSummary(pl, shown, authors, files, res.Waived, scanWarnings, folded), yes); err != nil {
 		return nil, warns, err
 	}
 	for i, en := range pl.Chain {

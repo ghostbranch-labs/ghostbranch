@@ -81,9 +81,17 @@ func (e *Engine) refreshPublished(ctx context.Context, pc *pairCtx, rs []Feature
 			unknown(err.Error())
 			continue
 		}
-		foreign, err := e.foreignCommits(ctx, pc, *m, base, tip)
+		foreign, planned, err := e.foreignCommits(ctx, pc, *m, base, tip)
 		if err != nil {
 			unknown(err.Error())
+			continue
+		}
+		if planned != "" {
+			// Ghostbranch's own update, pushed but never recorded: not
+			// someone else's commits, and not GitHub's restack to record
+			// here. apply of the plan writes the whole record.
+			r.flagged = true
+			warns = append(warns, unrecordedWarning(r.Name, branch, m.Promoted.PublicPR, tip, planned))
 			continue
 		}
 		if len(foreign) > 0 {

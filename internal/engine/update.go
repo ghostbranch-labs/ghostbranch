@@ -9,6 +9,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -43,14 +44,24 @@ type prUpdate struct {
 	// Public lists the commits on the PR now (base..H, first parent),
 	// oldest first.
 	Public []string
+	// Unrecorded is the plan whose public head H is when an update of this
+	// PR landed but its record was never written (plannedHead); "" when
+	// none. Its commits are Ghostbranch's, so none is foreign, but nothing
+	// may build on the PR until apply of that plan finishes the record.
+	Unrecorded string
 }
+
+// changed reports whether u's PR holds what an update must not build on:
+// commits Ghostbranch didn't publish, or an update whose record is missing.
+func (u *prUpdate) changed() bool { return len(u.Foreign) > 0 || u.Unrecorded != "" }
 
 // prHead reads the open PR m's record names: its branch head H and base
 // branch as GitHub has them now (the mirror was fetched when the operation
 // opened), the commits on it, those Ghostbranch didn't publish, and the
 // published ones it lost. Style is left "". It returns nil when m has no
 // publish record, its PR isn't open (merged or closed: promote acts as
-// before), or its branch is gone.
+// before), or its branch is gone. A head that is an unrecorded update's
+// (plannedHead) sets Unrecorded, with nothing foreign.
 func (e *Engine) prHead(ctx context.Context, pc *pairCtx, m *feature.Meta) (*prUpdate, error) {
 	if m.Promoted == nil || m.Promoted.PublicPR == 0 {
 		return nil, nil
@@ -82,11 +93,11 @@ func (e *Engine) prHead(ctx context.Context, pc *pairCtx, m *feature.Meta) (*prU
 	if err != nil {
 		return nil, internalErr(err, "list the commits on public PR #"+strconv.Itoa(n))
 	}
-	foreign, restores, err := e.comparePublished(ctx, pc, *m, base, H)
+	foreign, restores, planned, err := e.comparePublished(ctx, pc, *m, base, H)
 	if err != nil {
 		return nil, err
 	}
-	return &prUpdate{PR: n, Branch: branch, Base: pr.Base, Head: H, Public: onPR, Foreign: foreign, Restores: restores}, nil
+	return &prUpdate{PR: n, Branch: branch, Base: pr.Base, Head: H, Public: onPR, Foreign: foreign, Restores: restores, Unrecorded: planned}, nil
 }
 
 // foreignCommits lists the commits on m's public branch at head, over its
@@ -99,21 +110,28 @@ func (e *Engine) prHead(ctx context.Context, pc *pairCtx, m *feature.Meta) (*prU
 // a suggestion, an "Update branch" merge or a commit reworded on GitHub
 // is. Without a known published head that is in the mirror, nothing can
 // vouch: every commit is foreign, and Ghostbranch never drops what it
-// can't tell apart.
-func (e *Engine) foreignCommits(ctx context.Context, pc *pairCtx, m feature.Meta, base, head string) ([]ForeignCommit, error) {
-	foreign, _, err := e.comparePublished(ctx, pc, m, base, head)
-	return foreign, err
+// can't tell apart. A head that is the public head of a saved plan of the
+// feature (plannedHead) is Ghostbranch's own update whose record was never
+// written: nothing on it is foreign, and the plan is returned instead.
+func (e *Engine) foreignCommits(ctx context.Context, pc *pairCtx, m feature.Meta, base, head string) ([]ForeignCommit, string, error) {
+	foreign, _, planned, err := e.comparePublished(ctx, pc, m, base, head)
+	return foreign, planned, err
 }
 
 // comparePublished matches the commits on m's public branch at head with
 // the published ones, as foreignCommits describes. It returns the foreign
 // commits, and the published commits no commit on the branch matched
-// (someone removed them on GitHub), both oldest first.
-func (e *Engine) comparePublished(ctx context.Context, pc *pairCtx, m feature.Meta, base, head string) ([]ForeignCommit, []string, error) {
+// (someone removed them on GitHub), both oldest first. When head is the
+// public head of a saved plan of m (plannedHead), that plan vouches for
+// every commit on the branch: it returns only the plan's id.
+func (e *Engine) comparePublished(ctx context.Context, pc *pairCtx, m feature.Meta, base, head string) ([]ForeignCommit, []string, string, error) {
 	g := pc.git
 	published := e.publishedTip(m)
 	if published == head {
-		return nil, nil, nil
+		return nil, nil, "", nil
+	}
+	if id, err := e.plannedHead(ctx, pc, m, head, published); err != nil || id != "" {
+		return nil, nil, id, err
 	}
 	type mark struct{ id, msg string }
 	marks := func(commits []string) ([]mark, error) {
@@ -137,14 +155,14 @@ func (e *Engine) comparePublished(ctx context.Context, pc *pairCtx, m feature.Me
 	var pubCommits []string
 	if published != "" {
 		if _, ok, err := g.Resolve(ctx, published); err != nil {
-			return nil, nil, internalErr(err, "read the published head")
+			return nil, nil, "", internalErr(err, "read the published head")
 		} else if ok {
 			if pubCommits, err = g.CommitsBetween(ctx, base, published); err != nil {
-				return nil, nil, internalErr(err, "list the published commits")
+				return nil, nil, "", internalErr(err, "list the published commits")
 			}
 			ms, err := marks(pubCommits)
 			if err != nil {
-				return nil, nil, internalErr(err, "read the published commits")
+				return nil, nil, "", internalErr(err, "read the published commits")
 			}
 			for i, mk := range ms {
 				own[mk] = append(own[mk], pubCommits[i])
@@ -153,11 +171,11 @@ func (e *Engine) comparePublished(ctx context.Context, pc *pairCtx, m feature.Me
 	}
 	onPR, err := g.CommitsBetween(ctx, base, head)
 	if err != nil {
-		return nil, nil, internalErr(err, "list the commits on the public branch")
+		return nil, nil, "", internalErr(err, "list the commits on the public branch")
 	}
 	ms, err := marks(onPR)
 	if err != nil {
-		return nil, nil, internalErr(err, "read the commits on the public branch")
+		return nil, nil, "", internalErr(err, "read the commits on the public branch")
 	}
 	var foreign []ForeignCommit
 	matched := map[string]bool{}
@@ -169,7 +187,7 @@ func (e *Engine) comparePublished(ctx context.Context, pc *pairCtx, m feature.Me
 		}
 		author, _, err := g.CommitIdentities(ctx, c)
 		if err != nil {
-			return nil, nil, internalErr(err, "read a commit's author")
+			return nil, nil, "", internalErr(err, "read a commit's author")
 		}
 		foreign = append(foreign, ForeignCommit{SHA: c, Author: author, Subject: subject(ms[i].msg)})
 	}
@@ -179,7 +197,7 @@ func (e *Engine) comparePublished(ctx context.Context, pc *pairCtx, m feature.Me
 			restores = append(restores, c)
 		}
 	}
-	return foreign, restores, nil
+	return foreign, restores, "", nil
 }
 
 // publishedTip is the public head m's record says Ghostbranch published:
@@ -198,6 +216,63 @@ func (e *Engine) publishedTip(m feature.Meta) string {
 		}
 	}
 	return ""
+}
+
+// plannedHead names the saved plan whose public head for m is head: an
+// update of m's open PR that apply pushed but whose record was never
+// written (apply stopped after the push, the record's push failed, or the
+// other machine is asked). Plan refs live in the shadow repo, so every
+// machine sees them; the plan file only on the machine that made it. A
+// plan qualifies when its ref is at head (a plan of one feature, or the
+// top of a stack plan) or holds it (a lower branch of a stack plan), it is
+// newer than the plan m's record names, and head isn't already in the
+// published history (published, a branch reset on GitHub to an older
+// head). When the plan file is here, it must name head as m's own public
+// head. Of several, the oldest wins: the one that made head. "" when none.
+func (e *Engine) plannedHead(ctx context.Context, pc *pairCtx, m feature.Meta, head, published string) (string, error) {
+	if m.Promoted == nil || head == "" {
+		return "", nil
+	}
+	g := pc.git
+	if published != "" {
+		if _, ok, err := g.Resolve(ctx, published); err != nil {
+			return "", internalErr(err, "read the published head")
+		} else if ok {
+			if in, err := g.IsAncestor(ctx, head, published); err != nil {
+				return "", internalErr(err, "compare the public branch with the published head")
+			} else if in {
+				return "", nil
+			}
+		}
+	}
+	out, err := g.Run(ctx, "for-each-ref", "--contains", head, "--format=%(refname)", planRef(""))
+	if err != nil {
+		return "", internalErr(err, "list the plans holding the public branch's head")
+	}
+	var ids []string
+	for _, ref := range strings.Split(out, "\n") {
+		id := strings.TrimPrefix(ref, planRef(""))
+		if id == ref || !plan.ValidID(id) || (plan.ValidID(m.Promoted.PlanID) && id <= m.Promoted.PlanID) {
+			continue
+		}
+		ids = append(ids, id)
+	}
+	slices.Sort(ids) // plan ids start with their UTC time: oldest first
+	for _, id := range ids {
+		pl, _, err := plan.Load(e.WS.PlansDir(), id)
+		if err != nil || pl.ID != id {
+			return id, nil // no plan file here: the ref alone says it
+		}
+		if pl.Feature == m.Name && pl.Publish.Commit == head {
+			return id, nil
+		}
+		for _, en := range pl.Chain {
+			if en.Feature == m.Name && en.Publish.Commit == head {
+				return id, nil
+			}
+		}
+	}
+	return "", nil
 }
 
 // openAbove is the line of published features above names' top whose
@@ -294,18 +369,6 @@ func (e *Engine) hasOpenAbove(ctx context.Context, pc *pairCtx, name string) (bo
 	return len(above) > 0, err
 }
 
-// openUpdate is prHead plus the update's style for mode, given whether
-// open PRs sit above m (above) and publish, the public commits a publish
-// would make now in publish order. It returns nil when m has no open PR (a
-// first publish), and Style "" when the PR holds foreign commits.
-func (e *Engine) openUpdate(ctx context.Context, pc *pairCtx, m *feature.Meta, mode string, above bool, publish []string) (*prUpdate, error) {
-	u, err := e.prHead(ctx, pc, m)
-	if err != nil || u == nil || len(u.Foreign) > 0 {
-		return u, err
-	}
-	return u, setStyle(ctx, pc.git, u, m, mode, above, publish)
-}
-
 // setStyle decides how u updates m's open PR, which holds no foreign
 // commits. Squash and curated always replace. A changed base branch, a
 // pending restack or open PRs above (a stack level always replaces), and
@@ -387,7 +450,8 @@ func prefixReason(ctx context.Context, g *gitx.Git, public, publish []string) (s
 
 // readUpdate reads, before anything is built, the open PR an unstacked
 // published feature's gate updates (prHead) into b.update. Commits someone
-// made on GitHub stop the gate here, first: PUBLIC_BRANCH_CHANGED.
+// made on GitHub, or an update Ghostbranch pushed but never recorded, stop
+// the gate here, first: PUBLIC_BRANCH_CHANGED.
 func (e *Engine) readUpdate(ctx context.Context, pc *pairCtx, b *built, name string) error {
 	if b.meta.Promoted == nil || b.parent != "" {
 		return nil
@@ -396,7 +460,7 @@ func (e *Engine) readUpdate(ctx context.Context, pc *pairCtx, b *built, name str
 	if err != nil || u == nil {
 		return err
 	}
-	if len(u.Foreign) > 0 {
+	if u.changed() {
 		return prChangedErr(name, u)
 	}
 	b.update = u
@@ -431,7 +495,11 @@ func (e *Engine) buildUpdate(ctx context.Context, pc *pairCtx, b *built, name st
 	case err == nil:
 		if chainMode == config.ModePreserve && b.cfg.Promote.AuthorEmail != config.AuthorNoreply {
 			// As a first publish's gate does (scanHistory): an author with
-			// no mapping is AUTHOR_UNMAPPED here, not only at promote.
+			// no mapping is AUTHOR_UNMAPPED here, not only at promote. A
+			// commit adopted from the PR keeps its author: never unmapped.
+			if err := keepAdoptedAuthors(ctx, g, links, adoptedOf(b.meta)); err != nil {
+				return err
+			}
 			if _, err := chainAuthors(b.cfg.Promote, config.ModePreserve, links, gitx.Identity{}); err != nil {
 				return err
 			}
@@ -649,11 +717,12 @@ func gateFitsUpdate(gt *feature.Gate, u *prUpdate, m feature.Meta, mode string, 
 
 // updateFits reads m's open PR now and reports whether gate record gt still
 // stands for its update in mode (gateFitsUpdate), with that update (nil
-// when no PR is open). Foreign commits on the PR make it not fit: the gate
-// would refuse them.
+// when no PR is open). Foreign commits on the PR, or an update of it whose
+// record is missing (Unrecorded), make it not fit: the gate would refuse
+// them.
 func (e *Engine) updateFits(ctx context.Context, pc *pairCtx, gt *feature.Gate, m feature.Meta, mode string) (bool, *prUpdate, error) {
 	u, err := e.prHead(ctx, pc, &m)
-	if err != nil || (u != nil && len(u.Foreign) > 0) {
+	if err != nil || (u != nil && u.changed()) {
 		return false, u, err
 	}
 	above := false
@@ -677,8 +746,12 @@ func gateUpdateOf(u *prUpdate) *feature.GateUpdate {
 }
 
 // prChangedErr is PUBLIC_BRANCH_CHANGED as an error: the open PR's branch
-// holds commits Ghostbranch didn't publish, which an update would drop.
+// holds commits Ghostbranch didn't publish, which an update would drop, or
+// (u.Unrecorded) an update Ghostbranch pushed whose record is missing.
 func prChangedErr(name string, u *prUpdate) error {
+	if u.Unrecorded != "" {
+		return unrecordedErr(name, u)
+	}
 	foreign := foreignDetails(u.Foreign)
 	shas := make([]string, len(u.Foreign))
 	for i, f := range u.Foreign {
@@ -688,4 +761,228 @@ func prChangedErr(name string, u *prUpdate) error {
 		"public PR #%d's branch %s holds %d commit(s) Ghostbranch didn't publish (%s); an update would drop them, so nothing was built. Bring them into %s with ghostbranch feature pull %s, then gate and promote again",
 		u.PR, u.Branch, len(u.Foreign), strings.Join(shas, ", "), name, name).WithField("feature").
 		WithDetails(map[string]any{"feature": name, "branch": u.Branch, "public_pr": u.PR, "public_head": u.Head, "foreign": foreign})
+}
+
+// unrecordedErr is PUBLIC_BRANCH_CHANGED reason unrecorded_update: the open
+// PR's branch is at the public head of plan u.Unrecorded, whose apply
+// pushed it but never wrote the record. Nothing is foreign; apply of that
+// plan finds the push landed and writes the record.
+func unrecordedErr(name string, u *prUpdate) error {
+	id := u.Unrecorded
+	return contract.New(contract.PRChangedOnGitHub,
+		"public PR #%d's branch %s is at %s, the update plan %s pushed, but the record of that update was never written (its apply stopped after the push); nothing was built. Finish it with ghostbranch apply %s, on the machine that made the plan",
+		u.PR, u.Branch, short(u.Head), id, id).WithField("feature").
+		WithDetails(map[string]any{"feature": name, "branch": u.Branch, "public_pr": u.PR, "public_head": u.Head,
+			"foreign": foreignDetails(nil), "reason": "unrecorded_update", "plan": id})
+}
+
+// unrecordedWarning is PUBLIC_BRANCH_CHANGED as status's and sync's
+// warning for an update that landed unrecorded (plannedHead): the PR's
+// branch at tip is plan id's push, nothing on it is foreign, and apply of
+// that plan finishes the record.
+func unrecordedWarning(name, branch string, pr int, tip, id string) contract.Warning {
+	return contract.Warning{Code: contract.PublicBranchChanged,
+		Message: fmt.Sprintf("public branch %s of feature %s is at %s, the update plan %s pushed, but that update was never recorded; finish it with ghostbranch apply %s",
+			branch, name, short(tip), id, id),
+		Details: map[string]any{"feature": name, "branch": branch, "public_head": tip, "public_pr": pr,
+			"foreign": foreignDetails(nil), "reason": "unrecorded_update", "plan": id}}
+}
+
+// missingAdopted lists the commits feature pull adopted (adopted, from
+// Promoted.Adopted) that chain, the public commits an update leaves on the
+// PR, doesn't carry. As R6 tells Ghostbranch's own commits, a commit is
+// carried when one commit of chain has both its stable patch-id and its
+// message, each commit of chain carrying one. An adopted commit is a public
+// commit: the mirror fetched it from the PR's branch, and keeps the object
+// after a replace. One the mirror doesn't have (another machine whose
+// mirror never fetched it) is matched by its subject alone. A merge commit
+// (GitHub's Update branch) is never missing: its content comes in with the
+// branch it merged, and only its object leaves the PR.
+func missingAdopted(ctx context.Context, g *gitx.Git, adopted []feature.AdoptedCommit, chain []string) ([]feature.AdoptedCommit, error) {
+	if len(adopted) == 0 {
+		return nil, nil
+	}
+	type mark struct{ id, msg string }
+	ids, err := g.PatchIDs(ctx, chain)
+	if err != nil {
+		return nil, internalErr(err, "compute the update's patch-ids")
+	}
+	marks, subjects := map[mark]int{}, map[string]int{}
+	for i, c := range chain {
+		msg, err := g.CommitMessage(ctx, c)
+		if err != nil {
+			return nil, internalErr(err, "read a commit message")
+		}
+		msg = strings.TrimSpace(msg)
+		marks[mark{ids[i], msg}]++
+		subjects[subject(msg)]++
+	}
+	var out []feature.AdoptedCommit
+	for _, a := range adopted {
+		if _, ok, err := g.Resolve(ctx, a.SHA); err != nil {
+			return nil, internalErr(err, "read adopted commit "+short(a.SHA))
+		} else if !ok {
+			if subjects[a.Subject] > 0 {
+				subjects[a.Subject]--
+			} else {
+				out = append(out, a)
+			}
+			continue
+		}
+		parents, err := g.Run(ctx, "rev-list", "--parents", "-n", "1", a.SHA)
+		if err != nil {
+			return nil, internalErr(err, "read adopted commit "+short(a.SHA))
+		}
+		if len(strings.Fields(parents)) > 2 {
+			continue
+		}
+		id, err := g.PatchIDs(ctx, []string{a.SHA})
+		if err != nil {
+			return nil, internalErr(err, "compute adopted commit "+short(a.SHA)+"'s patch-id")
+		}
+		msg, err := g.CommitMessage(ctx, a.SHA)
+		if err != nil {
+			return nil, internalErr(err, "read adopted commit "+short(a.SHA))
+		}
+		if mk := (mark{id[0], strings.TrimSpace(msg)}); marks[mk] > 0 {
+			marks[mk]--
+		} else {
+			out = append(out, a)
+		}
+	}
+	return out, nil
+}
+
+// adoptedForeign is adopted commits as foreignDetails takes them.
+func adoptedForeign(as []feature.AdoptedCommit) []ForeignCommit {
+	out := make([]ForeignCommit, len(as))
+	for i, a := range as {
+		out[i] = ForeignCommit{SHA: a.SHA, Author: a.Author, Subject: a.Subject}
+	}
+	return out
+}
+
+// adoptedMissingErr is PUBLIC_BRANCH_CHANGED reason adopted_missing: a
+// preserve update would replace PR pr's branch with a history that lacks
+// commits feature pull adopted from GitHub (missing), as the feature no
+// longer has them. Ghostbranch never drops a commit made on GitHub, so the
+// person brings them back first.
+func adoptedMissingErr(name, branch string, pr int, head string, missing []feature.AdoptedCommit) error {
+	shas := make([]string, len(missing))
+	for i, a := range missing {
+		shas[i] = short(a.SHA)
+	}
+	return contract.New(contract.PRChangedOnGitHub,
+		"feature %s no longer has %d commit(s) made on GitHub that feature pull brought in (%s), and this update replaces public PR #%d's branch %s, so it would drop them; nothing was published. Bring them back into %s (cherry-pick them onto it and push it to the shadow repo), then gate and promote again",
+		name, len(missing), strings.Join(shas, ", "), pr, branch, name).WithField("feature").
+		WithDetails(map[string]any{"feature": name, "branch": branch, "public_pr": pr, "public_head": head,
+			"foreign": foreignDetails(adoptedForeign(missing)), "reason": "adopted_missing"})
+}
+
+// adoptedIdentity is adopted commit a's author as its public commit has it:
+// read from the commit when the mirror has it (ok), else parsed from the
+// record's "Name <email>".
+func adoptedIdentity(ctx context.Context, g *gitx.Git, a feature.AdoptedCommit) (gitx.Identity, bool, error) {
+	if _, ok, err := g.Resolve(ctx, a.SHA); err != nil {
+		return gitx.Identity{}, false, internalErr(err, "read adopted commit "+short(a.SHA))
+	} else if ok {
+		id, err := g.CommitAuthor(ctx, a.SHA)
+		if err != nil {
+			return gitx.Identity{}, false, internalErr(err, "read adopted commit "+short(a.SHA)+"'s author")
+		}
+		return id, true, nil
+	}
+	name, email, _ := strings.Cut(a.Author, " <")
+	return gitx.Identity{Name: strings.TrimSpace(name), Email: strings.TrimSuffix(strings.TrimSpace(email), ">")}, false, nil
+}
+
+// keepAdoptedAuthors marks each preserve link that publishes a commit
+// feature pull adopted from the public PR (adopted), matched as R6 tells
+// Ghostbranch's own commits: the stable patch-id and the message of the
+// link's one source commit against the adopted commit's, each adopted
+// commit marking one link. A marked link keeps the adopted commit's public
+// author (link.adopted): its email is already public, and author_email
+// (noreply, map) rewrites only the person's own commits. An adopted commit
+// the mirror doesn't have is matched by its subject, and the link keeps
+// the author its source carries (cherry-picks keep it).
+func keepAdoptedAuthors(ctx context.Context, g *gitx.Git, links []link, adopted []feature.AdoptedCommit) error {
+	if len(adopted) == 0 {
+		return nil
+	}
+	type mark struct{ id, msg string }
+	byMark, bySubject := map[mark][]gitx.Identity{}, map[string]int{}
+	for _, a := range adopted {
+		id, ok, err := adoptedIdentity(ctx, g, a)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			bySubject[a.Subject]++
+			continue
+		}
+		pid, err := g.PatchIDs(ctx, []string{a.SHA})
+		if err != nil {
+			return internalErr(err, "compute adopted commit "+short(a.SHA)+"'s patch-id")
+		}
+		msg, err := g.CommitMessage(ctx, a.SHA)
+		if err != nil {
+			return internalErr(err, "read adopted commit "+short(a.SHA))
+		}
+		mk := mark{pid[0], strings.TrimSpace(msg)}
+		byMark[mk] = append(byMark[mk], id)
+	}
+	for i := range links {
+		l := &links[i]
+		if len(l.sources) != 1 {
+			continue
+		}
+		pid, err := g.PatchIDs(ctx, l.sources)
+		if err != nil {
+			return internalErr(err, "compute a commit's patch-id")
+		}
+		mk := mark{pid[0], strings.TrimSpace(l.message)}
+		if ids := byMark[mk]; len(ids) > 0 {
+			l.adopted, byMark[mk] = &ids[0], ids[1:]
+			continue
+		}
+		if s := subject(l.message); bySubject[s] > 0 {
+			bySubject[s]--
+			id := l.author
+			l.adopted = &id
+		}
+	}
+	return nil
+}
+
+// adoptedOf is m's adopted commits; none for a record without a publish.
+func adoptedOf(m feature.Meta) []feature.AdoptedCommit {
+	if m.Promoted == nil {
+		return nil
+	}
+	return m.Promoted.Adopted
+}
+
+// withCoAuthors ends a squash update's message with one Co-authored-by
+// trailer for each distinct author of the adopted commits (folded into it),
+// first seen first, after a blank line. The publisher, who authors the
+// squash commit, is left out.
+func withCoAuthors(ctx context.Context, g *gitx.Git, msg string, adopted []feature.AdoptedCommit, publisher gitx.Identity) (string, error) {
+	seen := map[string]bool{strings.ToLower(identityText(publisher)): true}
+	var lines []string
+	for _, a := range adopted {
+		id, _, err := adoptedIdentity(ctx, g, a)
+		if err != nil {
+			return "", err
+		}
+		key := strings.ToLower(identityText(id))
+		if id.Email == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		lines = append(lines, "Co-authored-by: "+identityText(id))
+	}
+	if len(lines) == 0 {
+		return msg, nil
+	}
+	return strings.TrimRight(msg, "\n") + "\n\n" + strings.Join(lines, "\n") + "\n", nil
 }

@@ -88,7 +88,7 @@ func (e *Engine) updateLive(ctx context.Context, pc *pairCtx, pl plan.Plan, m fe
 			"public PR #%d is no longer open on %s as plan %s expects; nothing was pushed. Make a new plan with ghostbranch promote", n, pl.PRs[0].Base, pl.ID).
 			WithDetails(stale(pl, []string{"public_pr"}))
 	}
-	if u.Head != H || len(u.Foreign) > 0 || !slices.Equal(u.Restores, pl.Publish.Restores) {
+	if u.Head != H || u.changed() || !slices.Equal(u.Restores, pl.Publish.Restores) {
 		return false, branchMoved("holds other commits")
 	}
 	return false, nil
@@ -138,8 +138,27 @@ func (e *Engine) recordUpdate(ctx context.Context, pc *pairCtx, pl plan.Plan, P 
 	if err != nil {
 		return pr, nil, internalErr(err, "compute the updated PR's patch-ids")
 	}
+	// The commits feature pull adopted stay recorded while the PR carries
+	// them, so a later replace still can't drop them unseen; those a squash
+	// or curated replace folded (approved in its summary) are let go.
+	m, _, err := e.readMeta(ctx, pc, pl.Feature)
+	if err != nil {
+		return pr, nil, err
+	}
+	var adopted []feature.AdoptedCommit
+	if m.Promoted != nil && m.Promoted.PublicPR == n && len(m.Promoted.Adopted) > 0 {
+		missing, err := missingAdopted(ctx, g, m.Promoted.Adopted, commits)
+		if err != nil {
+			return pr, nil, err
+		}
+		for _, a := range m.Promoted.Adopted {
+			if !slices.Contains(missing, a) {
+				adopted = append(adopted, a)
+			}
+		}
+	}
 	mw, err := e.recordPublished(ctx, pc, pl.Feature, feature.Promoted{PublicPR: n, PlanID: pl.ID, FeatureHead: pl.Fingerprint.FeatureHead,
-		Branch: pl.Publish.TargetBranch, Base: base, PublishedHead: P, PatchIDs: ids})
+		Branch: pl.Publish.TargetBranch, Base: base, PublishedHead: P, PatchIDs: ids, Adopted: adopted})
 	return pr, mw, err
 }
 
@@ -164,13 +183,16 @@ func (e *Engine) editUpdated(ctx context.Context, pc *pairCtx, pl plan.Plan) err
 	return nil
 }
 
-// previewUpdate adds an update's one public step: the leased push of P
-// over H, unless the branch is already at P.
-func (e *Engine) previewUpdate(ctx context.Context, pc *pairCtx, pv *preview.Preview, branch, H, P string) {
-	if tip, ok, _ := pc.git.Resolve(ctx, publicRef(branch)); ok && tip == P {
-		return
+// previewUpdate adds an update's public steps: the leased push of P over
+// H, unless the branch is already at P, then the edit of PR n's texts the
+// person typed (editUpdated), which apply makes again on a resume.
+func (e *Engine) previewUpdate(ctx context.Context, pc *pairCtx, pv *preview.Preview, branch, H, P string, n int, typed plan.Typed) {
+	if tip, ok, _ := pc.git.Resolve(ctx, publicRef(branch)); !ok || tip != P {
+		pv.Add(preview.PushRef(pc.pair.Public, "refs/heads/"+branch, H, P))
 	}
-	pv.Add(preview.PushRef(pc.pair.Public, "refs/heads/"+branch, H, P))
+	if typed.Title || typed.Body {
+		pv.Add(preview.EditPR(pc.pair.Public, n, typed.Title, typed.Body))
+	}
 }
 
 // commitSources maps each public commit to the feature commits it
@@ -201,4 +223,25 @@ func plural(n int, what string) string {
 		return "1 " + what
 	}
 	return fmt.Sprintf("%d %ss", n, what)
+}
+
+// foldedAdopted is what an update plan's replace of feature name's PR n
+// does to the commits feature pull adopted from GitHub (m's record): those
+// its public commits (pub) don't carry (missingAdopted). In squash or
+// curated mode they are folded into the new commits, which the approval
+// summary lists. A preserve plan that drops any is refused, as promote
+// refuses it: the plan file is local and unsigned. An append keeps the
+// PR's commits, so it folds none.
+func (e *Engine) foldedAdopted(ctx context.Context, pc *pairCtx, name string, m feature.Meta, mode string, pub plan.Publish, n int) ([]feature.AdoptedCommit, error) {
+	if !pub.Update || pub.Style != plan.StyleReplace || m.Promoted == nil {
+		return nil, nil
+	}
+	missing, err := missingAdopted(ctx, pc.git, m.Promoted.Adopted, commitSHAs(pub.Commits))
+	if err != nil || len(missing) == 0 {
+		return nil, err
+	}
+	if mode == config.ModePreserve {
+		return nil, adoptedMissingErr(name, pub.TargetBranch, n, pub.ExpectedHead, missing)
+	}
+	return missing, nil
 }

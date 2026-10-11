@@ -254,12 +254,17 @@ func (e *Engine) surveyOne(ctx context.Context, pc *pairCtx, name, pm, O string)
 					Message: fmt.Sprintf("couldn't check public PR #%d of feature %s for commits made on GitHub: its branch or base can't be read", n, name),
 					Details: map[string]any{"feature": name, "public_pr": n}})
 			case tipOK && baseOK && tip != m.Promoted.PublishedHead:
-				fs, err := e.foreignCommits(ctx, pc, m, pbase, tip)
-				if err != nil {
+				fs, planned, err := e.foreignCommits(ctx, pc, m, pbase, tip)
+				switch {
+				case err != nil:
 					warns = append(warns, contract.Warning{Code: contract.PRStateUnknown,
 						Message: fmt.Sprintf("couldn't check public PR #%d of feature %s for commits made on GitHub: %v", n, name, err),
 						Details: map[string]any{"feature": name, "public_pr": n}})
-				} else {
+				case planned != "":
+					// Ghostbranch's own update, pushed but never recorded: nothing
+					// on it is foreign; apply of the plan finishes it.
+					warns = append(warns, unrecordedWarning(name, publishedBranch(m), n, tip, planned))
+				default:
 					r.PR.Foreign = len(fs)
 				}
 			}

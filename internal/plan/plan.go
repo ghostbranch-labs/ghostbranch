@@ -95,8 +95,9 @@ type Publish struct {
 	// ReplaceReason why a replace (a Reason constant; "" for append).
 	// ExpectedHead is the PR branch's head when the plan was made: apply
 	// pushes only while it is still there (the lease). Restores lists the
-	// commits a replace re-adds that the PR's branch holds. All are absent
-	// in a first publish and in plans from before 0.12.
+	// published commits the PR's branch no longer holds (removed on GitHub),
+	// which the replace puts back. All are absent in a first publish and in
+	// plans from before 0.12.
 	Update        bool     `json:"update,omitempty"`
 	Style         string   `json:"style,omitempty"`
 	ReplaceReason string   `json:"replace_reason,omitempty"`

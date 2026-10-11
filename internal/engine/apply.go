@@ -277,7 +277,7 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 	if e.DryRun {
 		pv := preview.New(map[string]string{"public_main": pm, "feature_head": head, "overlay": O, "gate_candidate": gateC})
 		if pl.Publish.Update {
-			e.previewUpdate(ctx, pc, pv, branch, pl.Publish.ExpectedHead, P)
+			e.previewUpdate(ctx, pc, pv, branch, pl.Publish.ExpectedHead, P, pl.PRs[0].Number, pl.Typed)
 		} else if err := e.previewPublish(ctx, pc, pv, pl.Feature, publishedPlan(m), branch, "main", P); err != nil {
 			return res, warns, err
 		}
@@ -298,7 +298,11 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 	if pl.Publish.Style == plan.StyleAppend {
 		summary.Publish.Parent = pl.Publish.ExpectedHead // the chain's verified parent
 	}
-	if res.Approval, err = e.authorize(ctx, pc.pair, pl.ID, planSummary(summary, files, authors, waived, rep.Warnings), yes); err != nil {
+	folded, err := e.foldedAdopted(ctx, pc, pl.Feature, m, pl.Mode, pl.Publish, pl.PRs[0].Number)
+	if err != nil {
+		return res, warns, err
+	}
+	if res.Approval, err = e.authorize(ctx, pc.pair, pl.ID, planSummary(summary, files, authors, waived, rep.Warnings, folded), yes); err != nil {
 		return nil, warns, err
 	}
 	if pl.Publish.Update {

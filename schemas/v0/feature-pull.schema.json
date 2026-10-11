@@ -3,7 +3,7 @@
   "title": "feature pull data",
   "type": "object",
   "additionalProperties": false,
-  "required": ["feature", "from", "to", "adopted", "preview"],
+  "required": ["feature", "from", "to", "adopted", "children", "preview"],
   "properties": {
     "feature": { "type": "string" },
     "from": { "description": "the feature branch's head before", "$ref": "common.schema.json#/$defs/sha" },
@@ -14,6 +14,7 @@
       "items": { "type": "object", "additionalProperties": false, "required": ["sha", "author", "subject"],
         "properties": { "sha": { "$ref": "common.schema.json#/$defs/sha" }, "author": { "type": "string" }, "subject": { "type": "string" } } }
     },
+    "children": { "description": "the live features stacked directly on it, when it moved (to != from): they sit on its old commits until feature restack moves them; empty otherwise", "type": "array", "items": { "type": "string" } },
     "preview": { "oneOf": [{ "type": "null" }, { "$ref": "preview.schema.json" }] }
   }
 }

@@ -9,7 +9,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/approval"
+	"github.com/ghostbranch-labs/ghostbranch/internal/config"
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
+	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 	"github.com/ghostbranch-labs/ghostbranch/internal/grant"
 	"github.com/ghostbranch-labs/ghostbranch/internal/ledger"
 	"github.com/ghostbranch-labs/ghostbranch/internal/plan"
@@ -96,7 +98,7 @@ func (e *Engine) authorize(ctx context.Context, p workspace.Pair, planID, summar
 // Every string in it that an agent or the feature controls goes through
 // visible, so a control character can't move the cursor, erase a line or
 // reorder text on the person's console.
-func planSummary(pl plan.Plan, files []string, authors []string, waived []WaivedFinding, warnings []contract.Warning) string {
+func planSummary(pl plan.Plan, files []string, authors []string, waived []WaivedFinding, warnings []contract.Warning, folded []feature.AdoptedCommit) string {
 	var b strings.Builder
 	if pl.Publish.Update && len(pl.PRs) == 1 {
 		n := pl.PRs[0].Number
@@ -108,6 +110,7 @@ func planSummary(pl plan.Plan, files []string, authors []string, waived []Waived
 			}
 			fmt.Fprintf(&b, "  puts back %s %s removed from PR #%d on GitHub\n", plural(k, "commit"), that, n)
 		}
+		foldedLines(&b, pl.Mode, folded)
 	} else {
 		fmt.Fprintf(&b, "About to publish to %s:\n", visible(pl.Pair.Public))
 	}
@@ -195,7 +198,7 @@ func tailLines(b *strings.Builder, waived []WaivedFinding, guards workflow.Guard
 // findings and warnings once. One code approves them all. shown holds each
 // branch's commits with their subjects as stored, authors each commit's
 // author as stored.
-func stackSummary(pl plan.Plan, shown [][]plan.Commit, authors, files [][]string, waived []WaivedFinding, warnings []contract.Warning) string {
+func stackSummary(pl plan.Plan, shown [][]plan.Commit, authors, files [][]string, waived []WaivedFinding, warnings []contract.Warning, folded [][]feature.AdoptedCommit) string {
 	var b strings.Builder
 	n := len(pl.Chain)
 	fmt.Fprintf(&b, "About to publish %d PR(s) to %s, bottom first; one code approves them all:\n", n, visible(pl.Pair.Public))
@@ -208,6 +211,7 @@ func stackSummary(pl plan.Plan, shown [][]plan.Commit, authors, files [][]string
 			if k := len(pub.Restores); k > 0 {
 				fmt.Fprintf(&b, "  puts back %s removed from PR #%d on GitHub\n", plural(k, "commit"), pl.PRs[i].Number)
 			}
+			foldedLines(&b, en.Mode, folded[i])
 		}
 		publishLines(&b, en.Mode, pub, en.Typed, files[i], authors[i])
 		tailLines(&b, nil, en.CI.RepoGuards, nil)
@@ -260,4 +264,22 @@ func unsafeRune(r rune) bool {
 func noConsole(what string) error {
 	return contract.New(contract.ApprovalRequired, "%s needs a person to type a code at a console", what).
 		WithDetails(map[string]any{"reason": string(approval.NoConsole)})
+}
+
+// foldedLines lists, in an update's approval summary, the commits made on
+// GitHub (adopted by feature pull) that the replace folds into its squash
+// or curated commits: their changes stay, the commits and their authors
+// leave the PR.
+func foldedLines(b *strings.Builder, mode string, folded []feature.AdoptedCommit) {
+	if len(folded) == 0 {
+		return
+	}
+	into := "the squash commit"
+	if mode == config.ModeCurated {
+		into = "the curated commits"
+	}
+	fmt.Fprintf(b, "  folds %s made on GitHub into %s:\n", plural(len(folded), "commit"), into)
+	for _, a := range folded {
+		fmt.Fprintf(b, "           %s %s (%s)\n", short(a.SHA), visible(a.Subject), visible(a.Author))
+	}
 }

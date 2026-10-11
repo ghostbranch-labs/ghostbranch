@@ -247,3 +247,31 @@ func TestPullPlanChangesNothing(t *testing.T) {
 		t.Fatalf("pull --plan = %+v %v", res, err)
 	}
 }
+
+// I2: a pull that leaves the feature branch where it is (a by-hand merge
+// already holds the PR) still leases it: a branch pushed to between the
+// read and the push makes the pull refuse, recording nothing.
+func TestPullLeasesABranchItDoesNotMove(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.publish("a")
+	merge := h.updateBranch("a")
+	h.mergeByHand("a", merge)
+	meta := h.shadowMeta("a")
+	var moved string
+	observe := h.eng.OnPush
+	h.eng.OnPush = func(op, remote string, specs []string) {
+		if observe != nil {
+			observe(op, remote, specs)
+		}
+		if op == "feature pull" && remote == "shadow" && moved == "" {
+			moved = testutil.Commit(t, h.shadowGit(), "a", "pushed meanwhile", map[string]string{"late.txt": "late\n"})
+		}
+	}
+	_, err := h.pull("a")
+	_ = wantCode(t, err, contract.RefMoved)
+	if h.head("a") != moved || !reflect.DeepEqual(h.shadowMeta("a").Promoted, meta.Promoted) {
+		t.Fatal("a pull whose branch moved must record nothing")
+	}
+}

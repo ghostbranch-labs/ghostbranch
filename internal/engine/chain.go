@@ -29,6 +29,10 @@ type link struct {
 	entries []gitx.TreeEntry // that tree's entries
 	message string           // squash: the -m message; preserve: the original; curated: the group's
 	author  gitx.Identity    // the original author (preserve, curated); zero for squash
+	// adopted is set on a preserve link that publishes a commit feature pull
+	// adopted from the public PR (keepAdoptedAuthors): its public author,
+	// kept as GitHub has it whatever promote.author_email says.
+	adopted *gitx.Identity
 }
 
 // chainInput is everything deriveChain needs.
@@ -237,14 +241,20 @@ func publicAuthor(p config.Promote, orig, publisher gitx.Identity) (gitx.Identit
 }
 
 // chainAuthors is each link's public author. Squash publishes as the
-// publisher, dated as the publisher's identity is. Unmapped emails in map
-// mode are AUTHOR_UNMAPPED, listing each email once, sorted.
+// publisher, dated as the publisher's identity is. A commit adopted from the
+// public PR (link.adopted) keeps its public author: author_email applies to
+// the person's own commits only. Unmapped emails in map mode are
+// AUTHOR_UNMAPPED, listing each email once, sorted.
 func chainAuthors(p config.Promote, mode string, links []link, publisher gitx.Identity) ([]gitx.Identity, error) {
 	out := make([]gitx.Identity, len(links))
 	missing := map[string]bool{}
 	for i, l := range links {
 		if mode == config.ModeSquash {
 			out[i] = publisher
+			continue
+		}
+		if l.adopted != nil {
+			out[i] = *l.adopted
 			continue
 		}
 		id, ok := publicAuthor(p, l.author, publisher)

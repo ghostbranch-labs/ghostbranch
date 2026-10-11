@@ -390,6 +390,11 @@ func (e *Engine) scanHistory(ctx context.Context, g *gitx.Git, cfg config.Config
 	}
 	var authors []gitx.Identity
 	if withAuthors && cfg.Promote.AuthorEmail != config.AuthorNoreply {
+		// A commit adopted from the public PR keeps its public author, so it
+		// is never AUTHOR_UNMAPPED.
+		if err := keepAdoptedAuthors(ctx, g, links, adoptedOf(b.meta)); err != nil {
+			return leak.Report{}, err
+		}
 		if authors, err = chainAuthors(cfg.Promote, config.ModePreserve, links, gitx.Identity{}); err != nil {
 			return leak.Report{}, err
 		}

@@ -71,7 +71,7 @@
         "style": { "description": "how the PR's branch is updated: append (a fast-forward with the new commits) or replace (a force-push leased on expected_head)", "enum": ["append", "replace"] },
         "replace_reason": { "description": "why the branch is replaced rather than appended to; absent or empty for append", "enum": ["restack", "rebase", "squash", "curated", "base_changed", "conflict", "reworded", ""] },
         "expected_head": { "description": "the PR branch's head when the plan was made; apply pushes only while it is still there", "$ref": "common.schema.json#/$defs/sha" },
-        "restores": { "description": "commits on the PR's branch that a replace puts back; only with style replace", "type": "array", "items": { "$ref": "common.schema.json#/$defs/sha" } }
+        "restores": { "description": "published commits the PR's branch no longer holds (removed on GitHub), which the replace puts back; only with style replace", "type": "array", "items": { "$ref": "common.schema.json#/$defs/sha" } }
       }
     },
     "typed": {
