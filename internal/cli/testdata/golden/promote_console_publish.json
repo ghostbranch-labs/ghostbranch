@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.11",
+  "schema_version": "0.12",
   "command": "promote",
   "ok": true,
   "exit_code": 0,
@@ -41,7 +41,7 @@
       "preview": null
     },
     "plan": {
-      "schema_version": "0.11",
+      "schema_version": "0.12",
       "id": "20261005T120005Z-0c0d0e",
       "kind": "promote",
       "actor": "human:octo",
@@ -150,6 +150,18 @@
     "stack_number": null
   },
   "warnings": [],
-  "next": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "sync",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "a maintainer reviews and merges PR #1 on GitHub; then sync closes the feature",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
   "error": null
 }

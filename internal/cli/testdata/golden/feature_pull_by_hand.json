@@ -1,0 +1,103 @@
+{
+  "schema_version": "0.12",
+  "command": "feature pull",
+  "ok": false,
+  "exit_code": 4,
+  "data": {
+    "feature": "feat-x",
+    "from": "3d2f697293932269105511e953e87f1a1db4d062",
+    "to": "3d2f697293932269105511e953e87f1a1db4d062",
+    "adopted": [],
+    "children": [],
+    "preview": null
+  },
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "git",
+        "fetch",
+        "origin",
+        "feat-x"
+      ],
+      "why": "fetch the PR's branch from the public repo in your checkout (origin is its remote there)",
+      "needs_human": false,
+      "needs_input": []
+    },
+    {
+      "command": [
+        "git",
+        "switch",
+        "feat-x"
+      ],
+      "why": "switch to the feature branch",
+      "needs_human": false,
+      "needs_input": []
+    },
+    {
+      "command": [
+        "git",
+        "merge",
+        "origin/feat-x"
+      ],
+      "why": "merge the PR's commits into it; you resolve any conflict, Ghostbranch never does",
+      "needs_human": false,
+      "needs_input": []
+    },
+    {
+      "command": [
+        "git",
+        "push",
+        "shadow",
+        "feat-x"
+      ],
+      "why": "push the merged feature branch to the shadow repo, never to origin",
+      "needs_human": false,
+      "needs_input": []
+    },
+    {
+      "command": [
+        "ghostbranch",
+        "feature",
+        "pull",
+        "feat-x",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "then pull again: it records the PR's commits as adopted",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
+  "error": {
+    "code": "PUBLIC_BRANCH_CHANGED",
+    "message": "PR #1 of feat-x holds 1 commit(s) Ghostbranch didn't publish, and they can't be brought in by themselves: replaying commit 3d2f69729393 with them conflicts in feature.txt. Ghostbranch never resolves conflicts: merge the PR's branch into feat-x yourself (details.steps), push it to the shadow repo, then run feature pull again",
+    "field": "feature",
+    "retryable": false,
+    "details": {
+      "branch": "feat-x",
+      "commit": "3d2f697293932269105511e953e87f1a1db4d062",
+      "feature": "feat-x",
+      "files": [
+        "feature.txt"
+      ],
+      "foreign": [
+        {
+          "author": "Test Author <author@example.com>",
+          "sha": "17cdebea50514a56f6fffd1baa674776ae35b99f",
+          "subject": "their change"
+        }
+      ],
+      "public_head": "17cdebea50514a56f6fffd1baa674776ae35b99f",
+      "public_pr": 1,
+      "reason": "conflict",
+      "steps": [
+        "git fetch origin feat-x",
+        "git switch feat-x",
+        "git merge origin/feat-x",
+        "git push <shadow remote> feat-x",
+        "ghostbranch feature pull feat-x"
+      ]
+    }
+  }
+}

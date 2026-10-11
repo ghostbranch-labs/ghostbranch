@@ -152,8 +152,8 @@ func TestSubProject61Schemas(t *testing.T) {
 			`{"pair":"acme/widget","grants":[],"token_can_publish":"false","token":{"source":"GHOSTBRANCH_TOKEN","http_status":403},"token_kind":"unknown"}`,
 		},
 		"envelope.schema.json": {
-			`{"schema_version":"0.11","command":"doctor","ok":false,"exit_code":1,"data":{},"warnings":[],"next":[],"error":{"code":"DOCTOR_FAILED","message":"m","field":null,"retryable":false,"details":{"failed":["guard"]}}}`,
-			`{"schema_version":"0.11","command":"auth status","ok":true,"exit_code":0,"data":{},"warnings":[{"code":"AGENT_ON_PERSON_LOGIN","message":"m"}],"next":[],"error":null}`,
+			`{"schema_version":"0.12","command":"doctor","ok":false,"exit_code":1,"data":{},"warnings":[],"next":[],"error":{"code":"DOCTOR_FAILED","message":"m","field":null,"retryable":false,"details":{"failed":["guard"]}}}`,
+			`{"schema_version":"0.12","command":"auth status","ok":true,"exit_code":0,"data":{},"warnings":[{"code":"AGENT_ON_PERSON_LOGIN","message":"m"}],"next":[],"error":null}`,
 		},
 	} {
 		for _, r := range raw {
@@ -307,5 +307,152 @@ func TestSubProject61aSchemas(t *testing.T) {
 		if !slices.Contains(r.Properties.State.Enum, string(s)) {
 			t.Errorf("feature-report state enum lacks %q", s)
 		}
+	}
+}
+
+// updatePlanJSON is planJSON with fields added to its publish object.
+func updatePlanJSON(fields string) string {
+	return strings.Replace(planJSON(""), `"dropped_empty":[]}`, `"dropped_empty":[]`+fields+`}`, 1)
+}
+
+// gateResultJSON is gate data, a first publish's, with extra fields added.
+func gateResultJSON(extra string) string {
+	g := `{"feature":"a","feature_head":"SHA","public_main":"SHA","parent":"","base":"SHA","overlay":"SHA","candidate":"SHA",` +
+		`"published_tree":"SHA","scanned_as":"preserve","commits":[],"checks":"passed","failed_checks":[],"leak":"clean","findings":[],` +
+		`"waived":[],"repo_guards":null,"shadow_pr":3,"job":"gate/a/0123456789ab","reused":false,"preview":null` + extra + `}`
+	return strings.ReplaceAll(g, "SHA", sha40)
+}
+
+// gateRecordJSON is a feature record whose gate has extra fields added.
+func gateRecordJSON(extra string) string {
+	g := `{"feature_head":"SHA","public_main":"SHA","overlay":"SHA","candidate":"SHA","published_tree":"SHA",` +
+		`"commits":[],"checks":"passed","leak":"clean","at":"2026-10-10T12:00:00Z"` + extra + `}`
+	return strings.Replace(recordJSON(""), `"gate":null`, `"gate":`+strings.ReplaceAll(g, "SHA", sha40), 1)
+}
+
+// The 6.1a-2 fields: what Tasks 3 to 8 emit, and what they must never emit.
+// All are optional, so plans and reports from before 0.12, and every first
+// publish, still validate.
+func TestSubProject61a2Schemas(t *testing.T) {
+	t.Parallel()
+	head := `,"expected_head":"` + sha40 + `"`
+	emptyTitle := func(fields string) string {
+		return strings.Replace(updatePlanJSON(fields), `"title":"Add a"`, `"title":""`, 1)
+	}
+	for name, raw := range map[string][]string{
+		"plan.schema.json": {
+			planJSON(""), // a first publish
+			updatePlanJSON(`,"update":true,"style":"append"` + head),
+			updatePlanJSON(`,"update":true,"style":"append","replace_reason":""` + head),
+			updatePlanJSON(`,"update":true,"style":"replace","replace_reason":"restack"` + head),
+			updatePlanJSON(`,"update":true,"style":"replace","replace_reason":"base_changed"` + head),
+			updatePlanJSON(`,"update":true,"style":"replace","replace_reason":"curated"` + head),
+			updatePlanJSON(`,"update":true,"style":"replace","replace_reason":"restack","restores":["` + sha40 + `"]` + head),
+			// An update may leave the PR title empty (R12); a typed one is fine too.
+			emptyTitle(`,"update":true,"style":"append"` + head),
+			updatePlanJSON(`,"update":true,"style":"append"` + head),
+			planJSON(`,"prs":[{"feature":"a","base":"main","number":14,"url":"u","update":true,"style":"replace"},` +
+				`{"feature":"b","base":"a","number":15,"url":"u","update":true,"style":"append"}],"stack_number":null`),
+			planJSON(`,"prs":[{"feature":"a","base":"main","number":14,"url":"u","update":true,"style":"append"},` +
+				`{"feature":"b","base":"a","number":0,"url":""}],"stack_number":null`), // a new PR above an updated one
+		},
+		"apply.schema.json": {applyJSON(`,"prs":[{"feature":"a","base":"main","number":14,"url":"u","update":true,"style":"append"}],"stack_number":null`)},
+		// A gate of an open PR's update (Task 4), as gate data and as the record.
+		"gate.schema.json": {
+			gateResultJSON(""), // a first publish
+			gateResultJSON(`,"update":{"pr":14,"head":"` + sha40 + `","base":"main","style":"append"}`),
+			gateResultJSON(`,"update":{"pr":14,"head":"` + sha40 + `","base":"main","style":"replace","replace_reason":"rebase"}`),
+		},
+		"feature.schema.json": {
+			gateRecordJSON(""),
+			gateRecordJSON(`,"base":"` + sha40 + `","update":{"pr":14,"head":"` + sha40 + `","base":"main","style":"append"}`),
+			gateRecordJSON(`,"update":{"pr":14,"head":"` + sha40 + `","base":"release","style":"replace","replace_reason":"base_changed"}`),
+		},
+		"feature-report.schema.json": {
+			reportJSON("pr_behind", `,"parent":"main","children":[],"stack":null,"pr":{"behind":2,"foreign":0}`),
+			reportJSON("published", `,"parent":"main","children":[],"stack":null,"pr":{"behind":0,"foreign":1}`),
+		},
+		"envelope.schema.json": {
+			`{"schema_version":"` + contract.SchemaVersion + `","command":"promote","ok":false,"exit_code":4,"data":{},"warnings":[],"next":[],` +
+				`"error":{"code":"PUBLIC_BRANCH_CHANGED","message":"m","field":null,"retryable":false,` +
+				`"details":{"feature":"a","foreign":[{"sha":"` + sha40 + `","author":"octo","subject":"Fix typo"}]}}}`,
+			`{"schema_version":"` + contract.SchemaVersion + `","command":"feature pull","ok":true,"exit_code":0,"data":{},"warnings":[],"next":[],"error":null}`,
+			`{"schema_version":"` + contract.SchemaVersion + `","command":"version","ok":true,"exit_code":0,"data":{},"warnings":[],"next":[],"error":null}`,
+		},
+		"ledger-entry.schema.json": {`{"ts":"2026-10-10T12:00:00Z","actor":"human:octo","op":"feature pull","exit_code":0,"summary":"s"}`},
+	} {
+		for _, r := range raw {
+			testutil.ValidateSchema(t, name, []byte(r))
+		}
+	}
+	for _, x := range []struct{ name, raw string }{
+		{"plan.schema.json", updatePlanJSON(`,"update":true` + head)},                                               // no style
+		{"plan.schema.json", updatePlanJSON(`,"update":true,"style":"append"`)},                                     // no lease
+		{"plan.schema.json", updatePlanJSON(`,"style":"append"` + head)},                                            // style without update
+		{"plan.schema.json", updatePlanJSON(`,"update":true,"style":"replace"` + head)},                             // replace without a reason
+		{"plan.schema.json", updatePlanJSON(`,"update":true,"style":"replace","replace_reason":""` + head)},         // an empty reason
+		{"plan.schema.json", updatePlanJSON(`,"update":true,"style":"append","replace_reason":"rebase"` + head)},    // append with a reason
+		{"plan.schema.json", updatePlanJSON(`,"update":true,"style":"merge"` + head)},                               // unknown style
+		{"plan.schema.json", updatePlanJSON(`,"update":true,"style":"replace","replace_reason":"other"` + head)},    // unknown reason
+		{"plan.schema.json", updatePlanJSON(`,"update":true,"style":"append","expected_head":"abc"`)},               // not a sha
+		{"plan.schema.json", updatePlanJSON(`,"update":true,"style":"append","restores":["` + sha40 + `"]` + head)}, // restores need a replace
+		{"plan.schema.json", updatePlanJSON(`,"update":true,"style":"replace","replace_reason":"restack","restores":["abc"]` + head)},
+		{"plan.schema.json", emptyTitle("")}, // a first publish needs a title
+		{"plan.schema.json", planJSON(`,"prs":[{"feature":"a","base":"main","number":14,"url":"u","style":"append"}]`)},
+		{"plan.schema.json", planJSON(`,"prs":[{"feature":"a","base":"main","number":14,"url":"u","update":true}]`)},
+		{"gate.schema.json", gateResultJSON(`,"update":{"pr":14,"head":"` + sha40 + `","base":"main","style":"replace"}`)},                          // replace without a reason
+		{"gate.schema.json", gateResultJSON(`,"update":{"pr":14,"head":"` + sha40 + `","base":"main","style":"append","replace_reason":"rebase"}`)}, // append with a reason
+		{"gate.schema.json", gateResultJSON(`,"update":{"pr":14,"head":"` + sha40 + `","base":"main","style":"merge"}`)},                            // unknown style
+		{"gate.schema.json", gateResultJSON(`,"update":{"pr":14,"head":"abc","base":"main","style":"append"}`)},                                     // not a sha
+		{"gate.schema.json", gateResultJSON(`,"update":{"pr":0,"head":"` + sha40 + `","base":"main","style":"append"}`)},                            // no PR
+		{"feature.schema.json", gateRecordJSON(`,"update":{"pr":14,"head":"` + sha40 + `","base":"main","style":"replace","replace_reason":"other"}`)},
+		{"feature.schema.json", gateRecordJSON(`,"update":{"pr":14,"head":"` + sha40 + `","style":"append"}`)}, // no base branch
+		{"feature.schema.json", gateRecordJSON(`,"update":{"pr":14,"head":"` + sha40 + `","base":"main","style":"replace"}`)},
+		{"feature-report.schema.json", reportJSON("pr_behind", `,"parent":"main","children":[],"stack":null,"pr":{"behind":-1,"foreign":0}`)},
+		{"feature-report.schema.json", reportJSON("pr_behind", `,"parent":"main","children":[],"stack":null,"pr":{"behind":1}`)},
+		{"feature-report.schema.json", reportJSON("pr_behind", `,"parent":"main","children":[],"stack":null,"pr":{"behind":1,"foreign":0,"x":1}`)},
+		{"feature-report.schema.json", reportJSON("behind", `,"parent":"main","children":[],"stack":null`)},
+		{"ledger-entry.schema.json", `{"ts":"2026-10-10T12:00:00Z","actor":"human:octo","op":"feature push","exit_code":0,"summary":"s"}`},
+	} {
+		schemaRejects(t, x.name, x.raw)
+	}
+	// The schema's enums are the plan package's constants, exactly.
+	var p struct {
+		Properties struct {
+			Publish struct {
+				Properties struct {
+					Style struct {
+						Enum []string `json:"enum"`
+					} `json:"style"`
+					ReplaceReason struct {
+						Enum []string `json:"enum"`
+					} `json:"replace_reason"`
+				} `json:"properties"`
+			} `json:"publish"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(schemaFile(t, "plan.schema.json"), &p); err != nil {
+		t.Fatal(err)
+	}
+	if got := slices.Sorted(slices.Values(p.Properties.Publish.Properties.Style.Enum)); !slices.Equal(got, []string{plan.StyleAppend, plan.StyleReplace}) {
+		t.Errorf("publish.style enum = %v", got)
+	}
+	reasons := []string{"", plan.ReasonBaseChanged, plan.ReasonConflict, plan.ReasonCurated, plan.ReasonRebase, plan.ReasonRestack, plan.ReasonReworded, plan.ReasonSquash}
+	if got := slices.Sorted(slices.Values(p.Properties.Publish.Properties.ReplaceReason.Enum)); !slices.Equal(got, reasons) {
+		t.Errorf("publish.replace_reason enum = %v, want %v", got, reasons)
+	}
+	var r struct {
+		Properties struct {
+			State struct {
+				Enum []string `json:"enum"`
+			} `json:"state"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(schemaFile(t, "feature-report.schema.json"), &r); err != nil {
+		t.Fatal(err)
+	}
+	// Task 3 adds feature.StatePRBehind with this string.
+	if !slices.Contains(r.Properties.State.Enum, "pr_behind") {
+		t.Errorf("feature-report state enum lacks pr_behind")
 	}
 }

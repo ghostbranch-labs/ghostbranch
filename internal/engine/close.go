@@ -256,12 +256,14 @@ func unreadableWhy(r FeatureReport) string {
 // auto-close calls it only for ClosableWithoutConsole reports. kids are
 // the features stacked on it: their records are rewritten onto main
 // (reparentChildren) and pushed in the same atomic push as the deletes, so
-// the close and the re-parenting land together or not at all. The caller
+// the close and the re-parenting land together or not at all. closing names
+// the features this same sync closes: a child among them isn't said to
+// move onto main, as it is about to close too. The caller
 // records the ledger entry, with Refs = res.Deleted. A non-nil res with an
 // error means the refs were deleted (and the children moved) but the gate
 // PR couldn't be closed. The warnings are PLAN_FILE_UNREADABLE from listing
 // the plan files and MIRROR_NOT_UPDATED from the local cleanup.
-func (e *Engine) closeFeature(ctx context.Context, pc *pairCtx, r FeatureReport, kids []FeatureReport) (*FeatureCloseResult, []contract.Warning, error) {
+func (e *Engine) closeFeature(ctx context.Context, pc *pairCtx, r FeatureReport, kids []FeatureReport, closing map[string]bool) (*FeatureCloseResult, []contract.Warning, error) {
 	t, tw, err := e.closeTargets(ctx, pc, r)
 	if err != nil {
 		return nil, tw, err
@@ -272,12 +274,16 @@ func (e *Engine) closeFeature(ctx context.Context, pc *pairCtx, r FeatureReport,
 	}
 	var o closeOpts
 	names := make([]string, 0, len(rps))
+	var staying []string
 	for _, rp := range rps {
 		o.also = append(o.also, refUpdate{Ref: remoteMetaRef(rp.name), From: rp.old, To: rp.new, Local: metaRef(rp.name)})
 		names = append(names, rp.name)
+		if !closing[rp.name] {
+			staying = append(staying, rp.name)
+		}
 	}
-	if len(rps) > 0 && !e.DryRun {
-		e.progressf("moving %s onto main in the same push that closes %s", strings.Join(names, ", "), r.Name)
+	if len(staying) > 0 && !e.DryRun {
+		e.progressf("moving %s onto main in the same push that closes %s", strings.Join(staying, ", "), r.Name)
 	}
 	res, cw, err := e.closeWith(ctx, pc, r, t, o)
 	// The push landed once res is non-nil outside a dry run, even when the

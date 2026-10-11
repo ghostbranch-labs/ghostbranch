@@ -175,7 +175,9 @@ func TestPromotePreviewRefusesAnExistingPublicBranch(t *testing.T) {
 }
 
 // Once the plan is published, previewing the same promote lists no public
-// push and no new PR: both already exist.
+// push: the branch already holds the commit. Since 6.1a-2 a promote of a
+// feature whose PR is open plans an update of that PR instead, so the PR
+// is closed here first, and the preview reopens one (open_pr).
 func TestPromotePreviewAfterPublishOmitsDoneSteps(t *testing.T) {
 	t.Parallel()
 	h := gated(t)
@@ -186,13 +188,16 @@ func TestPromotePreviewAfterPublishOmitsDoneSteps(t *testing.T) {
 	if _, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: saved.Plan.ID}); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
+	for _, pr := range h.forge.PRs(publicName) {
+		h.forge.ClosePR(publicName, pr.Number)
+	}
 	h.eng.DryRun = true
 	res, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "m"})
 	h.eng.DryRun = false
-	if err != nil || res.Plan == nil || res.Plan.Publish.Commit != saved.Plan.Publish.Commit {
+	if err != nil || res.Plan == nil || res.Plan.Publish.Commit != saved.Plan.Publish.Commit || res.Plan.Publish.Update {
 		t.Fatalf("the preview must rebuild the published commit: %+v %v", res, err)
 	}
-	if got := opNames(res.Preview); !reflect.DeepEqual(got, []string{"push_ref", "write_file"}) || res.Preview.Ops[0]["repo"] != shadowName {
+	if got := opNames(res.Preview); !reflect.DeepEqual(got, []string{"push_ref", "write_file", "open_pr"}) || res.Preview.Ops[0]["repo"] != shadowName {
 		t.Fatalf("ops = %v", res.Preview.Ops)
 	}
 }

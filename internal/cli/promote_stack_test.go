@@ -29,9 +29,11 @@ func TestPromoteStackFlags(t *testing.T) {
 }
 
 // A child of a parent published before public main moved can't be gated
-// onto it: next names sync (which moves the child once the parent merges),
-// never another gate or promote that would refuse the same way.
-func TestPromoteOnAParentPublishedBeforeMainMovedNextIsSync(t *testing.T) {
+// onto it: next first promotes the parent (which updates its PR onto the
+// new main), as the error says, with sync (which moves the child once the
+// parent merges) as the alternative; never another gate or promote of the
+// child that would refuse the same way.
+func TestPromoteOnAParentPublishedBeforeMainMovedNextPromotesTheParent(t *testing.T) {
 	t.Parallel()
 	te := newTestEnv(t)
 	initOnly(te)
@@ -48,11 +50,12 @@ func TestPromoteOnAParentPublishedBeforeMainMovedNextIsSync(t *testing.T) {
 	e, _ := env["error"].(map[string]any)
 	d, _ := e["details"].(map[string]any)
 	next, _ := env["next"].([]any)
-	if code != 2 || d["reason"] != "parent_moved" || len(next) != 1 {
+	if code != 2 || d["reason"] != "parent_moved" || len(next) != 2 {
 		t.Fatalf("exit %d, error %v, next %v", code, e, next)
 	}
-	cmd, _ := next[0].(map[string]any)["command"].([]any)
-	if len(cmd) < 2 || cmd[1] != "sync" {
-		t.Fatalf("next = %v, want sync", next)
+	first, _ := next[0].(map[string]any)["command"].([]any)
+	second, _ := next[1].(map[string]any)["command"].([]any)
+	if len(first) < 4 || first[1] != "promote" || first[2] != "feat-a" || first[3] != "--plan" || len(second) < 2 || second[1] != "sync" {
+		t.Fatalf("next = %v, want promote feat-a --plan, then sync", next)
 	}
 }

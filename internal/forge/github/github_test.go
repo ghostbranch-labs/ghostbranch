@@ -559,6 +559,44 @@ func TestClosePullRequest(t *testing.T) {
 	}
 }
 
+// EditPR sends only the fields it is given: a nil title or body is left as
+// it is on GitHub.
+func TestEditPR(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	var bodies []map[string]any
+	mux.HandleFunc("PATCH /repos/acme/widget/pulls/3", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		bodies = append(bodies, body)
+		writeJSON(w, map[string]any{"number": 3, "state": "open"})
+	})
+	mux.HandleFunc("PATCH /repos/acme/widget/pulls/9", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+	})
+	mux.HandleFunc("PATCH /repos/acme/widget/pulls/4", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"message":"Resource not accessible by personal access token"}`, http.StatusForbidden)
+	})
+	c := newClient(t, mux)
+	ctx := context.Background()
+	title, body := "New title", ""
+	if err := c.EditPR(ctx, "acme/widget", 3, &title, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.EditPR(ctx, "acme/widget", 3, nil, &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(bodies) != 2 || len(bodies[0]) != 1 || bodies[0]["title"] != "New title" || len(bodies[1]) != 1 || bodies[1]["body"] != "" {
+		t.Fatalf("request bodies = %v", bodies)
+	}
+	if err := c.EditPR(ctx, "acme/widget", 9, &title, nil); !errors.Is(err, forge.ErrNotFound) {
+		t.Fatalf("404: %v", err)
+	}
+	if err := c.EditPR(ctx, "acme/widget", 4, &title, nil); !errors.Is(err, forge.ErrForbidden) {
+		t.Fatalf("403: %v", err)
+	}
+}
+
 // Every call maps a plain 403 to forge.ErrForbidden; a rate-limit 403 is
 // transient, never forbidden.
 func TestA403IsForbiddenOnEveryCall(t *testing.T) {

@@ -281,20 +281,29 @@ func (e *Engine) closeMerged(ctx context.Context, pc *pairCtx, p *workspace.Pair
 			res.Attention = append(res.Attention, r)
 		}
 	}
+	// The features this sync closes: a child among them closes too, so it
+	// isn't "moved onto main" in any sense a person needs to hear.
+	closing := map[string]bool{}
+	for _, r := range rs {
+		if ClosableWithoutConsole(r) && !mergedIntoParent(r) && len(unread) == 0 {
+			closing[r.Name] = true
+		}
+	}
 	for _, i := range bottomUp(rs) {
 		r := rs[i]
 		if !ClosableWithoutConsole(r) {
 			continue
 		}
 		if mergedIntoParent(r) {
-			warns = addWarnings(warns, mergedIntoParentWarning(r))
+			_, there, err := pc.git.Resolve(ctx, publicRef(r.prBase))
+			warns = addWarnings(warns, mergedIntoParentWarning(r, err == nil && !there))
 			continue
 		}
 		if len(unread) > 0 {
 			warns = addWarnings(warns, closeBlocked(r.Name, unread))
 			continue
 		}
-		cr, cw, err := e.closeFeature(ctx, pc, r, childReports(rs, r.Name))
+		cr, cw, err := e.closeFeature(ctx, pc, r, childReports(rs, r.Name), closing)
 		warns = addWarnings(warns, cw...)
 		if e.DryRun {
 			// A close that couldn't be previewed warns, as the real one would.
@@ -356,16 +365,36 @@ func mergedIntoParent(r FeatureReport) bool {
 }
 
 // mergedIntoParentWarning is the FEATURE_NOT_CLOSED warning for a feature
-// mergedIntoParent leaves open.
-func mergedIntoParentWarning(r FeatureReport) contract.Warning {
+// mergedIntoParent leaves open. baseGone: the public branch its PR merged
+// into is gone (the feature below merged and closed). The warning then
+// names the base r's record has now (details.record_base), as a person
+// can't check a deleted branch.
+func mergedIntoParentWarning(r FeatureReport, baseGone bool) contract.Warning {
 	pr := 0
 	if r.PublicPR != nil {
 		pr = *r.PublicPR
 	}
+	details := map[string]any{"feature": r.Name, "reason": "merged_into_parent_branch", "base": r.prBase}
+	if rb := recordBase(r); baseGone && rb != "" && rb != r.prBase {
+		details["record_base"] = rb
+		return contract.Warning{Code: contract.FeatureNotClosed,
+			Message: fmt.Sprintf("sync left merged feature %s open: its PR #%d merged into %s, not main, and public branch %s is gone now; its record stands on %s: a person checks public branch %s holds its changes, then closes %s (ghostbranch feature close %s)",
+				r.Name, pr, r.prBase, r.prBase, rb, rb, r.Name, r.Name),
+			Details: details}
+	}
 	return contract.Warning{Code: contract.FeatureNotClosed,
 		Message: fmt.Sprintf("sync left merged feature %s open: its PR #%d merged into %s, not main, so its changes reach main only with %s's PR; a person checks public branch %s, then closes %s (ghostbranch feature close %s)",
 			r.Name, pr, r.prBase, r.prBase, r.prBase, r.Name, r.Name),
-		Details: map[string]any{"feature": r.Name, "reason": "merged_into_parent_branch", "base": r.prBase}}
+		Details: details}
+}
+
+// recordBase is the base branch r's publish record names, "" when there
+// is none.
+func recordBase(r FeatureReport) string {
+	if r.meta == nil || r.meta.Promoted == nil {
+		return ""
+	}
+	return r.meta.Promoted.Base
 }
 
 // notClosed is the FEATURE_NOT_CLOSED warning for a merged feature sync

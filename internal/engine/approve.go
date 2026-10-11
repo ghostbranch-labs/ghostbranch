@@ -9,7 +9,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/approval"
+	"github.com/ghostbranch-labs/ghostbranch/internal/config"
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
+	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 	"github.com/ghostbranch-labs/ghostbranch/internal/grant"
 	"github.com/ghostbranch-labs/ghostbranch/internal/ledger"
 	"github.com/ghostbranch-labs/ghostbranch/internal/plan"
@@ -96,10 +98,23 @@ func (e *Engine) authorize(ctx context.Context, p workspace.Pair, planID, summar
 // Every string in it that an agent or the feature controls goes through
 // visible, so a control character can't move the cursor, erase a line or
 // reorder text on the person's console.
-func planSummary(pl plan.Plan, files []string, authors []string, waived []WaivedFinding, warnings []contract.Warning) string {
+func planSummary(pl plan.Plan, files []string, authors []string, waived []WaivedFinding, warnings []contract.Warning, folded []feature.AdoptedCommit) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "About to publish to %s:\n", visible(pl.Pair.Public))
-	publishLines(&b, pl.Mode, pl.Publish, files, authors)
+	if pl.Publish.Update && len(pl.PRs) == 1 {
+		n := pl.PRs[0].Number
+		fmt.Fprintf(&b, "%s in %s:\n", updateHeadline(n, pl.Publish), visible(pl.Pair.Public))
+		if k := len(pl.Publish.Restores); k > 0 {
+			that := "that was"
+			if k > 1 {
+				that = "that were"
+			}
+			fmt.Fprintf(&b, "  puts back %s %s removed from PR #%d on GitHub\n", plural(k, "commit"), that, n)
+		}
+		foldedLines(&b, pl.Mode, folded)
+	} else {
+		fmt.Fprintf(&b, "About to publish to %s:\n", visible(pl.Pair.Public))
+	}
+	publishLines(&b, pl.Mode, pl.Publish, pl.Typed, files, authors)
 	tailLines(&b, waived, pl.CI.RepoGuards, warnings)
 	fmt.Fprintf(&b, "Plan %s", visible(pl.ID))
 	return b.String()
@@ -107,8 +122,10 @@ func planSummary(pl plan.Plan, files []string, authors []string, waived []Waived
 
 // publishLines is one PR's part of an approval summary: its branch, its
 // history on the commit below it, each commit with its author as stored,
-// the commits dropped as empty, the PR text and the files it changes.
-func publishLines(b *strings.Builder, mode string, pub plan.Publish, files, authors []string) {
+// the commits dropped as empty, the PR text and the files it changes. An
+// update of an open PR shows only the texts the person typed (typed): the
+// others stay as they are on GitHub.
+func publishLines(b *strings.Builder, mode string, pub plan.Publish, typed plan.Typed, files, authors []string) {
 	fmt.Fprintf(b, "  branch   %s\n", visible(pub.TargetBranch))
 	fmt.Fprintf(b, "  history  %s, %d commit(s) on %s\n", visible(mode), len(pub.Commits), short(pub.Parent))
 	for i, c := range pub.Commits {
@@ -121,9 +138,20 @@ func publishLines(b *strings.Builder, mode string, pub plan.Publish, files, auth
 	if n := len(pub.DroppedEmpty); n > 0 {
 		fmt.Fprintf(b, "  dropped  %d commit(s) with nothing public in them\n", n)
 	}
-	fmt.Fprintf(b, "  PR title %s\n", visible(pub.PR.Title))
+	switch {
+	case !pub.Update || typed.Title:
+		fmt.Fprintf(b, "  PR title %s\n", visible(pub.PR.Title))
+	case !typed.Body:
+		b.WriteString("  PR       keeps its title and body\n")
+	default:
+		b.WriteString("  PR title keeps its title\n")
+	}
 	body := strings.Split(strings.TrimSpace(pub.PR.Body), "\n")
 	switch {
+	case pub.Update && !typed.Body:
+		if typed.Title {
+			b.WriteString("  PR body  keeps its body\n")
+		}
 	case len(body) == 1 && body[0] == "":
 		b.WriteString("  PR body  (empty)\n")
 	default:
@@ -164,12 +192,13 @@ func tailLines(b *strings.Builder, waived []WaivedFinding, guards workflow.Guard
 }
 
 // stackSummary is the approval view of a stack plan: the number of PRs,
-// then each, bottom first, with the branch it is based on and what it
-// publishes (its files measured from the PR below it), then the waived
+// then each, bottom first, with the branch it is based on, how an open PR's
+// branch is updated (updateHeadline), and what it publishes (its files
+// measured from the PR below it, or from an open PR's head), then the waived
 // findings and warnings once. One code approves them all. shown holds each
 // branch's commits with their subjects as stored, authors each commit's
 // author as stored.
-func stackSummary(pl plan.Plan, shown [][]plan.Commit, authors, files [][]string, waived []WaivedFinding, warnings []contract.Warning) string {
+func stackSummary(pl plan.Plan, shown [][]plan.Commit, authors, files [][]string, waived []WaivedFinding, warnings []contract.Warning, folded [][]feature.AdoptedCommit) string {
 	var b strings.Builder
 	n := len(pl.Chain)
 	fmt.Fprintf(&b, "About to publish %d PR(s) to %s, bottom first; one code approves them all:\n", n, visible(pl.Pair.Public))
@@ -177,7 +206,14 @@ func stackSummary(pl plan.Plan, shown [][]plan.Commit, authors, files [][]string
 		pub := en.Publish
 		pub.Commits = shown[i]
 		fmt.Fprintf(&b, "PR %d of %d: %s, based on %s\n", i+1, n, visible(en.Feature), visible(pl.PRs[i].Base))
-		publishLines(&b, en.Mode, pub, files[i], authors[i])
+		if pub.Update {
+			fmt.Fprintf(&b, "  %s\n", updateHeadline(pl.PRs[i].Number, pub))
+			if k := len(pub.Restores); k > 0 {
+				fmt.Fprintf(&b, "  puts back %s removed from PR #%d on GitHub\n", plural(k, "commit"), pl.PRs[i].Number)
+			}
+			foldedLines(&b, en.Mode, folded[i])
+		}
+		publishLines(&b, en.Mode, pub, en.Typed, files[i], authors[i])
 		tailLines(&b, nil, en.CI.RepoGuards, nil)
 	}
 	tailLines(&b, waived, workflow.GuardReport{}, warnings)
@@ -228,4 +264,22 @@ func unsafeRune(r rune) bool {
 func noConsole(what string) error {
 	return contract.New(contract.ApprovalRequired, "%s needs a person to type a code at a console", what).
 		WithDetails(map[string]any{"reason": string(approval.NoConsole)})
+}
+
+// foldedLines lists, in an update's approval summary, the commits made on
+// GitHub (adopted by feature pull) that the replace folds into its squash
+// or curated commits: their changes stay, the commits and their authors
+// leave the PR.
+func foldedLines(b *strings.Builder, mode string, folded []feature.AdoptedCommit) {
+	if len(folded) == 0 {
+		return
+	}
+	into := "the squash commit"
+	if mode == config.ModeCurated {
+		into = "the curated commits"
+	}
+	fmt.Fprintf(b, "  folds %s made on GitHub into %s:\n", plural(len(folded), "commit"), into)
+	for _, a := range folded {
+		fmt.Fprintf(b, "           %s %s (%s)\n", short(a.SHA), visible(a.Subject), visible(a.Author))
+	}
 }

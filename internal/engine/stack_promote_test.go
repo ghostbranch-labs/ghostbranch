@@ -500,7 +500,8 @@ func TestPromoteOnAParentPublishedBeforeMainMovedSaysWhy(t *testing.T) {
 	testutil.Commit(t, h.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
 	for round := range 2 {
 		ce := promoteB(h, "parent_moved")
-		if ce.Details["public_main_moved"] != true || ce.Details["parent"] != "a" || !strings.Contains(ce.Message, "once a merges and `ghostbranch sync` moves b onto main (updating an open PR's branch is not supported yet)") {
+		if ce.Details["public_main_moved"] != true || ce.Details["parent"] != "a" || !strings.Contains(ce.Message, "promote a first, which updates its PR onto the new main") ||
+			!strings.Contains(ce.Message, "or wait for a to merge, run ghostbranch sync (it moves b onto main)") {
 			t.Fatalf("round %d: %s %v", round, ce.Message, ce.Details)
 		}
 		h.gateFeature("b") // what a stale_gate would have asked for

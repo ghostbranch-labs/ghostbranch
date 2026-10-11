@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.11",
+  "schema_version": "0.12",
   "command": "feature restack",
   "ok": true,
   "exit_code": 0,
@@ -24,11 +24,11 @@
       "command": [
         "ghostbranch",
         "gate",
-        "feat-y",
+        "feat-x",
         "--repo",
         "acme/widget"
       ],
-      "why": "the restacked branches were rewritten; gate them again from the bottom (and in each checkout: git fetch, then git reset --keep <remote>/<branch>)",
+      "why": "feat-x, below the restacked branches, has no fresh green gate, and their gates build on it: gate it first, then the restacked branches from the bottom (and in each checkout: git fetch, then git reset --keep <remote>/<branch>)",
       "needs_human": false,
       "needs_input": []
     }

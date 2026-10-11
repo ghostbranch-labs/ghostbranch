@@ -607,6 +607,20 @@ func (c *Client) ClosePullRequest(ctx context.Context, full string, number int) 
 	return wrap(ctx, full, resp, err)
 }
 
+// EditPR changes PR number's title and body; a nil field is not sent, so
+// GitHub leaves it as it is. A plain 403 is forge.ErrForbidden.
+func (c *Client) EditPR(ctx context.Context, full string, number int, title, body *string) error {
+	owner, name, err := forge.SplitName(full)
+	if err != nil {
+		return err
+	}
+	_, resp, err := c.c.PullRequests.Edit(ctx, owner, name, number, &gh.PullRequest{Title: title, Body: body})
+	if isForbidden(resp, err) {
+		return fmt.Errorf("edit PR #%d of %s: %w", number, full, forbidden(full, resp, err))
+	}
+	return wrap(ctx, full, resp, err)
+}
+
 // ProbePermissions learns what the token may do on full with read calls
 // only (forge.PermissionProber). A fine-grained token can't be asked what
 // it may write, so only Contents: write is probed, through PushAccess.

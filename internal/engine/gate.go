@@ -14,6 +14,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
 	"github.com/ghostbranch-labs/ghostbranch/internal/ledger"
 	"github.com/ghostbranch-labs/ghostbranch/internal/overlay"
+	"github.com/ghostbranch-labs/ghostbranch/internal/plan"
 	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workflow"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
@@ -27,8 +28,9 @@ type GateResult struct {
 	// public main.
 	Parent string `json:"parent"`
 	// Base is the commit the feature's own commits were replayed onto:
-	// public main, or R, the rebased tip of the features below it; "" when
-	// a stacked gate stopped before the features below it were built.
+	// public main, R, the rebased tip of the features below it, or, for an
+	// append to the feature's open PR, that PR's head H; "" when a stacked
+	// gate stopped before the features below it were built.
 	Base          string          `json:"base"`
 	Overlay       string          `json:"overlay"`
 	Candidate     string          `json:"candidate"`
@@ -61,6 +63,9 @@ type GateResult struct {
 	Children []string         `json:"children,omitempty"`
 	Chain    []string         `json:"chain,omitempty"`
 	Preview  *preview.Preview `json:"preview"`
+	// Update is how the gate built the update of the feature's open PR
+	// (append onto its head, or replace); absent for a first publish.
+	Update *feature.GateUpdate `json:"update,omitempty"`
 
 	// mapping is the gate's rebased chain, for promote to publish from.
 	mapping []feature.GateCommit `json:"-"`
@@ -214,6 +219,14 @@ type built struct {
 	// R below), and stack what was built below it (nil when unstacked).
 	parent, forkedAt, base string
 	stack                  *stackBase
+	// update is how this build updates the feature's open PR (readUpdate,
+	// buildUpdate); nil for a first publish, a stacked feature and waivers
+	// add. scanTip is the public commit the update scan runs to, and
+	// scanSources maps public commits to the feature commits they publish,
+	// for findings.
+	update      *prUpdate
+	scanTip     string
+	scanSources map[string][]string
 }
 
 // build resolves the feature and public main, rebases, strips and scans as
@@ -261,6 +274,14 @@ func (e *Engine) build(ctx context.Context, pc *pairCtx, name, mode string, waiv
 	if err != nil {
 		return b, warns, err
 	}
+	// A published feature whose PR is open is an update of that PR: read it
+	// first, so commits someone made on GitHub stop the gate before anything
+	// is built. waivers add keeps the full scan of a first publish.
+	if !waiving && len(levels) == 0 {
+		if err := e.readUpdate(ctx, pc, b, name); err != nil {
+			return b, warns, err
+		}
+	}
 	if len(levels) == 0 {
 		b.base = pm
 		e.progressf("replaying %s onto public main %s", name, short(pm))
@@ -307,14 +328,23 @@ func (e *Engine) build(ctx context.Context, pc *pairCtx, name, mode string, waiv
 	if b.T, b.entries, err = publishedTree(ctx, g, b.R, cfg); err != nil {
 		return b, warns, namedMarkerErr(err, name)
 	}
+	if err := e.buildUpdate(ctx, pc, b, name); err != nil {
+		return b, warns, err
+	}
 	e.progressf("scanning what %s would publish for leaks", b.scannedAs)
-	if b.scannedAs == config.ModePreserve {
+	switch {
+	case b.update != nil:
+		// An update scans what isn't public yet, from the PR's head H: the
+		// new commits of an append, the net change of a replace.
+		b.report, _, err = e.updateScan(ctx, pc, cfg, b.update.Head, b.scanTip,
+			scanOpts{identities: cfg.Promote.AuthorEmail == config.AuthorKeep, sources: b.scanSources})
+	case b.scannedAs == config.ModePreserve:
 		// Stripping each older commit can hit a broken marker the tip no
 		// longer has.
 		b.report, err = e.scanHistory(ctx, g, cfg, b, !waiving)
-	} else if b.stack == nil {
+	case b.stack == nil:
 		b.report, _, err = e.scan(ctx, g, cfg, b.entries, pm, nil)
-	} else {
+	default:
 		// A stacked feature's scan covers only what it adds over the
 		// published tree below it.
 		b.report, err = e.scanOwn(ctx, g, cfg, b.entries, b.stack.T)
@@ -360,6 +390,11 @@ func (e *Engine) scanHistory(ctx context.Context, g *gitx.Git, cfg config.Config
 	}
 	var authors []gitx.Identity
 	if withAuthors && cfg.Promote.AuthorEmail != config.AuthorNoreply {
+		// A commit adopted from the public PR keeps its public author, so it
+		// is never AUTHOR_UNMAPPED.
+		if err := keepAdoptedAuthors(ctx, g, links, adoptedOf(b.meta)); err != nil {
+			return leak.Report{}, err
+		}
 		if authors, err = chainAuthors(cfg.Promote, config.ModePreserve, links, gitx.Identity{}); err != nil {
 			return leak.Report{}, err
 		}
@@ -398,6 +433,7 @@ func (e *Engine) gate(ctx context.Context, pc *pairCtx, name, mode string, how g
 	res := &GateResult{Feature: name, FeatureHead: head, PublicMain: pm, Overlay: O, ScannedAs: b.scannedAs, Commits: infos,
 		Checks: feature.ChecksNotRun, FailedChecks: []string{}, Leak: feature.LeakNotRun, Findings: []leak.Finding{}, Waived: []WaivedFinding{}}
 	res.Parent, res.Base, res.stack, res.forkedAt = b.parent, b.base, b.stack, b.forkedAt
+	res.Update = gateUpdateOf(b.update)
 	if err != nil {
 		return res, warns, err
 	}
@@ -548,6 +584,13 @@ func (e *Engine) gateRecord(res *GateResult, commits []feature.GateCommit) featu
 		Checks: res.Checks, FailedChecks: res.FailedChecks, Leak: res.Leak, At: e.now()}
 	if s := res.stack; s != nil {
 		g.Parent, g.ForkedAt, g.Base, g.BaseTree, g.Below = res.Parent, res.forkedAt, s.R, s.T, s.below
+	}
+	if u := res.Update; u != nil {
+		rec := *u
+		g.Update = &rec
+		if u.Style == plan.StyleAppend {
+			g.Base = res.Base // H: the new commits were appended onto it
+		}
 	}
 	return g
 }

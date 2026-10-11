@@ -537,3 +537,81 @@ func TestNextForAFeatureMergedIntoItsParentsBranch(t *testing.T) {
 		t.Fatalf("next = %+v", next)
 	}
 }
+
+// The stack-path refusals of an update, PLAN_STALE after the PR moved, and
+// a pr_behind feature each name the step that moves it on.
+func TestNextForUpdates(t *testing.T) {
+	t.Parallel()
+	repo := []string{"--repo", "acme/widget"}
+	cmd := func(args ...string) []string { return append(append([]string{"ghostbranch"}, args...), repo...) }
+	a := testApp("promote", "promote", "feat-a")
+	next := a.next(contract.New(contract.NotAStack, "x").WithDetails(map[string]any{
+		"reason": "stale_gate", "feature": "feat-b", "features": []string{"feat-a", "feat-b", "feat-c"}}))
+	if len(next) != 1 || !slices.Equal(next[0].Command, cmd("gate", "feat-b")) || !strings.Contains(next[0].Why, "feat-c") ||
+		!strings.Contains(next[0].Why, "bottom up") {
+		t.Errorf("stale_gate: next = %+v", next)
+	}
+	// A bottom gate built in another mode: gating again would loop, so next
+	// promotes the bottom on its own in that mode; the branches above come
+	// once that plan is applied, so they are named in why, not offered now.
+	next = a.next(contract.New(contract.NotAStack, "x").WithDetails(map[string]any{
+		"reason": "stale_gate", "feature": "feat-a", "features": []string{"feat-a", "feat-b"}, "update_mode": "squash"}))
+	if len(next) != 1 || !slices.Equal(next[0].Command, cmd("promote", "feat-a", "--mode", "squash", "--plan")) ||
+		!strings.Contains(next[0].Why, "once that plan is applied, promote feat-b --mode squash --plan") {
+		t.Errorf("stale_gate update_mode: next = %+v", next)
+	}
+	next = a.next(contract.New(contract.NotAStack, "x").WithDetails(map[string]any{
+		"reason": "open_above", "feature": "feat-a", "features": []string{"feat-a"}, "children": []string{"feat-b", "feat-c"}}))
+	// Promoting either line would be refused naming the other: a person
+	// closes or merges the other lines' PRs first, then promote feat-a.
+	if len(next) != 2 || !slices.Equal(next[0].Command, cmd("status")) || !next[0].NeedsHuman ||
+		!strings.Contains(next[0].Why, "feat-b, feat-c") || !slices.Equal(next[1].Command, cmd("promote", "feat-a", "--plan")) {
+		t.Errorf("open_above: next = %+v", next)
+	}
+	next = a.next(contract.New(contract.NotAStack, "x").WithDetails(map[string]any{
+		"reason": "parent_stale", "feature": "feat-b", "parent": "feat-a", "features": []string{"feat-a", "feat-b"}}))
+	if len(next) != 2 || !slices.Equal(next[0].Command, cmd("feature", "restack", "feat-a")) {
+		t.Errorf("parent_stale: next = %+v", next)
+	}
+	ap := testApp("apply", "apply")
+	next = ap.next(contract.New(contract.PlanStale, "x").WithDetails(map[string]any{
+		"feature": "feat-a", "public": "acme/widget", "mode": "squash", "moved": []string{"public_branch"}, "branch": "feat-a"}))
+	if len(next) != 1 || !slices.Equal(next[0].Command, []string{"ghostbranch", "promote", "feat-a", "--mode", "squash", "--plan", "--repo", "acme/widget"}) {
+		t.Errorf("PLAN_STALE public_branch: next = %+v", next)
+	}
+	job := "gate/feat-a/0123456789ab"
+	st := testApp("status", "status")
+	next = st.featureNexts(nil, []engine.FeatureReport{
+		{Name: "feat-a", State: feature.StatePRBehind, Gate: &engine.GateSummary{Job: &job}},
+		{Name: "feat-b", State: feature.StatePRBehind, Gate: &engine.GateSummary{Fresh: true, Checks: feature.ChecksPassed, Leak: feature.LeakClean}},
+		{Name: "feat-c", State: feature.StatePRBehind},
+		{Name: "feat-d", State: feature.StatePRBehind, PR: &engine.PRSync{Behind: 1, Foreign: 2}},
+	})
+	want := [][]string{cmd("wait", job), cmd("promote", "feat-b", "--plan"), cmd("gate", "feat-c"), cmd("feature", "pull", "feat-d")}
+	if len(next) != len(want) {
+		t.Fatalf("featureNexts = %+v, want %v", next, want)
+	}
+	for i := range want {
+		if !slices.Equal(next[i].Command, want[i]) {
+			t.Errorf("featureNexts[%d] = %v, want %v", i, next[i].Command, want[i])
+		}
+	}
+}
+
+// After a stack publish, next says merging the top PR merges them all.
+func TestNextAfterAStackPublish(t *testing.T) {
+	t.Parallel()
+	a := testApp("apply", "apply")
+	stack := 3
+	a.result = &engine.ApplyResult{PublicPR: 7, StackNumber: &stack, PRs: []plan.StackPR{{Feature: "feat-a", Number: 6}, {Feature: "feat-b", Number: 7}}}
+	next := a.next(nil)
+	if len(next) != 1 || !slices.Equal(next[0].Command, []string{"ghostbranch", "sync", "--repo", "acme/widget"}) ||
+		!strings.Contains(next[0].Why, "#7") || !strings.Contains(next[0].Why, "merges them all") {
+		t.Fatalf("next = %+v", next)
+	}
+	// Plain chained PRs (no native stack) merge one by one, bottom first.
+	a.result = &engine.ApplyResult{PublicPR: 7, PRs: []plan.StackPR{{Feature: "feat-a", Number: 6}, {Feature: "feat-b", Number: 7}}}
+	if next = a.next(nil); len(next) != 1 || strings.Contains(next[0].Why, "merges them all") || !strings.Contains(next[0].Why, "#6 first") {
+		t.Fatalf("plain chain: next = %+v", next)
+	}
+}

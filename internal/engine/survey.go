@@ -32,6 +32,9 @@ type FeatureReport struct {
 	PlanID    string       `json:"plan_id"`
 	Moved     bool         `json:"moved"` // since publish; false when unpublished; meaningless when the branch is gone (branch_gone reads only PRState)
 	Abandoned bool         `json:"abandoned"`
+	// PR is how its open public PR compares with the feature; nil unless
+	// it is published, the PR is open and the feature's branch exists.
+	PR *PRSync `json:"pr,omitempty"`
 	// Error is why the feature couldn't be surveyed; set only with state
 	// unreadable. feature show returns it as its error.
 	Error string `json:"error,omitempty"`
@@ -228,6 +231,44 @@ func (e *Engine) surveyOne(ctx context.Context, pc *pairCtx, name, pm, O string)
 		}
 		base := e.publishedHead(m)
 		r.Moved = base == "" || head != base
+		// A branch_gone feature has nothing to compare with its PR.
+		if r.PRState == prOpen && exists {
+			var ws []contract.Warning
+			r.PR, ws = e.prSyncOf(ctx, pc, m, head, base, pm, st.heads)
+			warns = append(warns, ws...)
+		}
+		// Commits someone made on the PR on GitHub (R5, R6). Only for the
+		// records sync's refreshPublished compares too (it flags them): a
+		// record from before 0.11 has no published head or patch-ids, and
+		// without them every commit would read as foreign.
+		if r.PR != nil && m.Promoted.PublishedHead != "" && len(m.Promoted.PatchIDs) > 0 {
+			tip, tipOK, terr := pc.git.Resolve(ctx, publicRef(publishedBranch(m)))
+			pbase, baseOK, berr := pc.git.Resolve(ctx, publicRef(pr.Base))
+			// A base branch the public repo doesn't have leaves nothing to
+			// compare against: the count stays 0 without a warning here, as
+			// sync's comparison (refreshPublished) and promote each say so
+			// in their own words.
+			switch {
+			case terr != nil || berr != nil:
+				warns = append(warns, contract.Warning{Code: contract.PRStateUnknown,
+					Message: fmt.Sprintf("couldn't check public PR #%d of feature %s for commits made on GitHub: its branch or base can't be read", n, name),
+					Details: map[string]any{"feature": name, "public_pr": n}})
+			case tipOK && baseOK && tip != m.Promoted.PublishedHead:
+				fs, planned, err := e.foreignCommits(ctx, pc, m, pbase, tip)
+				switch {
+				case err != nil:
+					warns = append(warns, contract.Warning{Code: contract.PRStateUnknown,
+						Message: fmt.Sprintf("couldn't check public PR #%d of feature %s for commits made on GitHub: %v", n, name, err),
+						Details: map[string]any{"feature": name, "public_pr": n}})
+				case planned != "":
+					// Ghostbranch's own update, pushed but never recorded: nothing
+					// on it is foreign; apply of the plan finishes it.
+					warns = append(warns, unrecordedWarning(name, publishedBranch(m), n, tip, planned))
+				default:
+					r.PR.Foreign = len(fs)
+				}
+			}
+		}
 	}
 	if exists {
 		clean, files, err := pc.git.MergeTreeCheck(ctx, pm, head)
@@ -243,8 +284,12 @@ func (e *Engine) surveyOne(ctx context.Context, pc *pairCtx, name, pm, O string)
 			r.Drift = Drift{Status: driftConflicts, Files: append([]string{}, files...)}
 		}
 	}
+	behind := 0
+	if r.PR != nil {
+		behind = r.PR.Behind
+	}
 	r.State = feature.StateOf(feature.StateInput{Meta: m, BranchExists: exists, Head: head, PublicMain: pm,
-		Overlay: O, PRState: r.PRState, Moved: r.Moved, ParentMoved: st.parentMoved, StackStale: stackStale})
+		Overlay: O, PRState: r.PRState, Moved: r.Moved, ParentMoved: st.parentMoved, StackStale: stackStale, Behind: behind})
 	// Only a merged branch_gone feature needs to know whether its gate is
 	// for what was published (ClosableWithoutConsole), so only it reads the
 	// gate branch.

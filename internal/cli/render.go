@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/guard"
 	"github.com/ghostbranch-labs/ghostbranch/internal/guide"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
+	"github.com/ghostbranch-labs/ghostbranch/internal/plan"
 	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
 )
 
@@ -59,6 +61,8 @@ func previewText(b *strings.Builder, p *preview.Preview) {
 func human(r any, st style.Styler) string {
 	var b strings.Builder
 	switch v := r.(type) {
+	case *VersionResult:
+		fmt.Fprintf(&b, "ghostbranch %s (commit %s), JSON contract %s\n", oneLine(v.Version), oneLine(v.Commit), v.SchemaVersion)
 	case *guide.Printed:
 		b.WriteString(v.Markdown)
 	case *guide.InstallResult:
@@ -234,7 +238,11 @@ func human(r any, st style.Styler) string {
 		case v.Preview != nil:
 			previewText(&b, v.Preview)
 		case v.Applied != nil:
-			fmt.Fprintf(&b, "Published %s as PR #%d: %s\n", v.Applied.PublicBranch, v.Applied.PublicPR, v.Applied.PRURL)
+			k := -1
+			if v.Plan != nil {
+				k = len(v.Plan.Publish.Commits)
+			}
+			b.WriteString(publishedLine(v.Applied, k))
 		case v.Plan != nil && v.PlanPath != "":
 			fmt.Fprintf(&b, "Plan %s saved to %s.\n", v.Plan.ID, v.PlanPath)
 			fmt.Fprintf(&b, "  %s: %d public commit(s)", v.Plan.Mode, len(v.Plan.Publish.Commits))
@@ -253,7 +261,7 @@ func human(r any, st style.Styler) string {
 			previewText(&b, v.Preview)
 			break
 		}
-		fmt.Fprintf(&b, "Published %s as PR #%d: %s\n", v.PublicBranch, v.PublicPR, v.PRURL)
+		b.WriteString(publishedLine(v, -1))
 		waivedLines(&b, v.Waived)
 	case *engine.AgentsAllowResult:
 		if v.Preview != nil {
@@ -377,6 +385,22 @@ func human(r any, st style.Styler) string {
 		if len(v.Restacked) > 0 {
 			b.WriteString("These branches were rewritten in the shadow repo: in each checkout, git fetch, then git reset --keep <remote>/<branch>.\n")
 		}
+	case *engine.PullResult:
+		switch {
+		case v.Preview != nil:
+			previewText(&b, v.Preview)
+		case len(v.Adopted) == 0:
+			fmt.Fprintf(&b, "Nothing to pull: the public PR of %s holds only what Ghostbranch published.\n", oneLine(v.Feature))
+		default:
+			fmt.Fprintf(&b, "Brought %d commit(s) from the public PR into %s:\n", len(v.Adopted), oneLine(v.Feature))
+			for _, c := range v.Adopted {
+				fmt.Fprintf(&b, "  %s %s (%s)\n", short(c.SHA), oneLine(c.Subject), oneLine(c.Author))
+			}
+			if v.From != v.To {
+				fmt.Fprintf(&b, "%s moved %s -> %s in the shadow repo: in your checkout, git fetch, then git reset --keep <remote>/%s.\n",
+					oneLine(v.Feature), short(v.From), short(v.To), oneLine(v.Feature))
+			}
+		}
 	case *engine.FeatureCloseResult:
 		if v.Preview != nil {
 			previewText(&b, v.Preview)
@@ -482,6 +506,47 @@ func human(r any, st style.Styler) string {
 		}
 	}
 	return b.String()
+}
+
+// publishedLine is what an apply did: published a new PR, or updated an
+// open one, by adding k commits (k < 0 when the count isn't at hand) or by
+// replacing its branch. A stack plan that updated a PR says, for each of
+// its PRs, bottom first, what happened to it.
+func publishedLine(r *engine.ApplyResult, k int) string {
+	if len(r.PRs) > 1 && slices.ContainsFunc(r.PRs, func(p plan.StackPR) bool { return p.Update }) {
+		var b strings.Builder
+		for i, p := range r.PRs {
+			// Each PR's branch is the base of the PR above it; the top's is
+			// the result's.
+			branch := r.PublicBranch
+			if i+1 < len(r.PRs) {
+				branch = r.PRs[i+1].Base
+			}
+			switch {
+			case !p.Update:
+				fmt.Fprintf(&b, "Published %s as PR #%d: %s\n", branch, p.Number, p.URL)
+			case p.Style == plan.StyleAppend:
+				fmt.Fprintf(&b, "Updated PR #%d on %s: %s\n", p.Number, branch, p.URL)
+			default:
+				fmt.Fprintf(&b, "Replaced PR #%d's branch %s: %s\n", p.Number, branch, p.URL)
+			}
+		}
+		return b.String()
+	}
+	if len(r.PRs) == 1 && r.PRs[0].Update {
+		if r.PRs[0].Style == plan.StyleAppend {
+			if k < 0 {
+				return fmt.Sprintf("Updated PR #%d on %s: %s\n", r.PublicPR, r.PublicBranch, r.PRURL)
+			}
+			s := "s"
+			if k == 1 {
+				s = ""
+			}
+			return fmt.Sprintf("Updated PR #%d (added %d commit%s): %s\n", r.PublicPR, k, s, r.PRURL)
+		}
+		return fmt.Sprintf("Replaced PR #%d's branch %s: %s\n", r.PublicPR, r.PublicBranch, r.PRURL)
+	}
+	return fmt.Sprintf("Published %s as PR #%d: %s\n", r.PublicBranch, r.PublicPR, r.PRURL)
 }
 
 // pendingJob is whether a gate result is a job still waiting on CI.
@@ -647,13 +712,20 @@ func gateCell(g *engine.GateSummary) string {
 	return oneLine(out)
 }
 
-// prCell is a feature's public PR and its state, or "-", then the native
+// prCell is a feature's public PR and its state, `(behind)` when the
+// feature has commits its open PR doesn't, or `(changed on GitHub)` when the
+// PR holds commits Ghostbranch didn't publish, or "-"; then the native
 // GitHub stack the PR is in, if any.
 func prCell(r engine.FeatureReport) string {
 	out := "-"
 	if r.PublicPR != nil {
 		out = fmt.Sprintf("#%d", *r.PublicPR)
-		if r.PRState != "" {
+		switch {
+		case r.PR != nil && r.PR.Foreign > 0:
+			out += " (changed on GitHub)"
+		case r.State == feature.StatePRBehind:
+			out += " (behind)"
+		case r.PRState != "":
 			out += " " + oneLine(r.PRState)
 		}
 	}

@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.11",
+  "schema_version": "0.12",
   "command": "feature start",
   "ok": true,
   "exit_code": 0,
@@ -25,6 +25,18 @@
   },
   "warnings": [],
   "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "gate",
+        "feat-x",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "feat-x, below feat-y in its stack, has no fresh green gate; gate it first (then each branch above it, bottom up), as feat-y's gate builds on it",
+      "needs_human": false,
+      "needs_input": []
+    },
     {
       "command": [
         "ghostbranch",

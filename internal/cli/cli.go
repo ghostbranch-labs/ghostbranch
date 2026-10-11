@@ -176,6 +176,7 @@ type app struct {
 	shadowRemote   string
 	startName      string // feature start's name argument, for next
 	startFrom      string // feature start's --from, for next
+	versionFlag    bool   // ghostbranch --version ran: the command is version
 }
 
 // Run executes one command and returns the process exit code.
@@ -211,6 +212,9 @@ func Run(args []string, env Env) int {
 	context.AfterFunc(ctx, stop)
 	cmd, err := root.ExecuteContextC(ctx)
 	a.command = commandName(cmd)
+	if a.versionFlag {
+		a.command = "version"
+	}
 	if a.command == "wait" {
 		a.ndjson = a.jsonOut // a usage error before RunE is one line too
 	}
@@ -357,7 +361,7 @@ func printNext(w io.Writer, next []contract.Next, st style.Styler) {
 	for _, n := range next {
 		line := shellJoin(n.Command)
 		for _, in := range n.NeedsInput {
-			if strings.HasPrefix(in, "<") { // a positional argument, already named <like-this>
+			if strings.Contains(in, "<") { // a positional argument or a flag with its placeholder, already named
 				line += " " + in
 				continue
 			}

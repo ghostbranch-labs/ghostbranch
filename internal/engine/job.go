@@ -274,7 +274,7 @@ func (e *Engine) resultFromRecord(ctx context.Context, pc *pairCtx, name string,
 	res := &GateResult{Feature: name, FeatureHead: g.FeatureHead, PublicMain: g.PublicMain, Parent: g.Parent, Base: from, Overlay: g.Overlay,
 		Candidate: g.Candidate, PublishedTree: g.PublishedTree, ScannedAs: g.ScannedAs, Commits: infos,
 		Checks: g.Checks, FailedChecks: failed, Leak: g.Leak, Findings: []leak.Finding{}, Waived: []WaivedFinding{},
-		mapping: g.Commits}
+		mapping: g.Commits, Update: g.Update}
 	if g.ShadowPR != 0 {
 		pr, job := g.ShadowPR, jobID(name, g.Candidate)
 		res.ShadowPR, res.Job = &pr, &job
@@ -318,6 +318,21 @@ func (e *Engine) pendingFor(ctx context.Context, pc *pairCtx, name, mode string)
 		mode = cfg.Promote.DefaultMode
 	}
 	if m.Gate.FreshFor(head, pm, O) && m.Gate.ScannedAs == mode && tip == m.Gate.Candidate {
+		// An update job is this gate only while it builds an update the
+		// open PR can take now (gateFitsUpdate): the same PR, still open on
+		// the same base, its branch at the head the job built on. An append
+		// job stops standing once a replace is forced (PRs opened above it, a
+		// restack flagged since); a replace job stands for any forced
+		// replace. A first-publish job stands only while no PR is open.
+		if m.Gate.Update != nil || (m.Promoted != nil && parentFeature(m) == "") {
+			fits, _, err := e.updateFits(ctx, pc, m.Gate, m, mode)
+			if err != nil {
+				return nil, err
+			}
+			if !fits {
+				return nil, nil
+			}
+		}
 		// A job built on a stack that has moved since is not this gate.
 		st, err := e.stackState(ctx, pc, name, m)
 		if err != nil {

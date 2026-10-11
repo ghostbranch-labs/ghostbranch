@@ -33,7 +33,8 @@ var dataSchemas = map[string]string{
 	"status": "status.schema.json", "feature list": "feature-list.schema.json", "feature show": "feature-show.schema.json",
 	"feature abandon": "feature-abandon.schema.json", "feature close": "feature-close.schema.json",
 	"wait": "gate.schema.json", "login": "login.schema.json", "logout": "logout.schema.json", "auth status": "auth-status.schema.json",
-	"doctor": "doctor.schema.json", "feature fold": "feature-fold.schema.json", "feature restack": "feature-restack.schema.json",
+	"doctor": "doctor.schema.json", "feature fold": "feature-fold.schema.json", "feature restack": "feature-restack.schema.json", "feature pull": "feature-pull.schema.json",
+	"version": "version.schema.json",
 }
 
 var rootPath = regexp.MustCompile(`<ROOT>[^"]*`)
@@ -60,6 +61,8 @@ func TestGoldenContract(t *testing.T) {
 		exit int
 	}{
 		{"init", nil, []string{"init", "acme/widget"}, 0},
+		{"version", nil, []string{"version"}, 0},
+		{"version_flag", nil, []string{"--version"}, 0},
 		{"init_dry_run", nil, []string{"init", "acme/widget", "--dry-run"}, 0},
 		{"init_create_denied", func(te *testEnv) { te.forge.CreateForbidden = true }, []string{"init", "acme/widget"}, 1},
 		{"sync_noop", initOnly, []string{"sync"}, 0},
@@ -93,6 +96,11 @@ func TestGoldenContract(t *testing.T) {
 			te.forge.MissingPermission = map[string]string{"CreatePR": "Pull requests: write"}
 		}, []string{"gate", "feat-x"}, 1},
 		{"gate_stacked", withStack, []string{"gate", "feat-y"}, 0},
+		{"gate_update_append", func(te *testEnv) {
+			publishable(te)
+			te.mustRun("promote", "feat-x", "--yes")
+			te.shadowCommit("feat-x", map[string]string{"more.txt": "more\n"})
+		}, []string{"gate", "feat-x"}, 0},
 		{"gate_parent_rewritten", func(te *testEnv) {
 			withStack(te)
 			sh := gitx.New(te.forge.RepoDir("acme/widget-shadow"))
@@ -127,6 +135,11 @@ func TestGoldenContract(t *testing.T) {
 		{"promote_needs_human", func(te *testEnv) { gatedFeature(te); te.vars["GHOSTBRANCH_ACTOR"] = "agent:claude-code" },
 			[]string{"promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--yes"}, 5},
 		{"promote_plan_under_grant", publishable, []string{"promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--plan"}, 0},
+		{"promote_update_plan", func(te *testEnv) {
+			publishable(te)
+			te.mustRun("promote", "feat-x", "--yes")
+			te.shadowCommit("feat-x", map[string]string{"more.txt": "more\n"})
+		}, []string{"promote", "feat-x", "--plan"}, 0},
 		{"promote_grant_needs_yes", publishable, []string{"promote", "feat-x", "--mode", "squash", "-m", "Add feature"}, 5},
 		{"promote_not_confirmed", func(te *testEnv) { gatedFeature(te); atConsole(te, func(string) string { return "n\n" }) },
 			[]string{"promote", "feat-x", "--mode", "squash", "-m", "Add feature"}, 5},
@@ -236,6 +249,8 @@ jobs:
 		}, []string{"feature", "restack", "feat-x"}, 0},
 		{"feature_restack_onto_main", withStack, []string{"feature", "restack", "feat-y", "--onto", "main"}, 0},
 		{"feature_restack_conflict", withConflictingStack, []string{"feature", "restack", "feat-x"}, contract.RebaseConflict.Exit()},
+		{"feature_pull", publishedWithForeign, []string{"feature", "pull", "feat-x"}, 0},
+		{"feature_pull_by_hand", publishedWithConflict, []string{"feature", "pull", "feat-x"}, contract.PRChangedOnGitHub.Exit()},
 		{"feature_abandon_has_children", withStack, []string{"feature", "abandon", "feat-x"}, contract.HasChildren.Exit()},
 		{"feature_close_has_children", withStack, []string{"feature", "close", "feat-x"}, contract.HasChildren.Exit()},
 		{"gate_detach", withFeature, []string{"gate", "feat-x", "--detach"}, 0},

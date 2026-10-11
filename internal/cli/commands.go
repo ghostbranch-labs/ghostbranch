@@ -38,8 +38,17 @@ Coding agents: run "ghostbranch guide" first.`,
 		return contract.New(contract.BadFlag, "%s", err.Error())
 	})
 	feature := &cobra.Command{Use: "feature", Short: "Work with features (private branches in the shadow repo)"}
-	feature.AddCommand(a.featureStartCmd(), a.featureListCmd(), a.featureShowCmd(), a.featureAbandonCmd(), a.featureCloseCmd(), a.featureFoldCmd(), a.featureRestackCmd())
-	root.AddCommand(a.initCmd(), a.syncCmd(), a.statusCmd(), a.auditCmd(), a.doctorCmd(), a.upgradeCmd(), feature, a.gateCmd(), a.waitCmd(), a.promoteCmd(), a.applyCmd(), a.agentsCmd(), a.waiversCmd(), a.explainCmd(), a.guideCmd(), a.guardCmd(), a.removeCmd(), a.logCmd(), a.loginCmd(), a.logoutCmd(), a.authCmd())
+	feature.AddCommand(a.featureStartCmd(), a.featureListCmd(), a.featureShowCmd(), a.featureAbandonCmd(), a.featureCloseCmd(), a.featureFoldCmd(), a.featureRestackCmd(), a.featurePullCmd())
+	root.AddCommand(a.initCmd(), a.syncCmd(), a.statusCmd(), a.auditCmd(), a.doctorCmd(), a.upgradeCmd(), feature, a.gateCmd(), a.waitCmd(), a.promoteCmd(), a.applyCmd(), a.agentsCmd(), a.waiversCmd(), a.explainCmd(), a.guideCmd(), a.guardCmd(), a.removeCmd(), a.logCmd(), a.loginCmd(), a.logoutCmd(), a.authCmd(), a.versionCmd())
+	var showVersion bool
+	root.Flags().BoolVar(&showVersion, "version", false, "print this binary's version (as ghostbranch version does)")
+	root.RunE = func(cmd *cobra.Command, _ []string) error {
+		if !showVersion {
+			return cmd.Help()
+		}
+		a.versionFlag = true
+		return a.printVersion()
+	}
 	return root
 }
 

@@ -2,6 +2,14 @@ name: ci
 
 # Linux only, to save Actions minutes. Windows and macOS are tested on the
 # maintainers' own machines before a merge.
+#
+# Three jobs run in parallel: lint, vuln, and test, a matrix. The test
+# matrix splits ./internal/engine into shards by the first letter after
+# "Test" (each shard's run pattern); the "other" shard runs every other
+# package. internal/cishard's test fails if an engine test is in no shard
+# or in two, so a test added later can't drop out of CI. To rebalance, move
+# a boundary letter and rename the shard to match: keep the ranges
+# contiguous, from A to Z. The shard names are the check names on the PR.
 on:
   pull_request:
   push:
@@ -12,8 +20,9 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
@@ -22,10 +31,50 @@ jobs:
       - name: gofmt
         run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
       - run: go vet ./...
-      - run: go test ./...
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v8
         with:
           version: v2.14.0
+
+  vuln:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          # Every job's setup-go cache shares one key, and the first job to
+          # finish saves it. This one builds nothing of ours, so it saves
+          # nothing, which leaves the key to a job whose build cache helps.
+          cache: false
       - name: govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+  test:
+    name: test (${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { shard: engine-a-f, pkg: ./internal/engine, run: '^Test[A-F]' }
+          - { shard: engine-g-r, pkg: ./internal/engine, run: '^Test[G-R]' }
+          - { shard: engine-s-z, pkg: ./internal/engine, run: '^Test[S-Z]' }
+          - { shard: other, pkg: ./..., run: '' }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: go test
+        env:
+          PKG: ${{ matrix.pkg }}
+          RUN: ${{ matrix.run }}
+        run: |
+          if [ "$PKG" = ./internal/engine ]; then
+            go test -timeout 25m -run "$RUN" ./internal/engine
+          else
+            go test $(go list ./... | grep -v '/internal/engine$')
+          fi

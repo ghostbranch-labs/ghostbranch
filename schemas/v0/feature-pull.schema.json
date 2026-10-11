@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "feature pull data",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["feature", "from", "to", "adopted", "children", "preview"],
+  "properties": {
+    "feature": { "type": "string" },
+    "from": { "description": "the feature branch's head before", "$ref": "common.schema.json#/$defs/sha" },
+    "to": { "description": "its head now (under --plan, what it would be); from when only the record moved or nothing did", "$ref": "common.schema.json#/$defs/sha" },
+    "adopted": {
+      "description": "the public PR's commits Ghostbranch didn't publish, now in the feature; empty when there were none",
+      "type": "array",
+      "items": { "type": "object", "additionalProperties": false, "required": ["sha", "author", "subject"],
+        "properties": { "sha": { "$ref": "common.schema.json#/$defs/sha" }, "author": { "type": "string" }, "subject": { "type": "string" } } }
+    },
+    "children": { "description": "the live features stacked directly on it, when it moved (to != from): they sit on its old commits until feature restack moves them; empty otherwise", "type": "array", "items": { "type": "string" } },
+    "preview": { "oneOf": [{ "type": "null" }, { "$ref": "preview.schema.json" }] }
+  }
+}

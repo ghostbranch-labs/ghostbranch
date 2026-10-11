@@ -443,18 +443,31 @@ func TestBranchExistsNamesTheEarlierPlan(t *testing.T) {
 			if err != nil || second.Plan == nil || second.Plan.Publish.Commit == first.Plan.Publish.Commit {
 				t.Fatalf("second promote = %+v %v", second, err)
 			}
+			if !interrupted {
+				// The branch is this feature's published one and its PR is
+				// open: the plan updates it instead of hitting BRANCH_EXISTS.
+				if pub := second.Plan.Publish; !pub.Update || pub.Style != "replace" || pub.ExpectedHead != first.Plan.Publish.Commit {
+					t.Fatalf("second plan = %+v", pub)
+				}
+				h.eng.DryRun = true
+				if _, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: second.Plan.ID, Yes: true}); err != nil {
+					t.Fatalf("apply --dry-run: %v", err)
+				}
+				h.eng.DryRun = false
+				if _, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: second.Plan.ID, Yes: true}); err != nil {
+					t.Fatalf("apply: %v", err)
+				}
+				if got := h.publicRefs()["refs/heads/feat-x"]; got != second.Plan.Publish.Commit {
+					t.Fatalf("public branch at %s, want the update %s", got, second.Plan.Publish.Commit)
+				}
+				return
+			}
 			check := func(what string) {
 				t.Helper()
 				_, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: second.Plan.ID, Yes: true})
 				ce := wantCode(t, err, contract.BranchExists)
 				if ce.Details["sha"] != first.Plan.Publish.Commit {
 					t.Fatalf("%s: details = %+v", what, ce.Details)
-				}
-				if !interrupted {
-					if _, ok := ce.Details["plan_id"]; ok || !strings.Contains(ce.Message, "--branch") {
-						t.Fatalf("%s: a finished publish was named: %s, details = %+v", what, ce.Message, ce.Details)
-					}
-					return
 				}
 				if ce.Details["plan_id"] != first.Plan.ID || !strings.Contains(ce.Message, "ghostbranch apply "+first.Plan.ID) {
 					t.Fatalf("%s: %s, details = %+v", what, ce.Message, ce.Details)

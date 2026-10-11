@@ -38,7 +38,8 @@ main, green CI, and a leak scan of exactly what will be published.
   Every commit must appear exactly once. Reordering commits that touch the same lines fails with
   `CURATE_CONFLICT` or `CURATE_TREE_MISMATCH`: keep those in order, or reorder on your branch.
 - **Authors:** `promote.author_email` (`noreply` by default) decides who each public commit says wrote
-  it. Never rewrite authors on your branch to hide them.
+  it. Commits `feature pull` brought in from the PR keep their authors (a squash credits them with
+  `Co-authored-by`). Never rewrite authors on your branch to hide them.
 - **History leaks:** a preserve publish (and its gate) checks every commit, so a secret added and
   later deleted still blocks; squash and curated check what they publish. A finding's `commits` are
   the feature commits that introduce or change it (a later commit that only carries it unchanged is
@@ -98,7 +99,7 @@ main, green CI, and a leak scan of exactly what will be published.
 ## Lifecycle
 
 - `ghostbranch status --repo <public> --json` shows the pair's health and every feature's state:
-  `draft`, `in_review`, `gate_passed`, `published`, `merged`, `merged_moved`, `pr_closed`,
+  `draft`, `in_review`, `gate_passed`, `published`, `pr_behind`, `merged`, `merged_moved`, `pr_closed`,
   `branch_gone`, `abandoned`, and `unreadable` (a record that can't be read: `feature show <name>`
   gives the error; run the command again if it was a passing failure, as a corrupt one only a person
   at the console closes; the other features still show). `feature list --repo <public>` and
@@ -145,7 +146,32 @@ main, green CI, and a leak scan of exactly what will be published.
   (`HAS_CHILDREN`): fold each, `feature restack <child> --onto main` it, or abandon it (for `close`: `close <child>`, as an abandoned child still blocks `close`).
 - After a PR of a stack merges, `sync` closes its feature and moves the branch above onto main.
   `public_pr_needs_update` means that branch's open PR still carries the merged one's old commits:
-  restack it with `--onto main` and gate it; a person updates the public PR by hand for now.
+  restack it with `--onto main`, gate it, and promote it: the update replaces its PR's branch.
+
+## Updating an open PR
+
+- After a review, commit the fixes on the feature branch, push to the shadow repo, then `gate` and
+  `ghostbranch promote <name> --repo <public> --plan --json` as before: promote updates the open PR
+  instead of opening another. `status` shows such a feature as `pr_behind`, its PR as `#14 (behind)`.
+- Only new commits: they are added to the PR's branch (`plan.publish.style` `append`), no force-push.
+  A changed history (restack, rebase, squash mode, a reworded message, a changed base, a conflict)
+  replaces the branch (`replace`; `replace_reason` says why), pushed with a lease on the head the plan
+  saw (`expected_head`). The approval summary says which. Every update needs the same approval.
+  A rebase onto a moved main replaces (`rebase`) even when no commit changed.
+- In a stack, `promote a` updates the open PRs above a too, under one approval, bottom up; a PR in a stack,
+  or with open PRs above it, is always replaced (a leased force-push), never appended. Restack and gate
+  first (`feature restack a`, then `gate` a and each branch above it, from the bottom up); `NOT_A_STACK`
+  (`parent_stale`, `stale_gate`) and `next` say which. `open_above` (more than one line of open PRs on a,
+  `error.details.children`): a person closes or merges every line's PRs but one, then `promote a` again.
+  `stale_gate` with `error.details.update_mode` (a's gate was built in another mode): promote a on
+  its own with that `--mode` (it gates itself), then the branches above; gating again won't help.
+- `PUBLIC_BRANCH_CHANGED`: someone pushed to the PR on GitHub (`status`: `#14 (changed on GitHub)`).
+  It is never overwritten. Run `ghostbranch feature pull <name> --repo <public> --json`: it brings
+  their commits into the feature branch, or gives git steps (merge, push to the shadow repo, pull
+  again). Then gate and promote as usual; the update keeps their commits. `error.details.reason`
+  `unrecorded_update`: an update Ghostbranch pushed was never recorded; run `apply <error.details.plan>`
+  (where the plan was made), never `feature pull`. `adopted_missing`: cherry-pick the pulled commits back.
+- `PLAN_STALE` with `public_branch` in `error.details.moved`: the PR moved after the plan; plan again.
 
 ## Keeping up with public
 

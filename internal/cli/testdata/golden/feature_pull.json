@@ -1,0 +1,57 @@
+{
+  "schema_version": "0.12",
+  "command": "feature pull",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "feature": "feat-x",
+    "from": "d7407485ce685c126afcfc258f0a9eeb0092d776",
+    "to": "619a2a52696abdb103b8ba98934b14c3726a9f4c",
+    "adopted": [
+      {
+        "sha": "4671a8d375de46f53b62ecae3020f9306d11893e",
+        "author": "Test Author <author@example.com>",
+        "subject": "their fix"
+      }
+    ],
+    "children": [],
+    "preview": null
+  },
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "git",
+        "fetch",
+        "shadow"
+      ],
+      "why": "in your checkout: fetch the feature branch pull rewrote in the shadow repo",
+      "needs_human": false,
+      "needs_input": []
+    },
+    {
+      "command": [
+        "git",
+        "reset",
+        "--keep",
+        "shadow/feat-x"
+      ],
+      "why": "with feat-x checked out, move it to the pulled branch (--keep refuses rather than lose uncommitted changes)",
+      "needs_human": false,
+      "needs_input": []
+    },
+    {
+      "command": [
+        "ghostbranch",
+        "gate",
+        "feat-x",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "the PR's commits are in the feature branch now; gate it, then promote: the update keeps them",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
+  "error": null
+}

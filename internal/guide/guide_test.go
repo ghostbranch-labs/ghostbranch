@@ -43,8 +43,12 @@ func TestRenderListsEveryCodeFromTheRegistry(t *testing.T) {
 	// 378: guided init asks where an org's shadow repo lives, and --shadow sets it (6.1 Task 10).
 	// 379: one line on terminal colour, --no-color and NO_COLOR.
 	// 383: the four sub-project 6.1a error rows (FOLD_NEEDS_REBASE, HAS_CHILDREN, NOT_A_STACK, PARENT_REWRITTEN).
-	// 405: the Stacks section (sub-project 6.1a, 22 lines).
-	if n := strings.Count(out, "\n"); n > 405 {
+	// 406: the PUBLIC_BRANCH_CHANGED error row (sub-project 6.1a-2).
+	// 426: the Updating an open PR section and feature pull (sub-project 6.1a-2, 20 lines, with the stack refusals).
+	// 428: PUBLIC_BRANCH_CHANGED's reasons unrecorded_update and adopted_missing (6.1a-2 final review).
+	// 429: commits pulled in from the PR keep their authors (6.1a-2 final review, owner's ruling).
+	// 432: a clean rebase replaces, and stale_gate's update_mode (6.1a-2 acceptance fixes).
+	if n := strings.Count(out, "\n"); n > 432 {
 		t.Errorf("the guide is %d lines; keep it short (spec: about 150 plus the tables)", n)
 	}
 }
@@ -400,5 +404,32 @@ func TestGuideTeachesStacks(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("the guide lacks %q", want)
 		}
+	}
+}
+
+// An agent that opens a second PR after a review, or force-pushes over a
+// maintainer's commit, loses the review or their work.
+func TestGuideTeachesUpdatingAnOpenPR(t *testing.T) {
+	t.Parallel()
+	out := strings.Join(strings.Fields(guide.Render(contract.Registry())), " ")
+	for _, want := range []string{
+		"## Updating an open PR",
+		"promote updates the open PR",
+		"`pr_behind`", "`#14 (behind)`",
+		"`append`", "`replace`", "`replace_reason`", "`expected_head`",
+		"`promote a` updates the open PRs above a too",
+		"from the bottom up", "`open_above`", "a person closes or merges every line's PRs but one, then `promote a` again",
+		"is always replaced (a leased force-push), never appended", "`published`, `pr_behind`,",
+		"`PUBLIC_BRANCH_CHANGED`", "`ghostbranch feature pull <name> --repo <public> --json`",
+		"the update keeps their commits",
+		"`PLAN_STALE` with `public_branch` in `error.details.moved`",
+		"promote it: the update replaces its PR's branch",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the guide lacks %q", want)
+		}
+	}
+	if strings.Contains(out, "a person updates the public PR by hand") {
+		t.Error("the guide still says a person updates the public PR by hand")
 	}
 }

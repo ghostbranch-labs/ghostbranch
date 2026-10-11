@@ -245,3 +245,34 @@ func TestAPlainChainedChildNeedsItsPRUpdated(t *testing.T) {
 		t.Fatalf("a merged PR is merged whatever else: %s", got)
 	}
 }
+
+// pr_behind: published, PR open, and commits the PR doesn't have. Every
+// state that already wins over published wins over it too.
+func TestStateOfPRBehind(t *testing.T) {
+	t.Parallel()
+	prom := &feature.Promoted{PublicPR: 1, FeatureHead: "h"}
+	needs := &feature.Promoted{PublicPR: 1, FeatureHead: "h", NeedsUpdate: true}
+	in := func(m feature.Meta, branch bool, pr string, behind int) feature.StateInput {
+		return feature.StateInput{Meta: m, BranchExists: branch, Head: "h2", PublicMain: "p", Overlay: "o", PRState: pr,
+			Moved: m.Promoted != nil, Behind: behind}
+	}
+	for _, c := range []struct {
+		name string
+		in   feature.StateInput
+		want feature.State
+	}{
+		{"open and behind", in(feature.Meta{Promoted: prom}, true, "open", 2), feature.StatePRBehind},
+		{"open, moved, nothing new", in(feature.Meta{Promoted: prom}, true, "open", 0), feature.StatePublished},
+		{"PR state unknown", in(feature.Meta{Promoted: prom}, true, "unknown", 2), feature.StatePublished},
+		{"merged wins", in(feature.Meta{Promoted: prom}, true, "merged", 2), feature.StateMergedMoved},
+		{"closed wins", in(feature.Meta{Promoted: prom}, true, "closed", 2), feature.StatePRClosed},
+		{"branch gone wins", in(feature.Meta{Promoted: prom}, false, "open", 2), feature.StateBranchGone},
+		{"abandoned wins", in(feature.Meta{Abandoned: true, Promoted: prom}, true, "open", 2), feature.StateAbandoned},
+		{"needs update wins", in(feature.Meta{Promoted: needs}, true, "open", 2), feature.StatePublicPRNeedsUpdate},
+		{"unpublished ignores behind", in(feature.Meta{}, true, "", 2), feature.StateDraft},
+	} {
+		if got := feature.StateOf(c.in); got != c.want {
+			t.Errorf("%s: got %s, want %s", c.name, got, c.want)
+		}
+	}
+}

@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	SchemaVersion = "0.11"
+	SchemaVersion = "0.12"
 	MetaFile      = "feature.json"
 )
 
@@ -66,7 +66,8 @@ type Gate struct {
 	// commits from; empty when unstacked.
 	ForkedAt string `json:"forked_at,omitempty"`
 	// Base is the commit the feature's own commits were replayed onto: R,
-	// the rebased tip of the features below; empty when unstacked (public
+	// the rebased tip of the features below, or, for an append to the
+	// feature's open PR (Update), that PR's head H; empty otherwise (public
 	// main).
 	Base string `json:"base,omitempty"`
 	// BaseTree is Base's published tree: what the leak scan compared the
@@ -75,6 +76,11 @@ type Gate struct {
 	// Below lists every feature under this one with the head the gate
 	// built on, bottom first; nil when unstacked.
 	Below []StackHead `json:"below,omitempty"`
+	// Update is how the gate built the update of the feature's open PR;
+	// nil for a first publish and in a gate recorded before 0.12. An append
+	// gate's Base is the PR's head H, and its Commits map the new feature
+	// commits to the public commits appended on H.
+	Update *GateUpdate `json:"update,omitempty"`
 }
 
 // StackHead is one feature below a stacked feature, at the head its gate
@@ -82,6 +88,16 @@ type Gate struct {
 type StackHead struct {
 	Feature string `json:"feature"`
 	Head    string `json:"head"`
+}
+
+// GateUpdate is how a gate built the update of a feature's open PR: on its
+// head H, by appending the new commits or replacing the branch.
+type GateUpdate struct {
+	PR     int    `json:"pr"`
+	Head   string `json:"head"`
+	Base   string `json:"base"`
+	Style  string `json:"style"` // append | replace
+	Reason string `json:"replace_reason,omitempty"`
 }
 
 // Pending reports a gate whose CI wait hasn't finished: a job. A pending
@@ -142,6 +158,20 @@ type Promoted struct {
 	// were plain chained PRs (no native stack), so its open public PR still
 	// carries that parent's old commits. Republishing it is 6.1a-2.
 	NeedsUpdate bool `json:"needs_update,omitempty"`
+	// Adopted are commits someone made on the public PR's branch on GitHub
+	// that feature pull brought into the feature: they came from the public
+	// PR, not from Ghostbranch. Absent when none.
+	Adopted []AdoptedCommit `json:"adopted,omitempty"`
+}
+
+// AdoptedCommit is one public PR commit feature pull adopted. Folded: a
+// squash or curated update folded it into its own commits, which keep its
+// content (and credit its author); it is no longer on the PR by itself.
+type AdoptedCommit struct {
+	SHA     string `json:"sha"`
+	Author  string `json:"author"`
+	Subject string `json:"subject"`
+	Folded  bool   `json:"folded,omitempty"`
 }
 
 // Meta is feature.json.
@@ -215,6 +245,10 @@ const (
 	// (not a native stack) whose PR below was squash- or rebase-merged: its
 	// public branch still carries the old parent commits.
 	StatePublicPRNeedsUpdate State = "public_pr_needs_update"
+	// StatePRBehind is a published feature whose PR is open and whose
+	// branch has commits the PR doesn't: gate it, then promote updates the
+	// PR.
+	StatePRBehind State = "pr_behind"
 )
 
 // StateInput is everything state depends on.
@@ -235,6 +269,9 @@ type StateInput struct {
 	// StackStale reports that the gate built on a stack that has changed
 	// since (Gate.StackFreshFor is false); false when unstacked.
 	StackStale bool
+	// Behind counts the branch's commits since it was published that its
+	// open PR doesn't have; 0 when it isn't published or the PR isn't open.
+	Behind int
 }
 
 // StateOf computes state. The first matching rule wins.
@@ -253,6 +290,8 @@ func StateOf(in StateInput) State {
 		return StatePRClosed
 	case m.Promoted != nil && m.Promoted.NeedsUpdate:
 		return StatePublicPRNeedsUpdate
+	case m.Promoted != nil && in.PRState == "open" && in.Behind > 0:
+		return StatePRBehind
 	case m.Promoted != nil:
 		return StatePublished
 	case in.ParentMoved:

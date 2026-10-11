@@ -5,7 +5,7 @@
   "additionalProperties": false,
   "required": ["schema_version", "name", "branch", "created_by", "created_at", "base", "abandoned", "gate", "promoted"],
   "properties": {
-    "schema_version": { "const": "0.11" },
+    "schema_version": { "const": "0.12" },
     "name": { "type": "string" },
     "branch": { "type": "string" },
     "created_by": { "$ref": "common.schema.json#/$defs/actor" },
@@ -36,7 +36,7 @@
             "started_at": { "$ref": "common.schema.json#/$defs/time" },
             "parent": { "description": "the feature the gate stacked on; absent when it built on public main", "type": "string" },
             "forked_at": { "description": "the fork point the gate replayed the feature's own commits from; absent when unstacked", "$ref": "common.schema.json#/$defs/sha" },
-            "base": { "description": "the commit the feature's own commits were replayed onto (the rebased tip below); absent when unstacked", "$ref": "common.schema.json#/$defs/sha" },
+            "base": { "description": "the commit the feature's own commits were replayed onto: the rebased tip below, or the open PR's head for an append; absent otherwise", "$ref": "common.schema.json#/$defs/sha" },
             "base_tree": { "description": "base's published tree, the leak scan's baseline; absent when unstacked", "$ref": "common.schema.json#/$defs/sha" },
             "below": {
               "description": "every feature under this one with the head the gate built on, bottom first; absent when unstacked",
@@ -44,6 +44,20 @@
               "items": {
                 "type": "object", "additionalProperties": false, "required": ["feature", "head"],
                 "properties": { "feature": { "type": "string" }, "head": { "$ref": "common.schema.json#/$defs/sha" } }
+              }
+            },
+            "update": {
+              "description": "how the gate built the update of the feature's open PR; absent for a first publish. An append gate's base is head",
+              "type": "object", "additionalProperties": false, "required": ["pr", "head", "base", "style"],
+              "if": { "properties": { "style": { "const": "replace" } } },
+              "then": { "required": ["replace_reason"] },
+              "else": { "not": { "required": ["replace_reason"] } },
+              "properties": {
+                "pr": { "type": "integer", "minimum": 1 },
+                "head": { "$ref": "common.schema.json#/$defs/sha" },
+                "base": { "type": "string", "minLength": 1 },
+                "style": { "enum": ["append", "replace"] },
+                "replace_reason": { "enum": ["restack", "rebase", "squash", "curated", "base_changed", "conflict", "reworded"] }
               }
             },
             "leak": { "enum": ["clean", "found", "not_run"] },
@@ -78,7 +92,11 @@
             "published_head": { "description": "the public branch's head as Ghostbranch last knew it", "$ref": "common.schema.json#/$defs/sha" },
             "patch_ids": { "description": "the published commits' stable patch-ids, oldest first", "type": "array", "items": { "type": "string" } },
             "stack": { "description": "the native GitHub stack its PR is in; absent when none", "type": "integer", "minimum": 1 },
-            "needs_update": { "description": "the PR below it merged by squash or rebase while the PRs were plain chained PRs: its open public PR still carries that parent's old commits", "type": "boolean" }
+            "needs_update": { "description": "the PR below it merged by squash or rebase while the PRs were plain chained PRs: its open public PR still carries that parent's old commits", "type": "boolean" },
+            "adopted": { "description": "commits someone made on the public PR on GitHub that feature pull brought into the feature", "type": "array",
+              "items": { "type": "object", "additionalProperties": false, "required": ["sha", "author", "subject"],
+                "properties": { "sha": { "$ref": "common.schema.json#/$defs/sha" }, "author": { "type": "string" }, "subject": { "type": "string" },
+                  "folded": { "description": "a squash or curated update folded it into its commits; no longer on the PR by itself", "type": "boolean" } } } }
           }
         }
       ]
