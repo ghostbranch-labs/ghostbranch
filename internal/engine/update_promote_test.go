@@ -151,7 +151,7 @@ func TestAModeForcedReplaceOnAReusedGate(t *testing.T) {
 			h.rebaseOntoMain()
 			testutil.Commit(t, h.shadowGit(), "feat-x", "add a fixture", fixture())
 			gr, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
-			if wantCode(t, err, contract.LeakFound); len(gr.Findings) != 1 || !gr.Findings[0].Waivable {
+			if _ = wantCode(t, err, contract.LeakFound); len(gr.Findings) != 1 || !gr.Findings[0].Waivable {
 				t.Fatalf("gate findings = %+v", gr.Findings)
 			}
 			secret := gr.Findings[0]
@@ -170,6 +170,7 @@ func TestAModeForcedReplaceOnAReusedGate(t *testing.T) {
 				}
 				return o
 			}
+			from := len(h.pushes)
 			res, err := promote(h, opt("Fix JIRA-123", true))
 			ce := wantCode(t, err, contract.LeakFound)
 			if ce.Details["mode"] != mode || res == nil || res.Gate == nil || !res.Gate.Reused || len(res.Findings) == 0 ||
@@ -185,9 +186,9 @@ func TestAModeForcedReplaceOnAReusedGate(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, _, err = h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: id, Yes: true})
-			wantCode(t, err, contract.LeakFound)
-			if h.pubTip("feat-x") != H {
-				t.Fatal("a refused update moved the PR's branch")
+			_ = wantCode(t, err, contract.LeakFound)
+			if got := h.publicPushes(from); len(got) != 0 || h.pubTip("feat-x") != H {
+				t.Fatalf("a refused update pushed %v publicly", got)
 			}
 			h.waive(secret, "test fixture")
 			ar, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: id, Yes: true})
@@ -198,6 +199,32 @@ func TestAModeForcedReplaceOnAReusedGate(t *testing.T) {
 				t.Fatalf("summary:\n%s", s)
 			}
 		})
+	}
+}
+
+// The mirror of TestAModeForcedReplaceOnAReusedGate: a replace gate built
+// in squash (default_mode squash) is reused by a preserve promote once a
+// restack is flagged, which forces a replace. The plan and the approval
+// say restack, the reason forced now, never squash; apply accepts it.
+func TestAPreserveUpdateOnASquashGateSaysWhatForcesIt(t *testing.T) {
+	t.Parallel()
+	h, pr := publishedFeature(t)
+	h.setConfig("default_mode: preserve", "default_mode: squash")
+	testutil.Commit(t, h.shadowGit(), "feat-x", "more", map[string]string{"more.txt": "more\n"})
+	h.gateFeature("feat-x")
+	if g := h.meta("feat-x").Gate; g.ScannedAs != "squash" || g.Update == nil || g.Update.Reason != plan.ReasonSquash {
+		t.Fatalf("gate = scanned as %s, update %+v", g.ScannedAs, g.Update)
+	}
+	h.editRemoteMeta("feat-x", func(m *feature.Meta) { m.Promoted.NeedsUpdate = true })
+	res, err := promote(h, engine.PromoteOptions{Mode: "preserve", Yes: true})
+	if err != nil || res.Applied == nil || !res.Gate.Reused {
+		t.Fatalf("promote = %+v %v", res, err)
+	}
+	if pub := res.Plan.Publish; pub.Style != plan.StyleReplace || pub.ReplaceReason != plan.ReasonRestack {
+		t.Fatalf("publish = style %s reason %s", pub.Style, pub.ReplaceReason)
+	}
+	if s := h.approver.asked[len(h.approver.asked)-1]; !strings.Contains(s, fmt.Sprintf("Replace PR #%d's branch (history changed: restack)", pr)) {
+		t.Fatalf("summary:\n%s", s)
 	}
 }
 

@@ -483,12 +483,15 @@ func TestStackSquashUpdateOnPreserveGatesScansWhatItWrites(t *testing.T) {
 	old := map[string]string{"a": h.pubTip("a"), "b": h.pubTip("b")}
 	testutil.Commit(t, h.shadowGit(), "a", "add a fixture", fixture())
 	gr, _, err := h.eng.Gate(h.ctx, h.pair, "a")
-	if wantCode(t, err, contract.LeakFound); len(gr.Findings) != 1 || !gr.Findings[0].Waivable {
+	if _ = wantCode(t, err, contract.LeakFound); len(gr.Findings) != 1 || !gr.Findings[0].Waivable {
 		t.Fatalf("gate findings = %+v", gr.Findings)
 	}
 	secret := gr.Findings[0]
 	h.waive(secret, "test fixture")
 	fixBottom(h, "a", "b")
+	if g := h.meta("a").Gate; g.ScannedAs != "preserve" || g.Update == nil || g.Update.Style != plan.StyleReplace {
+		t.Fatalf("a's gate = scanned as %s, update %+v", g.ScannedAs, g.Update)
+	}
 	from := len(h.pushes)
 	res, _, err := promoteStack(h, engine.PromoteOptions{Feature: "a", Mode: "squash", Message: "a, fixes JIRA-7", PlanOnly: true})
 	ce := wantCode(t, err, contract.LeakFound)
@@ -503,7 +506,7 @@ func TestStackSquashUpdateOnPreserveGatesScansWhatItWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, _, err = h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: res.Plan.ID, Yes: true})
-	wantCode(t, err, contract.LeakFound)
+	_ = wantCode(t, err, contract.LeakFound)
 	if got := h.publicPushes(from); len(got) != 0 || h.pubTip("a") != old["a"] || h.pubTip("b") != old["b"] {
 		t.Fatalf("pushed %v publicly", got)
 	}
@@ -596,6 +599,67 @@ func TestStackUpdateAskForAGateWhenGatingAgainFits(t *testing.T) {
 	res, _, err := promoteStack(h, opt)
 	if err != nil || res.Plan == nil || res.Plan.Chain[0].Publish.ReplaceReason != plan.ReasonSquash {
 		t.Fatalf("promote a b after gate a = %+v %v", res, err)
+	}
+}
+
+// A bottom gate that is stale (a moved since it was gated) is plain
+// stale_gate: gating again builds on the new head, so the refusal never
+// says gating again won't help (no update_mode), even when the stale
+// record was an append in promote.default_mode.
+func TestStackUpdateCallsAStaleBottomGateStale(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.grant(time.Hour)
+	h.startFeature("a", map[string]string{"a.txt": "a\n"})
+	h.gateFeature("a")
+	if pr, err := promote(h, engine.PromoteOptions{Feature: "a", Mode: "preserve", Yes: true}); err != nil || pr.Applied == nil {
+		t.Fatalf("promote a = %+v %v", pr, err)
+	}
+	h.startOn("b", "a", map[string]string{"b.txt": "b\n"})
+	testutil.Commit(t, h.shadowGit(), "a", "a second change", map[string]string{"a2.txt": "a2\n"})
+	if _, _, err := h.eng.FeatureRestack(h.ctx, h.pair, engine.RestackOptions{Feature: "a"}); err != nil {
+		t.Fatal(err)
+	}
+	h.gateFeature("a")
+	h.gateFeature("b")
+	if u := h.meta("a").Gate.Update; u == nil || u.Style != plan.StyleAppend {
+		t.Fatalf("a's gate update = %+v", u)
+	}
+	testutil.Commit(t, h.shadowGit(), "a", "a third change", map[string]string{"a3.txt": "a3\n"})
+	_, _, err := promoteStack(h, engine.PromoteOptions{Features: []string{"a", "b"}, Mode: "squash",
+		Titles: map[string]string{"a": "Add a", "b": "Add b"}, PlanOnly: true})
+	ce := wantCode(t, err, contract.NotAStack)
+	if ce.Details["reason"] != "stale_gate" || ce.Details["feature"] != "a" || ce.Details["update_mode"] != nil || strings.Contains(ce.Message, "won't") {
+		t.Fatalf("refusal = %s %+v", ce.Message, ce.Details)
+	}
+}
+
+// The mirror of a squash update on preserve gates: under default_mode
+// squash, a's gate built a squash replace; promote a --mode preserve
+// reuses it (open PRs above force a replace) and keeps every commit, so
+// the plan and the approval say restack, never squash.
+func TestStackPreserveUpdateOnSquashGatesSaysRestack(t *testing.T) {
+	t.Parallel()
+	h, prs := preserveStack(t, "a", "b")
+	h.setConfig("default_mode: preserve", "default_mode: squash")
+	fixBottom(h, "a", "b")
+	if g := h.meta("a").Gate; g.ScannedAs != "squash" || g.Update == nil || g.Update.Style != plan.StyleReplace || g.Update.Reason != plan.ReasonSquash {
+		t.Fatalf("a's gate = scanned as %s, update %+v", g.ScannedAs, g.Update)
+	}
+	h.eng.Approver = h.approver
+	res, _, err := promoteStack(h, engine.PromoteOptions{Feature: "a", Mode: "preserve"})
+	if err != nil || res.Applied == nil || len(h.approver.asked) == 0 {
+		t.Fatalf("promote a --mode preserve = %+v %v", res, err)
+	}
+	for _, en := range res.Plan.Chain {
+		if p := en.Publish; !p.Update || p.Style != plan.StyleReplace || p.ReplaceReason != plan.ReasonRestack {
+			t.Fatalf("%s's publish = style %s reason %s", en.Feature, p.Style, p.ReplaceReason)
+		}
+	}
+	sum := h.approver.asked[len(h.approver.asked)-1]
+	if strings.Contains(sum, "squash") || !strings.Contains(sum, "Replace PR #"+itoa(prs[0].Number)+"'s branch (history changed: restack)") {
+		t.Fatalf("summary:\n%s", sum)
 	}
 }
 

@@ -430,15 +430,40 @@ func modeReason(mode string) string {
 	return ""
 }
 
-// planReason is the replace reason a plan in mode shows for an update the
-// gate built with reason gated: the mode's own (squash, curated) when it
-// forces one, so the same command reads the same whichever replace gate it
-// reused; else the gate's. An append has none.
-func planReason(style, gated, mode string) string {
-	if r := modeReason(mode); r != "" && style == plan.StyleReplace {
-		return r
+// planReason is the replace reason a plan shows for an update the gate
+// built with style and reason gated, when forced (forcedReason) is what
+// forces a replace now: forced when there is one, so the same command
+// reads the same whichever replace gate it reused (squash or curated mode
+// says so; a preserve promote on a gate built in squash says restack or
+// base_changed, never squash); else the gate's. An append has none.
+func planReason(style, gated, forced string) string {
+	if forced != "" && style == plan.StyleReplace {
+		return forced
 	}
 	return gated
+}
+
+// reasonStands reports whether a plan in mode may show reason for the
+// update gate record gu built (updateStands). The reason is display only:
+// apply can't tell whether open PRs sat above at plan time, so it checks
+// what can hold. An append shows the gate's reason (none). A replace in
+// squash or curated mode shows that mode. A preserve replace shows the
+// gate's reason or one a preserve plan forces (restack, base_changed,
+// rebase), never a mode's.
+func reasonStands(gu feature.GateUpdate, mode, reason string) bool {
+	if gu.Style != plan.StyleReplace {
+		return reason == gu.Reason
+	}
+	if r := modeReason(mode); r != "" {
+		return reason == r
+	}
+	switch reason {
+	case plan.ReasonSquash, plan.ReasonCurated:
+		return false
+	case gu.Reason, plan.ReasonRestack, plan.ReasonBaseChanged, plan.ReasonRebase:
+		return true
+	}
+	return false
 }
 
 // prefixReason is "" when public is, by patch-id and message and in order,
@@ -770,10 +795,10 @@ func gateFitsUpdate(gt *feature.Gate, u *prUpdate, m feature.Meta, mode string, 
 	if forcedReason(u, &m, mode, above) != "" {
 		return w.Style == plan.StyleReplace
 	}
-	switch {
-	case w.Style == plan.StyleAppend:
+	switch w.Style {
+	case plan.StyleAppend:
 		return w.Reason == ""
-	case w.Style == plan.StyleReplace:
+	case plan.StyleReplace:
 		return w.Reason == plan.ReasonRebase || w.Reason == plan.ReasonReworded || w.Reason == plan.ReasonConflict
 	}
 	return false

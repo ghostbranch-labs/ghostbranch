@@ -474,7 +474,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 		Commits: chain, DroppedEmpty: dropped}
 	prs := []plan.StackPR{{Feature: opt.Feature, Base: "main"}}
 	if gu != nil {
-		pub.Update, pub.Style, pub.ReplaceReason, pub.ExpectedHead = true, gu.Style, planReason(gu.Style, gu.Reason, mode), gu.Head
+		pub.Update, pub.Style, pub.ReplaceReason, pub.ExpectedHead = true, gu.Style, planReason(gu.Style, gu.Reason, forcedReason(upd, &m, mode, false)), gu.Head
 		if gu.Style == plan.StyleReplace {
 			pub.Restores = upd.Restores // the published commits GitHub lost, which this replace puts back
 		}
