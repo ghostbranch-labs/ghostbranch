@@ -261,13 +261,24 @@ func (e *Engine) openChildren(ctx context.Context, pc *pairCtx, recs map[string]
 	return open, nil
 }
 
+// foreignDetails is PUBLIC_BRANCH_CHANGED's details.foreign: each commit
+// Ghostbranch didn't publish, oldest first, as {sha, author, subject}. The
+// errors (update, feature pull) and sync's warning share it.
+func foreignDetails(fs []ForeignCommit) []map[string]any {
+	out := make([]map[string]any, len(fs))
+	for i, f := range fs {
+		out[i] = map[string]any{"sha": f.SHA, "author": f.Author, "subject": f.Subject}
+	}
+	return out
+}
+
 // openAboveErr is NOT_A_STACK open_above: cur has open PRs stacked on it
 // (open) that plan list can't update together, as one plan updates one line
 // of PRs. details.children names them.
 func openAboveErr(cur string, open, list []string) *contract.Error {
 	ce := notAStack("open_above", cur, list,
-		"%s has %d open PRs stacked on it (%s), and one plan updates one line of PRs: promote each line, listed from its bottom (for example ghostbranch promote %s %s)",
-		cur, len(open), strings.Join(open, ", "), strings.Join(list, " "), open[0])
+		"%s has %d open PRs stacked on it that this plan can't update (%s): one plan updates one line of PRs, and an update of %s would leave the others on its old commits. A person closes or merges on GitHub the PRs of every line but the one to update, then run ghostbranch promote %s --plan again",
+		cur, len(open), strings.Join(open, ", "), cur, cur)
 	ce.Details["children"] = open
 	return ce
 }
@@ -668,10 +679,9 @@ func gateUpdateOf(u *prUpdate) *feature.GateUpdate {
 // prChangedErr is PUBLIC_BRANCH_CHANGED as an error: the open PR's branch
 // holds commits Ghostbranch didn't publish, which an update would drop.
 func prChangedErr(name string, u *prUpdate) error {
-	foreign := make([]map[string]any, len(u.Foreign))
+	foreign := foreignDetails(u.Foreign)
 	shas := make([]string, len(u.Foreign))
 	for i, f := range u.Foreign {
-		foreign[i] = map[string]any{"sha": f.SHA, "author": f.Author, "subject": f.Subject}
 		shas[i] = short(f.SHA)
 	}
 	return contract.New(contract.PRChangedOnGitHub,

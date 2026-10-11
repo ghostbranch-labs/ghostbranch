@@ -177,3 +177,25 @@ func TestMergedIntoParentWarningNamesTheRecordsBaseOnceTheBranchIsGone(t *testin
 		t.Fatalf("warnings = %+v", warns)
 	}
 }
+
+// A record from before 0.11 (no published head or patch-ids) isn't
+// checked for foreign commits: sync skips it too, and without them every
+// commit on the PR would read as foreign.
+func TestReportSkipsTheForeignCheckForARecordFromBefore011(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.publish("a")
+	forgeMeta(t, h, "a", func(m *feature.Meta) {
+		p := *m.Promoted
+		p.PublishedHead, p.PatchIDs = "", nil
+		m.Promoted = &p
+	})
+	testutil.Commit(t, h.pubGit, "a", "their fix", map[string]string{"fix.txt": "fix\n"})
+	if r := h.report("a"); r.PR == nil || r.PR.Foreign != 0 {
+		t.Fatalf("report = %s %+v", r.State, r.PR)
+	}
+	if _, warns := h.syncOK(engine.SyncOptions{}); len(warningsFor(warns, contract.PublicBranchChanged)) != 0 {
+		t.Fatalf("sync warns: %+v", warns)
+	}
+}

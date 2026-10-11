@@ -310,10 +310,15 @@ func TestSyncFlagsAForeignChangeOnASingleFeature(t *testing.T) {
 	h.init()
 	h.publish("a")
 	published := h.shadowMeta("a").Promoted.PublishedHead
-	testutil.Commit(t, h.pubGit, "a", "someone else's change", map[string]string{"fix.txt": "fix\n"})
+	theirs := testutil.Commit(t, h.pubGit, "a", "someone else's change", map[string]string{"fix.txt": "fix\n"})
 	res, warns := h.syncOK(engine.SyncOptions{})
-	if ws := warningsFor(warns, contract.PublicBranchChanged); len(ws) != 1 || ws[0].Details["feature"] != "a" {
+	ws := warningsFor(warns, contract.PublicBranchChanged)
+	if len(ws) != 1 || ws[0].Details["feature"] != "a" {
 		t.Fatalf("warnings = %+v", warns)
+	}
+	// details.foreign has the errors' shape: the commits, not a count.
+	if fs, _ := ws[0].Details["foreign"].([]map[string]any); len(fs) != 1 || fs[0]["sha"] != theirs || fs[0]["subject"] != "someone else's change" {
+		t.Fatalf("details.foreign = %#v", ws[0].Details["foreign"])
 	}
 	if !reflect.DeepEqual(attentionNames(res.Attention), []string{"a"}) || h.shadowMeta("a").Promoted.PublishedHead != published {
 		t.Fatalf("attention %v, record %+v", attentionNames(res.Attention), h.shadowMeta("a").Promoted)

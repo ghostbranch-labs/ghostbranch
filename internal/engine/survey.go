@@ -237,8 +237,11 @@ func (e *Engine) surveyOne(ctx context.Context, pc *pairCtx, name, pm, O string)
 			r.PR, ws = e.prSyncOf(ctx, pc, m, head, base, pm, st.heads)
 			warns = append(warns, ws...)
 		}
-		if r.PR != nil {
-			// Commits someone made on the PR on GitHub (R5, R6).
+		// Commits someone made on the PR on GitHub (R5, R6). Only for the
+		// records sync's refreshPublished compares too (it flags them): a
+		// record from before 0.11 has no published head or patch-ids, and
+		// without them every commit would read as foreign.
+		if r.PR != nil && m.Promoted.PublishedHead != "" && len(m.Promoted.PatchIDs) > 0 {
 			tip, tipOK, terr := pc.git.Resolve(ctx, publicRef(publishedBranch(m)))
 			pbase, baseOK, berr := pc.git.Resolve(ctx, publicRef(pr.Base))
 			// A base branch the public repo doesn't have leaves nothing to

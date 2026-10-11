@@ -403,23 +403,18 @@ func (a *app) steps(err error) []contract.Next {
 					}
 				}
 			case reason == "open_above":
+				// f is published (both refusals are raised only then): no
+				// plan can update its PR while another line's PRs stay open
+				// on it, so promoting any one line is refused naming the
+				// others. A person closes or merges them first.
 				f, _ := ce.Details["feature"].(string)
 				kids := stringList(ce.Details["children"])
 				if f != "" && len(kids) > 0 {
-					// The line up to f, then the child: f may sit mid-list
-					// when a branch below the top has open PRs off the line.
-					line := stringList(ce.Details["features"])
-					if i := slices.Index(line, f); i >= 0 {
-						line = line[:i+1]
-					} else {
-						line = []string{f}
-					}
-					args := append(append(append([]string{"promote"}, line...), kids[0]), "--plan")
 					return []contract.Next{
-						{Command: a.scoped(args...), Why: f + " has open PRs on more than one line stacked on it (" + strings.Join(kids, ", ") +
-							"), and one plan updates one line: promote the line that includes " + kids[0] + ", listed from its bottom (another child's line works the same way); while the other lines' PRs stay open on " + f + ", an update of " + f + " is refused, as it would leave them on its old commits"},
 						{Command: a.scoped("status"), NeedsHuman: true,
-							Why: "or a person closes on GitHub the open PRs of the children of " + f + " that shouldn't be updated with it (" + strings.Join(kids, ", ") + "), then promotes again"},
+							Why: f + " has open PRs stacked on it that one plan can't update together (" + strings.Join(kids, ", ") +
+								"): a person closes or merges on GitHub the PRs of every line on " + f + " but the one to update, as an update of " + f + " would leave them on its old commits"},
+						{Command: a.scoped("promote", f, "--plan"), Why: "then plan the update of " + f + " and the one line of open PRs left above it"},
 					}
 				}
 			}
@@ -554,8 +549,12 @@ func (a *app) steps(err error) []contract.Next {
 		case r.Preview != nil:
 			out = append(out, contract.Next{Command: a.scoped(args...), Why: "the preview lists the branches restacking rewrites; run it to restack"})
 		case len(r.Restacked) > 0:
-			out = append(out, contract.Next{Command: a.scoped("gate", cmp.Or(r.GateFirst(), r.Restacked[0].Feature)),
-				Why: "the restacked branches were rewritten; gate them again from the bottom (and in each checkout: git fetch, then git reset --keep <remote>/<branch>)"})
+			first := cmp.Or(r.GateFirst(), r.Restacked[0].Feature)
+			why := "the restacked branches were rewritten; gate them again from the bottom (and in each checkout: git fetch, then git reset --keep <remote>/<branch>)"
+			if first != r.Restacked[0].Feature {
+				why = first + ", below the restacked branches, has no fresh green gate, and their gates build on it: gate it first, then the restacked branches from the bottom (and in each checkout: git fetch, then git reset --keep <remote>/<branch>)"
+			}
+			out = append(out, contract.Next{Command: a.scoped("gate", first), Why: why})
 		}
 	case *engine.PullResult:
 		switch {

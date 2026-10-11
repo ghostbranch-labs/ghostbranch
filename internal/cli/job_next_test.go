@@ -553,8 +553,10 @@ func TestNextForUpdates(t *testing.T) {
 	}
 	next = a.next(contract.New(contract.NotAStack, "x").WithDetails(map[string]any{
 		"reason": "open_above", "feature": "feat-a", "features": []string{"feat-a"}, "children": []string{"feat-b", "feat-c"}}))
-	if len(next) != 2 || !slices.Equal(next[0].Command, cmd("promote", "feat-a", "feat-b", "--plan")) ||
-		!next[1].NeedsHuman || !strings.Contains(next[1].Why, "feat-b, feat-c") {
+	// Promoting either line would be refused naming the other: a person
+	// closes or merges the other lines' PRs first, then promote feat-a.
+	if len(next) != 2 || !slices.Equal(next[0].Command, cmd("status")) || !next[0].NeedsHuman ||
+		!strings.Contains(next[0].Why, "feat-b, feat-c") || !slices.Equal(next[1].Command, cmd("promote", "feat-a", "--plan")) {
 		t.Errorf("open_above: next = %+v", next)
 	}
 	next = a.next(contract.New(contract.NotAStack, "x").WithDetails(map[string]any{

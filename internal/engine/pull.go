@@ -228,10 +228,7 @@ func (e *Engine) pullHead(ctx context.Context, pc *pairCtx, m feature.Meta, head
 // the shadow repo, and runs feature pull again, which then records it.
 func pullByHand(m feature.Meta, u *prUpdate, reason, commit string, files []string) error {
 	name := m.Name
-	list := make([]map[string]any, len(u.Foreign))
-	for i, f := range u.Foreign {
-		list[i] = map[string]any{"sha": f.SHA, "author": f.Author, "subject": f.Subject}
-	}
+	list := foreignDetails(u.Foreign)
 	why := "commit " + short(commit) + " is a merge commit (GitHub's Update branch, or a merge someone pushed)"
 	if reason == "conflict" {
 		why = fmt.Sprintf("replaying commit %s with them conflicts in %s", short(commit), strings.Join(files, ", "))

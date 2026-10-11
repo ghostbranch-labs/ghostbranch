@@ -98,7 +98,7 @@ main, green CI, and a leak scan of exactly what will be published.
 ## Lifecycle
 
 - `ghostbranch status --repo <public> --json` shows the pair's health and every feature's state:
-  `draft`, `in_review`, `gate_passed`, `published`, `merged`, `merged_moved`, `pr_closed`,
+  `draft`, `in_review`, `gate_passed`, `published`, `pr_behind`, `merged`, `merged_moved`, `pr_closed`,
   `branch_gone`, `abandoned`, and `unreadable` (a record that can't be read: `feature show <name>`
   gives the error; run the command again if it was a passing failure, as a corrupt one only a person
   at the console closes; the other features still show). `feature list --repo <public>` and
@@ -156,11 +156,11 @@ main, green CI, and a leak scan of exactly what will be published.
   A changed history (restack, rebase, squash mode, a reworded message, a changed base, a conflict)
   replaces the branch (`replace`; `replace_reason` says why), pushed with a lease on the head the plan
   saw (`expected_head`). The approval summary says which. Every update needs the same approval.
-- In a stack, `promote a` updates the open PRs above a too, under one approval, bottom up. Restack and
-  gate them first (`feature restack a`, then `gate` a and each branch above it, from the bottom up);
-  `NOT_A_STACK` (`parent_stale`, `stale_gate`) and `next` say which. `open_above`: a has open PRs on
-  more than one line (`error.details.children`); promote the line that includes one of them, or close
-  the other PRs.
+- In a stack, `promote a` updates the open PRs above a too, under one approval, bottom up; a PR in a stack,
+  or with open PRs above it, is always replaced (a leased force-push), never appended. Restack and gate
+  first (`feature restack a`, then `gate` a and each branch above it, from the bottom up); `NOT_A_STACK`
+  (`parent_stale`, `stale_gate`) and `next` say which. `open_above` (more than one line of open PRs on a,
+  `error.details.children`): a person closes or merges every line's PRs but one, then `promote a` again.
 - `PUBLIC_BRANCH_CHANGED`: someone pushed to the PR on GitHub (`status`: `#14 (changed on GitHub)`).
   It is never overwritten. Run `ghostbranch feature pull <name> --repo <public> --json`: it brings
   their commits into the feature branch, or gives git steps (merge, push to the shadow repo, pull

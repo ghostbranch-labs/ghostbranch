@@ -23,7 +23,7 @@ import (
 // the retargeted base, are recorded. That is neither drift nor
 // public_pr_needs_update. A branch that moved and holds a commit
 // Ghostbranch didn't publish was changed by someone: PUBLIC_BRANCH_CHANGED
-// (details.foreign counts them), and the feature joins sync's attention
+// (details.foreign lists them, as the errors do), and the feature joins sync's attention
 // list; it is never adopted, and the warning comes back each sync until
 // feature pull brings the commits in. A branch that only lost published
 // commits on GitHub is left as it is: no restack to record, nothing foreign
@@ -92,7 +92,7 @@ func (e *Engine) refreshPublished(ctx context.Context, pc *pairCtx, rs []Feature
 				Message: fmt.Sprintf("public branch %s of feature %s is at %s, not %s as published, and holds changes Ghostbranch didn't publish; they were not adopted: a person looks at PR #%d",
 					branch, r.Name, short(tip), short(m.Promoted.PublishedHead), m.Promoted.PublicPR),
 				Details: map[string]any{"feature": r.Name, "branch": branch, "published_head": m.Promoted.PublishedHead,
-					"public_head": tip, "public_pr": m.Promoted.PublicPR, "foreign": len(foreign)}})
+					"public_head": tip, "public_pr": m.Promoted.PublicPR, "foreign": foreignDetails(foreign)}})
 			continue
 		}
 		ids, err := g.PatchIDs(ctx, commits)

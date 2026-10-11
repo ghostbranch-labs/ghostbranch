@@ -322,8 +322,8 @@ func (e *Engine) publicParent(ctx context.Context, pc *pairCtx, b *stackBranch, 
 	// sync moving b onto main) gets b out of this.
 	if pmeta.Gate.PublicMain != pm {
 		ce := notAStack("parent_moved", b.name, names,
-			"public main moved since %s was published; %s can be promoted once %s merges and `ghostbranch sync` moves %s onto main (updating an open PR's branch is not supported yet)",
-			p, b.name, p, b.name)
+			"public main moved since %s was published: promote %s first, which updates its PR onto the new main (ghostbranch promote %s --plan), then gate and promote %s; or wait for %s to merge, run ghostbranch sync (it moves %s onto main), then gate and promote %s",
+			p, p, p, b.name, p, b.name, b.name)
 		ce.Details["parent"] = p
 		ce.Details["public_main_moved"] = true
 		return "", ce
