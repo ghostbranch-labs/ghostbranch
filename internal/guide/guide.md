@@ -38,7 +38,8 @@ main, green CI, and a leak scan of exactly what will be published.
   Every commit must appear exactly once. Reordering commits that touch the same lines fails with
   `CURATE_CONFLICT` or `CURATE_TREE_MISMATCH`: keep those in order, or reorder on your branch.
 - **Authors:** `promote.author_email` (`noreply` by default) decides who each public commit says wrote
-  it. Never rewrite authors on your branch to hide them.
+  it. Commits `feature pull` brought in from the PR keep their authors (a squash credits them with
+  `Co-authored-by`). Never rewrite authors on your branch to hide them.
 - **History leaks:** a preserve publish (and its gate) checks every commit, so a secret added and
   later deleted still blocks; squash and curated check what they publish. A finding's `commits` are
   the feature commits that introduce or change it (a later commit that only carries it unchanged is
@@ -164,7 +165,9 @@ main, green CI, and a leak scan of exactly what will be published.
 - `PUBLIC_BRANCH_CHANGED`: someone pushed to the PR on GitHub (`status`: `#14 (changed on GitHub)`).
   It is never overwritten. Run `ghostbranch feature pull <name> --repo <public> --json`: it brings
   their commits into the feature branch, or gives git steps (merge, push to the shadow repo, pull
-  again). Then gate and promote as usual; the update keeps their commits.
+  again). Then gate and promote as usual; the update keeps their commits. `error.details.reason`
+  `unrecorded_update`: an update Ghostbranch pushed was never recorded; run `apply <error.details.plan>`
+  (where the plan was made), never `feature pull`. `adopted_missing`: cherry-pick the pulled commits back.
 - `PLAN_STALE` with `public_branch` in `error.details.moved`: the PR moved after the plan; plan again.
 
 ## Keeping up with public

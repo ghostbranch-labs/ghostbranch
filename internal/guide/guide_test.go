@@ -45,7 +45,9 @@ func TestRenderListsEveryCodeFromTheRegistry(t *testing.T) {
 	// 383: the four sub-project 6.1a error rows (FOLD_NEEDS_REBASE, HAS_CHILDREN, NOT_A_STACK, PARENT_REWRITTEN).
 	// 406: the PUBLIC_BRANCH_CHANGED error row (sub-project 6.1a-2).
 	// 426: the Updating an open PR section and feature pull (sub-project 6.1a-2, 20 lines, with the stack refusals).
-	if n := strings.Count(out, "\n"); n > 426 {
+	// 428: PUBLIC_BRANCH_CHANGED's reasons unrecorded_update and adopted_missing (6.1a-2 final review).
+	// 429: commits pulled in from the PR keep their authors (6.1a-2 final review, owner's ruling).
+	if n := strings.Count(out, "\n"); n > 429 {
 		t.Errorf("the guide is %d lines; keep it short (spec: about 150 plus the tables)", n)
 	}
 }

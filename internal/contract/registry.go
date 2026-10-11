@@ -139,7 +139,7 @@ var errorDocs = map[Code]Doc{
 		WhatToDo: "Change the group order in the --curate file so commits that touch the same lines keep their original order, or reorder the commits on your feature branch yourself. Ghostbranch never resolves conflicts."},
 	CurateTreeMismatch: {Summary: "The curated replay ends on a different tree from the one the gate's CI tested.",
 		WhatToDo: "Keep commits that touch the same lines in their original order, or reorder on your feature branch, gate again, and use preserve."},
-	AuthorUnmapped: {Summary: "promote.author_email is map, and some commit authors are not in promote.author_map.",
+	AuthorUnmapped: {Summary: "promote.author_email is map, and some commit authors are not in promote.author_map. Commits feature pull brought in from the public PR keep their authors and are never unmapped.",
 		WhatToDo:   "A person adds the emails in error.details.emails to promote.author_map in .ghostbranch.yml on the overlay branch, or switches author_email to noreply.",
 		NeedsHuman: true},
 	NothingToPublish: {Summary: "Nothing would be published: every feature commit is empty once overlay paths and internal sections are stripped.",
@@ -179,20 +179,22 @@ var errorDocs = map[Code]Doc{
 			"parent_merged: the bottom's published parent merged; run sync",
 			"parent_moved: the bottom's published parent changed since it was published",
 			"stale_gate: a listed feature has no fresh, green gate; a gate goes stale when its own branch or any branch below it moves",
-			"open_above: two open PRs on one branch; promote each line from its bottom",
+			"open_above: two or more lines of open PRs stack on one published feature, and one plan updates one line: close or merge every other line's PRs on that feature on GitHub, then promote it again",
 			"parent_stale: a branch above wasn't restacked after the branch below moved; restack, gate up, promote",
 		},
 		WhatToDo: "Run ghostbranch status to see the stack. List the features bottom first, starting from one whose parent is main or already published, with none left out. Gate each one that needs it (ghostbranch gate <feature>, bottom up), then run promote again."},
 	ParentRewritten: {Summary: "The feature's parent no longer contains the commit the feature was branched from (forked_at): the parent was rebased, amended or force-pushed.",
 		WhatToDo: "Run ghostbranch feature restack <parent> to replay the feature's own commits onto the parent's new tip (it stops with git steps on a conflict), or ghostbranch feature restack <feature> --onto main to move it off the parent. Then run the command again. error.details.parent and error.details.forked_at name them."},
-	PRChangedOnGitHub: {Summary: "The open PR's public branch holds commits Ghostbranch didn't publish (error.details.foreign), so the PR was not updated: the update would drop them.",
+	PRChangedOnGitHub: {Summary: "The open PR's public branch holds commits Ghostbranch didn't publish (error.details.foreign), so the PR was not updated: the update would drop them. error.details.reason, when set, names a special case.",
 		Causes: []string{
 			"someone pushed a commit to the PR's branch",
 			"a review suggestion was committed on GitHub",
 			"Update branch on GitHub merged main into the PR's branch",
 			"the branch was force-pushed outside Ghostbranch",
+			"unrecorded_update: the branch is at an update Ghostbranch pushed whose record was never written (error.details.plan); nothing is foreign",
+			"adopted_missing: a preserve update would drop commits feature pull brought in from GitHub that the feature no longer has (error.details.foreign)",
 		},
-		WhatToDo: "Bring them into the feature with ghostbranch feature pull <feature>, then gate and promote again; the gate scans them like any other change. If feature pull can't replay them cleanly, it stops with the git steps to merge them in yourself. Ghostbranch never resolves conflicts, and never overwrites commits made on GitHub. error.details.foreign lists each commit's sha, author and subject."},
+		WhatToDo: "Bring them into the feature with ghostbranch feature pull <feature>, then gate and promote again. They are already public, so the gate doesn't scan them again; it scans your commits as always. If feature pull can't replay them cleanly, it stops with the git steps to merge them in yourself. For unrecorded_update, run ghostbranch apply <error.details.plan> on the machine that made the plan: it finds the push landed and writes the record (never feature pull, which would copy Ghostbranch's own commits into the feature). For adopted_missing, cherry-pick the listed commits back onto the feature, push it to the shadow repo, then gate and promote again. Ghostbranch never resolves conflicts, and never overwrites commits made on GitHub. error.details.foreign lists each commit's sha, author and subject."},
 }
 
 var warningDocs = map[WarningCode]Doc{
@@ -248,8 +250,8 @@ var warningDocs = map[WarningCode]Doc{
 		WhatToDo: "Look at details.path: fix its permissions or delete it. If it belonged to a feature that was just closed, that feature's plan ref may remain in the shadow repo; it is harmless."},
 	AgentOnPersonLogin: {Summary: "This run looks like an agent or a script, and it is using a person's stored login, which can publish.",
 		WhatToDo: "Give the agent its own shadow-only token in GHOSTBRANCH_TOKEN (see ghostbranch guide § Tokens). The person's login still needs the console code to publish."},
-	PublicBranchChanged: {Summary: "A published feature's public branch holds commits Ghostbranch didn't publish, so sync didn't adopt them.",
-		WhatToDo: "Look at the PR on GitHub: someone pushed to its branch. Bring the commits in with ghostbranch feature pull <feature> (details.feature), then gate and promote; until then promote refuses to update the PR. Ghostbranch never adopts a change it didn't scan."},
+	PublicBranchChanged: {Summary: "A published feature's public branch holds commits Ghostbranch didn't publish, so sync didn't adopt them; or (details.reason unrecorded_update) it is at an update Ghostbranch pushed but never recorded.",
+		WhatToDo: "Look at the PR on GitHub: someone pushed to its branch. Bring the commits in with ghostbranch feature pull <feature> (details.feature), then gate and promote; until then promote refuses to update the PR. Ghostbranch never adopts a change it didn't scan. For unrecorded_update, run ghostbranch apply <details.plan> on the machine that made the plan: it writes the record."},
 }
 
 func intp(n int) *int { return &n }

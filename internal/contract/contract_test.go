@@ -544,7 +544,7 @@ func TestSubProject61aContract(t *testing.T) {
 				"parent_merged: the bottom's published parent merged; run sync",
 				"parent_moved: the bottom's published parent changed since it was published",
 				"stale_gate: a listed feature has no fresh, green gate; a gate goes stale when its own branch or any branch below it moves",
-				"open_above: two open PRs on one branch; promote each line from its bottom",
+				"open_above: two or more lines of open PRs stack on one published feature, and one plan updates one line: close or merge every other line's PRs on that feature on GitHub, then promote it again",
 				"parent_stale: a branch above wasn't restacked after the branch below moved; restack, gate up, promote",
 			},
 			whatToDo: "Run ghostbranch status to see the stack. List the features bottom first, starting from one whose parent is main or already published, with none left out. Gate each one that needs it (ghostbranch gate <feature>, bottom up), then run promote again.",
@@ -591,19 +591,21 @@ func TestSubProject61a2Contract(t *testing.T) {
 	}
 	e, w := es[0], es[1]
 	if e.Kind != contract.KindError || e.ExitCode == nil || *e.ExitCode != 4 || e.NeedsHuman ||
-		e.Summary != "The open PR's public branch holds commits Ghostbranch didn't publish (error.details.foreign), so the PR was not updated: the update would drop them." ||
+		e.Summary != "The open PR's public branch holds commits Ghostbranch didn't publish (error.details.foreign), so the PR was not updated: the update would drop them. error.details.reason, when set, names a special case." ||
 		!slices.Equal(e.Causes, []string{
 			"someone pushed a commit to the PR's branch",
 			"a review suggestion was committed on GitHub",
 			"Update branch on GitHub merged main into the PR's branch",
 			"the branch was force-pushed outside Ghostbranch",
+			"unrecorded_update: the branch is at an update Ghostbranch pushed whose record was never written (error.details.plan); nothing is foreign",
+			"adopted_missing: a preserve update would drop commits feature pull brought in from GitHub that the feature no longer has (error.details.foreign)",
 		}) ||
-		e.WhatToDo != "Bring them into the feature with ghostbranch feature pull <feature>, then gate and promote again; the gate scans them like any other change. If feature pull can't replay them cleanly, it stops with the git steps to merge them in yourself. Ghostbranch never resolves conflicts, and never overwrites commits made on GitHub. error.details.foreign lists each commit's sha, author and subject." {
+		e.WhatToDo != "Bring them into the feature with ghostbranch feature pull <feature>, then gate and promote again. They are already public, so the gate doesn't scan them again; it scans your commits as always. If feature pull can't replay them cleanly, it stops with the git steps to merge them in yourself. For unrecorded_update, run ghostbranch apply <error.details.plan> on the machine that made the plan: it finds the push landed and writes the record (never feature pull, which would copy Ghostbranch's own commits into the feature). For adopted_missing, cherry-pick the listed commits back onto the feature, push it to the shadow repo, then gate and promote again. Ghostbranch never resolves conflicts, and never overwrites commits made on GitHub. error.details.foreign lists each commit's sha, author and subject." {
 		t.Errorf("PUBLIC_BRANCH_CHANGED error doc = %+v", e)
 	}
 	if w.Kind != contract.KindWarning || w.ExitCode != nil ||
-		w.Summary != "A published feature's public branch holds commits Ghostbranch didn't publish, so sync didn't adopt them." ||
-		w.WhatToDo != "Look at the PR on GitHub: someone pushed to its branch. Bring the commits in with ghostbranch feature pull <feature> (details.feature), then gate and promote; until then promote refuses to update the PR. Ghostbranch never adopts a change it didn't scan." {
+		w.Summary != "A published feature's public branch holds commits Ghostbranch didn't publish, so sync didn't adopt them; or (details.reason unrecorded_update) it is at an update Ghostbranch pushed but never recorded." ||
+		w.WhatToDo != "Look at the PR on GitHub: someone pushed to its branch. Bring the commits in with ghostbranch feature pull <feature> (details.feature), then gate and promote; until then promote refuses to update the PR. Ghostbranch never adopts a change it didn't scan. For unrecorded_update, run ghostbranch apply <details.plan> on the machine that made the plan: it writes the record." {
 		t.Errorf("PUBLIC_BRANCH_CHANGED warning doc = %+v", w)
 	}
 	es, err = contract.Explain(string(contract.BranchExists))
