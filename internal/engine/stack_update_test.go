@@ -307,6 +307,45 @@ func TestStackUpdateRefusesTwoOpenLinesAbove(t *testing.T) {
 	}
 }
 
+// An open PR on a branch of the plan that the plan doesn't update (b2,
+// beside the listed b) would be left on a's old commits: the plan is
+// refused, naming it, and nothing goes public.
+func TestStackUpdateRefusesAnOpenSiblingOutsideThePlan(t *testing.T) {
+	t.Parallel()
+	h, _ := preserveStack(t, "a", "b2")
+	h.grant(time.Hour)
+	h.startOn("b", "a", map[string]string{"b.txt": "b\n"})
+	fixBottom(h, "a", "b2", "b")
+	from := len(h.pushes)
+	_, _, err := promoteStack(h, engine.PromoteOptions{Features: []string{"a", "b"}, Mode: "preserve", Yes: true})
+	ce := wantCode(t, err, contract.NotAStack)
+	if ce.Details["reason"] != "open_above" || ce.Details["feature"] != "a" || !reflect.DeepEqual(stringsOf(ce.Details["children"]), []string{"b2"}) {
+		t.Fatalf("details = %+v", ce.Details)
+	}
+	if got := h.publicPushes(from); len(got) != 0 {
+		t.Fatalf("pushed %v publicly", got)
+	}
+}
+
+// A PR above whose base on GitHub isn't the branch below it in the plan
+// (here retargeted to main) is parent_moved: the plan would push it onto a
+// branch its PR doesn't sit on.
+func TestStackUpdateRefusesAPRBasedElsewhere(t *testing.T) {
+	t.Parallel()
+	h, prs := preserveStack(t, "a", "b")
+	fixBottom(h, "a", "b")
+	h.forge.SetPRBase(publicName, prs[1].Number, "main")
+	from := len(h.pushes)
+	_, _, err := promoteStack(h, engine.PromoteOptions{Feature: "a", Mode: "preserve", PlanOnly: true})
+	ce := wantCode(t, err, contract.NotAStack)
+	if ce.Details["reason"] != "parent_moved" || ce.Details["feature"] != "b" || ce.Details["parent"] != "a" {
+		t.Fatalf("details = %+v", ce.Details)
+	}
+	if got := h.publicPushes(from); len(got) != 0 {
+		t.Fatalf("pushed %v publicly", got)
+	}
+}
+
 // With an open PR above it, the bottom is replaced too (its gate built a
 // restack), and the branch above moves onto its new head.
 func TestStackUpdateReplacesTheBottomWithOpenPRsAbove(t *testing.T) {

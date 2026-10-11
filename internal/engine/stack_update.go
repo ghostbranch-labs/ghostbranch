@@ -214,3 +214,31 @@ func updateLevelStands(pl plan.Plan, i int, b *stackBranch) error {
 		"plan %s's update of %s doesn't match its record; make a new plan with ghostbranch promote", pl.ID, en.Feature).
 		WithDetails(stale(lp, []string{"prs"}))
 }
+
+// openOutside refuses a plan that would move a branch from under an open PR
+// it doesn't update: a published level below the top (names[i]) with open
+// PRs stacked on it other than names[i+1], the level the plan puts on it.
+// Those PRs would stay on the branch's old commits. NOT_A_STACK open_above
+// names them in details.children. The top's open PRs are openAbove's.
+func (e *Engine) openOutside(ctx context.Context, pc *pairCtx, names []string) error {
+	if len(names) < 2 {
+		return nil
+	}
+	recs, err := e.records(ctx, pc)
+	if err != nil {
+		return err
+	}
+	for i, n := range names[:len(names)-1] {
+		if r, ok := recs[n]; !ok || r.meta.Promoted == nil {
+			continue // never published: nothing is published on it
+		}
+		open, err := e.openChildren(ctx, pc, recs, n, map[string]bool{names[i+1]: true})
+		if err != nil {
+			return err
+		}
+		if len(open) > 0 {
+			return openAboveErr(n, open, names)
+		}
+	}
+	return nil
+}

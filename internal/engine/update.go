@@ -224,19 +224,9 @@ func (e *Engine) openAbove(ctx context.Context, pc *pairCtx, names []string) ([]
 	}
 	var out []string
 	for cur := top; ; {
-		var open []string
-		for _, c := range childrenOf(recs, cur, false) {
-			cm := recs[c].meta
-			if seen[c] || cm.Promoted == nil || cm.Promoted.PublicPR == 0 {
-				continue
-			}
-			pr, err := e.Forge.GetPR(ctx, pc.pair.Public, cm.Promoted.PublicPR)
-			if err != nil {
-				return nil, forgeErr(err, "read public PR #%d of %s", cm.Promoted.PublicPR, c)
-			}
-			if !pr.Merged && pr.State == prOpen {
-				open = append(open, c)
-			}
+		open, err := e.openChildren(ctx, pc, recs, cur, seen)
+		if err != nil {
+			return nil, err
 		}
 		switch len(open) {
 		case 0:
@@ -246,14 +236,40 @@ func (e *Engine) openAbove(ctx context.Context, pc *pairCtx, names []string) ([]
 			out = append(out, open[0])
 			cur = open[0]
 		default:
-			list := append(slices.Clone(names), out...)
-			ce := notAStack("open_above", cur, list,
-				"%s has %d open PRs stacked on it (%s), and one plan updates one line of PRs: promote each line, listed from its bottom (for example ghostbranch promote %s %s)",
-				cur, len(open), strings.Join(open, ", "), strings.Join(list, " "), open[0])
-			ce.Details["children"] = open
-			return nil, ce
+			return nil, openAboveErr(cur, open, append(slices.Clone(names), out...))
 		}
 	}
+}
+
+// openChildren lists the published features stacked on cur whose public
+// PRs are open, leaving out those in skip.
+func (e *Engine) openChildren(ctx context.Context, pc *pairCtx, recs map[string]stackRecord, cur string, skip map[string]bool) ([]string, error) {
+	var open []string
+	for _, c := range childrenOf(recs, cur, false) {
+		cm := recs[c].meta
+		if skip[c] || cm.Promoted == nil || cm.Promoted.PublicPR == 0 {
+			continue
+		}
+		pr, err := e.Forge.GetPR(ctx, pc.pair.Public, cm.Promoted.PublicPR)
+		if err != nil {
+			return nil, forgeErr(err, "read public PR #%d of %s", cm.Promoted.PublicPR, c)
+		}
+		if !pr.Merged && pr.State == prOpen {
+			open = append(open, c)
+		}
+	}
+	return open, nil
+}
+
+// openAboveErr is NOT_A_STACK open_above: cur has open PRs stacked on it
+// (open) that plan list can't update together, as one plan updates one line
+// of PRs. details.children names them.
+func openAboveErr(cur string, open, list []string) *contract.Error {
+	ce := notAStack("open_above", cur, list,
+		"%s has %d open PRs stacked on it (%s), and one plan updates one line of PRs: promote each line, listed from its bottom (for example ghostbranch promote %s %s)",
+		cur, len(open), strings.Join(open, ", "), strings.Join(list, " "), open[0])
+	ce.Details["children"] = open
+	return ce
 }
 
 // hasOpenAbove reports whether any published feature stacked above name

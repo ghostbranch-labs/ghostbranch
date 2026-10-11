@@ -396,6 +396,11 @@ func (e *Engine) promoteStack(ctx context.Context, pc *pairCtx, cfg config.Confi
 	for i, n := range names {
 		modes[i] = cmp.Or(opt.Modes[n], opt.Mode, cfg.Promote.DefaultMode)
 	}
+	// An open PR on a branch of the plan that the plan doesn't update would
+	// be left on that branch's old commits.
+	if err := e.openOutside(ctx, pc, names); err != nil {
+		return "", warns, err
+	}
 	updates, err := e.stackUpdates(ctx, pc, names, modes)
 	if err != nil {
 		return "", warns, err
