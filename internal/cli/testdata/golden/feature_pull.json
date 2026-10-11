@@ -14,10 +14,32 @@
         "subject": "their fix"
       }
     ],
+    "children": [],
     "preview": null
   },
   "warnings": [],
   "next": [
+    {
+      "command": [
+        "git",
+        "fetch",
+        "shadow"
+      ],
+      "why": "in your checkout: fetch the feature branch pull rewrote in the shadow repo",
+      "needs_human": false,
+      "needs_input": []
+    },
+    {
+      "command": [
+        "git",
+        "reset",
+        "--keep",
+        "shadow/feat-x"
+      ],
+      "why": "with feat-x checked out, move it to the pulled branch (--keep refuses rather than lose uncommitted changes)",
+      "needs_human": false,
+      "needs_input": []
+    },
     {
       "command": [
         "ghostbranch",

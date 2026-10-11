@@ -507,7 +507,6 @@ func human(r any, st style.Styler) string {
 	return b.String()
 }
 
-// pendingJob is whether a gate result is a job still waiting on CI.
 // publishedLine is what an apply did: published a new PR, or updated an
 // open one, by adding k commits (k < 0 when the count isn't at hand) or by
 // replacing its branch.
@@ -528,6 +527,7 @@ func publishedLine(r *engine.ApplyResult, k int) string {
 	return fmt.Sprintf("Published %s as PR #%d: %s\n", r.PublicBranch, r.PublicPR, r.PRURL)
 }
 
+// pendingJob is whether a gate result is a job still waiting on CI.
 func pendingJob(g *engine.GateResult) bool {
 	return g.Checks == feature.ChecksPending && g.Job != nil && g.ShadowPR != nil
 }

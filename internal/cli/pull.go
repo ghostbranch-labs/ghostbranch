@@ -12,11 +12,11 @@ func (a *app) featurePullCmd() *cobra.Command {
 		Short: "Bring commits someone made on a feature's open public PR into its shadow branch",
 		Long: `feature pull reads the open public PR of <feature> and the commits on its branch that Ghostbranch didn't
 publish (someone pushed them on GitHub: a maintainer's fix, an applied suggestion). It brings them into the
-feature's branch in the shadow repo and records them as adopted, in one push leased on what it read; the
-next gate scans them like any other change, and the next promote keeps them. Your later commits are replayed
-on top of them. A merge commit or a conflict stops it with the git steps to merge the PR's branch yourself;
-Ghostbranch never resolves conflicts. It only touches the shadow repo; your checkout needs a fetch and reset
-afterwards. --plan shows what would change.`,
+feature's branch in the shadow repo and records them as adopted, in one push leased on what it read. They
+are already public, so the next gate doesn't scan them again; the next promote keeps them. Your later commits
+are replayed on top of them. A merge commit or a conflict stops it with the git steps to merge the PR's branch
+yourself; Ghostbranch never resolves conflicts. It only touches the shadow repo; your checkout needs a fetch
+and reset afterwards. --plan shows what would change.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			e, err := a.engine(cmd.Context())

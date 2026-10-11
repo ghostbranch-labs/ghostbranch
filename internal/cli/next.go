@@ -379,8 +379,13 @@ func (a *app) steps(err error) []contract.Next {
 			parent, _ := ce.Details["parent"].(string)
 			switch {
 			case reason == "parent_moved" && ce.Details["public_main_moved"] == true && parent != "":
-				return []contract.Next{{Command: a.scoped("sync"),
-					Why: "once " + parent + "'s public PR merges, sync closes " + parent + " and moves its children onto main; gate and promote them then"}}
+				f, _ := ce.Details["feature"].(string)
+				return []contract.Next{
+					{Command: a.scoped("promote", parent, "--plan"),
+						Why: "public main moved since " + parent + " was published: promote " + parent + " first, which updates its PR onto the new main; then gate and promote " + cmp.Or(f, "this feature")},
+					{Command: a.scoped("sync"),
+						Why: "or wait for " + parent + "'s public PR to merge: sync then closes " + parent + " and moves its children onto main; gate and promote them then"},
+				}
 			case reason == "parent_merged", reason == "parent_moved":
 				return []contract.Next{{Command: a.scoped("sync"), Why: "sync records what changed on the public side; then restack and gate what moved"}}
 			case reason == "stale_gate":
@@ -431,6 +436,33 @@ func (a *app) steps(err error) []contract.Next {
 			f, _ := ce.Details["feature"].(string)
 			if f == "" {
 				break
+			}
+			switch reason, _ := ce.Details["reason"].(string); reason {
+			case "unrecorded_update":
+				// Ghostbranch's own update landed but was never recorded:
+				// apply of its plan finds the push landed and writes the
+				// record. Never feature pull, which would adopt our commits.
+				if id, _ := ce.Details["plan"].(string); id != "" {
+					nx := a.applyNext(id, true)
+					nx.Why = "the update of " + f + "'s PR that plan " + id + " pushed was never recorded; apply finds the push landed and finishes the record (on the machine that made the plan). " + nx.Why
+					return []contract.Next{nx, {Command: a.scoped("promote", f, "--plan"), Why: "then plan the next update of " + f}}
+				}
+			case "adopted_missing":
+				// Commits feature pull adopted from GitHub that the feature
+				// no longer has: a preserve update would drop them.
+				branch, _ := ce.Details["branch"].(string)
+				remote := a.shadowRemote
+				if remote == "" {
+					remote = "shadow"
+				}
+				pick := append([]string{"git", "cherry-pick"}, foreignSHAs(ce.Details["foreign"])...)
+				return []contract.Next{
+					{Command: []string{"git", "fetch", "origin", branch}, Why: "fetch the PR's branch from the public repo in your checkout, so its commits are there (origin is its remote there)"},
+					{Command: []string{"git", "switch", f}, Why: "switch to the feature branch"},
+					{Command: pick, Why: "bring back the commits made on GitHub that " + f + " no longer has (error.details.foreign); you resolve any conflict, Ghostbranch never does"},
+					{Command: []string{"git", "push", remote, f}, Why: "push the feature branch to the shadow repo, never to origin"},
+					{Command: a.scoped("gate", f), Why: "then gate it, and promote again: the update keeps their commits"},
+				}
 			}
 			if reason, _ := ce.Details["reason"].(string); reason != "" && a.command == "feature pull" {
 				branch, _ := ce.Details["branch"].(string)
@@ -561,6 +593,19 @@ func (a *app) steps(err error) []contract.Next {
 		case r.Preview != nil:
 			out = append(out, contract.Next{Command: a.scoped("feature", "pull", r.Feature), Why: "the preview lists what pulling changes; run it to pull"})
 		case len(r.Adopted) > 0:
+			if r.From != r.To {
+				// The pull rewrote the feature branch in the shadow repo: the
+				// checkout follows it, and the branches above move onto it.
+				remote := cmp.Or(a.shadowRemote, "shadow")
+				out = append(out,
+					contract.Next{Command: []string{"git", "fetch", remote}, Why: "in your checkout: fetch the feature branch pull rewrote in the shadow repo"},
+					contract.Next{Command: []string{"git", "reset", "--keep", remote + "/" + r.Feature},
+						Why: "with " + r.Feature + " checked out, move it to the pulled branch (--keep refuses rather than lose uncommitted changes)"})
+				if len(r.Children) > 0 {
+					out = append(out, contract.Next{Command: a.scoped("feature", "restack", r.Feature),
+						Why: strings.Join(r.Children, ", ") + " still sit on " + r.Feature + "'s old commits (parent_stale); restack them onto its new head (a conflict stops it with git steps)"})
+				}
+			}
 			out = append(out, contract.Next{Command: a.scoped("gate", r.Feature),
 				Why: "the PR's commits are in the feature branch now; gate it, then promote: the update keeps them"})
 		}
@@ -1520,4 +1565,28 @@ func stringList(v any) []string {
 		return out
 	}
 	return nil
+}
+
+// foreignSHAs is the sha of each commit in a PUBLIC_BRANCH_CHANGED's
+// details.foreign list ({sha, author, subject}), in order.
+func foreignSHAs(v any) []string {
+	var out []string
+	add := func(m map[string]any) {
+		if s, ok := m["sha"].(string); ok && s != "" {
+			out = append(out, s)
+		}
+	}
+	switch l := v.(type) {
+	case []map[string]any:
+		for _, m := range l {
+			add(m)
+		}
+	case []any:
+		for _, x := range l {
+			if m, ok := x.(map[string]any); ok {
+				add(m)
+			}
+		}
+	}
+	return out
 }
