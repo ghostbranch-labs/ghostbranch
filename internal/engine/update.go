@@ -720,13 +720,18 @@ func unpublished(ctx context.Context, g *gitx.Git, tip string) ([]string, error)
 // gateFitsUpdate reports whether gate record gt was built for update u (as
 // prHead reads it now; nil when no PR is open) of m, for promote mode, with
 // above telling whether open PRs sit above m now. Either both are nil, or
-// the record names the same PR, head and base, with the style and reason
-// they give now: a reason forced now (forcedReason) must be the recorded
-// one, and with none forced the recorded reason must be one the new
-// history alone gives (append, rebase, reworded or conflict), which the
-// gate decided on the same feature head and public main. So a gate built
-// to append never stands for an update that must replace (CI never ran on
-// that branch), nor one scanned for another mode.
+// the record names the same PR, head and base, with a style that fits now.
+// When a replace is forced now (forcedReason: squash or curated mode, a
+// restack, open PRs above), any replace the gate built fits, whatever its
+// reason or the mode it was gated in: a replace candidate is the feature
+// replayed onto public main in every mode, and promote publishes it only
+// as a chain whose tree is the gated one (assertChain), scanned again as
+// published. So a squash update stands on the gate gate built in
+// promote.default_mode. With none forced, the recorded update must be one
+// the new history alone gives (append, rebase, reworded or conflict),
+// which the gate decided on the same feature head and public main. A gate
+// built to append never stands for an update that must replace: CI never
+// ran on that branch.
 func gateFitsUpdate(gt *feature.Gate, u *prUpdate, m feature.Meta, mode string, above bool) bool {
 	if gt == nil {
 		return false
@@ -738,8 +743,8 @@ func gateFitsUpdate(gt *feature.Gate, u *prUpdate, m feature.Meta, mode string, 
 	if w == nil || w.PR != u.PR || w.Head != u.Head || w.Base != u.Base || m.Promoted == nil {
 		return false
 	}
-	if forced := forcedReason(u, &m, mode, above); forced != "" {
-		return w.Style == plan.StyleReplace && w.Reason == forced
+	if forcedReason(u, &m, mode, above) != "" {
+		return w.Style == plan.StyleReplace
 	}
 	switch {
 	case w.Style == plan.StyleAppend:

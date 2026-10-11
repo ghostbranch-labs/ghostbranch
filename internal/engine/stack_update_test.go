@@ -431,6 +431,93 @@ func TestStackUpdateAppendsTheBottomUnderAFirstPublish(t *testing.T) {
 	}
 }
 
+// Acceptance 6.1a-2 bug 2: a squash stack, its bottom fixed, restacked and
+// gated as gate builds (promote.default_mode, preserve), updates in squash
+// mode. The bottom's gate built a replace (restack) on public main, which is
+// the candidate a squash replace publishes too: it stands, rather than a
+// stale_gate that gating again never clears.
+func TestStackUpdateInSquashModeStandsOnTheGatesAsBuilt(t *testing.T) {
+	t.Parallel()
+	h, prs := publishedStack(t, "a", "b")
+	old := map[string]string{"a": h.pubTip("a"), "b": h.pubTip("b")}
+	fixBottom(h, "a", "b")
+	if g := h.meta("a").Gate; g.ScannedAs != "preserve" || g.Update == nil || g.Update.Style != plan.StyleReplace {
+		t.Fatalf("a's gate = scanned as %s, update %+v", g.ScannedAs, g.Update)
+	}
+	from := len(h.pushes)
+	res, _, err := promoteStack(h, engine.PromoteOptions{Feature: "a", Mode: "squash", Message: "a, reviewed", Yes: true})
+	if err != nil || res.Applied == nil {
+		t.Fatalf("promote a --mode squash = %+v %v", res, err)
+	}
+	for i, en := range res.Plan.Chain {
+		p := en.Publish
+		if !p.Update || p.Style != plan.StyleReplace || p.ExpectedHead != old[en.Feature] || len(p.Commits) != 1 {
+			t.Fatalf("%s's publish = %+v", en.Feature, p)
+		}
+		if pr := res.Plan.PRs[i]; pr.Number != prs[i].Number || !pr.Update {
+			t.Fatalf("plan PR %d = %+v", i, pr)
+		}
+		if tip := h.pubTip(en.Feature); tip != p.Commit {
+			t.Fatalf("public %s = %s, want the plan's %s", en.Feature, tip, p.Commit)
+		}
+	}
+	if got := h.publicPushes(from); !reflect.DeepEqual(got, []string{"a", "b"}) {
+		t.Fatalf("public pushes = %v", got)
+	}
+	if n := len(h.forge.PRs(publicName)); n != 2 {
+		t.Fatalf("%d public PRs, want the same 2", n)
+	}
+}
+
+// A bottom whose gate built an append can't stand for a squash update,
+// which replaces; gate builds for promote.default_mode, so gating it again
+// builds the same append. The refusal says so (details.update_mode) and
+// names the way out, never "gate again": promote the bottom on its own,
+// which gates it for that mode, then the branch above.
+func TestStackUpdateNamesABottomGateBuiltForAnotherMode(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.grant(time.Hour)
+	h.startFeature("a", map[string]string{"a.txt": "a\n"})
+	h.gateFeature("a")
+	if pr, err := promote(h, engine.PromoteOptions{Feature: "a", Mode: "preserve", Yes: true}); err != nil || pr.Applied == nil {
+		t.Fatalf("promote a = %+v %v", pr, err)
+	}
+	h.startOn("b", "a", map[string]string{"b.txt": "b\n"})
+	testutil.Commit(t, h.shadowGit(), "a", "a second change", map[string]string{"a2.txt": "a2\n"})
+	if _, _, err := h.eng.FeatureRestack(h.ctx, h.pair, engine.RestackOptions{Feature: "a"}); err != nil {
+		t.Fatal(err)
+	}
+	h.gateFeature("a")
+	h.gateFeature("b")
+	if u := h.meta("a").Gate.Update; u == nil || u.Style != plan.StyleAppend {
+		t.Fatalf("a's gate update = %+v", u)
+	}
+	opt := engine.PromoteOptions{Features: []string{"a", "b"}, Mode: "squash", Titles: map[string]string{"a": "Add a", "b": "Add b"}, PlanOnly: true}
+	for range 2 { // gating again changes nothing
+		_, _, err := promoteStack(h, opt)
+		ce := wantCode(t, err, contract.NotAStack)
+		if ce.Details["reason"] != "stale_gate" || ce.Details["feature"] != "a" || ce.Details["update_mode"] != "squash" ||
+			!strings.Contains(ce.Message, "ghostbranch promote a --mode squash") {
+			t.Fatalf("refusal = %s %+v", ce.Message, ce.Details)
+		}
+		h.gateFeature("a")
+	}
+	// The way out: a on its own (its promote gates it for squash), then b.
+	if pr, err := promote(h, engine.PromoteOptions{Feature: "a", Mode: "squash", Message: "Add a, reviewed", Yes: true}); err != nil || pr.Applied == nil ||
+		pr.Plan.Publish.Style != plan.StyleReplace {
+		t.Fatalf("promote a alone = %+v %v", pr, err)
+	}
+	res, _, err := promoteStack(h, engine.PromoteOptions{Feature: "b", Mode: "squash", Message: "Add b", Yes: true})
+	if err != nil || res.Applied == nil {
+		t.Fatalf("promote b = %+v %v", res, err)
+	}
+	if parent, _ := h.pubGit.MustResolve(h.ctx, h.pubTip("b")+"^"); parent != h.pubTip("a") {
+		t.Fatalf("b sits on %s, want a's new head %s", parent, h.pubTip("a"))
+	}
+}
+
 // The plain chained-PR squash path end to end: after a squash merge of a,
 // sync marks b public_pr_needs_update; restack --onto main, gate and
 // promote b replace b's PR branch onto main, and the flag clears.

@@ -86,7 +86,7 @@ func (e *Engine) stackUpdates(ctx context.Context, pc *pairCtx, names, modes []s
 				}
 			}
 			if !gateFitsUpdate(m.Gate, u, m, modes[i], above) {
-				return nil, staleGate(n, names)
+				return nil, updateGateErr(n, names, m, u, modes[i], above)
 			}
 			if u != nil {
 				u.Style, u.Reason = m.Gate.Update.Style, m.Gate.Update.Reason
@@ -106,6 +106,35 @@ func (e *Engine) stackUpdates(ctx context.Context, pc *pairCtx, names, modes []s
 		}
 	}
 	return out, nil
+}
+
+// updateGateErr is NOT_A_STACK stale_gate for the bottom on main, name,
+// whose gate doesn't fit the update of its open PR u in mode now
+// (gateFitsUpdate). When the gate would fit in the mode it was built for,
+// gating again can't help: gate builds for promote.default_mode, so it
+// would build the same update. Then the refusal says so, with
+// details.update_mode, and the way out is to promote name on its own,
+// which gates it for mode. Otherwise the PR or the stack changed since the
+// gate (its head, its base, PRs opened above), and gating again fits.
+func updateGateErr(name string, names []string, m feature.Meta, u *prUpdate, mode string, above bool) *contract.Error {
+	gt := m.Gate
+	switch {
+	case u == nil:
+		return staleGate(name, names)
+	case gt.Update == nil || gt.ScannedAs == mode || !gateFitsUpdate(gt, u, m, gt.ScannedAs, above):
+		return notAStack("stale_gate", name, names,
+			"%s's gate wasn't built for the update its public PR #%d needs now (the PR's head or base, or the PRs open above it, changed since %s was gated): gate %s, then the branches above it, then promote again",
+			name, u.PR, name, name)
+	}
+	built := "an append to"
+	if gt.Update.Style == plan.StyleReplace {
+		built = "a replace of"
+	}
+	ce := notAStack("stale_gate", name, names,
+		"%s's gate built %s its public PR #%d in %s mode, which a %s update can't use; gate builds in promote.default_mode, so gating %s again doesn't change that. Promote %s on its own first (ghostbranch promote %s --mode %s --plan gates it in %s mode and plans its update), then promote the branches above it",
+		name, built, u.PR, gt.ScannedAs, mode, name, name, name, mode, mode)
+	ce.Details["update_mode"] = mode
+	return ce
 }
 
 // restackedAbove refuses an update plan in which a branch above the bottom

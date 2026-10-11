@@ -551,6 +551,14 @@ func TestNextForUpdates(t *testing.T) {
 		!strings.Contains(next[0].Why, "bottom up") {
 		t.Errorf("stale_gate: next = %+v", next)
 	}
+	// A bottom gate built in another mode: gating again would loop, so next
+	// promotes the bottom on its own in that mode, then the branches above.
+	next = a.next(contract.New(contract.NotAStack, "x").WithDetails(map[string]any{
+		"reason": "stale_gate", "feature": "feat-a", "features": []string{"feat-a", "feat-b"}, "update_mode": "squash"}))
+	if len(next) != 2 || !slices.Equal(next[0].Command, cmd("promote", "feat-a", "--mode", "squash", "--plan")) ||
+		!slices.Equal(next[1].Command, cmd("promote", "feat-b", "--mode", "squash", "--plan")) {
+		t.Errorf("stale_gate update_mode: next = %+v", next)
+	}
 	next = a.next(contract.New(contract.NotAStack, "x").WithDetails(map[string]any{
 		"reason": "open_above", "feature": "feat-a", "features": []string{"feat-a"}, "children": []string{"feat-b", "feat-c"}}))
 	// Promoting either line would be refused naming the other: a person
