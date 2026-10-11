@@ -743,11 +743,14 @@ func unpublished(ctx context.Context, g *gitx.Git, tip string) ([]string, error)
 // above telling whether open PRs sit above m now. Either both are nil, or
 // the record names the same PR, head and base, with a style that fits now.
 // When a replace is forced now (forcedReason: squash or curated mode, a
-// restack, open PRs above), any replace the gate built fits, whatever its
-// reason or the mode it was gated in: a replace candidate is the feature
-// replayed onto public main in every mode, and promote publishes it only
-// as a chain whose tree is the gated one (assertChain), scanned again as
-// published. So a squash update stands on the gate gate built in
+// changed base branch, a flagged restack, open PRs above, or published
+// commits removed on GitHub; the base and the removed commits are the PR's
+// base and head, so a gate built before they changed already fails the
+// check above), any replace the gate built fits, whatever its reason or
+// the mode it was gated in: a replace candidate is the feature replayed
+// onto public main in every mode, and promote publishes it only as a chain
+// whose tree is the gated one (assertChain), scanned again as published.
+// So a squash update stands on the gate gate built in
 // promote.default_mode. With none forced, the recorded update must be one
 // the new history alone gives (append, rebase, reworded or conflict),
 // which the gate decided on the same feature head and public main. A gate

@@ -54,6 +54,26 @@ func (h *harness) rebaseOntoMain() {
 		map[string]string{"feature.txt": "new\n", ".ghostbranch/notes.md": "private\n"})
 }
 
+// mergeMainIntoFeature merges shadow main into feat-x, as git merge main
+// in the person's checkout does.
+func (h *harness) mergeMainIntoFeature() {
+	h.t.Helper()
+	sg := h.shadowGit()
+	F := h.head("feat-x")
+	c := testutil.Commit(h.t, sg, "feat-x", "tree", map[string]string{"up.txt": "up\n"})
+	tree, err := sg.TreeOf(h.ctx, c)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	merge, err := sg.CommitTree(h.ctx, tree, []string{F, h.head("main")}, "Merge branch 'main' into feat-x", testutil.Author(71), testutil.Author(71))
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	if err := sg.UpdateRef(h.ctx, "refs/heads/feat-x", merge); err != nil {
+		h.t.Fatal(err)
+	}
+}
+
 // Review Focus 4: append vs replace is chosen correctly.
 func TestUpdateStyle(t *testing.T) {
 	t.Parallel()
@@ -90,6 +110,28 @@ func TestUpdateStyle(t *testing.T) {
 		// still an append onto the PR's head.
 		{"a new commit while main moved appends", func(h *harness, _ int) {
 			h.moveMain()
+			testutil.Commit(h.t, h.shadowGit(), "feat-x", "more", more)
+		}, plan.StyleAppend, ""},
+		// The head the feature was published from is gone from the mirror:
+		// it was rewritten away, as the mirror holds every ancestor of the
+		// feature's head.
+		{"a published head the mirror lacks replaces", func(h *harness, _ int) {
+			h.editRemoteMeta("feat-x", func(m *feature.Meta) { m.Promoted.FeatureHead = "0123456789abcdef0123456789abcdef01234567" })
+			testutil.Commit(h.t, h.shadowGit(), "feat-x", "more", more)
+		}, plan.StyleReplace, plan.ReasonRebase},
+		// A record that knows no published head (no feature_head, no plan file)
+		// can't tell a rewrite: the patch-id prefix alone decides, as before.
+		{"with no published head known a clean rebase appends", func(h *harness, _ int) {
+			h.editRemoteMeta("feat-x", func(m *feature.Meta) { m.Promoted.FeatureHead, m.Promoted.PlanID = "", "20200101T000000Z-abcdef" })
+			h.moveMain()
+			h.rebaseOntoMain()
+			testutil.Commit(h.t, h.shadowGit(), "feat-x", "more", more)
+		}, plan.StyleAppend, ""},
+		// Main merged into the feature keeps the published head an
+		// ancestor: not a rewrite.
+		{"a merge of main into the feature appends", func(h *harness, _ int) {
+			h.moveMain()
+			h.mergeMainIntoFeature()
 			testutil.Commit(h.t, h.shadowGit(), "feat-x", "more", more)
 		}, plan.StyleAppend, ""},
 		{"a reworded commit replaces", func(h *harness, _ int) {

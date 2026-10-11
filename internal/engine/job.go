@@ -318,11 +318,12 @@ func (e *Engine) pendingFor(ctx context.Context, pc *pairCtx, name, mode string)
 		mode = cfg.Promote.DefaultMode
 	}
 	if m.Gate.FreshFor(head, pm, O) && m.Gate.ScannedAs == mode && tip == m.Gate.Candidate {
-		// An update job is this gate only while it builds the update the
-		// open PR needs now: the same PR, still open on the same base, its
-		// branch at the head the job built on, with the same style (nothing
-		// new open above it, no restack flagged since). A first-publish job
-		// stands only while no PR is open.
+		// An update job is this gate only while it builds an update the
+		// open PR can take now (gateFitsUpdate): the same PR, still open on
+		// the same base, its branch at the head the job built on. An append
+		// job stops standing once a replace is forced (PRs opened above it, a
+		// restack flagged since); a replace job stands for any forced
+		// replace. A first-publish job stands only while no PR is open.
 		if m.Gate.Update != nil || (m.Promoted != nil && parentFeature(m) == "") {
 			fits, _, err := e.updateFits(ctx, pc, m.Gate, m, mode)
 			if err != nil {
