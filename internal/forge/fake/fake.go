@@ -69,10 +69,14 @@ type Forge struct {
 	// records the repo each ClosePullRequest call named.
 	ClosePRErr   error
 	ClosePRRepos []string
+	// Edits records each EditPR call, in order; EditPRErr makes EditPR
+	// fail with that error.
+	Edits     []PREdit
+	EditPRErr error
 	// MissingPermission scripts a 403 that names its permission: the method
 	// named (GetRepo, CreatePrivateRepo, SetDefaultBranch, FindOpenPR,
 	// CreatePR, GetPR, ListChecks, SecretNames, PushRuns, CancelRun,
-	// ForceCancelRun, ClosePullRequest, CreateStack, AddToStack, StackOf)
+	// ForceCancelRun, ClosePullRequest, EditPR, CreateStack, AddToStack, StackOf)
 	// fails with a *forge.PermissionError naming that permission and the
 	// repo, for any repo.
 	MissingPermission map[string]string
@@ -263,6 +267,41 @@ func (f *Forge) ClosePullRequest(_ context.Context, full string, number int) err
 		}
 	}
 	return fmt.Errorf("PR %s#%d: %w", full, number, forge.ErrNotFound)
+}
+
+// PREdit is one EditPR call: a nil Title or Body was left as it is.
+type PREdit struct {
+	Repo   string
+	Number int
+	Title  *string
+	Body   *string
+}
+
+// EditPR records the edit of PR number. An unknown PR is ErrNotFound.
+func (f *Forge) EditPR(_ context.Context, full string, number int, title, body *string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.missing("EditPR", full); err != nil {
+		return err
+	}
+	if f.EditPRErr != nil {
+		return f.EditPRErr
+	}
+	for _, pr := range f.prs[full] {
+		if pr.Number == number {
+			f.Edits = append(f.Edits, PREdit{Repo: full, Number: number, Title: clonePtr(title), Body: clonePtr(body)})
+			return nil
+		}
+	}
+	return fmt.Errorf("PR %s#%d: %w", full, number, forge.ErrNotFound)
+}
+
+func clonePtr(s *string) *string {
+	if s == nil {
+		return nil
+	}
+	v := *s
+	return &v
 }
 
 func (f *Forge) GetRepo(_ context.Context, full string) (forge.Repo, error) {

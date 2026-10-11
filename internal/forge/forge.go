@@ -170,6 +170,10 @@ type Forge interface {
 	// closed is not an error; a missing one is ErrNotFound, and a plain
 	// permission refusal ErrForbidden.
 	ClosePullRequest(ctx context.Context, full string, number int) error
+	// EditPR changes PR number's title and body in full. A nil field is
+	// left as it is. A missing PR is ErrNotFound, and a plain permission
+	// refusal ErrForbidden.
+	EditPR(ctx context.Context, full string, number int, title, body *string) error
 }
 
 // NoreplyEmail is the user's GitHub noreply address. Public commits use it
