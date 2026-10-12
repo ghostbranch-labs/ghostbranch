@@ -10,6 +10,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 	"github.com/ghostbranch-labs/ghostbranch/internal/plan"
+	"github.com/ghostbranch-labs/ghostbranch/internal/progress"
 )
 
 // FeatureReport is one feature as the survey sees it.
@@ -106,6 +107,21 @@ const (
 // that concerns every feature (listing them, the config, public main),
 // fails it.
 func (e *Engine) survey(ctx context.Context, pc *pairCtx, names ...string) ([]FeatureReport, []contract.Warning, error) {
+	return e.surveyRun(ctx, pc, false, names)
+}
+
+// surveyStep is the step a read-only command shows while its survey reads
+// (decision 9): each published feature costs a GitHub request.
+const surveyStep = "Reading the features and their pull requests"
+
+// surveyShown is survey for the read-only commands (status, feature list,
+// feature show, doctor): it shows surveyStep, counting the features, while
+// it reads. The changing commands survey inside their own steps.
+func (e *Engine) surveyShown(ctx context.Context, pc *pairCtx, names ...string) ([]FeatureReport, []contract.Warning, error) {
+	return e.surveyRun(ctx, pc, true, names)
+}
+
+func (e *Engine) surveyRun(ctx context.Context, pc *pairCtx, shown bool, names []string) (_ []FeatureReport, _ []contract.Warning, err error) {
 	const prefix = "refs/shadow-meta/features/"
 	refs, err := pc.git.Refs(ctx, strings.TrimSuffix(prefix, "/"))
 	if err != nil {
@@ -139,7 +155,21 @@ func (e *Engine) survey(ctx context.Context, pc *pairCtx, names ...string) ([]Fe
 		return nil, nil, internalErr(err, "read public main")
 	}
 	var warns []contract.Warning
-	for _, name := range list {
+	st := progress.Nop().Step("")
+	if shown {
+		st = e.startStep(surveyStep)
+		defer func() {
+			if err != nil {
+				st.Fail()
+			} else {
+				st.Done(surveyStep) // the start text: plain mode prints no ending
+			}
+		}()
+	}
+	for i, name := range list {
+		if len(list) > 1 {
+			st.Update(fmt.Sprintf("%s (%d of %d)", surveyStep, i+1, len(list)))
+		}
 		r, ws, err := e.surveyOne(ctx, pc, name, pm, O)
 		if err != nil {
 			if ctx.Err() != nil {

@@ -305,3 +305,53 @@ func TestStackPromoteKeepsPRsChainedWithoutNativeStacks(t *testing.T) {
 		t.Fatalf("stack promote:\n%s", rec.String())
 	}
 }
+
+// The read-only commands show their slow GitHub reads (decision 9): the
+// survey counts the features, the audit and the token check are steps, and
+// every step ends after a successful run.
+func TestReadOnlyCommandsShowTheirGitHubReads(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.grant(time.Hour)
+	h.publishPreserve("feat-x")
+	h.startFeature("feat-y", map[string]string{"y.txt": "y\n"})
+	survey := "Reading the features and their pull requests"
+	audit := "Checking the CI setup of " + shadowName
+
+	rec := &progress.Recorder{}
+	h.eng.Progress = rec
+	if _, _, err := h.eng.Status(h.ctx, h.pair); err != nil {
+		t.Fatal(err)
+	}
+	if !inOrder(rec.Steps(), []string{"Reading " + publicName + " and " + shadowName + " from GitHub", survey}) ||
+		!slices.Equal(rec.Updates(), []string{survey + " (1 of 2)", survey + " (2 of 2)"}) || rec.Running() {
+		t.Fatalf("status:\n%s", rec.String())
+	}
+
+	rec = &progress.Recorder{}
+	h.eng.Progress = rec
+	if _, _, err := h.eng.FeatureShow(h.ctx, h.pair, "feat-x"); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(rec.Steps(), survey) || len(rec.Updates()) != 0 || rec.Running() {
+		t.Fatalf("feature show:\n%s", rec.String())
+	}
+
+	rec = &progress.Recorder{}
+	h.eng.Progress = rec
+	if _, _, err := h.eng.Audit(h.ctx, h.pair); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(rec.Steps(), audit) || rec.Running() {
+		t.Fatalf("audit:\n%s", rec.String())
+	}
+
+	rec = &progress.Recorder{}
+	h.eng.Progress = rec
+	h.asApp() // a token, so the token check asks GitHub
+	h.doctor(doctorOpts())
+	if !inOrder(rec.Steps(), []string{"Checking the GitHub token", survey, audit}) || rec.Running() {
+		t.Fatalf("doctor:\n%s", rec.String())
+	}
+}

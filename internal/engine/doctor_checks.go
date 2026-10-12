@@ -291,6 +291,11 @@ func (d *doctorRun) token(ctx context.Context) DoctorCheck {
 			"; the next command that uses GitHub refreshes it (doctor doesn't, as it writes nothing), so it wasn't checked")
 		return v.result(head, "", det)
 	}
+	// Its requests (the account, the push and permission probes) are the
+	// slow part of doctor: show them. A check's findings are its own lines,
+	// so the step always ends done.
+	st := e.startStep("Checking the GitHub token")
+	defer st.Done("")
 	u, err := e.Forge.CurrentUser(ctx)
 	if err != nil {
 		if errors.Is(err, forge.ErrTransient) || ctx.Err() != nil {
@@ -563,7 +568,7 @@ func (d *doctorRun) state(ctx context.Context) DoctorCheck {
 	if d.pc == nil {
 		tail += " (features not checked: no readable pair)"
 	} else {
-		rs, _, err := e.survey(ctx, d.pc)
+		rs, _, err := e.surveyShown(ctx, d.pc)
 		if err != nil {
 			v.add(DoctorFail, "the features of "+d.pair.Public+" couldn't be listed: "+contract.From(err).Message)
 		} else {
@@ -611,7 +616,9 @@ func (d *doctorRun) ci(ctx context.Context) DoctorCheck {
 	if d.pc == nil || d.O == "" {
 		return skipped("no readable pair to audit (see pair)")
 	}
+	st := d.e.startStep(auditStep, d.pair.Shadow)
 	res, warns, err := d.e.audit(ctx, d.pc, d.cfg, d.O)
+	st.Done("") // the check reports a failed audit itself
 	if err != nil {
 		if errors.Is(err, forge.ErrForbidden) {
 			return skipped("the token can't read the shadow repo's CI settings: " + contract.From(err).Message)

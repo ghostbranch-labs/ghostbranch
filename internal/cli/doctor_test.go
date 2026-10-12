@@ -192,3 +192,20 @@ func TestDoctorSaysTheCheckIsOffWithoutAStateDirectory(t *testing.T) {
 		t.Fatalf("%s", out)
 	}
 }
+
+// A look still running when doctor's checks end shows a step while doctor
+// waits for it, so doctor never looks hung.
+func TestDoctorShowsItsWaitForTheLook(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	f, url := newFakeReleases(t, "v0.12.0", "[]") // not newer: one request
+	f.mu.Lock()
+	f.delay = time.Second
+	f.mu.Unlock()
+	te.releaseBuild("v0.12.0", url)
+	te.env.StderrTerminal = false
+	_, out, errOut := te.run("doctor")
+	if !strings.Contains(errOut, "Looking for a newer Ghostbranch\n") || !strings.Contains(out, "update check: on · last looked just now · up to date") {
+		t.Fatalf("stdout %s\nstderr %s", out, errOut)
+	}
+}

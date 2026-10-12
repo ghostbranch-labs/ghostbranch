@@ -35,7 +35,7 @@ checks that need a pair. It exits 0 unless a check fails (DOCTOR_FAILED, details
 			looked := make(chan updatecheck.Status, 1)
 			go func() { looked <- a.doctorUpdateCheck(cmd.Context()) }()
 			res, err := a.doctorRun(cmd.Context(), a.repo)
-			st := <-looked // always received: orders the goroutine's write of a.updates before render reads it
+			st := a.waitForDoctorLook(looked) // always received: orders the goroutine's write of a.updates before render reads it
 			if res != nil {
 				res.UpdateCheck = &st
 				a.result = res
@@ -51,6 +51,20 @@ checks that need a pair. It exits 0 unless a check fails (DOCTOR_FAILED, details
 			return nil
 		},
 	}
+}
+
+// waitForDoctorLook waits for doctor's own look, showing a step while it is still
+// running (up to the look's budget) so doctor never looks hung.
+func (a *app) waitForDoctorLook(looked <-chan updatecheck.Status) updatecheck.Status {
+	select {
+	case st := <-looked:
+		return st
+	default:
+	}
+	step := a.reporter().Step("Looking for a newer Ghostbranch")
+	st := <-looked
+	step.Done("")
+	return st
 }
 
 // doctorWarnings is AGENT_ON_PERSON_LOGIN when the token check found a
