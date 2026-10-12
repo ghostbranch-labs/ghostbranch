@@ -39,9 +39,18 @@ func TestReferenceListsEveryVisibleCommand(t *testing.T) {
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("paths:\n got %v\nwant %v", got, want)
 	}
-	for _, c := range ref.Commands {
-		if c.Path == "reference" {
-			t.Fatal("the hidden reference command is listed")
+	set := map[string]bool{}
+	for _, p := range got {
+		set[p] = true
+	}
+	for _, p := range []string{"feature start", "waivers revoke"} {
+		if !set[p] {
+			t.Errorf("%q missing", p)
+		}
+	}
+	for _, p := range []string{"feature", "agents", "reference"} {
+		if set[p] {
+			t.Errorf("%q is listed, but is hidden or not runnable", p)
 		}
 	}
 }
@@ -76,6 +85,11 @@ func TestReferenceFlagsAndReadOnly(t *testing.T) {
 	globals := map[string]bool{}
 	for _, f := range ref.GlobalFlags {
 		globals[f.Name] = true
+	}
+	for _, f := range ref.GlobalFlags {
+		if f.Name == "json" && f.Default != "false" {
+			t.Errorf("json default %q, want false", f.Default)
+		}
 	}
 	for _, g := range []string{"json", "repo", "dry-run", "non-interactive"} {
 		if !globals[g] {

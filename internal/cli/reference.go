@@ -40,9 +40,11 @@ func (a *app) referenceCmd() *cobra.Command {
 		Short:  "Print every command and flag as data, for the product site's reference pages",
 		Hidden: true,
 		Args:   cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		RunE: func(_ *cobra.Command, _ []string) error {
 			a.ran = true
-			return done(a, buildReference(cmd.Root()), nil, nil)
+			// A fresh tree: the live one carries defaults taken from this
+			// run's argv (--json, --no-color), which the reference must not.
+			return done(a, buildReference((&app{}).root()), nil, nil)
 		},
 	}
 }

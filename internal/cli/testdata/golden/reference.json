@@ -765,7 +765,7 @@
         "name": "json",
         "shorthand": "",
         "type": "bool",
-        "default": "true",
+        "default": "false",
         "usage": "print JSON on stdout: one object (wait streams one event per line, the result last)"
       },
       {

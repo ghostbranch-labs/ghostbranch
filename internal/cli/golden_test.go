@@ -521,3 +521,26 @@ func withGatedStack(te *testEnv) {
 	te.mustRun("gate", "feat-a")
 	te.mustRun("gate", "feat-b")
 }
+
+// Run pre-scans argv for --json and --no-color; the reference must still
+// report their real defaults.
+func TestReferenceDefaultsIgnoreArgv(t *testing.T) {
+	te := newTestEnv(t)
+	code, env := te.runJSON("reference", "--no-color")
+	if code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	data, _ := env["data"].(map[string]any)
+	flags, _ := data["global_flags"].([]any)
+	seen := map[string]string{}
+	for _, f := range flags {
+		m, _ := f.(map[string]any)
+		seen[m["name"].(string)], _ = m["default"].(string)
+	}
+	for _, n := range []string{"json", "no-color"} {
+		d, ok := seen[n]
+		if !ok || d != "false" {
+			t.Errorf("%s default %q (present %v), want false", n, d, ok)
+		}
+	}
+}
