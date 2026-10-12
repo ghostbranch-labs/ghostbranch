@@ -71,7 +71,7 @@
   ],
   "error": {
     "code": "PUBLIC_BRANCH_CHANGED",
-    "message": "PR #1 of feat-x holds 1 commit(s) Ghostbranch didn't publish, and they can't be brought in by themselves: replaying commit <SHA1:short> with them conflicts in feature.txt. Ghostbranch never resolves conflicts: merge the PR's branch into feat-x yourself (details.steps), push it to the shadow repo, then run feature pull again",
+    "message": "PR #1 of feat-x holds 1 commit(s) Ghostbranch didn't publish, and they can't be brought in by themselves: replaying commit <SHA1:12> with them conflicts in feature.txt. Ghostbranch never resolves conflicts: merge the PR's branch into feat-x yourself (details.steps), push it to the shadow repo, then run feature pull again",
     "field": "feature",
     "retryable": false,
     "details": {

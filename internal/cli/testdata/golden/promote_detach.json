@@ -36,7 +36,7 @@
         "skipped": []
       },
       "shadow_pr": 1,
-      "job": "gate/feat-x/<SHA4:short>",
+      "job": "gate/feat-x/<SHA4:12>",
       "reused": false,
       "preview": null
     },
@@ -55,7 +55,7 @@
       "command": [
         "ghostbranch",
         "wait",
-        "gate/feat-x/<SHA4:short>",
+        "gate/feat-x/<SHA4:12>",
         "--repo",
         "acme/widget"
       ],

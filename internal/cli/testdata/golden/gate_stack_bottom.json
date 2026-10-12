@@ -35,7 +35,7 @@
       "skipped": []
     },
     "shadow_pr": 1,
-    "job": "gate/feat-a/<SHA4:short>",
+    "job": "gate/feat-a/<SHA4:12>",
     "reused": false,
     "children": [
       "feat-b"

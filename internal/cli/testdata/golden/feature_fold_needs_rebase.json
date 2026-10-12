@@ -67,7 +67,7 @@
   ],
   "error": {
     "code": "FOLD_NEEDS_REBASE",
-    "message": "feat-x has moved on since feat-y was started from it (it is at <SHA2:short>, which feat-y doesn't contain), so fold can't fast-forward it; rebase feat-y onto feat-x yourself (details.steps), push it, and fold again. Ghostbranch never rebases or resolves conflicts",
+    "message": "feat-x has moved on since feat-y was started from it (it is at <SHA2:12>, which feat-y doesn't contain), so fold can't fast-forward it; rebase feat-y onto feat-x yourself (details.steps), push it, and fold again. Ghostbranch never rebases or resolves conflicts",
     "field": "feature",
     "retryable": false,
     "details": {

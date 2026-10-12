@@ -58,7 +58,7 @@
         "pair": "acme/widget",
         "feature": "feat-x",
         "exit_code": 0,
-        "summary": "checks passed, leak clean, candidate <SHA3>"
+        "summary": "checks passed, leak clean, candidate <SHA3:12>"
       }
     ]
   },

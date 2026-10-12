@@ -75,7 +75,7 @@
   ],
   "error": {
     "code": "REBASE_CONFLICT",
-    "message": "feat-y does not restack cleanly onto feat-x: commit <SHA2:short> stopped on conflicts in feature.txt. The branches restacked before it stay restacked, and feat-y is unchanged; Ghostbranch never resolves conflicts: rebase it yourself (details.steps), push it, then run ghostbranch feature restack feat-x",
+    "message": "feat-y does not restack cleanly onto feat-x: commit <SHA2:12> stopped on conflicts in feature.txt. The branches restacked before it stay restacked, and feat-y is unchanged; Ghostbranch never resolves conflicts: rebase it yourself (details.steps), push it, then run ghostbranch feature restack feat-x",
     "field": "feature",
     "retryable": false,
     "details": {

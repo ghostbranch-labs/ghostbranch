@@ -58,7 +58,7 @@
   ],
   "error": {
     "code": "PARENT_REWRITTEN",
-    "message": "feature feat-x was rewritten after feat-y was started from it, so it no longer contains the fork point <SHA4:short>; run ghostbranch feature restack feat-x",
+    "message": "feature feat-x was rewritten after feat-y was started from it, so it no longer contains the fork point <SHA4:12>; run ghostbranch feature restack feat-x",
     "field": "feature",
     "retryable": false,
     "details": {
