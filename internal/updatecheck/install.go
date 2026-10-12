@@ -1,6 +1,7 @@
 package updatecheck
 
 import (
+	"path"
 	"path/filepath"
 	"runtime/debug"
 	"strings"
@@ -52,7 +53,7 @@ func UpgradeCommand(exe string, env InstallEnv, releasePage string) string {
 			return "bun update -g " + NPMPackage
 		case strings.Contains(p, "/pnpm/"):
 			return "pnpm update -g " + NPMPackage
-		case strings.Contains(p, "/yarn/global/"):
+		case strings.Contains(p, "/yarn/global/"), strings.Contains(p, "/yarn/data/global/"):
 			return "yarn global upgrade " + NPMPackage
 		}
 		return "npm update -g " + NPMPackage
@@ -65,7 +66,7 @@ func UpgradeCommand(exe string, env InstallEnv, releasePage string) string {
 		return "winget upgrade --id " + WingetID
 	case inGoBin(p, env):
 		return "go install " + env.Module + "/cmd/ghostbranch@latest"
-	case InstallScriptDir != "" && strings.HasPrefix(p, norm(InstallScriptDir)+"/"):
+	case InstallScriptDir != "" && InstallScriptCommand != "" && strings.HasPrefix(p, norm(InstallScriptDir)+"/"):
 		return InstallScriptCommand
 	}
 	return releasePage
@@ -80,18 +81,20 @@ func inGoBin(p string, env InstallEnv) bool {
 	}
 	var dirs []string
 	if b := getenv("GOBIN"); b != "" {
-		dirs = append(dirs, b)
+		dirs = append(dirs, path.Clean(norm(b)))
 	}
 	if gp := getenv("GOPATH"); gp != "" {
 		for _, d := range filepath.SplitList(gp) {
-			dirs = append(dirs, d+"/bin")
+			if d != "" {
+				dirs = append(dirs, path.Clean(norm(d)+"/bin"))
+			}
 		}
 	} else if env.Home != "" {
-		dirs = append(dirs, env.Home+"/go/bin")
+		dirs = append(dirs, path.Clean(norm(env.Home)+"/go/bin"))
 	}
-	dir := p[:strings.LastIndex(p, "/")+1]
+	dir := strings.TrimRight(p[:strings.LastIndex(p, "/")+1], "/")
 	for _, d := range dirs {
-		if dir == norm(d)+"/" {
+		if dir == d {
 			return true
 		}
 	}
@@ -104,5 +107,5 @@ func Module() string {
 	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Path != "" {
 		return bi.Main.Path
 	}
-	return "github.com/ghostbranch-labs/ghostbranch"
+	return "github.com/" + Repo
 }
