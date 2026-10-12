@@ -12,6 +12,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/grant"
+	"github.com/ghostbranch-labs/ghostbranch/internal/updatecheck"
 	"github.com/ghostbranch-labs/ghostbranch/internal/waiver"
 )
 
@@ -28,8 +29,14 @@ In a checkout of a pair it checks that pair; --repo names another; with neither 
 checks that need a pair. It exits 0 unless a check fails (DOCTOR_FAILED, details.failed).`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// The fresh look runs here, not in doctorRun: guided init calls
+			// doctorRun too and must not pay up to the look's budget (F5).
+			looked := make(chan updatecheck.Status, 1)
+			go func() { looked <- a.doctorUpdateCheck(cmd.Context()) }()
 			res, err := a.doctorRun(cmd.Context(), a.repo)
+			st := <-looked // always received: orders the goroutine's write of a.updates before render reads it
 			if res != nil {
+				res.UpdateCheck = &st
 				a.result = res
 				a.warnings = append(a.warnings, doctorWarnings(res)...)
 			}
@@ -161,4 +168,30 @@ func (a *app) doctorNext() []contract.Next {
 		out = append(out, contract.Next{Command: argv, NeedsHuman: human, Why: c.ID + ": " + c.Message})
 	}
 	return out
+}
+
+// doctorUpdateCheck runs a fresh look within the budget, whatever the
+// schedule says, saves it without touching the reminder times, and keeps it
+// for the end-of-command reminder (R11).
+func (a *app) doctorUpdateCheck(ctx context.Context) updatecheck.Status {
+	u := a.newUpdateRun()
+	a.updates = u
+	if u.off == "" {
+		if c, ok := a.updateClient(u); ok {
+			r := updatecheck.Look(ctx, c, u.current, a.env.Now, updatecheck.Budget)
+			u.mu.Lock()
+			u.cache.Merge(r, u.current)           // r.Err is stored cleaned, never printed here
+			_ = updatecheck.Save(u.path, u.cache) // a cache: a failed write is silent
+			u.mu.Unlock()
+		}
+	}
+	page := "https://github.com/" + updatecheck.Repo + "/releases/latest"
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.cache.Latest != nil {
+		if v, ok := updatecheck.ParseRelease(u.cache.Latest.Version); ok { // nothing from the cache file unchecked
+			page = updatecheck.ReleaseURL("v" + v.String())
+		}
+	}
+	return updatecheck.StatusOf(u.off, u.current, u.cache, u.override, a.upgradeCommand(page), a.env.Now())
 }

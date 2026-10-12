@@ -60,7 +60,19 @@
         "fix": "",
         "details": {}
       }
-    ]
+    ],
+    "update_check": {
+      "enabled": false,
+      "off_reason": "development build",
+      "checked_at": null,
+      "current": "",
+      "latest": "",
+      "security": false,
+      "advisories": [],
+      "upgrade": "",
+      "error": "",
+      "override": ""
+    }
   },
   "warnings": [],
   "next": [

@@ -176,7 +176,7 @@ func TestHelpAndCompletionNeverLook(t *testing.T) {
 	te := newTestEnv(t)
 	f, url := newFakeReleases(t, "v0.13.0", "[]")
 	te.releaseBuild("v0.12.0", url)
-	for _, args := range [][]string{{"--help"}, {}, {"help", "gate"}, {"completion", "bash"}, {"__complete", "ga"}} {
+	for _, args := range [][]string{{"--help"}, {}, {"help", "gate"}, {"completion", "bash"}, {"__complete", "ga"}, {"__completeNoDesc", "ga"}} {
 		te.run(args...)
 	}
 	// None of these reaches render, so nothing would wait for a look that
@@ -184,6 +184,36 @@ func TestHelpAndCompletionNeverLook(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 	if f.count() != 0 {
 		t.Fatalf("%d hits", f.count())
+	}
+	// doctor starts no background look: its own fresh look is the only one
+	// (a latest request, then advisories for the newer release), not two.
+	te.run("doctor")
+	if f.count() != 2 {
+		t.Fatalf("doctor made %d requests, want one look's 2", f.count())
+	}
+}
+
+// Reminders are kept per audience, and from 1.0 on a person is reminded once
+// per release: a piped human run records nothing, the first terminal run
+// reminds, the second does not, and an agent still gets its warning.
+func TestRemindersAreKeptPerAudienceFromOnePointZero(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	_, url := newFakeReleases(t, "v1.3.0", "[]")
+	te.releaseBuild("v1.2.0", url)
+	te.env.StderrTerminal = false
+	if _, _, errOut := te.run("version"); strings.Contains(errOut, "Ghostbranch 1.3.0") {
+		t.Fatalf("piped run reminded: %q", errOut)
+	}
+	te.env.StderrTerminal = true
+	if _, _, errOut := te.run("version"); !strings.Contains(errOut, "! Ghostbranch 1.3.0 is out (you have 1.2.0).") {
+		t.Fatalf("first terminal run (the piped one recorded nothing): %q", errOut)
+	}
+	if _, _, errOut := te.run("version"); strings.Contains(errOut, "Ghostbranch 1.3.0") {
+		t.Fatalf("second run reminded again: %q", errOut)
+	}
+	if _, out, _ := te.run("version", "--json"); !strings.Contains(out, `"code": "UPDATE_AVAILABLE"`) {
+		t.Fatalf("agent audience got no warning: %s", out)
 	}
 }
 

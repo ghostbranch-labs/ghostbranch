@@ -11,6 +11,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/auth"
 	"github.com/ghostbranch-labs/ghostbranch/internal/config"
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
+	"github.com/ghostbranch-labs/ghostbranch/internal/updatecheck"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
@@ -80,6 +81,9 @@ func (c DoctorCheck) withFix(argv ...string) DoctorCheck {
 // DoctorResult is doctor's data: every check, in DoctorCheckIDs order.
 type DoctorResult struct {
 	Checks []DoctorCheck `json:"checks"`
+	// UpdateCheck is the update checker's state from a fresh look (6.4a).
+	// The CLI sets it; the engine never looks.
+	UpdateCheck *updatecheck.Status `json:"update_check,omitempty"`
 }
 
 // DoctorSummary counts a result's checks by status; guided init reports it.
