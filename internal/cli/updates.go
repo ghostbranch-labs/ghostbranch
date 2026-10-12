@@ -69,7 +69,11 @@ func (a *app) newUpdateRun() *updateRun {
 		return u
 	}
 	u.current, _ = updatecheck.ParseRelease(v)
-	home, err := workspace.HomeDir(a.env.Getenv, runtime.GOOS, os.UserHomeDir)
+	userHome := a.env.UserHome // the same seam the skills use; production sets os.UserHomeDir
+	if userHome == nil {
+		userHome = os.UserHomeDir
+	}
+	home, err := workspace.HomeDir(a.env.Getenv, runtime.GOOS, userHome)
 	if err != nil {
 		u.off = "no state directory"
 		return u

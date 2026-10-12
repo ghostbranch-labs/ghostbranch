@@ -159,8 +159,8 @@ func TestDoctorSaysWhyTheCheckIsOff(t *testing.T) {
 		// The override is reported in the object even when the check is off.
 		_, env := te.runJSON("doctor")
 		uc, _ := env["data"].(map[string]any)["update_check"].(map[string]any)
-		if uc["enabled"] != false || uc["override"] != url {
-			t.Errorf("%v: update_check = %v", c.vars, uc)
+		if uc["enabled"] != false || uc["override"] != url || f.count() != 0 {
+			t.Errorf("%v: update_check = %v, %d hits", c.vars, uc, f.count())
 		}
 	}
 }
@@ -183,6 +183,9 @@ func TestDoctorSaysTheCheckIsOffWithoutAStateDirectory(t *testing.T) {
 	te := newTestEnv(t)
 	te.releaseBuild("v0.12.0", "http://127.0.0.1:1")
 	delete(te.vars, "GHOSTBRANCH_HOME")
+	// The state directory comes from Env.UserHome (darwin, linux) or
+	// LOCALAPPDATA (windows, unset in te.vars): it fails on every OS, and
+	// the real home is never read.
 	te.env.UserHome = func() (string, error) { return "", errors.New("no home") }
 	_, out, _ := te.run("doctor")
 	if !strings.Contains(out, "update check: off (no state directory)") {
