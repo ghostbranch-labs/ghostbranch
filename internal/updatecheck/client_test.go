@@ -189,3 +189,103 @@ func TestNetworkTextIsCleaned(t *testing.T) {
 		}
 	}
 }
+
+// Bidi overrides, isolates, zero-width characters and the Unicode line and
+// paragraph separators are dropped too: they reorder or break a line.
+func TestNetworkTextLosesFormatCharacters(t *testing.T) {
+	t.Parallel()
+	adv := `[{"ghsa_id":"GHSA-2222\u202e-3333\u2066-4444\u200b","summary":"a\u2028b\u2029c\ufeff","withdrawn_at":null,
+	  "vulnerabilities":[{"vulnerable_version_range":"< 0.13.1","patched_versions":"0.13.1"}]}]`
+	_, c := newGH(t, http.StatusOK, release("v0.13.1"), adv)
+	r := updatecheck.Look(context.Background(), c, mustParse(t, "v0.13.0"), clock, time.Second)
+	if len(r.Advisories) != 1 || r.Advisories[0].ID != "GHSA-2222-3333-4444" || r.Advisories[0].Summary != "abc" {
+		t.Fatalf("%+v", r)
+	}
+}
+
+// A long advisory list (over the release call's 1 MiB cap) still yields the
+// one that affects this version, rather than failing to decode.
+func TestALongAdvisoryListKeepsTheWarning(t *testing.T) {
+	t.Parallel()
+	var b strings.Builder
+	b.WriteString("[")
+	pad := strings.Repeat("x", 1000)
+	for i := 0; i < 2000; i++ {
+		fmt.Fprintf(&b, `{"ghsa_id":"GHSA-old-%d","summary":"%s","withdrawn_at":null,"vulnerabilities":[{"vulnerable_version_range":"< 0.1.0","patched_versions":"0.1.0"}]},`, i, pad)
+	}
+	b.WriteString(`{"ghsa_id":"GHSA-2222-3333-4444","summary":"s","withdrawn_at":null,"vulnerabilities":[{"vulnerable_version_range":"< 0.13.1","patched_versions":"0.13.1"}]}]`)
+	if b.Len() <= 1<<20 || b.Len() >= 4<<20 {
+		t.Fatalf("body is %d bytes", b.Len())
+	}
+	_, c := newGH(t, http.StatusOK, release("v0.13.1"), b.String())
+	r := updatecheck.Look(context.Background(), c, mustParse(t, "v0.13.0"), clock, 5*time.Second)
+	if r.Err != nil || len(r.Advisories) != 1 || r.Advisories[0].ID != "GHSA-2222-3333-4444" {
+		t.Fatalf("err %v, %d advisories", r.Err, len(r.Advisories))
+	}
+}
+
+// An https look never follows a redirect to plain http.
+func TestLookRefusesADowngradeRedirect(t *testing.T) {
+	t.Parallel()
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, release("v0.13.1"))
+	}))
+	t.Cleanup(plain.Close)
+	var hops int
+	var mu sync.Mutex
+	secure := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		hops++
+		mu.Unlock()
+		if r.URL.Path == "/moved"+latestPath {
+			fmt.Fprint(w, release("v0.13.0"))
+			return
+		}
+		if r.URL.Query().Get("to") == "https" {
+			http.Redirect(w, r, "/moved"+latestPath, http.StatusFound)
+			return
+		}
+		http.Redirect(w, r, plain.URL+r.URL.Path, http.StatusFound)
+	}))
+	t.Cleanup(secure.Close)
+	hc := updatecheck.NewHTTPClient()
+	hc.Transport = secure.Client().Transport
+	c := updatecheck.Client{BaseURL: secure.URL, HTTP: hc}
+	r := updatecheck.Look(context.Background(), c, mustParse(t, "v0.13.0"), clock, time.Second)
+	if r.Err == nil || r.Latest != nil {
+		t.Fatalf("followed a downgrade: %+v", r)
+	}
+	// An https → https redirect is still followed.
+	req, _ := http.NewRequest(http.MethodGet, secure.URL+latestPath+"?to=https", nil)
+	resp, err := hc.Do(req)
+	if err != nil {
+		t.Fatalf("https redirect refused: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || resp.Request.URL.Path != "/moved"+latestPath {
+		t.Fatalf("status %d at %s", resp.StatusCode, resp.Request.URL)
+	}
+}
+
+// Review Focus 2: headers arrive at once but the body never does; the
+// budget still holds.
+func TestLookGivesUpOnAStalledBody(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"tag_name":"v0.`)
+		w.(http.Flusher).Flush()
+		select {
+		case <-r.Context().Done():
+		case <-time.After(5 * time.Second):
+		}
+	}))
+	t.Cleanup(srv.Close)
+	c := updatecheck.Client{BaseURL: srv.URL, HTTP: updatecheck.NewHTTPClient()}
+	start := time.Now()
+	r := updatecheck.Look(context.Background(), c, mustParse(t, "v0.13.0"), clock, 200*time.Millisecond)
+	if r.Err == nil || time.Since(start) > 2*time.Second {
+		t.Fatalf("look = %+v after %s", r, time.Since(start))
+	}
+}

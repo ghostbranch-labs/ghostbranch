@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode"
 )
 
 const (
@@ -21,6 +22,11 @@ const (
 	Budget = 3 * time.Second
 	// userAgent is the whole User-Agent: no version, no OS.
 	userAgent = "ghostbranch"
+	// releaseCap and advisoriesCap bound what a response may make us read.
+	// The advisory list gets more room so a long list can't be cut short and
+	// lose the one warning that matters.
+	releaseCap    = 1 << 20
+	advisoriesCap = 4 << 20
 )
 
 // ErrNoRelease means GitHub has no published release to show: before launch
@@ -35,9 +41,23 @@ type Client struct {
 }
 
 // NewHTTPClient is a client with Go's default transport settings, which
-// honour HTTPS_PROXY, HTTP_PROXY and NO_PROXY, and no cookie jar.
+// honour HTTPS_PROXY, HTTP_PROXY and NO_PROXY, and no cookie jar. A look
+// that started on https never follows a redirect to anything else.
 func NewHTTPClient() *http.Client {
-	return &http.Client{Transport: http.DefaultTransport.(*http.Transport).Clone()}
+	return &http.Client{
+		Transport:     http.DefaultTransport.(*http.Transport).Clone(),
+		CheckRedirect: noDowngrade,
+	}
+}
+
+func noDowngrade(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	if via[0].URL.Scheme == "https" && req.URL.Scheme != "https" {
+		return errors.New("refused a redirect away from https")
+	}
+	return nil
 }
 
 // Release is the newest published, non-draft, non-prerelease release.
@@ -69,7 +89,7 @@ func (s statusError) Error() string {
 	return fmt.Sprintf("HTTP %d", int(s))
 }
 
-func (c Client) get(ctx context.Context, path string, into any) error {
+func (c Client) get(ctx context.Context, path string, limit int64, into any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(c.BaseURL, "/")+path, nil)
 	if err != nil {
 		return err
@@ -85,7 +105,7 @@ func (c Client) get(ctx context.Context, path string, into any) error {
 	if resp.StatusCode != http.StatusOK {
 		return statusError(resp.StatusCode)
 	}
-	return json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(into)
+	return json.NewDecoder(io.LimitReader(resp.Body, limit)).Decode(into)
 }
 
 // Latest is the newest release. A 404 is ErrNoRelease.
@@ -95,7 +115,7 @@ func (c Client) Latest(ctx context.Context) (Release, error) {
 		Draft      bool   `json:"draft"`
 		Prerelease bool   `json:"prerelease"`
 	}
-	if err := c.get(ctx, "/repos/"+Repo+"/releases/latest", &r); err != nil {
+	if err := c.get(ctx, "/repos/"+Repo+"/releases/latest", releaseCap, &r); err != nil {
 		var s statusError
 		if errors.As(err, &s) && s == http.StatusNotFound {
 			return Release{}, ErrNoRelease
@@ -125,7 +145,7 @@ func (c Client) Affecting(ctx context.Context, current Version) ([]Advisory, err
 			Patched string `json:"patched_versions"`
 		} `json:"vulnerabilities"`
 	}
-	if err := c.get(ctx, "/repos/"+Repo+"/security-advisories?state=published&per_page=100", &raw); err != nil {
+	if err := c.get(ctx, "/repos/"+Repo+"/security-advisories?state=published&per_page=100", advisoriesCap, &raw); err != nil {
 		var s statusError
 		if errors.As(err, &s) && s == http.StatusNotFound {
 			return []Advisory{}, nil
@@ -185,11 +205,13 @@ func Look(ctx context.Context, c Client, current Version, now func() time.Time, 
 	return r
 }
 
-// clean drops control characters (C0, DEL, C1) and cuts to 200 runes, so
-// text from the network can't move a terminal's cursor or flood a line.
+// clean drops control characters (C0, DEL, C1), format characters (bidi
+// overrides and isolates, zero-width marks) and the line and paragraph
+// separators, and cuts to 200 runes, so text from the network can't move a
+// terminal's cursor, reorder a line, break it or flood it.
 func clean(s string) string {
 	s = strings.Map(func(r rune) rune {
-		if r < 0x20 || r == 0x7f || (r >= 0x80 && r < 0xa0) {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r < 0xa0) || r == 0x2028 || r == 0x2029 || unicode.Is(unicode.Cf, r) {
 			return -1
 		}
 		return r
