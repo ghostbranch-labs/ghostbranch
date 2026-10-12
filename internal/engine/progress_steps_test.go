@@ -170,8 +170,9 @@ func TestInitReportsItsSteps(t *testing.T) {
 	var rec progress.Recorder
 	h.eng.Progress = &rec
 	h.init()
-	if !inOrder(rec.Steps(), []string{"Creating the private repo " + shadowName, "Creating the overlay branch ghostbranch",
-		"Reading " + publicName + " and " + shadowName + " from GitHub"}) ||
+	if !inOrder(rec.Steps(), []string{"Creating the private repo " + shadowName,
+		"Reading " + publicName + " and " + shadowName + " from GitHub", "Creating the overlay branch ghostbranch",
+		"Reading " + publicName + " and " + shadowName + " again for the CI audit"}) ||
 		!slices.ContainsFunc(rec.Steps(), func(s string) bool { return len(s) > 9 && s[:9] == "Mirroring" }) {
 		t.Fatalf("init steps:\n%s", rec.String())
 	}
@@ -197,21 +198,20 @@ func TestSyncReportsTheFastForwardAndItsSHAs(t *testing.T) {
 	}
 }
 
-// Sync shows a step while it waits for the runs it cancelled to stop: ✓
-// when they did, ✗ with a count when some kept running.
+// Sync shows a step while it waits for the runs it cancelled to stop. It
+// always ends ✓ (the sync itself succeeded); when some runs could not be
+// confirmed stopped it adds a warning note instead of claiming they didn't.
 func TestSyncShowsTheWaitForCancelledRuns(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
 		name string
 		run  func(next string) fake.Run
-		kind string
-		want string
+		note string
 	}{
-		{"stopped", func(next string) fake.Run { return fake.Run{SHA: next, Run: wfRun(1, "ci", "queued")} },
-			"done", "Checked that the cancelled CI runs stopped"},
+		{"stopped", func(next string) fake.Run { return fake.Run{SHA: next, Run: wfRun(1, "ci", "queued")} }, ""},
 		{"kept running", func(next string) fake.Run {
 			return fake.Run{SHA: next, Run: wfRun(7, "ci", "in_progress"), IgnoreCancel: true, IgnoreForceCancel: true}
-		}, "fail", "1 cancelled CI run(s) didn't stop"},
+		}, "Couldn't confirm that 1 cancelled CI run(s) stopped"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -223,8 +223,21 @@ func TestSyncShowsTheWaitForCancelledRuns(t *testing.T) {
 				t.Fatal(err)
 			}
 			if !inOrder(rec.Steps(), []string{"Looking for CI runs the sync started in " + shadowName, "Checking that the cancelled CI runs stopped"}) ||
-				!hasEvent(rec.Events(), c.kind, c.want) || rec.Running() {
+				!hasEvent(rec.Events(), "done", "Checked the cancelled CI runs") ||
+				slices.ContainsFunc(rec.Events(), func(e progress.Event) bool { return e.Kind == "fail" }) ||
+				rec.Running() {
 				t.Fatalf("sync:\n%s", rec.String())
+			}
+			noted := slices.ContainsFunc(rec.Events(), func(e progress.Event) bool {
+				return e.Kind == "note" && e.Level == progress.Warn && strings.HasPrefix(e.Text, "Couldn't confirm")
+			})
+			if c.note == "" && noted {
+				t.Fatalf("unexpected note:\n%s", rec.String())
+			}
+			if c.note != "" && !slices.ContainsFunc(rec.Events(), func(e progress.Event) bool {
+				return e.Kind == "note" && e.Level == progress.Warn && e.Text == c.note
+			}) {
+				t.Fatalf("missing warn note %q:\n%s", c.note, rec.String())
 			}
 		})
 	}

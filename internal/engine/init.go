@@ -247,7 +247,7 @@ func (e *Engine) Init(ctx context.Context, opt InitOptions) (res *InitResult, wa
 		warns = append(warns, contract.Warning{Code: contract.AuditIncomplete,
 			Message: "the CI audit could not run (" + contract.From(err).Message + "); run ghostbranch audit"})
 	}
-	st := e.startStep("Reading %s and %s from GitHub", p.Public, p.Shadow)
+	st := e.startStep("Reading %s and %s again for the CI audit", p.Public, p.Shadow)
 	if err := e.fetch(ctx, g); err != nil {
 		st.Fail()
 		auditIncomplete(err)

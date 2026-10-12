@@ -617,12 +617,10 @@ looking:
 		} else {
 			check := e.startStep("Checking that the cancelled CI runs stopped")
 			done, left := e.verifyCancels(ctx, repo, asked, requested, interval)
-			if len(left) == 0 {
-				check.Done("Checked that the cancelled CI runs stopped")
-			} else {
-				check.Update(fmt.Sprintf("%d cancelled CI run(s) didn't stop", len(left)))
-				check.Fail()
+			if len(left) > 0 {
+				e.notef(progress.Warn, "Couldn't confirm that %d cancelled CI run(s) stopped", len(left))
 			}
+			check.Done("Checked the cancelled CI runs")
 			cancelled = append(cancelled, done...)
 			stuck = append(stuck, left...)
 		}
