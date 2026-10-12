@@ -61,12 +61,14 @@ var shaOrKeep = regexp.MustCompile(`<ROOT>[^"\s]*|\bf-[0-9a-f]{12}\b|\b[0-9a-f]{
 func isSHA(m string) bool { return !strings.HasPrefix(m, "<ROOT>") && !strings.HasPrefix(m, "f-") }
 
 // normalizeSHAs replaces each git hash in out with <SHA1>, <SHA2>, ...,
-// numbered by first appearance in out. A hash that is a prefix of a longer
-// one in out (a short hash of a full one) gets the longer one's number as
-// <SHAn:short>. One mapping covers all of out, so a hash repeated on other
-// NDJSON lines keeps its number. Goldens then pin which hashes are equal
-// and which are short forms of which, but not their values, so a change to
-// commit identity or content does not churn them.
+// numbered by first appearance in out. <SHAn> is always a full 40-hex hash;
+// anything shorter carries its length, as <SHAn:12> or <SHAn:7>. A hash
+// that is a prefix of a longer one in out (a short hash of a full one)
+// shares the longer one's number; a lone short hash gets its own. One
+// mapping covers all of out, so a hash repeated on other NDJSON lines keeps
+// its number. Goldens then pin which hashes are equal, which are short
+// forms of which, and every hash's length, but not their values, so a
+// change to commit identity or content does not churn them.
 func normalizeSHAs(out string) string {
 	var seen []string
 	for _, m := range shaOrKeep.FindAllString(out, -1) {
@@ -95,11 +97,11 @@ func normalizeSHAs(out string) string {
 		if !isSHA(m) {
 			return m
 		}
-		c := canon(m)
-		if c != m {
-			return fmt.Sprintf("<SHA%d:short>", num[c])
+		n := num[canon(m)]
+		if len(m) == 40 {
+			return fmt.Sprintf("<SHA%d>", n)
 		}
-		return fmt.Sprintf("<SHA%d>", num[c])
+		return fmt.Sprintf("<SHA%d:%d>", n, len(m))
 	})
 }
 
@@ -613,16 +615,19 @@ func TestNormalizeSHAs(t *testing.T) {
 			`{"a":"<SHA1>","b":"<SHA2>","c":"<SHA1>"}`},
 		{"short prefix after the full",
 			`{"a":"` + full1 + `","job":"gate/feat-x/` + full1[:12] + `"}`,
-			`{"a":"<SHA1>","job":"gate/feat-x/<SHA1:short>"}`},
+			`{"a":"<SHA1>","job":"gate/feat-x/<SHA1:12>"}`},
 		{"short prefix before the full takes the full's number",
 			`{"m":"candidate ` + full2[:12] + `","x":"` + full1 + `","a":"` + full2 + `"}`,
-			`{"m":"candidate <SHA1:short>","x":"<SHA2>","a":"<SHA1>"}`},
+			`{"m":"candidate <SHA1:12>","x":"<SHA2>","a":"<SHA1>"}`},
 		{"7-hex prefix",
 			`{"a":"` + full1 + `","m":"at ` + full1[:7] + `"}`,
-			`{"a":"<SHA1>","m":"at <SHA1:short>"}`},
+			`{"a":"<SHA1>","m":"at <SHA1:7>"}`},
 		{"lone short hash",
 			`{"commit":"0123456789ab"}`,
-			`{"commit":"<SHA1>"}`},
+			`{"commit":"<SHA1:12>"}`},
+		{"lengths pinned; a lone short hash gets its own number",
+			`{"j":"gate/feat-x/` + full2[:12] + `","a":"` + full1 + `","m":"at ` + full1[:7] + ` and ` + full1[:12] + `"}`,
+			`{"j":"gate/feat-x/<SHA1:12>","a":"<SHA2>","m":"at <SHA2:7> and <SHA2:12>"}`},
 		{"6-hex ids untouched",
 			`{"id":"20261005T120005Z-0c0d0e","g":"g-030405"}`,
 			`{"id":"20261005T120005Z-0c0d0e","g":"g-030405"}`},
@@ -643,7 +648,7 @@ func TestNormalizeSHAs(t *testing.T) {
 			`{"p":"<ROOT>/home/` + full1[:12] + `/x.json","c":"<SHA1>"}`},
 		{"one mapping across NDJSON lines",
 			`{"job":"gate/feat-x/` + full2[:12] + `"}` + "\n" + `{"data":{"candidate":"` + full2 + `"}}` + "\n",
-			`{"job":"gate/feat-x/<SHA1:short>"}` + "\n" + `{"data":{"candidate":"<SHA1>"}}` + "\n"},
+			`{"job":"gate/feat-x/<SHA1:12>"}` + "\n" + `{"data":{"candidate":"<SHA1>"}}` + "\n"},
 		{"version strings untouched",
 			`{"schema_version":"0.13","version":"v0.13.0"}`,
 			`{"schema_version":"0.13","version":"v0.13.0"}`},
