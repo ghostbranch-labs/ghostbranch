@@ -79,11 +79,7 @@ func (a *app) doctorRun(ctx context.Context, repo string) (*engine.DoctorResult,
 		gitVersion = gitx.Version
 	}
 	opt.GitVersion, opt.GitErr = gitVersion(ctx)
-	build := a.env.Build
-	if build == nil {
-		build = func() (string, string) { return "(unknown)", "(unknown)" }
-	}
-	opt.Version, opt.Commit = build()
+	opt.Version, opt.Commit = a.build()
 	src := a.authSource()
 	src.Refresh, src.Lock = nil, nil // doctor writes nothing, the keychain included
 	token, source, terr := auth.Resolve(ctx, src)
@@ -115,23 +111,24 @@ func (a *app) doctorRun(ctx context.Context, repo string) (*engine.DoctorResult,
 }
 
 // buildInfo is this binary's module version and VCS commit, from the Go
-// build info.
+// build info; stampedVersion, when set, replaces the version.
 func buildInfo() (version, commit string) {
 	version, commit = "(unknown)", "(unknown)"
-	bi, ok := debug.ReadBuildInfo()
-	if !ok {
-		return version, commit
-	}
-	if bi.Main.Version != "" {
-		version = bi.Main.Version
-	}
-	for _, s := range bi.Settings {
-		if s.Key == "vcs.revision" && s.Value != "" {
-			commit = s.Value
-			if len(commit) > 12 {
-				commit = commit[:12]
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		if bi.Main.Version != "" {
+			version = bi.Main.Version
+		}
+		for _, s := range bi.Settings {
+			if s.Key == "vcs.revision" && s.Value != "" {
+				commit = s.Value
+				if len(commit) > 12 {
+					commit = commit[:12]
+				}
 			}
 		}
+	}
+	if stampedVersion != "" {
+		version = stampedVersion // R10: a release build's link-time stamp
 	}
 	return version, commit
 }

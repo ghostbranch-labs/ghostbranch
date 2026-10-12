@@ -36,6 +36,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
 	"github.com/ghostbranch-labs/ghostbranch/internal/progress"
 	"github.com/ghostbranch-labs/ghostbranch/internal/prompt"
+	"github.com/ghostbranch-labs/ghostbranch/internal/updatecheck"
 	"github.com/ghostbranch-labs/ghostbranch/internal/waiver"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
@@ -114,6 +115,9 @@ type Env struct {
 	// leave them false and nil.
 	StderrTerminal, StderrAnimate bool
 	StderrWidth                   func() int
+	// UpdateWait is the most a command waits at its end for an update look
+	// in flight; 0 means 500 ms.
+	UpdateWait time.Duration
 }
 
 // colorAllowed is the environment's say on colour: NO_COLOR set to any
@@ -189,6 +193,7 @@ type app struct {
 	startFrom      string     // feature start's --from, for next
 	versionFlag    bool       // ghostbranch --version ran: the command is version
 	prog           uiProgress // this run's progress (newProgress); Finish runs before any output
+	updates        *updateRun // this run's update check (startUpdateCheck); nil when none was started
 }
 
 // Run executes one command and returns the process exit code.
@@ -305,6 +310,12 @@ func (a *app) render(err error) int {
 	if a.eng != nil {
 		a.warnings = append(a.warnings, a.eng.LedgerWarnings()...)
 	}
+	a.awaitLook() // whoever reads the result, so a look that lands in time is saved
+	if a.jsonOut {
+		if n := a.updateNotice(updatecheck.Agent); n != nil {
+			a.warnings = append(a.warnings, n.Warning())
+		}
+	}
 	next := a.next(err)
 	env := contract.NewEnvelope(a.command, a.result, a.warnings, next, err)
 	if a.jsonOut {
@@ -330,6 +341,11 @@ func (a *app) render(err error) int {
 		printNext(a.env.Stderr, next, errSt)
 	} else {
 		printNext(a.env.Stdout, next, outSt)
+	}
+	if a.env.StderrTerminal {
+		if n := a.updateNotice(updatecheck.Person); n != nil {
+			printReminder(a.env.Stderr, *n, errSt)
+		}
 	}
 	return env.ExitCode
 }

@@ -1,0 +1,43 @@
+{
+  "schema_version": "0.13",
+  "command": "gate",
+  "ok": false,
+  "exit_code": 2,
+  "data": {},
+  "warnings": [
+    {
+      "code": "UPDATE_AVAILABLE",
+      "message": "Ghostbranch 0.13.0 is out (this is 0.12.0)",
+      "details": {
+        "advisories": [],
+        "current": "0.12.0",
+        "latest": "0.13.0",
+        "security": false,
+        "upgrade": "https://github.com/ghostbranch-labs/ghostbranch/releases/tag/v0.13.0",
+        "url": "https://github.com/ghostbranch-labs/ghostbranch/releases/tag/v0.13.0"
+      }
+    }
+  ],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "feature",
+        "list",
+        "--all",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "no feature by that name here; list every feature, abandoned ones included, to find it",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
+  "error": {
+    "code": "FEATURE_NOT_FOUND",
+    "message": "no feature \"no-such-feature\" in acme/widget-shadow; start one with ghostbranch feature start",
+    "field": "feature",
+    "retryable": false,
+    "details": {}
+  }
+}
