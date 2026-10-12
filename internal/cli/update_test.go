@@ -17,6 +17,7 @@ type fakeReleases struct {
 	tag        string
 	advisories string
 	delay      time.Duration
+	gate       chan struct{} // when set, answers wait until it is closed
 	hits       int
 	auth       []string
 	agents     []string
@@ -34,8 +35,15 @@ func newFakeReleases(t *testing.T, tag, advisories string) (*fakeReleases, strin
 		f.hits++
 		f.auth = append(f.auth, r.Header.Get("Authorization"))
 		f.agents = append(f.agents, r.Header.Get("User-Agent"))
-		tag, adv, delay := f.tag, f.advisories, f.delay
+		tag, adv, delay, gate := f.tag, f.advisories, f.delay, f.gate
 		f.mu.Unlock()
+		if gate != nil {
+			select {
+			case <-r.Context().Done():
+				return
+			case <-gate:
+			}
+		}
 		if delay > 0 {
 			select {
 			case <-r.Context().Done():

@@ -1,6 +1,7 @@
 package cli_test
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -209,13 +211,41 @@ func TestDoctorShowsItsWaitForTheLook(t *testing.T) {
 	t.Parallel()
 	te := newTestEnv(t)
 	f, url := newFakeReleases(t, "v0.12.0", "[]") // not newer: one request
+	gate := make(chan struct{})
 	f.mu.Lock()
-	f.delay = time.Second
+	f.gate = gate
 	f.mu.Unlock()
 	te.releaseBuild("v0.12.0", url)
 	te.env.StderrTerminal = false
-	_, out, errOut := te.run("doctor")
-	if !strings.Contains(errOut, "Looking for a newer Ghostbranch\n") || !strings.Contains(out, "update check: on · last looked just now · up to date") {
-		t.Fatalf("stdout %s\nstderr %s", out, errOut)
+	// The fake holds its answer until doctor has shown its wait, so the look
+	// is always still running when the checks end.
+	var out bytes.Buffer
+	errb := &lockedBuffer{}
+	env := te.env
+	env.Stdout, env.Stderr = &out, errb
+	go func() {
+		defer close(gate)
+		deadline := time.Now().Add(30 * time.Second)
+		for !strings.Contains(errb.String(), "Looking for a newer Ghostbranch\n") && time.Now().Before(deadline) {
+			time.Sleep(5 * time.Millisecond)
+		}
+	}()
+	cli.Run([]string{"doctor"}, env)
+	errOut := errb.String()
+	if !strings.Contains(errOut, "Looking for a newer Ghostbranch\n") || !strings.Contains(out.String(), "update check: on · last looked just now · up to date") {
+		t.Fatalf("stdout %s\nstderr %s", out.String(), errOut)
 	}
 }
+
+// lockedBuffer is a stderr that a test can read while doctor still writes.
+type lockedBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (l *lockedBuffer) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+func (l *lockedBuffer) String() string { l.mu.Lock(); defer l.mu.Unlock(); return l.b.String() }
