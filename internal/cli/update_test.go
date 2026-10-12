@@ -193,6 +193,21 @@ func TestHelpAndCompletionNeverLook(t *testing.T) {
 	}
 }
 
+// guard check, the pre-push hook, never looks: it runs inside every git
+// push, so it neither reminds nor waits there.
+func TestGuardCheckNeverLooks(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	f, url := newFakeReleases(t, "v0.13.0", "[]")
+	te.releaseBuild("v0.12.0", url)
+	te.env.Stdin = strings.NewReader("refs/heads/main 1111111111111111111111111111111111111111 refs/heads/main 0000000000000000000000000000000000000000\n")
+	_, out, errOut := te.run("guard", "check", "origin", "https://github.com/acme/widget.git")
+	time.Sleep(500 * time.Millisecond) // as above: room for a leaked look to land
+	if f.count() != 0 || strings.Contains(out+errOut, "0.13.0") {
+		t.Fatalf("%d hits\nstdout %q\nstderr %q", f.count(), out, errOut)
+	}
+}
+
 // Reminders are kept per audience, and from 1.0 on a person is reminded once
 // per release: a piped human run records nothing, the first terminal run
 // reminds, the second does not, and an agent still gets its warning.

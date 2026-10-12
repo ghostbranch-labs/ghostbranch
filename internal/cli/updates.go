@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -46,7 +45,9 @@ func (a *app) build() (string, string) {
 }
 
 // skipsUpdateCheck is true for help, shell completion, the bare root showing
-// help, and doctor, which looks itself (R11, R12).
+// help, doctor, which looks itself (R11, R12), and guard check: the pre-push
+// hook runs inside every git push, where a reminder is noise and a look a
+// delay; the person's next command reminds instead.
 func skipsUpdateCheck(cmd *cobra.Command, showVersion bool) bool {
 	if !cmd.HasParent() {
 		return !showVersion
@@ -56,6 +57,9 @@ func skipsUpdateCheck(cmd *cobra.Command, showVersion bool) bool {
 		case name == "help", name == "completion", strings.HasPrefix(name, "__complete"):
 			return true
 		}
+	}
+	if cmd.Name() == "check" && cmd.Parent() != nil && cmd.Parent().Name() == "guard" {
+		return true
 	}
 	return cmd.Name() == "doctor" && cmd.Parent() != nil && !cmd.Parent().HasParent()
 }
@@ -69,11 +73,7 @@ func (a *app) newUpdateRun() *updateRun {
 		return u
 	}
 	u.current, _ = updatecheck.ParseRelease(v)
-	userHome := a.env.UserHome // the same seam the skills use; production sets os.UserHomeDir
-	if userHome == nil {
-		userHome = os.UserHomeDir
-	}
-	home, err := workspace.HomeDir(a.env.Getenv, runtime.GOOS, userHome)
+	home, err := workspace.HomeDir(a.env.Getenv, runtime.GOOS, a.userHome()) // the same seam the skills use
 	if err != nil {
 		u.off = "no state directory"
 		return u

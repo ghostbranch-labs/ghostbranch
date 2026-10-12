@@ -184,12 +184,22 @@ func TestDoctorSaysTheCheckIsOffWithoutAStateDirectory(t *testing.T) {
 	te.releaseBuild("v0.12.0", "http://127.0.0.1:1")
 	delete(te.vars, "GHOSTBRANCH_HOME")
 	// The state directory comes from Env.UserHome (darwin, linux) or
-	// LOCALAPPDATA (windows, unset in te.vars): it fails on every OS, and
-	// the real home is never read.
+	// LOCALAPPDATA (windows, unset in te.vars): it fails on every OS, for the
+	// update check and the workspace alike, and the real home is never read.
 	te.env.UserHome = func() (string, error) { return "", errors.New("no home") }
 	_, out, _ := te.run("doctor")
 	if !strings.Contains(out, "update check: off (no state directory)") {
 		t.Fatalf("%s", out)
+	}
+	_, env := te.runJSON("doctor")
+	checks, _ := env["data"].(map[string]any)["checks"].([]any)
+	if len(checks) != 6 {
+		t.Fatalf("checks %v", checks)
+	}
+	for _, c := range checks {
+		if c := c.(map[string]any); c["id"] == "state" && (c["status"] != "fail" || !strings.Contains(c["message"].(string), "find the state directory")) {
+			t.Fatalf("state check %v", c)
+		}
 	}
 }
 

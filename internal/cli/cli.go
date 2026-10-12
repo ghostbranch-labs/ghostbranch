@@ -48,7 +48,8 @@ type Env struct {
 	Stderr io.Writer
 	Stdin  io.Reader
 	Getenv func(string) string
-	// UserHome is the home directory user-level skills go under.
+	// UserHome is the home directory user-level skills go under, and the
+	// state directory on macOS and Linux (when GHOSTBRANCH_HOME is unset).
 	UserHome func() (string, error)
 	// ConsoleUsable is console.Usable(os.Stdin, os.Stderr): stdin and stderr
 	// are real terminals, so a person could be asked at the console.
@@ -225,8 +226,9 @@ func Run(args []string, env Env) int {
 	root.SetErr(env.Stderr)
 	// Ctrl-C cancels the context: a gate waiting on CI leaves its job
 	// pending for wait, and every command reports INTERRUPTED
-	// (asInterrupted).
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	// (asInterrupted). SIGTERM and SIGHUP do the same (stopSignals), so the
+	// cursor is shown again whichever way the run is stopped.
+	ctx, stop := signal.NotifyContext(context.Background(), stopSignals...)
 	defer stop()
 	// After the first Ctrl-C, stop restores the default handling, so a
 	// second Ctrl-C kills the process if the command is slow to wind down.
@@ -447,9 +449,18 @@ func (a *app) actor() (string, error) {
 	return actor, nil
 }
 
+// userHome is Env.UserHome, else os.UserHomeDir: tests set the seam so
+// that none reads the real state directory.
+func (a *app) userHome() func() (string, error) {
+	if a.env.UserHome != nil {
+		return a.env.UserHome
+	}
+	return os.UserHomeDir
+}
+
 // openWorkspace opens this run's workspace. It needs no token or network.
 func (a *app) openWorkspace() (*workspace.Workspace, error) {
-	home, err := workspace.HomeDir(a.env.Getenv, runtime.GOOS, os.UserHomeDir)
+	home, err := workspace.HomeDir(a.env.Getenv, runtime.GOOS, a.userHome())
 	if err != nil {
 		return nil, contract.Wrap(contract.Internal, err, "find the state directory")
 	}
@@ -501,7 +512,7 @@ func (a *app) authSource() auth.Source {
 			a.reporter().Note(progress.Warn, "the refreshed GitHub login couldn't be saved to the OS keychain; the next command will ask you to log in again")
 		},
 		Lock: func() (func(), error) {
-			home, err := workspace.HomeDir(a.env.Getenv, runtime.GOOS, os.UserHomeDir)
+			home, err := workspace.HomeDir(a.env.Getenv, runtime.GOOS, a.userHome())
 			if err != nil {
 				return nil, contract.Wrap(contract.Internal, err, "find the state directory")
 			}
