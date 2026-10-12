@@ -107,7 +107,7 @@ func TestASecurityNoticeWithoutIDs(t *testing.T) {
 func TestTheOverrideIsCleaned(t *testing.T) {
 	t.Parallel()
 	now := clock()
-	s := updatecheck.StatusOf("", mustParse(t, "v0.12.0"), cacheWith(t, "0.12.0", "0.12.0", now), "http://127.0.0.1:1/\x1b[2J‮", "u", now)
+	s := updatecheck.StatusOf("", mustParse(t, "v0.12.0"), cacheWith(t, "0.12.0", "0.12.0", now), "http://127.0.0.1:1/\x1b[2J\u202e", "u", now)
 	if s.Override != "http://127.0.0.1:1/[2J" || s.Line() != "update check: on · last looked just now · up to date · GHOSTBRANCH_UPDATE_URL=http://127.0.0.1:1/[2J (test-only)" {
 		t.Fatalf("%q %q", s.Override, s.Line())
 	}

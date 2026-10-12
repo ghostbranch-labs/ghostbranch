@@ -43,9 +43,9 @@ func newGH(t *testing.T, latestStatus int, latest string, advisories string) (*g
 				w.WriteHeader(latestStatus)
 				return
 			}
-			fmt.Fprint(w, latest)
+			_, _ = fmt.Fprint(w, latest)
 		case advisoryPath:
-			fmt.Fprint(w, advisories)
+			_, _ = fmt.Fprint(w, advisories)
 		default:
 			http.NotFound(w, r)
 		}
@@ -228,7 +228,7 @@ func TestALongAdvisoryListKeepsTheWarning(t *testing.T) {
 func TestLookRefusesADowngradeRedirect(t *testing.T) {
 	t.Parallel()
 	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, release("v0.13.1"))
+		_, _ = fmt.Fprint(w, release("v0.13.1"))
 	}))
 	t.Cleanup(plain.Close)
 	var hops int
@@ -238,7 +238,7 @@ func TestLookRefusesADowngradeRedirect(t *testing.T) {
 		hops++
 		mu.Unlock()
 		if r.URL.Path == "/moved"+latestPath {
-			fmt.Fprint(w, release("v0.13.0"))
+			_, _ = fmt.Fprint(w, release("v0.13.0"))
 			return
 		}
 		if r.URL.Query().Get("to") == "https" {
@@ -274,7 +274,7 @@ func TestLookGivesUpOnAStalledBody(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, `{"tag_name":"v0.`)
+		_, _ = fmt.Fprint(w, `{"tag_name":"v0.`)
 		w.(http.Flusher).Flush()
 		select {
 		case <-r.Context().Done():

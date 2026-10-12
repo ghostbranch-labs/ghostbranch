@@ -57,9 +57,9 @@ func newFakeReleases(t *testing.T, tag, advisories string) (*fakeReleases, strin
 				http.NotFound(w, r)
 				return
 			}
-			fmt.Fprintf(w, `{"tag_name":%q,"draft":false,"prerelease":false}`, tag)
+			_, _ = fmt.Fprintf(w, `{"tag_name":%q,"draft":false,"prerelease":false}`, tag)
 		case "/repos/ghostbranch-labs/ghostbranch/security-advisories":
-			fmt.Fprint(w, adv)
+			_, _ = fmt.Fprint(w, adv)
 		default:
 			http.NotFound(w, r)
 		}
