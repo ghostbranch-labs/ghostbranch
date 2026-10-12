@@ -48,7 +48,8 @@ func TestRenderListsEveryCodeFromTheRegistry(t *testing.T) {
 	// 428: PUBLIC_BRANCH_CHANGED's reasons unrecorded_update and adopted_missing (6.1a-2 final review).
 	// 429: commits pulled in from the PR keep their authors (6.1a-2 final review, owner's ruling).
 	// 432: a clean rebase replaces, and stale_gate's update_mode (6.1a-2 acceptance fixes).
-	if n := strings.Count(out, "\n"); n > 432 {
+	// 443: the Updates section and the stderr line (6.4a).
+	if n := strings.Count(out, "\n"); n > 443 {
 		t.Errorf("the guide is %d lines; keep it short (spec: about 150 plus the tables)", n)
 	}
 }
@@ -431,5 +432,23 @@ func TestGuideTeachesUpdatingAnOpenPR(t *testing.T) {
 	}
 	if strings.Contains(out, "a person updates the public PR by hand") {
 		t.Error("the guide still says a person updates the public PR by hand")
+	}
+}
+
+// An agent that runs the upgrade itself, or buries an advisory, changes the
+// person's install without asking.
+func TestGuideTeachesUpdates(t *testing.T) {
+	t.Parallel()
+	out := strings.Join(strings.Fields(guide.Render(contract.Registry())), " ")
+	for _, want := range []string{
+		"## Updates",
+		"`UPDATE_AVAILABLE`",
+		"never run the upgrade yourself",
+		"`GHOSTBRANCH_NO_UPDATE_CHECK=1`",
+		"Progress is on stderr only, never in `--json` stdout; with `--json` the update reminder comes only as the `UPDATE_AVAILABLE` warning",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the guide lacks %q", want)
+		}
 	}
 }

@@ -145,11 +145,12 @@ func (e *Engine) Upgrade(ctx context.Context, p workspace.Pair) (res *UpgradeRes
 	if err != nil {
 		return res, warns, internalErr(err, "write the overlay commit")
 	}
-	e.progressf("upgrading the overlay branch of %s", p.Shadow)
+	st := e.startStep("Upgrading the overlay branch of %s", p.Shadow)
 	lease := gitx.PushOptions{Leases: []gitx.Lease{{Ref: "refs/heads/" + OverlayBranch, Expect: O}}}
 	if err := e.push(ctx, pc, remoteShadow, lease, c+":refs/heads/"+OverlayBranch); err != nil {
 		return res, warns, err
 	}
+	st.Done(fmt.Sprintf("Upgraded the overlay branch of %s", p.Shadow))
 	warns = addWarnings(warns, e.updateMirror(ctx, g, shadowRef(OverlayBranch), c)...)
 	res.Commit = c
 	res.Audit, warns = e.auditInto(ctx, pc, cfg, c, warns)

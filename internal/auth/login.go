@@ -140,7 +140,7 @@ func SaveLogin(s keychain.Store, l Login) error {
 	if err := refuseNewer(s); err != nil {
 		return err
 	}
-	st := stored{SchemaVersion: contract.SchemaVersion, Token: l.Token, RefreshToken: l.RefreshToken, Account: l.Account, Kind: l.Kind}
+	st := stored{SchemaVersion: contract.RecordVersion, Token: l.Token, RefreshToken: l.RefreshToken, Account: l.Account, Kind: l.Kind}
 	if !l.Expires.IsZero() {
 		t := l.Expires.UTC()
 		st.Expires = &t

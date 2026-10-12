@@ -220,7 +220,7 @@ func (e *Engine) pullHead(ctx context.Context, pc *pairCtx, m feature.Meta, head
 			onto = pub
 		}
 	}
-	e.progressf("bringing %d commit(s) from PR #%d into %s", len(shas), u.PR, name)
+	st := e.startStep("Bringing %d commit(s) from PR #%d into %s", len(shas), u.PR, name)
 	out, err := e.replay(ctx, pc, append(shas, rest...), onto)
 	if err != nil {
 		var ce *gitx.ConflictError
@@ -229,6 +229,7 @@ func (e *Engine) pullHead(ctx context.Context, pc *pairCtx, m feature.Meta, head
 		}
 		return "", "", contract.From(err)
 	}
+	st.Done(fmt.Sprintf("Brought %d commit(s) from PR #%d into %s", len(shas), u.PR, name))
 	adopted := out[len(shas)-1]
 	if onto == head && pub != head {
 		// Replayed on top of unpublished work: no one commit holds only what

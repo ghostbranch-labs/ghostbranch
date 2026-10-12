@@ -110,7 +110,7 @@ func (e *Engine) stackBase(ctx context.Context, pc *pairCtx, cfg config.Config, 
 			if err != nil {
 				return stackBase{}, err
 			}
-			e.progressf("replaying %s (below the gated feature) onto %s", lv.name, short(R))
+			e.startStep("Replaying %s (lower in the stack)", lv.name)
 			rebased, err := e.replay(ctx, pc, own, R)
 			if err != nil {
 				var ce *gitx.ConflictError

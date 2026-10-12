@@ -14,6 +14,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/ledger"
 	"github.com/ghostbranch-labs/ghostbranch/internal/plan"
 	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
+	"github.com/ghostbranch-labs/ghostbranch/internal/progress"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
@@ -283,7 +284,7 @@ func (e *Engine) closeFeature(ctx context.Context, pc *pairCtx, r FeatureReport,
 		}
 	}
 	if len(staying) > 0 && !e.DryRun {
-		e.progressf("moving %s onto main in the same push that closes %s", strings.Join(staying, ", "), r.Name)
+		e.notef(progress.Info, "Moving %s onto main in the same push that closes %s", strings.Join(staying, ", "), r.Name)
 	}
 	res, cw, err := e.closeWith(ctx, pc, r, t, o)
 	// The push landed once res is non-nil outside a dry run, even when the
@@ -438,10 +439,14 @@ func (e *Engine) closeWith(ctx context.Context, pc *pairCtx, r FeatureReport, t 
 		verb = "closed"
 	}
 	if len(specs) > 0 {
-		e.progressf("deleting %d ref(s) of feature %s from %s", len(refs), r.Name, sh)
+		st := e.startStep("Deleting %s's branches and records from the shadow repo", r.Name)
 		if err := e.push(ctx, pc, remoteShadow, opt, specs...); err != nil {
+			// Sync's auto-close goes on to the next feature, so end the step
+			// here: the next step would otherwise mark it done.
+			st.Fail()
 			return nil, nil, movedErr(r.Name, sh, verb, err)
 		}
+		st.Done(fmt.Sprintf("Deleted %d ref(s) of %s from the shadow repo", len(refs), r.Name))
 	}
 	for _, ref := range refs {
 		res.Deleted[ref] = t.refs[ref]

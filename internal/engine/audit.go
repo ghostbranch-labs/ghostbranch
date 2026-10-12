@@ -61,9 +61,19 @@ func (e *Engine) Audit(ctx context.Context, p workspace.Pair) (*AuditResult, []c
 		return nil, warns, err
 	}
 	warns = addWarnings(warns, e.behind(ctx, pc)...)
+	st := e.startStep(auditStep, pc.pair.Shadow)
 	res, aw, err := e.audit(ctx, pc, cfg, O)
-	return res, addWarnings(warns, aw...), err
+	if err != nil {
+		st.Fail()
+		return res, addWarnings(warns, aw...), err
+	}
+	st.Done("")
+	return res, addWarnings(warns, aw...), nil
 }
+
+// auditStep is the step audit and doctor show while the audit reads the
+// shadow repo's workflows and secret names.
+const auditStep = "Checking the CI setup of %s"
 
 // auditInto runs the audit after init or upgrade; a failure is a warning.
 func (e *Engine) auditInto(ctx context.Context, pc *pairCtx, cfg config.Config, O string, warns []contract.Warning) (*AuditResult, []contract.Warning) {

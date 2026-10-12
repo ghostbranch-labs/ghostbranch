@@ -1,0 +1,27 @@
+{
+  "schema_version": "0.13",
+  "command": "version",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "version": "v0.12.0",
+    "commit": "0123456789ab",
+    "schema_version": "0.13"
+  },
+  "warnings": [
+    {
+      "code": "UPDATE_AVAILABLE",
+      "message": "Ghostbranch 0.13.0 is out (this is 0.12.0)",
+      "details": {
+        "advisories": [],
+        "current": "0.12.0",
+        "latest": "0.13.0",
+        "security": false,
+        "upgrade": "https://github.com/ghostbranch-labs/ghostbranch/releases/tag/v0.13.0",
+        "url": "https://github.com/ghostbranch-labs/ghostbranch/releases/tag/v0.13.0"
+      }
+    }
+  ],
+  "next": [],
+  "error": null
+}

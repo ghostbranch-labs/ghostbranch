@@ -42,6 +42,19 @@ Coding agents: run "ghostbranch guide" first.`,
 	root.AddCommand(a.initCmd(), a.syncCmd(), a.statusCmd(), a.auditCmd(), a.doctorCmd(), a.upgradeCmd(), feature, a.gateCmd(), a.waitCmd(), a.promoteCmd(), a.applyCmd(), a.agentsCmd(), a.waiversCmd(), a.explainCmd(), a.guideCmd(), a.guardCmd(), a.removeCmd(), a.logCmd(), a.loginCmd(), a.logoutCmd(), a.authCmd(), a.versionCmd())
 	var showVersion bool
 	root.Flags().BoolVar(&showVersion, "version", false, "print this binary's version (as ghostbranch version does)")
+	// Spinner only for read-only commands and dry runs (R16), and the update
+	// look started in the background (R12 says where it isn't). Flags are
+	// parsed by now, so a.dryRun and showVersion are set. No subcommand
+	// defines its own PersistentPreRun*, so this runs for every command.
+	root.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
+		if c, ok := a.reporter().(*checklist); ok {
+			c.setQuiet(quietProgress(commandName(cmd), a.dryRun))
+		}
+		if !skipsUpdateCheck(cmd, showVersion) {
+			a.startUpdateCheck(cmd.Context())
+		}
+		return nil
+	}
 	root.RunE = func(cmd *cobra.Command, _ []string) error {
 		if !showVersion {
 			return cmd.Help()

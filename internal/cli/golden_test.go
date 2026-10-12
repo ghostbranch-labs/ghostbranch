@@ -63,6 +63,19 @@ func TestGoldenContract(t *testing.T) {
 		{"init", nil, []string{"init", "acme/widget"}, 0},
 		{"version", nil, []string{"version"}, 0},
 		{"version_flag", nil, []string{"--version"}, 0},
+		{"update_available", func(te *testEnv) {
+			_, url := newFakeReleases(te.t, "v0.13.0", "[]")
+			te.releaseBuild("v0.12.0", url)
+		}, []string{"version"}, 0},
+		{"update_available_security", func(te *testEnv) {
+			_, url := newFakeReleases(te.t, "v0.13.1", securityAdvisory)
+			te.releaseBuild("v0.13.0", url)
+		}, []string{"version"}, 0},
+		{"update_available_on_error", func(te *testEnv) {
+			initOnly(te)
+			_, url := newFakeReleases(te.t, "v0.13.0", "[]")
+			te.releaseBuild("v0.12.0", url)
+		}, []string{"gate", "no-such-feature"}, 2},
 		{"init_dry_run", nil, []string{"init", "acme/widget", "--dry-run"}, 0},
 		{"init_create_denied", func(te *testEnv) { te.forge.CreateForbidden = true }, []string{"init", "acme/widget"}, 1},
 		{"sync_noop", initOnly, []string{"sync"}, 0},

@@ -3,6 +3,9 @@ package cli
 import (
 	"context"
 	"errors"
+	"os"
+	"slices"
+	"syscall"
 	"testing"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
@@ -43,5 +46,14 @@ func TestAsInterrupted(t *testing.T) {
 		if got := asInterrupted(cancelled, dead); got != error(dead) {
 			t.Fatalf("%s must pass through: %v", code, got)
 		}
+	}
+}
+
+// SIGTERM stops a run like Ctrl-C (the cursor is shown again); SIGHUP too
+// where it exists (signals_unix_test.go).
+func TestStopSignalsIncludeTERM(t *testing.T) {
+	t.Parallel()
+	if !slices.Contains(stopSignals, os.Interrupt) || !slices.Contains(stopSignals, os.Signal(syscall.SIGTERM)) {
+		t.Fatalf("stopSignals %v", stopSignals)
 	}
 }

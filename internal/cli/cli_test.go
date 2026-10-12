@@ -271,7 +271,7 @@ func TestWaitHumanOutput(t *testing.T) {
 	withFeature(te)
 	te.mustRun("gate", "feat-x", "--detach")
 	code, out, errOut := te.run("wait", te.job("feat-x"))
-	if code != 0 || !strings.Contains(errOut, "waiting for CI on ") || !strings.Contains(out, "Gate for feat-x: checks passed") {
+	if code != 0 || !strings.Contains(errOut, "Waiting for CI to start") || !strings.Contains(out, "Gate for feat-x: checks passed") {
 		t.Fatalf("%d\nstdout: %q\nstderr: %q", code, out, errOut)
 	}
 }

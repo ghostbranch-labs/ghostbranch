@@ -11,6 +11,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
+	"github.com/ghostbranch-labs/ghostbranch/internal/progress"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
@@ -225,13 +226,16 @@ func (e *Engine) restackOne(ctx context.Context, pc *pairCtx, r stackRecord, par
 		return b, false, nil, internalErr(err, "compare "+r.name+" with "+parentName)
 	}
 	newHead := r.head
+	// st is the restack's step, started only when commits are replayed; it
+	// ends once the leased push lands (or the run stops short of pushing).
+	st := progress.Nop().Step("")
 	if reparent || !has {
 		own, ok, err := ownCommits(ctx, g, m, r.head, onto)
 		switch {
 		case err != nil:
 			return b, false, nil, internalErr(err, "list "+r.name+"'s own commits")
 		case ok:
-			e.progressf("restacking %s onto %s at %s", r.name, parentName, short(onto))
+			st = e.startStep("Restacking %s onto %s", r.name, parentName)
 			rebased, err := e.replay(ctx, pc, own, onto)
 			if err != nil {
 				var ce *gitx.ConflictError
@@ -260,6 +264,7 @@ func (e *Engine) restackOne(ctx context.Context, pc *pairCtx, r stackRecord, par
 	}
 	b.To, b.ForkedAt = newHead, nm.ForkedAt
 	if newHead == r.head && parentFeature(nm) == parentFeature(m) && nm.ForkedAt == m.ForkedAt && nm.Base == m.Base {
+		st.Done("")
 		return b, false, nil, nil
 	}
 	sh := pc.pair.Shadow
@@ -269,6 +274,7 @@ func (e *Engine) restackOne(ctx context.Context, pc *pairCtx, r stackRecord, par
 			pv.Add(preview.PushRef(sh, branchRef, r.head, newHead))
 		}
 		pv.Add(preview.PushRef(sh, metaRemote, r.metaSHA, ""))
+		st.Done("")
 		return b, true, nil, nil
 	}
 	sha, err := e.saveMeta(ctx, pc, nm, r.metaSHA)
@@ -284,6 +290,7 @@ func (e *Engine) restackOne(ctx context.Context, pc *pairCtx, r stackRecord, par
 	if err := e.push(ctx, pc, remoteShadow, opt, specs...); err != nil {
 		return b, false, nil, restackMoved(r.name, sh, err)
 	}
+	st.Done("")
 	var warns []contract.Warning
 	if newHead != r.head {
 		warns = addWarnings(warns, e.updateMirror(ctx, g, shadowRef(m.Branch), newHead)...)

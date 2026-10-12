@@ -1,9 +1,16 @@
 package cli_test
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -27,7 +34,7 @@ func TestDoctorHumanOutput(t *testing.T) {
 			marks = append(marks, strings.Join(strings.Fields(l)[:2], " "))
 		}
 	}
-	want := []string{"✓ tools", "! token", "✓ pair", "– guard", "✓ state", "✓ ci"}
+	want := []string{"✓ tools", "! token", "✓ pair", "– guard", "✓ state", "✓ ci", "update check:"}
 	if !reflect.DeepEqual(marks, want) {
 		t.Fatalf("lines %q, want %q\n%s", marks, want, out)
 	}
@@ -101,3 +108,144 @@ func TestDoctorWarnsOfAnAgentOnThePersonsLogin(t *testing.T) {
 		t.Fatalf("doctor shows the token: %v", env)
 	}
 }
+
+// Doctor looks afresh, saves the look, and reports it as a line and an
+// object; the reminder times are left alone.
+func TestDoctorReportsTheUpdateCheck(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	f, url := newFakeReleases(t, "v0.13.0", "[]")
+	te.releaseBuild("v0.12.0", url)
+	te.env.StderrTerminal = false
+	_, out, _ := te.run("doctor", "--repo", "acme/widget")
+	// Two requests per look: the latest release, then (it is newer) the advisories.
+	if f.count() != 2 || !strings.Contains(out, "update check: on · last looked just now · 0.13.0 available (you have 0.12.0) · GHOSTBRANCH_UPDATE_URL="+url+" (test-only)\n") {
+		t.Fatalf("%d hits\n%s", f.count(), out)
+	}
+	_, env := te.runJSON("doctor", "--repo", "acme/widget")
+	uc, _ := env["data"].(map[string]any)["update_check"].(map[string]any)
+	if uc["enabled"] != true || uc["latest"] != "0.13.0" || uc["current"] != "0.12.0" || uc["override"] != url || uc["error"] != "" {
+		t.Fatalf("update_check = %v", uc)
+	}
+	if f.count() != 4 {
+		t.Fatalf("doctor must look afresh each time: %d hits", f.count())
+	}
+	raw, err := os.ReadFile(filepath.Join(te.vars["GHOSTBRANCH_HOME"], "update-check.json"))
+	if err != nil || !strings.Contains(string(raw), `"reminded_person_at": "0001-01-01T00:00:00Z"`) {
+		t.Fatalf("cache %s %v", raw, err)
+	}
+}
+
+func TestDoctorSaysWhyTheCheckIsOff(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		version string
+		vars    map[string]string
+		want    string
+	}{
+		{"v0.12.0", map[string]string{"GHOSTBRANCH_NO_UPDATE_CHECK": "1"}, "update check: off (GHOSTBRANCH_NO_UPDATE_CHECK)"},
+		{"v0.12.0", map[string]string{"CI": "1"}, "update check: off (CI)"},
+		{"(devel)", nil, "update check: off (development build)"},
+	} {
+		te := newTestEnv(t)
+		f, url := newFakeReleases(t, "v0.13.0", "[]")
+		te.releaseBuild(c.version, url)
+		for k, v := range c.vars {
+			te.vars[k] = v
+		}
+		_, out, _ := te.run("doctor")
+		if !strings.Contains(out, c.want+"\n") || f.count() != 0 {
+			t.Errorf("%v: %d hits\n%s", c.vars, f.count(), out)
+		}
+		// The override is reported in the object even when the check is off.
+		_, env := te.runJSON("doctor")
+		uc, _ := env["data"].(map[string]any)["update_check"].(map[string]any)
+		if uc["enabled"] != false || uc["override"] != url || f.count() != 0 {
+			t.Errorf("%v: update_check = %v, %d hits", c.vars, uc, f.count())
+		}
+	}
+}
+
+func TestDoctorShowsAFailedLook(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	closed := httptest.NewServer(http.NotFoundHandler())
+	closed.Close() // a port that was just in use and now refuses
+	te.releaseBuild("v0.12.0", closed.URL)
+	_, out, _ := te.run("doctor")
+	if !strings.Contains(out, "update check: on · last look failed: ") {
+		t.Fatalf("%s", out)
+	}
+}
+
+// No state directory: the check is off, and doctor says so.
+func TestDoctorSaysTheCheckIsOffWithoutAStateDirectory(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	te.releaseBuild("v0.12.0", "http://127.0.0.1:1")
+	delete(te.vars, "GHOSTBRANCH_HOME")
+	// The state directory comes from Env.UserHome (darwin, linux) or
+	// LOCALAPPDATA (windows, unset in te.vars): it fails on every OS, for the
+	// update check and the workspace alike, and the real home is never read.
+	te.env.UserHome = func() (string, error) { return "", errors.New("no home") }
+	_, out, _ := te.run("doctor")
+	if !strings.Contains(out, "update check: off (no state directory)") {
+		t.Fatalf("%s", out)
+	}
+	_, env := te.runJSON("doctor")
+	checks, _ := env["data"].(map[string]any)["checks"].([]any)
+	if len(checks) != 6 {
+		t.Fatalf("checks %v", checks)
+	}
+	for _, c := range checks {
+		if c := c.(map[string]any); c["id"] == "state" && (c["status"] != "fail" || !strings.Contains(c["message"].(string), "find the state directory")) {
+			t.Fatalf("state check %v", c)
+		}
+	}
+}
+
+// A look still running when doctor's checks end shows a step while doctor
+// waits for it, so doctor never looks hung.
+func TestDoctorShowsItsWaitForTheLook(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	f, url := newFakeReleases(t, "v0.12.0", "[]") // not newer: one request
+	gate := make(chan struct{})
+	f.mu.Lock()
+	f.gate = gate
+	f.mu.Unlock()
+	te.releaseBuild("v0.12.0", url)
+	te.env.StderrTerminal = false
+	// The fake holds its answer until doctor has shown its wait, so the look
+	// is always still running when the checks end.
+	var out bytes.Buffer
+	errb := &lockedBuffer{}
+	env := te.env
+	env.Stdout, env.Stderr = &out, errb
+	go func() {
+		defer close(gate)
+		deadline := time.Now().Add(30 * time.Second)
+		for !strings.Contains(errb.String(), "Looking for a newer Ghostbranch\n") && time.Now().Before(deadline) {
+			time.Sleep(5 * time.Millisecond)
+		}
+	}()
+	cli.Run([]string{"doctor"}, env)
+	errOut := errb.String()
+	if !strings.Contains(errOut, "Looking for a newer Ghostbranch\n") || !strings.Contains(out.String(), "update check: on · last looked just now · up to date") {
+		t.Fatalf("stdout %s\nstderr %s", out.String(), errOut)
+	}
+}
+
+// lockedBuffer is a stderr that a test can read while doctor still writes.
+type lockedBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (l *lockedBuffer) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+func (l *lockedBuffer) String() string { l.mu.Lock(); defer l.mu.Unlock(); return l.b.String() }

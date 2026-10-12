@@ -13,6 +13,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
+	"github.com/ghostbranch-labs/ghostbranch/internal/progress"
 )
 
 // refreshPublished compares each open published feature's public branch,
@@ -121,7 +122,7 @@ func (e *Engine) refreshPublished(ctx context.Context, pc *pairCtx, rs []Feature
 			pv.Add(preview.PushRef(pc.pair.Shadow, remoteMetaRef(r.Name), r.metaSHA, ""))
 			continue
 		}
-		e.progressf("GitHub restacked feature %s's public branch %s onto %s (the same changes, new commits); recording it", r.Name, branch, pr.Base)
+		e.notef(progress.Info, "GitHub restacked %s's public branch %s onto %s (the same changes, new commits); recording it", r.Name, branch, pr.Base)
 		sha, mw, err := e.updateMeta(ctx, pc, nm, r.metaSHA)
 		warns = addWarnings(warns, mw...)
 		if err != nil {

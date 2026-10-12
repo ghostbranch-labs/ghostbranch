@@ -3,7 +3,6 @@ package engine_test
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -17,6 +16,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/grant"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
 	"github.com/ghostbranch-labs/ghostbranch/internal/ledger"
+	"github.com/ghostbranch-labs/ghostbranch/internal/progress"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
 	"github.com/ghostbranch-labs/ghostbranch/internal/waiver"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
@@ -88,7 +88,7 @@ func newHarness(t *testing.T) *harness {
 		pair:  workspace.Pair{Public: publicName, Shadow: shadowName}}
 	h.eng = &engine.Engine{
 		Forge: f, WS: ws, Actor: "human:octo",
-		Now: h.clock.Now, Sleep: h.clock.SleepCtx, Rand: &testutil.SeqReader{}, Progress: io.Discard,
+		Now: h.clock.Now, Sleep: h.clock.SleepCtx, Rand: &testutil.SeqReader{}, Progress: progress.Nop(),
 		NewScanner:   func(r leak.Rules) (leak.Scanner, error) { return leak.NewGitleaks(r) },
 		PollInterval: time.Second, SettleWindow: 5 * time.Second,
 		OnPush: func(op, remote string, specs []string) {

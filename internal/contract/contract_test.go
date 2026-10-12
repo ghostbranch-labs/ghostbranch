@@ -66,7 +66,7 @@ func TestSuccessEnvelopeShape(t *testing.T) {
 	if err := json.Unmarshal(b, &m); err != nil {
 		t.Fatal(err)
 	}
-	if m["schema_version"] != "0.12" || m["ok"] != true || m["exit_code"] != float64(0) ||
+	if m["schema_version"] != "0.13" || m["ok"] != true || m["exit_code"] != float64(0) ||
 		m["command"] != "sync" || m["error"] != nil {
 		t.Fatalf("bad envelope: %s", b)
 	}
@@ -137,7 +137,7 @@ func TestSubProject4CodesAreRegistered(t *testing.T) {
 	if err != nil || !es[0].NeedsHuman || !strings.Contains(es[0].WhatToDo, "--adopt") {
 		t.Fatalf("SHADOW_CREATE_DENIED doc: %+v %v", es, err)
 	}
-	if contract.SchemaVersion != "0.12" {
+	if contract.SchemaVersion != "0.13" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 }
@@ -160,7 +160,7 @@ func TestSubProject5aCodesAreRegistered(t *testing.T) {
 	if es, _ := contract.Explain("AUTHOR_UNMAPPED"); !es[0].NeedsHuman {
 		t.Fatal("AUTHOR_UNMAPPED needs a person: only they may edit the overlay config's author_map")
 	}
-	if contract.SchemaVersion != "0.12" {
+	if contract.SchemaVersion != "0.13" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 }
@@ -176,7 +176,7 @@ func TestSubProject5bCodesAreRegistered(t *testing.T) {
 			t.Fatalf("%s is not documented: %+v %v", c, es, err)
 		}
 	}
-	if contract.SchemaVersion != "0.12" {
+	if contract.SchemaVersion != "0.13" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 }
@@ -285,7 +285,7 @@ func TestSubProject5cCodesAreRegistered(t *testing.T) {
 			t.Fatalf("%s is not documented: %+v %v", c, es, err)
 		}
 	}
-	if contract.SchemaVersion != "0.12" {
+	if contract.SchemaVersion != "0.13" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 }
@@ -301,7 +301,7 @@ func TestSubProject5d1CodesAreRegistered(t *testing.T) {
 			t.Fatalf("%s is not documented: %+v %v", w, es, err)
 		}
 	}
-	if contract.SchemaVersion != "0.12" {
+	if contract.SchemaVersion != "0.13" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 	if es, _ := contract.Explain(string(contract.Locked)); !strings.Contains(es[0].WhatToDo, "nothing to delete") ||
@@ -347,7 +347,7 @@ func TestNewer(t *testing.T) {
 // and the user docs are generated from them, and agents act on them.
 func TestSubProject61Contract(t *testing.T) {
 	t.Parallel()
-	if contract.SchemaVersion != "0.12" {
+	if contract.SchemaVersion != "0.13" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 	for c, s := range map[contract.Code]string{contract.LoginExpired: "LOGIN_EXPIRED", contract.LoginUnavailable: "LOGIN_UNAVAILABLE",
@@ -432,14 +432,14 @@ func TestNewerRecord(t *testing.T) {
 	t.Parallel()
 	ce := contract.NewerRecord("plan", "0.99")
 	if ce.Code != contract.UpgradeNeeded || ce.Details["record"] != "plan" || ce.Details["record_version"] != "0.99" ||
-		ce.Details["supported"] != contract.SchemaVersion || !strings.Contains(ce.Message, "plan record") {
+		ce.Details["supported"] != contract.RecordVersion || !strings.Contains(ce.Message, "plan record") {
 		t.Fatalf("NewerRecord = %+v", ce)
 	}
 }
 
 func TestSubProject5d2Contract(t *testing.T) {
 	t.Parallel()
-	if contract.SchemaVersion != "0.12" {
+	if contract.SchemaVersion != "0.13" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 	for _, c := range []contract.WarningCode{contract.LedgerNotWritten, contract.SyncPushFailed, contract.PlanFileUnreadable} {
@@ -503,7 +503,7 @@ func TestGuardUnsupportedAndWaiverUnknownTexts(t *testing.T) {
 // is generated from them, and agents act on them.
 func TestSubProject61aContract(t *testing.T) {
 	t.Parallel()
-	if contract.SchemaVersion != "0.12" {
+	if contract.SchemaVersion != "0.13" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 	for c, want := range map[contract.Code]struct {
@@ -577,7 +577,7 @@ func TestSubProject61aContract(t *testing.T) {
 // first.
 func TestSubProject61a2Contract(t *testing.T) {
 	t.Parallel()
-	if contract.SchemaVersion != "0.12" {
+	if contract.SchemaVersion != "0.13" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 	if string(contract.PRChangedOnGitHub) != "PUBLIC_BRANCH_CHANGED" || string(contract.PublicBranchChanged) != "PUBLIC_BRANCH_CHANGED" ||
@@ -621,5 +621,31 @@ func TestSubProject61a2Contract(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("explain 4 lacks PUBLIC_BRANCH_CHANGED: %+v", es)
+	}
+}
+
+// 6.4a moves the JSON contract to 0.13 and leaves every stored record at
+// 0.12, so a 0.12 binary keeps working on records this build writes. Newer
+// compares a record with RecordVersion: a 0.13 record would come from a
+// later Ghostbranch whose record format this binary doesn't know.
+func TestContract013KeepsRecordsAt012(t *testing.T) {
+	t.Parallel()
+	if contract.SchemaVersion != "0.13" || contract.RecordVersion != "0.12" {
+		t.Fatalf("SchemaVersion %s, RecordVersion %s", contract.SchemaVersion, contract.RecordVersion)
+	}
+	if contract.Newer("0.12") || !contract.Newer("0.13") {
+		t.Fatal("Newer must compare against RecordVersion, not the contract version")
+	}
+	if ce := contract.NewerRecord("feature", "0.13"); ce.Details["supported"] != contract.RecordVersion ||
+		!strings.Contains(ce.Message, "this binary knows 0.12") {
+		t.Fatalf("NewerRecord = %+v", ce)
+	}
+	if !slices.Contains(contract.AllWarnings(), contract.UpdateAvailable) || contract.UpdateAvailable != "UPDATE_AVAILABLE" {
+		t.Fatal("UPDATE_AVAILABLE is not registered")
+	}
+	es, err := contract.Explain("UPDATE_AVAILABLE")
+	if err != nil || len(es) != 1 || es[0].Kind != contract.KindWarning ||
+		!strings.Contains(es[0].WhatToDo, "Never run the upgrade yourself") || !strings.Contains(es[0].WhatToDo, "GHOSTBRANCH_NO_UPDATE_CHECK") {
+		t.Fatalf("UPDATE_AVAILABLE doc = %+v %v", es, err)
 	}
 }

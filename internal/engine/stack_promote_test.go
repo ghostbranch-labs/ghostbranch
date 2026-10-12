@@ -12,6 +12,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 	"github.com/ghostbranch-labs/ghostbranch/internal/plan"
+	"github.com/ghostbranch-labs/ghostbranch/internal/progress"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
 )
 
@@ -637,16 +638,19 @@ func TestPromoteOnAParentBelowTheTopOfItsStackSaysWhy(t *testing.T) {
 	}
 	h.startOn("c", "a", map[string]string{"c.txt": "c\n"})
 	h.gateFeature("c")
-	var progress strings.Builder
-	h.eng.Progress = &progress
+	var rec progress.Recorder
+	h.eng.Progress = &rec
 	resC, _, err := promoteStack(h, engine.PromoteOptions{Feature: "c", Mode: "squash", Message: "Add c", Yes: true})
 	if err != nil || resC.Applied == nil || resC.Applied.StackNumber != nil {
 		t.Fatalf("promote c = %+v %v", resC, err)
 	}
 	a, b := res.Applied.PRs[0].Number, res.Applied.PRs[1].Number
-	if want := fmt.Sprintf("PR #%d isn't the top of native stack #%d (#%d is)", a, *res.Applied.StackNumber, b); !strings.Contains(progress.String(), want) ||
-		strings.Contains(progress.String(), "no native stacked PRs") {
-		t.Fatalf("progress = %q, want %q", progress.String(), want)
+	if want := fmt.Sprintf("PR #%d isn't the top of native stack #%d (#%d is)", a, *res.Applied.StackNumber, b); !strings.Contains(rec.String(), want) ||
+		strings.Contains(rec.String(), "no native stacked PRs") {
+		t.Fatalf("progress =\n%s\nwant %q", rec.String(), want)
+	}
+	if rec.Running() {
+		t.Fatalf("a step is still running after promote:\n%s", rec.String())
 	}
 	if st := h.forge.Stacks(publicName); len(st) != 1 || len(st[0].PRs) != 2 {
 		t.Fatalf("native stacks = %+v", st)

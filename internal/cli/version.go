@@ -6,6 +6,15 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 )
 
+// stampedVersion is set at link time for release builds (R10):
+//
+//	go build -ldflags "-X github.com/ghostbranch-labs/ghostbranch/internal/cli.stampedVersion=v0.13.0" ./cmd/ghostbranch
+//
+// It wins over the module version Go records. 6.4b's release builds set it
+// the same way. Empty, the version is Go's: (devel) or a pseudo-version, and
+// such a build never looks for updates.
+var stampedVersion string
+
 // VersionResult is version's data.
 type VersionResult struct {
 	Version       string `json:"version"`
@@ -26,10 +35,6 @@ func (a *app) versionCmd() *cobra.Command {
 // printVersion is version and --version.
 func (a *app) printVersion() error {
 	a.ran = true
-	build := a.env.Build
-	if build == nil {
-		build = func() (string, string) { return "(unknown)", "(unknown)" }
-	}
-	v, c := build()
+	v, c := a.build()
 	return done(a, &VersionResult{Version: v, Commit: c, SchemaVersion: contract.SchemaVersion}, nil, nil)
 }

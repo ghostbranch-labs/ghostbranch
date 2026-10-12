@@ -22,6 +22,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
+	"github.com/ghostbranch-labs/ghostbranch/internal/progress"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
@@ -127,12 +128,30 @@ func (e *Engine) finish(ctx context.Context, pc *pairCtx, name string, res *Gate
 	if pr, err := e.Forge.GetPR(ctx, shadow, pending.ShadowPR); err == nil {
 		url = pr.URL
 	}
-	e.progressf("waiting for CI on %s (shadow PR #%d: %s)", short(C), pending.ShadowPR, url)
+	e.notef(progress.Info, "CI runs on shadow PR #%d: %s (gate candidate %s)", pending.ShadowPR, url, short(C))
+	ci := e.startStep("Waiting for CI to start")
 	o.job = job
 	e.event(o, JobEvent{Type: EventWaiting, Candidate: C, ShadowPR: pending.ShadowPR, ShadowPRURL: url, CITimeout: cfg.Gate.CITimeout.String()})
-	out, err := e.waitChecks(ctx, shadow, C, cfg.Gate, waitOpts{start: pending.StartedAt, deadline: o.deadline, job: job, emit: o.emit})
+	out, err := e.waitChecks(ctx, shadow, C, cfg.Gate, waitOpts{start: pending.StartedAt, deadline: o.deadline, job: job, emit: o.emit, step: ci})
 	if err != nil {
-		return res, warns, err
+		return res, warns, err // the step stays running; the CLI marks it failed
+	}
+	// The text before each Fail is the step's news: the checklist's ✗ line
+	// and plain mode's failed: line show it.
+	switch out.status {
+	case feature.ChecksPending:
+		ci.Done("CI still running; the job stays pending")
+	case feature.ChecksPassed:
+		ci.Done("CI passed")
+	case feature.ChecksFailed:
+		ci.Update("CI failed: " + strings.Join(out.failed, ", "))
+		ci.Fail()
+	case feature.ChecksNoCI:
+		ci.Update("No CI checks appeared")
+		ci.Fail()
+	default: // timeout
+		ci.Update("CI didn't finish in time")
+		ci.Fail()
 	}
 	if v, ok := e.Forge.(forge.CheckVisibility); ok && v.ChecksLimited(shadow) {
 		warns = append(warns, contract.Warning{Code: contract.ChecksLimited,

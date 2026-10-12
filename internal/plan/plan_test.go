@@ -116,7 +116,7 @@ func TestLoadRefusesAPlanFromANewerGhostbranch(t *testing.T) {
 	}
 	_, _, err := plan.Load(dir, id)
 	if ce := contract.From(err); ce == nil || ce.Code != contract.UpgradeNeeded || ce.Details["record"] != "plan" ||
-		ce.Details["record_version"] != "0.99" || ce.Details["supported"] != contract.SchemaVersion {
+		ce.Details["record_version"] != "0.99" || ce.Details["supported"] != contract.RecordVersion {
 		t.Fatalf("want UPGRADE_NEEDED for the plan, got %v", err)
 	}
 }

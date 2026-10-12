@@ -16,6 +16,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/ledger"
 	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
+	"github.com/ghostbranch-labs/ghostbranch/internal/progress"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workflow"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
@@ -172,9 +173,17 @@ func (e *Engine) Sync(ctx context.Context, p workspace.Pair, o SyncOptions) (res
 				res.Preview.Add(preview.PushRef(p.Shadow, "refs/heads/"+b, sb, pb))
 				br.To = pb // what the run would push
 			} else {
-				e.progressf("fast-forwarding shadow %s %s -> %s", b, short(sb), short(pb))
+				st := e.startStep("Fast-forwarding shadow %s", b)
+				from := short(sb)
+				if sb == "" {
+					from = "(new)" // a branch the shadow repo doesn't have yet
+				}
+				e.notef(progress.Info, "shadow %s: %s → %s", b, from, short(pb))
 				opt := gitx.PushOptions{Leases: []gitx.Lease{{Ref: "refs/heads/" + b, Expect: sb}}}
 				if err := e.push(ctx, pc, remoteShadow, opt, pb+":refs/heads/"+b); err != nil {
+					// Sync goes on to the next branch: end this step as failed
+					// before the next one would mark it done.
+					st.Fail()
 					if ctx.Err() != nil {
 						return res, warns, err // interrupted: push nothing more
 					}
@@ -190,6 +199,7 @@ func (e *Engine) Sync(ctx context.Context, p workspace.Pair, o SyncOptions) (res
 						pushErr = err
 					}
 				} else {
+					st.Done(fmt.Sprintf("Fast-forwarded shadow %s", b))
 					warns = addWarnings(warns, e.updateMirror(ctx, g, shadowRef(b), pb)...)
 					br.To = pb
 					pushed = addPushed(pushed, pb, b)
@@ -334,9 +344,9 @@ func (e *Engine) closeMerged(ctx context.Context, pc *pairCtx, p *workspace.Pair
 				pr = *r.PublicPR
 			}
 			if cr.GatePRLeftOpen != 0 {
-				e.progressf("deleted merged feature %s (PR #%d), but its gate PR #%d is still open", r.Name, pr, cr.GatePRLeftOpen)
+				e.notef(progress.Warn, "Deleted merged feature %s (PR #%d), but its gate PR #%d is still open", r.Name, pr, cr.GatePRLeftOpen)
 			} else {
-				e.progressf("closed merged feature %s (PR #%d)", r.Name, pr)
+				e.notef(progress.Info, "Closed merged feature %s (PR #%d)", r.Name, pr)
 			}
 			res.Closed = append(res.Closed, ClosedFeature{Name: r.Name, PublicPR: pr, Deleted: cr.Deleted, Reparented: cr.Reparented,
 				GatePRLeftOpen: cr.GatePRLeftOpen})
@@ -527,9 +537,14 @@ func (e *Engine) cancelPushRuns(ctx context.Context, pc *pairCtx, pushed []pushe
 	var lookFailed []lookFailure
 	listDenied := false
 	var interrupted error
+	// A sync that pushed nothing which starts workflows has nothing to look for.
+	look := progress.Nop().Step("")
+	if len(shas) > 0 {
+		look = e.startStep("Looking for CI runs the sync started in %s", repo)
+	}
 looking:
-	for _, sha := range shas {
-		e.progressf("looking for workflow runs the push of %s started in %s", short(sha), repo)
+	for k, sha := range shas {
+		look.Update(fmt.Sprintf("Looking for CI runs the sync started in %s (commit %d of %d)", repo, k+1, len(shas)))
 		start := e.Now()
 		seen := map[int64]bool{}
 		for {
@@ -590,6 +605,9 @@ looking:
 			}
 		}
 	}
+	if interrupted == nil {
+		look.Done("Looked for CI runs the sync started")
+	}
 	cancelled := []CancelledRun{}
 	if len(requested) > 0 {
 		if interrupted != nil {
@@ -597,7 +615,12 @@ looking:
 				stuck = append(stuck, stuckRun{CancelledRun: r, why: stuckInterrupted})
 			}
 		} else {
+			check := e.startStep("Checking that the cancelled CI runs stopped")
 			done, left := e.verifyCancels(ctx, repo, asked, requested, interval)
+			if len(left) > 0 {
+				e.notef(progress.Warn, "Couldn't confirm that %d cancelled CI run(s) stopped", len(left))
+			}
+			check.Done("Checked the cancelled CI runs")
 			cancelled = append(cancelled, done...)
 			stuck = append(stuck, left...)
 		}
@@ -636,10 +659,10 @@ func (e *Engine) verifyCancels(ctx context.Context, repo string, shas []string, 
 				delete(pending, r.ID)
 				delete(forceFailed, r.ID)
 				if r.Conclusion == "cancelled" {
-					e.progressf("cancelled workflow run %s (%d)", p.Workflow, p.ID)
+					e.notef(progress.Info, "Cancelled CI run %s (%d)", p.Workflow, p.ID)
 					done = append(done, p.CancelledRun)
 				} else {
-					e.progressf("workflow run %s (%d) finished on its own", p.Workflow, p.ID)
+					e.notef(progress.Info, "CI run %s (%d) finished on its own", p.Workflow, p.ID)
 				}
 			}
 		}
@@ -686,7 +709,7 @@ func (e *Engine) verifyCancels(ctx context.Context, repo string, shas []string, 
 		}
 		switch ferr := e.Forge.ForceCancelRun(ctx, repo, r.ID); {
 		case ferr == nil || errors.Is(ferr, forge.ErrConflict):
-			e.progressf("force-cancelling workflow run %s (%d), which kept running", r.Workflow, r.ID)
+			e.notef(progress.Warn, "Force-cancelling CI run %s (%d), which kept running", r.Workflow, r.ID)
 			forced++
 		case ctx.Err() != nil:
 			return finish(ctx.Err())
@@ -694,7 +717,7 @@ func (e *Engine) verifyCancels(ctx context.Context, repo string, shas []string, 
 			forceDenied = true // every other force-cancel would be refused too
 			forceFailed[r.ID] = stuckRun{CancelledRun: r, why: stuckForceDenied}
 		default:
-			e.progressf("could not force-cancel workflow run %s (%d): %v", r.Workflow, r.ID, ferr)
+			e.notef(progress.Warn, "Couldn't force-cancel CI run %s (%d): %v", r.Workflow, r.ID, ferr)
 			forceFailed[r.ID] = stuckRun{CancelledRun: r, why: stuckForceFailed, err: ferr}
 		}
 	}

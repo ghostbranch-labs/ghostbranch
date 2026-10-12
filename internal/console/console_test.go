@@ -184,3 +184,16 @@ func TestUsable(t *testing.T) {
 		t.Error("nil files are not a console")
 	}
 }
+
+// A file isn't a terminal: no width, and IsTerminal is false.
+func TestWidthOfAFileIsZero(t *testing.T) {
+	t.Parallel()
+	f, err := os.CreateTemp(t.TempDir(), "w")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	if console.IsTerminal(f) || console.Width(f) != 0 || console.Width(nil) != 0 || console.IsTerminal(nil) {
+		t.Fatal("a file has no terminal width")
+	}
+}

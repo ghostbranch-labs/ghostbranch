@@ -82,3 +82,16 @@ func ColorCapable(f *os.File) bool {
 	}
 	return windows.SetConsoleMode(h, mode|windows.ENABLE_VIRTUAL_TERMINAL_PROCESSING) == nil
 }
+
+// Width is the console window's width in columns, or 0 when f is not a
+// console.
+func Width(f *os.File) int {
+	if f == nil {
+		return 0
+	}
+	var info windows.ConsoleScreenBufferInfo
+	if windows.GetConsoleScreenBufferInfo(windows.Handle(f.Fd()), &info) != nil {
+		return 0
+	}
+	return int(info.Window.Right-info.Window.Left) + 1
+}

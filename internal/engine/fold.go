@@ -8,6 +8,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 	"github.com/ghostbranch-labs/ghostbranch/internal/ledger"
 	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
+	"github.com/ghostbranch-labs/ghostbranch/internal/progress"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
@@ -149,12 +150,15 @@ func (e *Engine) FeatureFold(ctx context.Context, p workspace.Pair, opt FoldOpti
 	if err != nil {
 		return nil, warns, err
 	}
-	e.progressf("folding %s into %s: %s -> %s", name, parent, short(pr.head), short(r.Head))
+	st := e.startStep("Folding %s into %s", name, parent)
+	e.notef(progress.Info, "%s: %s → %s", parent, short(pr.head), short(r.Head))
 	cres, cw, err := e.closeWith(ctx, pc, r, t, closeOpts{verb: "folded into " + parent, also: also})
 	warns = addWarnings(warns, cw...)
 	if cres == nil {
 		return nil, warns, err
 	}
+	// The close push's step ended this one; a dry run pushes nothing.
+	st.Done("")
 	// A non-nil cres with an error: the fold landed, but the gate PR is
 	// still open (closeWith's afterDeletes error).
 	return &FoldResult{Feature: name, Parent: parent, From: pr.head, To: r.Head, Reparented: kids,

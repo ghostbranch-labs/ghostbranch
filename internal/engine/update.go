@@ -20,6 +20,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
 	"github.com/ghostbranch-labs/ghostbranch/internal/plan"
+	"github.com/ghostbranch-labs/ghostbranch/internal/progress"
 )
 
 // ForeignCommit is a commit on a published feature's public branch that
@@ -614,11 +615,11 @@ func (e *Engine) buildUpdate(ctx context.Context, pc *pairCtx, b *built, name st
 		}
 	}
 	if u.Style != plan.StyleAppend {
-		e.progressf("public PR #%d of %s: replacing its branch (history changed: %s)", u.PR, name, u.Reason)
+		e.notef(progress.Info, "PR #%d of %s: replacing its branch (history changed: %s)", u.PR, name, u.Reason)
 		return nil
 	}
 	added := chain[len(u.Public):]
-	e.progressf("public PR #%d of %s: appending %d commit(s) onto its head %s", u.PR, name, len(added), short(u.Head))
+	st := e.startStep("Appending %d commit(s) onto PR #%d", len(added), u.PR)
 	appended, err := e.replay(ctx, pc, commitSHAs(added), u.Head)
 	if err != nil {
 		var ce *gitx.ConflictError
@@ -626,9 +627,10 @@ func (e *Engine) buildUpdate(ctx context.Context, pc *pairCtx, b *built, name st
 			return contract.From(err)
 		}
 		u.Style, u.Reason = plan.StyleReplace, plan.ReasonConflict
-		e.progressf("public PR #%d of %s: the new commits don't apply on its head; replacing its branch instead", u.PR, name)
+		st.Done(fmt.Sprintf("PR #%d: the new commits don't apply on its head, so its branch is replaced instead", u.PR))
 		return nil
 	}
+	st.Done(fmt.Sprintf("Appended %d commit(s) onto PR #%d", len(added), u.PR))
 	// The append: what is built, recorded and scanned is H plus the new
 	// public commits.
 	commits := make([]feature.GateCommit, len(added))

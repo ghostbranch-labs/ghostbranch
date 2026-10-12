@@ -17,6 +17,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
 	"github.com/ghostbranch-labs/ghostbranch/internal/plan"
 	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
+	"github.com/ghostbranch-labs/ghostbranch/internal/progress"
 )
 
 // updateFlags refuses what an update can't do: it pushes to the branch the
@@ -102,9 +103,13 @@ func (e *Engine) updateLive(ctx context.Context, pc *pairCtx, pl plan.Plan, m fe
 // since is left as it is: PLAN_STALE.
 func (e *Engine) pushUpdate(ctx context.Context, pc *pairCtx, pl plan.Plan, P string) error {
 	branch, H, n := pl.Publish.TargetBranch, pl.Publish.ExpectedHead, pl.PRs[0].Number
-	e.progressf("updating public PR #%d (%s): %s to %s:%s, leased on %s", n, pl.Publish.Style, short(P), pc.pair.Public, branch, short(H))
+	st := e.startStep("Updating PR #%d on %s (%s)", n, pc.pair.Public, pl.Publish.Style)
+	e.notef(progress.Info, "%s: %s → %s, leased on %s", branch, short(H), short(P), short(H))
 	opt := gitx.PushOptions{Leases: []gitx.Lease{{Ref: "refs/heads/" + branch, Expect: H}}}
 	err := e.push(ctx, pc, remotePublic, opt, P+":refs/heads/"+branch)
+	if err == nil {
+		st.Done(fmt.Sprintf("Updated PR #%d on %s (%s)", n, pc.pair.Public, pl.Publish.Style))
+	}
 	if err != nil && contract.From(err).Code == contract.RefMoved {
 		out := contract.New(contract.PlanStale,
 			"public PR #%d's branch %s moved while plan %s was being applied, so nothing was pushed; make a new plan with ghostbranch promote", n, branch, pl.ID).
@@ -328,7 +333,7 @@ func (e *Engine) finishLanded(ctx context.Context, pc *pairCtx, cfg config.Confi
 		}
 		return res, warns, nil
 	}
-	e.progressf("plan %s's update already landed; recording it", pl.ID)
+	e.notef(progress.Info, "Plan %s's update already landed; recording it", pl.ID)
 	for i, lp := range levels {
 		pr, mw, err := e.recordUpdate(ctx, pc, lp, lp.Publish.Commit)
 		warns = addWarnings(warns, mw...)

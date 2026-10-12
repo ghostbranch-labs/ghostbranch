@@ -75,6 +75,9 @@ func human(r any, st style.Styler) string {
 		for _, c := range v.Checks {
 			doctorLine(&b, c, st)
 		}
+		if v.UpdateCheck != nil {
+			b.WriteString(v.UpdateCheck.Line() + "\n")
+		}
 	case *guard.Result:
 		if v.Preview != nil {
 			previewText(&b, v.Preview)

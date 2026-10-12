@@ -147,13 +147,15 @@ func (e *Engine) Init(ctx context.Context, opt InitOptions) (res *InitResult, wa
 			res.CreatedShadow = true // what the run would do
 			return res, warns, e.previewNewShadow(ctx, p, pub, registered, res)
 		}
-		e.progressf("creating private repo %s", p.Shadow)
+		st := e.startStep("Creating the private repo %s", p.Shadow)
 		if _, err := e.Forge.CreatePrivateRepo(ctx, p.Shadow); err != nil {
+			st.Fail() // guided init asks next; the step mustn't spin or end as ✓
 			if errors.Is(err, forge.ErrForbidden) {
 				return res, warns, shadowCreateDenied(p, opt.Shadow != "", err)
 			}
 			return res, warns, forgeErr(err, "create shadow repo %s", p.Shadow)
 		}
+		st.Done(fmt.Sprintf("Created the private repo %s", p.Shadow))
 		res.CreatedShadow = true
 	} else {
 		res.Adopted, res.Resumed = opt.Adopt, !opt.Adopt
@@ -219,10 +221,12 @@ func (e *Engine) Init(ctx context.Context, opt InitOptions) (res *InitResult, wa
 		return res, warns, nil
 	}
 	if len(specs) > 0 {
-		e.progressf("mirroring %d branches and %d tags into %s", len(res.MirroredBranches), len(res.MirroredTags), p.Shadow)
+		nb, nt := len(res.MirroredBranches), len(res.MirroredTags)
+		st := e.startStep("Mirroring %d branch(es) and %d tag(s) into %s", nb, nt, p.Shadow)
 		if err := e.push(ctx, pc, remoteShadow, gitx.PushOptions{Atomic: true, Leases: leases}, specs...); err != nil {
 			return res, warns, err
 		}
+		st.Done(fmt.Sprintf("Mirrored %d branch(es) and %d tag(s) into %s", nb, nt, p.Shadow))
 	}
 	if !hasOverlay {
 		if err := e.createOverlay(ctx, pc, opt.Schedule); err != nil {
@@ -243,10 +247,13 @@ func (e *Engine) Init(ctx context.Context, opt InitOptions) (res *InitResult, wa
 		warns = append(warns, contract.Warning{Code: contract.AuditIncomplete,
 			Message: "the CI audit could not run (" + contract.From(err).Message + "); run ghostbranch audit"})
 	}
+	st := e.startStep("Reading %s and %s again for the CI audit", p.Public, p.Shadow)
 	if err := e.fetch(ctx, g); err != nil {
+		st.Fail()
 		auditIncomplete(err)
 		return res, warns, nil
 	}
+	st.Done("")
 	cfg, O, cw, cerr := e.readConfig(ctx, pc)
 	warns = addWarnings(warns, cw...)
 	if cerr != nil {
@@ -556,7 +563,11 @@ func (e *Engine) createOverlay(ctx context.Context, pc *pairCtx, schedule string
 	if err != nil {
 		return internalErr(err, "write the overlay commit")
 	}
-	e.progressf("creating the %s overlay branch", OverlayBranch)
-	return e.push(ctx, pc, remoteShadow, gitx.PushOptions{Leases: []gitx.Lease{{Ref: "refs/heads/" + OverlayBranch}}},
-		c+":refs/heads/"+OverlayBranch)
+	st := e.startStep("Creating the overlay branch %s", OverlayBranch)
+	if err := e.push(ctx, pc, remoteShadow, gitx.PushOptions{Leases: []gitx.Lease{{Ref: "refs/heads/" + OverlayBranch}}},
+		c+":refs/heads/"+OverlayBranch); err != nil {
+		return err
+	}
+	st.Done(fmt.Sprintf("Created the overlay branch %s", OverlayBranch))
+	return nil
 }

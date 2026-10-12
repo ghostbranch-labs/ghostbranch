@@ -60,12 +60,12 @@ func (a *app) localEngine() (*engine.Engine, error) {
 				Message: "GHOSTBRANCH_ACTOR is unset, and remove asks GitHub nothing, so the ledger records human:unknown; set GHOSTBRANCH_ACTOR, for example human:<your login>"})
 		}
 	}
-	e := &engine.Engine{WS: ws, Actor: actor, Now: a.env.Now, Sleep: a.env.Sleep, Rand: a.env.Rand, Progress: a.env.Stderr,
+	e := &engine.Engine{WS: ws, Actor: actor, Now: a.env.Now, Sleep: a.env.Sleep, Rand: a.env.Rand, Progress: a.reporter(),
 		DryRun: a.dryRun, OnPush: a.env.OnPush,
 		Grants:  grant.NewStore(ws.GrantsPath(), ws.GrantsLockPath()),
 		Waivers: waiver.NewStore(ws.WaiversPath(), ws.WaiversLockPath())}
 	if a.env.ConsoleUsable && !a.nonInteractive && a.env.OpenConsole != nil {
-		e.Approver = &console.Challenger{Open: a.env.OpenConsole, Rand: a.env.Rand}
+		e.Approver = pausingApprover{inner: &console.Challenger{Open: a.env.OpenConsole, Rand: a.env.Rand}, p: a.reporter()}
 	}
 	a.eng = e
 	return e, nil

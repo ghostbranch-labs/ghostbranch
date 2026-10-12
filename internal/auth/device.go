@@ -223,7 +223,7 @@ func (d DeviceFlow) login(r oauthReply) (Login, error) {
 		return Login{}, contract.New(contract.ForgeError, "GitHub's login service sent no token")
 	}
 	now := d.now()
-	l := Login{Token: r.AccessToken, RefreshToken: r.RefreshToken, Kind: "app", SchemaVersion: contract.SchemaVersion}
+	l := Login{Token: r.AccessToken, RefreshToken: r.RefreshToken, Kind: "app", SchemaVersion: contract.RecordVersion}
 	if r.ExpiresIn > 0 {
 		l.Expires = now.Add(time.Duration(r.ExpiresIn) * time.Second)
 	}

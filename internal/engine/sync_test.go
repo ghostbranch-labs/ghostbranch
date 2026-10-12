@@ -20,6 +20,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge/fake"
 	"github.com/ghostbranch-labs/ghostbranch/internal/ledger"
+	"github.com/ghostbranch-labs/ghostbranch/internal/progress"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
 )
 
@@ -727,8 +728,15 @@ func TestSyncPushFailureOnOneBranchStillPushesTheOthers(t *testing.T) {
 			moved = testutil.Commit(t, h.shadowGit(), "main", "elsewhere", map[string]string{"e.txt": "1\n"})
 		}
 	}
+	var rec progress.Recorder
+	h.eng.Progress = &rec
 	res, warns, err := h.eng.Sync(h.ctx, h.pair, engine.SyncOptions{})
 	_ = wantCode(t, err, contract.RefMoved)
+	// The failed push is ✗ even though sync went on to the next branch.
+	if !hasEvent(rec.Events(), "fail", "Fast-forwarding shadow main") || !hasEvent(rec.Events(), "done", "Fast-forwarded shadow release") ||
+		hasEvent(rec.Events(), "done", "Fast-forwarding shadow main") {
+		t.Fatalf("progress:\n%s", rec.String())
+	}
 	got := map[string]engine.SyncBranch{}
 	for _, b := range res.Branches {
 		got[b.Name] = b
@@ -1063,9 +1071,15 @@ func TestSyncCloseFailureIsAWarning(t *testing.T) {
 		record(op, remote, specs)
 	}
 
+	var rec progress.Recorder
+	h.eng.Progress = &rec
 	res, warns := h.syncOK(engine.SyncOptions{})
 	if raced == "" {
 		t.Fatal("the race never ran")
+	}
+	// The refused close push is ✗, though sync itself succeeds.
+	if !hasEvent(rec.Events(), "fail", "Deleting feat-x's branches and records from the shadow repo") || rec.Running() {
+		t.Fatalf("progress:\n%s", rec.String())
 	}
 	if res.ShadowMainAfter != next || len(res.Closed) != 0 {
 		t.Fatalf("sync = %+v", res)
@@ -1461,4 +1475,9 @@ func TestABranchGoneFeatureWithAnOldRecordNeedsAPerson(t *testing.T) {
 	if r.State != feature.StateBranchGone || r.PRState != "merged" || r.Gate == nil || engine.ClosableWithoutConsole(r) {
 		t.Fatalf("report = %+v, closable %v", r, engine.ClosableWithoutConsole(r))
 	}
+}
+
+// hasEvent reports whether events holds one of kind with text.
+func hasEvent(events []progress.Event, kind, text string) bool {
+	return slices.ContainsFunc(events, func(e progress.Event) bool { return e.Kind == kind && e.Text == text })
 }

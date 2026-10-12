@@ -64,7 +64,7 @@ func TestAPartialCloseDoesNotReadAsClosed(t *testing.T) {
 	}
 	code, out, errOut = te.run("sync")
 	if code != 0 || !strings.Contains(out, "deleted merged feature feat-b (PR #") || strings.Contains(out, "closed merged feature feat-b") ||
-		strings.Contains(errOut, "closed merged feature feat-b") {
+		strings.Contains(errOut, "Closed merged feature feat-b") || !strings.Contains(errOut, "Deleted merged feature feat-b") {
 		t.Fatalf("sync: exit %d\nstdout: %s\nstderr: %s", code, out, errOut)
 	}
 }

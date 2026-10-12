@@ -39,3 +39,15 @@ func flush(dev io.ReadWriteCloser) {
 // ColorCapable reports whether f is a terminal, which takes ANSI escape
 // codes.
 func ColorCapable(f *os.File) bool { return isTerminal(f) }
+
+// Width is f's terminal width in columns, or 0 when f is not a terminal.
+func Width(f *os.File) int {
+	if f == nil {
+		return 0
+	}
+	ws, err := unix.IoctlGetWinsize(int(f.Fd()), unix.TIOCGWINSZ)
+	if err != nil {
+		return 0
+	}
+	return int(ws.Col)
+}

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"runtime/debug"
 	"strings"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/grant"
+	"github.com/ghostbranch-labs/ghostbranch/internal/updatecheck"
 	"github.com/ghostbranch-labs/ghostbranch/internal/waiver"
 )
 
@@ -28,8 +30,14 @@ In a checkout of a pair it checks that pair; --repo names another; with neither 
 checks that need a pair. It exits 0 unless a check fails (DOCTOR_FAILED, details.failed).`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// The fresh look runs here, not in doctorRun: guided init calls
+			// doctorRun too and must not pay up to the look's budget (F5).
+			looked := make(chan updatecheck.Status, 1)
+			go func() { looked <- a.doctorUpdateCheck(cmd.Context()) }()
 			res, err := a.doctorRun(cmd.Context(), a.repo)
+			st := a.waitForDoctorLook(looked) // always received: orders the goroutine's write of a.updates before render reads it
 			if res != nil {
+				res.UpdateCheck = &st
 				a.result = res
 				a.warnings = append(a.warnings, doctorWarnings(res)...)
 			}
@@ -43,6 +51,20 @@ checks that need a pair. It exits 0 unless a check fails (DOCTOR_FAILED, details
 			return nil
 		},
 	}
+}
+
+// waitForDoctorLook waits for doctor's own look, showing a step while it is still
+// running (up to the look's budget) so doctor never looks hung.
+func (a *app) waitForDoctorLook(looked <-chan updatecheck.Status) updatecheck.Status {
+	select {
+	case st := <-looked:
+		return st
+	default:
+	}
+	step := a.reporter().Step("Looking for a newer Ghostbranch")
+	st := <-looked
+	step.Done("")
+	return st
 }
 
 // doctorWarnings is AGENT_ON_PERSON_LOGIN when the token check found a
@@ -79,11 +101,7 @@ func (a *app) doctorRun(ctx context.Context, repo string) (*engine.DoctorResult,
 		gitVersion = gitx.Version
 	}
 	opt.GitVersion, opt.GitErr = gitVersion(ctx)
-	build := a.env.Build
-	if build == nil {
-		build = func() (string, string) { return "(unknown)", "(unknown)" }
-	}
-	opt.Version, opt.Commit = build()
+	opt.Version, opt.Commit = a.build()
 	src := a.authSource()
 	src.Refresh, src.Lock = nil, nil // doctor writes nothing, the keychain included
 	token, source, terr := auth.Resolve(ctx, src)
@@ -94,7 +112,8 @@ func (a *app) doctorRun(ctx context.Context, repo string) (*engine.DoctorResult,
 	// DryRun: every engine write path refuses a dry run. Doctor makes none;
 	// this keeps it so.
 	e := &engine.Engine{Actor: actor, Token: token, TokenSource: source,
-		LooksLikeAgent: auth.LooksLikeAgent(a.env.Getenv, a.env.ConsoleUsable), Now: a.env.Now, Sleep: a.env.Sleep, Rand: a.env.Rand, DryRun: true}
+		LooksLikeAgent: auth.LooksLikeAgent(a.env.Getenv, a.env.ConsoleUsable), Now: a.env.Now, Sleep: a.env.Sleep, Rand: a.env.Rand, DryRun: true,
+		Progress: a.reporter()}
 	if token != "" {
 		f, err := a.env.NewForge(token)
 		if err != nil {
@@ -114,23 +133,24 @@ func (a *app) doctorRun(ctx context.Context, repo string) (*engine.DoctorResult,
 }
 
 // buildInfo is this binary's module version and VCS commit, from the Go
-// build info.
+// build info; stampedVersion, when set, replaces the version.
 func buildInfo() (version, commit string) {
 	version, commit = "(unknown)", "(unknown)"
-	bi, ok := debug.ReadBuildInfo()
-	if !ok {
-		return version, commit
-	}
-	if bi.Main.Version != "" {
-		version = bi.Main.Version
-	}
-	for _, s := range bi.Settings {
-		if s.Key == "vcs.revision" && s.Value != "" {
-			commit = s.Value
-			if len(commit) > 12 {
-				commit = commit[:12]
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		if bi.Main.Version != "" {
+			version = bi.Main.Version
+		}
+		for _, s := range bi.Settings {
+			if s.Key == "vcs.revision" && s.Value != "" {
+				commit = s.Value
+				if len(commit) > 12 {
+					commit = commit[:12]
+				}
 			}
 		}
+	}
+	if stampedVersion != "" {
+		version = stampedVersion // R10: a release build's link-time stamp
 	}
 	return version, commit
 }
@@ -163,4 +183,35 @@ func (a *app) doctorNext() []contract.Next {
 		out = append(out, contract.Next{Command: argv, NeedsHuman: human, Why: c.ID + ": " + c.Message})
 	}
 	return out
+}
+
+// doctorUpdateCheck runs a fresh look within the budget, whatever the
+// schedule says, saves it without touching the reminder times, and keeps it
+// for the end-of-command reminder (R11).
+func (a *app) doctorUpdateCheck(ctx context.Context) updatecheck.Status {
+	u := a.newUpdateRun()
+	a.updates = u
+	_, u.override, _ = updatecheck.BaseURL(a.env.Getenv) // shown even when the check is off
+	if u.off == "" {
+		if c, ok := a.updateClient(u); ok {
+			r := updatecheck.Look(ctx, c, u.current, a.env.Now, updatecheck.Budget)
+			// A Ctrl-C'd look is not a failed one: record nothing, so the
+			// schedule and the last result stay as they were.
+			if ctx.Err() == nil && !errors.Is(r.Err, context.Canceled) {
+				u.mu.Lock()
+				u.cache.Merge(r, u.current)           // r.Err is stored cleaned, never printed here
+				_ = updatecheck.Save(u.path, u.cache) // a cache: a failed write is silent
+				u.mu.Unlock()
+			}
+		}
+	}
+	page := "https://github.com/" + updatecheck.Repo + "/releases/latest"
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.cache.Latest != nil {
+		if v, ok := updatecheck.ParseRelease(u.cache.Latest.Version); ok { // nothing from the cache file unchecked
+			page = updatecheck.ReleaseURL("v" + v.String())
+		}
+	}
+	return updatecheck.StatusOf(u.off, u.current, u.cache, u.override, a.upgradeCommand(page), a.env.Now())
 }

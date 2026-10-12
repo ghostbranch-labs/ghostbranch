@@ -212,7 +212,7 @@ func (a *app) loginWithToken(ctx context.Context) (*LoginResult, error) {
 		}
 		return nil, contract.New(contract.AuthMissing, "GitHub didn't accept the token from stdin; nothing was stored")
 	}
-	l := auth.Login{Token: token, Account: u.Login, Kind: "pat", SchemaVersion: contract.SchemaVersion}
+	l := auth.Login{Token: token, Account: u.Login, Kind: "pat", SchemaVersion: contract.RecordVersion}
 	if err := auth.SaveLogin(a.env.Keychain, l); err != nil {
 		return nil, err
 	}

@@ -513,6 +513,7 @@ func (a *app) guidedInit(ctx context.Context, args []string, f initFlags) error 
 		return contract.Wrap(contract.MissingInput, err,
 			"init has questions and the console can't be opened; answer them with flags: <owner/repo>, --shadow or --adopt, --guard or --no-guard, --sync or --no-sync")
 	}
+	ask = pausingAsker{inner: ask, p: a.reporter()}
 	for _, l := range intro {
 		ask.Say(l)
 	}

@@ -1,0 +1,29 @@
+{
+  "schema_version": "0.13",
+  "command": "version",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "version": "v0.13.0",
+    "commit": "0123456789ab",
+    "schema_version": "0.13"
+  },
+  "warnings": [
+    {
+      "code": "UPDATE_AVAILABLE",
+      "message": "Ghostbranch 0.13.1 is out (this is 0.13.0); it fixes a security issue (GHSA-2222-3333-4444)",
+      "details": {
+        "advisories": [
+          "GHSA-2222-3333-4444"
+        ],
+        "current": "0.13.0",
+        "latest": "0.13.1",
+        "security": true,
+        "upgrade": "https://github.com/ghostbranch-labs/ghostbranch/releases/tag/v0.13.1",
+        "url": "https://github.com/ghostbranch-labs/ghostbranch/releases/tag/v0.13.1"
+      }
+    }
+  ],
+  "next": [],
+  "error": null
+}

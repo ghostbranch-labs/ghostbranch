@@ -75,7 +75,7 @@ func (e *Engine) Status(ctx context.Context, p workspace.Pair) (*StatusResult, [
 		ScheduledSync: cfg.Sync.Schedule != config.ScheduleOff}
 	warns = addWarnings(warns, m.warnings(pc.pair.Public)...)
 	warns = addWarnings(warns, outdatedWarnings(files)...)
-	rs, sw, err := e.survey(ctx, pc)
+	rs, sw, err := e.surveyShown(ctx, pc)
 	warns = addWarnings(warns, sw...)
 	if err != nil {
 		return nil, warns, err
@@ -107,7 +107,7 @@ func (e *Engine) FeatureList(ctx context.Context, p workspace.Pair, all bool) (*
 	if err != nil {
 		return nil, warns, err
 	}
-	rs, sw, err := e.survey(ctx, pc)
+	rs, sw, err := e.surveyShown(ctx, pc)
 	warns = addWarnings(warns, sw...)
 	if err != nil {
 		return nil, warns, err
@@ -136,7 +136,7 @@ func (e *Engine) FeatureShow(ctx context.Context, p workspace.Pair, name string)
 	if err != nil {
 		return nil, warns, err
 	}
-	rs, sw, err := e.survey(ctx, pc, name)
+	rs, sw, err := e.surveyShown(ctx, pc, name)
 	warns = addWarnings(warns, sw...)
 	if err != nil {
 		return nil, warns, err
