@@ -63,6 +63,10 @@ func human(r any, st style.Styler) string {
 	switch v := r.(type) {
 	case *VersionResult:
 		fmt.Fprintf(&b, "ghostbranch %s (commit %s), JSON contract %s\n", oneLine(v.Version), oneLine(v.Commit), v.SchemaVersion)
+	case *ReferenceResult:
+		for _, c := range v.Commands {
+			fmt.Fprintf(&b, "%s: %s\n", c.Path, oneLine(c.Short))
+		}
 	case *guide.Printed:
 		b.WriteString(v.Markdown)
 	case *guide.InstallResult:

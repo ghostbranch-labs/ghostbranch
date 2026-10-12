@@ -1,0 +1,804 @@
+{
+  "schema_version": "0.13",
+  "command": "reference",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "commands": [
+      {
+        "path": "agents allow",
+        "use": "allow",
+        "short": "Let agents publish to this repo with --yes, for a while (needs a person at a console)",
+        "long": "agents allow lets coding agents on this machine publish to one repo pair with --yes, without the\nconsole code, for 6h (the default), 24h or 30d, or --until-revoked. Making the grant itself needs a\nperson to type a code at a console, so an agent cannot grant itself. Agents still need a green gate\nand a clean leak scan for every publish. Grants live on this machine only.",
+        "read_only": false,
+        "flags": [
+          {
+            "name": "for",
+            "shorthand": "",
+            "type": "string",
+            "default": "",
+            "usage": "how long: 6h (default), 24h or 30d"
+          },
+          {
+            "name": "plan",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "preview the grant without making it"
+          },
+          {
+            "name": "until-revoked",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "never expire; take it back with ghostbranch agents revoke"
+          }
+        ]
+      },
+      {
+        "path": "agents revoke",
+        "use": "revoke",
+        "short": "Take back the agent grant for this repo (or --all); needs no console",
+        "long": "",
+        "read_only": false,
+        "flags": [
+          {
+            "name": "all",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "revoke every grant in this workspace (also clears a grants.json that isn't valid JSON; a file from a newer Ghostbranch is kept); with --repo, every grant for that repo"
+          },
+          {
+            "name": "plan",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "preview what would be revoked"
+          }
+        ]
+      },
+      {
+        "path": "agents status",
+        "use": "status",
+        "short": "List agent grants, and whether the current token can publish to the public repo",
+        "long": "",
+        "read_only": true,
+        "flags": []
+      },
+      {
+        "path": "apply",
+        "use": "apply <plan-id|plan.json>",
+        "short": "Publish a saved plan if the repos still match it",
+        "long": "apply publishes a plan saved by promote. It refuses with exit 6 if public main, the feature, the overlay or the gate candidate moved since the plan was made. Re-running it finishes an interrupted publish. A person confirms on the console, or --yes publishes under an agent grant.",
+        "read_only": false,
+        "flags": [
+          {
+            "name": "yes",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "publish under an agent grant (ghostbranch agents allow); on its own it never skips the console"
+          }
+        ]
+      },
+      {
+        "path": "audit",
+        "use": "audit",
+        "short": "Report what keeps the shadow repo's CI from matching public CI",
+        "long": "audit reads the workflows the shadow repo's CI runs and reports repo guards (jobs that skip in\nthe shadow repo), referenced secrets and which are missing (when the token may list them), workflows a\nsync starts in the shadow repo and the guard that stops them, billed Actions minutes, and whether\nGhostbranch's managed overlay files are current. It changes nothing.",
+        "read_only": true,
+        "flags": []
+      },
+      {
+        "path": "auth status",
+        "use": "status",
+        "short": "Show the token's source, account, kind and expiry, and whether it can publish",
+        "long": "auth status shows where the token comes from (GHOSTBRANCH_TOKEN, the stored login, GH_TOKEN,\nGITHUB_TOKEN or gh), its account and kind, whether it can publish to this checkout's pair (or --repo),\nand the stored login. Offline, it still shows the stored login. With GHOSTBRANCH_TOKEN set it doesn't\nread the keychain at all. A stored login near expiry is refreshed first, as any command would.",
+        "read_only": true,
+        "flags": []
+      },
+      {
+        "path": "doctor",
+        "use": "doctor",
+        "short": "Check this machine's setup and the pair, and name each fix; changes nothing",
+        "long": "doctor runs six checks, in order: tools (git and this binary), token (its source, account,\nexpiry, whether it can publish, and the permissions each command group needs), pair (both repos,\nthe overlay and its config, shadow main, the managed files), guard (the pre-push hook in this\ncheckout), state (this machine's records) and ci (the audit's summary). Each is ok, warn, fail or\nskipped, and names the command that fixes it. It never writes, never prompts and isn't ledgered.\nIn a checkout of a pair it checks that pair; --repo names another; with neither it skips the\nchecks that need a pair. It exits 0 unless a check fails (DOCTOR_FAILED, details.failed).",
+        "read_only": true,
+        "flags": []
+      },
+      {
+        "path": "explain",
+        "use": "explain <CODE | exit number>",
+        "short": "Explain an error, warning or exit code, and what to do about it",
+        "long": "explain prints what a code means, its usual causes, what to do, and whether a person must act. It needs no token and no network. --all lists every code.",
+        "read_only": true,
+        "flags": [
+          {
+            "name": "all",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "list every exit, error and warning code"
+          }
+        ]
+      },
+      {
+        "path": "feature abandon",
+        "use": "abandon <name>",
+        "short": "Park a feature: keep its branch, but leave it out of feature list",
+        "long": "feature abandon marks a feature abandoned in its metadata in the shadow repo. Nothing is deleted:\nits branch, gate and plans stay, status still shows it, and feature list hides it unless --all.\n--undo makes it an active feature again. To delete a feature, use feature close.",
+        "read_only": false,
+        "flags": [
+          {
+            "name": "plan",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "preview exactly what would change, and change nothing (same as --dry-run)"
+          },
+          {
+            "name": "undo",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "restore an abandoned feature"
+          }
+        ]
+      },
+      {
+        "path": "feature close",
+        "use": "close <name>",
+        "short": "Delete a feature from the shadow repo (a person confirms unless it merged unchanged)",
+        "long": "feature close deletes a feature from the shadow repo: its branch, its gate branch, its metadata\nand its plan refs, in one push that fails, deleting nothing, if any of them moved since it looked. Then it\ncloses the gate's draft PR and removes the feature's plan files and mirror refs on this machine. The\nledger records every ref deleted with the SHA it pointed at, so a branch can be pushed back.\n\nA feature whose public PR merged and whose branch hasn't moved since closes without asking (sync does\nthis on its own). Anything else would lose work that was never published, so a person confirms by\ntyping a code at the console. --plan shows what would be deleted and asks no one.",
+        "read_only": false,
+        "flags": [
+          {
+            "name": "plan",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "preview exactly what would change, and change nothing (same as --dry-run)"
+          }
+        ]
+      },
+      {
+        "path": "feature fold",
+        "use": "fold <feature>",
+        "short": "Fold a stacked feature into its parent: the parent fast-forwards to it, and it closes",
+        "long": "feature fold moves the parent feature's branch to <feature>'s head in the shadow repo, a fast-forward\n(never a merge or a rebase), and closes <feature>. Its branch, gate branch, metadata and plan refs are deleted\nin the same atomic push, leased on what fold read, and the features stacked on <feature> are stacked on the\nparent instead. Nothing is lost: every commit of <feature> is on the parent, so no console is asked.\nIf the parent has moved on since <feature> was started from it, fold refuses with FOLD_NEEDS_REBASE, and next\ngives the git commands to rebase <feature> yourself. Ghostbranch never resolves conflicts. --plan shows what\nwould change.",
+        "read_only": false,
+        "flags": [
+          {
+            "name": "plan",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "preview exactly what would change, and change nothing (same as --dry-run)"
+          }
+        ]
+      },
+      {
+        "path": "feature list",
+        "use": "list",
+        "short": "List the pair's features with their state, drift, gate and public PR",
+        "long": "feature list prints one line per feature: its state, whether it still merges cleanly onto public\nmain (drift), its last gate and its public PR. Abandoned features are left out unless --all. It only reads.",
+        "read_only": true,
+        "flags": [
+          {
+            "name": "all",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "include abandoned features"
+          }
+        ]
+      },
+      {
+        "path": "feature pull",
+        "use": "pull <feature>",
+        "short": "Bring commits someone made on a feature's open public PR into its shadow branch",
+        "long": "feature pull reads the open public PR of <feature> and the commits on its branch that Ghostbranch didn't\npublish (someone pushed them on GitHub: a maintainer's fix, an applied suggestion). It brings them into the\nfeature's branch in the shadow repo and records them as adopted, in one push leased on what it read. They\nare already public, so the next gate doesn't scan them again; the next promote keeps them. Your later commits\nare replayed on top of them. A merge commit or a conflict stops it with the git steps to merge the PR's branch\nyourself; Ghostbranch never resolves conflicts. It only touches the shadow repo; your checkout needs a fetch\nand reset afterwards. --plan shows what would change.",
+        "read_only": false,
+        "flags": [
+          {
+            "name": "plan",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "preview exactly what would change, and change nothing (same as --dry-run)"
+          }
+        ]
+      },
+      {
+        "path": "feature restack",
+        "use": "restack <feature>",
+        "short": "Rebase the features stacked above <feature> onto its tip, in the shadow repo",
+        "long": "feature restack replays each feature stacked above <feature> (then the ones above those, in order)\nonto its parent's new tip, in a throwaway worktree, and pushes each with a lease, together with its updated\nrecord. A feature that already holds its parent's tip only has its record updated. The first conflict stops\nthe restack with the git commands to rebase that feature yourself; features already restacked stay\nrestacked. Ghostbranch never resolves conflicts.\nWith --onto main or --onto <feature>, <feature> itself moves first: its own commits are replayed onto main\n(dropping its parent's commits) or onto that feature, and then the features above it follow.\nIt only touches the shadow repo; your checkouts of the rewritten branches need a fetch and reset afterwards.",
+        "read_only": false,
+        "flags": [
+          {
+            "name": "onto",
+            "shorthand": "",
+            "type": "string",
+            "default": "",
+            "usage": "move <feature> itself onto \"main\" or onto another feature first"
+          },
+          {
+            "name": "plan",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "preview exactly what would change, and change nothing (same as --dry-run)"
+          }
+        ]
+      },
+      {
+        "path": "feature show",
+        "use": "show <name>",
+        "short": "Show one feature in full: state, drift, gate, PR, commits and ledger",
+        "long": "feature show prints everything about one feature: its state, branch and base, drift onto public\nmain and the files that conflict, its last gate, its public PR and plan, its commits since public main,\nand this pair's ledger entries for it. It only reads.",
+        "read_only": true,
+        "flags": []
+      },
+      {
+        "path": "feature start",
+        "use": "start <name>",
+        "short": "Start a feature branch in the shadow repo",
+        "long": "feature start creates <name> from shadow main in the shadow repo and records it as a feature. It does not touch your checkout; fetch and switch to the branch afterwards. With --from <feature> it starts at that feature's tip instead and records it as the parent, stacking the new feature on it.",
+        "read_only": false,
+        "flags": [
+          {
+            "name": "from",
+            "shorthand": "",
+            "type": "string",
+            "default": "",
+            "usage": "stack the feature on another feature: start it at that feature's tip in the shadow repo (default: shadow main)"
+          },
+          {
+            "name": "plan",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "preview exactly what would change, and change nothing (same as --dry-run)"
+          },
+          {
+            "name": "yes",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "accepted for consistency; feature start never asks"
+          }
+        ]
+      },
+      {
+        "path": "gate",
+        "use": "gate <feature>",
+        "short": "Rebase on public main, scan for leaks, and run CI; report only",
+        "long": "gate rebases the feature onto public main, scans exactly what would be published for leaks,\npushes a CI candidate (the feature plus the overlay) to a draft PR in the shadow repo, and waits for\nevery check. It records the result and never touches the public repo. Exit 3 means the gate failed.\nWith --detach it returns a job id once CI has started; ghostbranch wait <job> finishes it, from this machine or another. Without --detach, Ctrl-C leaves the job pending for wait.",
+        "read_only": false,
+        "flags": [
+          {
+            "name": "detach",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "push the candidate, record the job and return without waiting for CI; finish it with ghostbranch wait <job>"
+          },
+          {
+            "name": "plan",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "preview exactly what would change, and change nothing (same as --dry-run)"
+          }
+        ]
+      },
+      {
+        "path": "guard check",
+        "use": "check <remote> <url>",
+        "short": "Check a push to the public repo; run by the pre-push hook with git's input on stdin",
+        "long": "",
+        "read_only": true,
+        "flags": []
+      },
+      {
+        "path": "guard install",
+        "use": "install",
+        "short": "Install the pre-push guard in this checkout",
+        "long": "",
+        "read_only": false,
+        "flags": [
+          {
+            "name": "plan",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "show what would change, and change nothing"
+          }
+        ]
+      },
+      {
+        "path": "guard status",
+        "use": "status",
+        "short": "Show whether the guard is installed here, and what it covers",
+        "long": "",
+        "read_only": true,
+        "flags": []
+      },
+      {
+        "path": "guard uninstall",
+        "use": "uninstall",
+        "short": "Remove the pre-push guard, restoring any hook it chained",
+        "long": "",
+        "read_only": false,
+        "flags": [
+          {
+            "name": "plan",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "show what would change, and change nothing"
+          }
+        ]
+      },
+      {
+        "path": "guide",
+        "use": "guide",
+        "short": "Print the guide for coding agents, or install a skill that points agents at it",
+        "long": "guide prints how coding agents should use Ghostbranch: the loop, the rules, and every exit and\nerror code. It always matches this binary. --install claude|codex writes a small user-level skill\n(never a file in your repo) that tells the agent to read this guide; --uninstall removes it.",
+        "read_only": true,
+        "flags": [
+          {
+            "name": "install",
+            "shorthand": "",
+            "type": "string",
+            "default": "",
+            "usage": "write a user-level skill for an agent: claude or codex"
+          },
+          {
+            "name": "plan",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "show what would be written, and write nothing"
+          },
+          {
+            "name": "uninstall",
+            "shorthand": "",
+            "type": "string",
+            "default": "",
+            "usage": "remove the skill for an agent: claude or codex"
+          }
+        ]
+      },
+      {
+        "path": "init",
+        "use": "init [<owner/repo>]",
+        "short": "Create or adopt the private shadow repo for a public repo",
+        "long": "init creates <owner/repo>-shadow as a private repo (or adopts an existing one with --adopt),\nmirrors the public repo's branches and tags into it, and creates the \"ghostbranch\" overlay branch,\nwhich holds .ghostbranch.yml and is the shadow repo's default branch. It never writes to the public\nrepo. Running it again resumes a partial setup.\nRun by a person at a terminal with an answer missing, it asks: the public repo (from origin), a\nlogin if there is none, the shadow repo, the push guard (in a clone of the public repo) and\nscheduled sync. It shows the --plan preview, then runs init, guard install and doctor, and ends\nwith how to start a first feature. Flags answer the questions; --json, --non-interactive and --yes\nnever ask.",
+        "read_only": false,
+        "flags": [
+          {
+            "name": "adopt",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "take over an existing, empty or mirror-only, private repo"
+          },
+          {
+            "name": "guard",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "install the push guard in this checkout, a clone of the public repo, after init"
+          },
+          {
+            "name": "no-guard",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "don't install the push guard, and don't ask"
+          },
+          {
+            "name": "no-sync",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "leave scheduled sync off, and don't ask"
+          },
+          {
+            "name": "plan",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "preview exactly what would change, and change nothing (same as --dry-run)"
+          },
+          {
+            "name": "shadow",
+            "shorthand": "",
+            "type": "string",
+            "default": "",
+            "usage": "shadow repo name (default <owner/repo>-shadow)"
+          },
+          {
+            "name": "sync",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "turn on scheduled sync in the new overlay (sync.schedule \"23 */6 * * *\", about 120 Actions minutes a month)"
+          },
+          {
+            "name": "yes",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "never ask: use the flags given and the defaults"
+          }
+        ]
+      },
+      {
+        "path": "log",
+        "use": "log",
+        "short": "Show the ledger of what ghostbranch did on this machine, newest first",
+        "long": "log prints this workspace's ledger: every mutating command, who ran it (the actor), and how it\nended, newest first. It reads only the local ledger: no token, no network, no pair. --feature and --op\nmatch exactly, --actor matches a prefix (agent: shows every agent), and --since takes a duration back\nfrom now (24h) or an RFC 3339 time. --repo shows one pair's entries, even after remove; --repo . is the\npair this checkout's remotes name.",
+        "read_only": true,
+        "flags": [
+          {
+            "name": "actor",
+            "shorthand": "",
+            "type": "string",
+            "default": "",
+            "usage": "only entries whose actor starts with this, such as agent: or human:octo"
+          },
+          {
+            "name": "feature",
+            "shorthand": "",
+            "type": "string",
+            "default": "",
+            "usage": "only entries about this feature"
+          },
+          {
+            "name": "limit",
+            "shorthand": "",
+            "type": "int",
+            "default": "50",
+            "usage": "at most this many entries (1 or more)"
+          },
+          {
+            "name": "op",
+            "shorthand": "",
+            "type": "string",
+            "default": "",
+            "usage": "only entries for this operation, such as promote or \"feature start\""
+          },
+          {
+            "name": "since",
+            "shorthand": "",
+            "type": "string",
+            "default": "",
+            "usage": "only entries from this long ago (24h) or since this RFC 3339 time"
+          }
+        ]
+      },
+      {
+        "path": "login",
+        "use": "login",
+        "short": "Log in to GitHub with the Ghostbranch GitHub App, or store a token from stdin",
+        "long": "login runs GitHub's device flow for the Ghostbranch GitHub App: it shows a code and a URL on the\nconsole, opens the browser when it can, and waits while you approve. The token reaches only the repos\nyou install the app on, refreshes itself, and is kept in the OS keychain (never in a file).\nWith --with-token it reads one token from stdin instead (never from an argument, so it stays out of\nshell history), checks it with GitHub, and stores it. GHOSTBRANCH_TOKEN, when set, still wins over\nthe stored login.",
+        "read_only": false,
+        "flags": [
+          {
+            "name": "with-token",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "read a token from stdin and store it"
+          }
+        ]
+      },
+      {
+        "path": "logout",
+        "use": "logout",
+        "short": "Remove the stored GitHub login from the OS keychain",
+        "long": "logout removes the login that ghostbranch login stored in the OS keychain, a corrupt one included.\nIt can't revoke the token at GitHub (that needs the app's client secret, which Ghostbranch doesn't\nship); for a GitHub App login it gives the page where you revoke the app's access. Environment tokens\n(GHOSTBRANCH_TOKEN, GH_TOKEN, GITHUB_TOKEN) are untouched.",
+        "read_only": false,
+        "flags": []
+      },
+      {
+        "path": "promote",
+        "use": "promote <feature>...",
+        "short": "Publish a gated feature, or a stack of them, to the public repo as PRs",
+        "long": "promote reuses a fresh green gate (or runs one), builds the public commits (each feature commit\nwith --mode preserve, one with squash, or the groups of a --curate file) on public main, ending on\nexactly the gated tree, scans every commit's files, message and author, the branch name and PR text\nfor leaks, and saves a plan.\nWith --plan it stops there. Otherwise a person confirms by typing a code shown on the console, or, if they have allowed agents with \"ghostbranch agents allow\", --yes publishes. Without either it stops at the plan with exit 5.\nSeveral features, bottom first (promote a b c), publish a stack: each branch's PR is based on the\nbranch below (a's on main) and shows only that branch's commits, and one approval covers every PR.\nEach branch needs a fresh green gate built on the branch below. Where GitHub offers native stacked\nPRs, they are registered as one stack. --mode-for and --title-for set one branch's mode and PR title.",
+        "read_only": false,
+        "flags": [
+          {
+            "name": "body",
+            "shorthand": "",
+            "type": "string",
+            "default": "",
+            "usage": "PR body (default: the commit's body, or one line per commit)"
+          },
+          {
+            "name": "branch",
+            "shorthand": "",
+            "type": "string",
+            "default": "",
+            "usage": "public branch name (default: the feature name)"
+          },
+          {
+            "name": "curate",
+            "shorthand": "",
+            "type": "string",
+            "default": "",
+            "usage": "curated mode: a JSON file {\"commits\": [{\"from\": [<sha>...], \"message\": \"...\"}]} naming every feature commit once, in the order to publish"
+          },
+          {
+            "name": "detach",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "if a gate is needed, start it and return its job instead of waiting"
+          },
+          {
+            "name": "message",
+            "shorthand": "m",
+            "type": "string",
+            "default": "",
+            "usage": "the squash commit's message (squash mode only)"
+          },
+          {
+            "name": "mode",
+            "shorthand": "",
+            "type": "string",
+            "default": "",
+            "usage": "history mode: preserve (each commit), squash (one commit) or curated (a --curate file); default promote.default_mode, which is preserve unless set"
+          },
+          {
+            "name": "mode-for",
+            "shorthand": "",
+            "type": "stringArray",
+            "default": "[]",
+            "usage": "one branch's history mode in a stack promote: <feature>=squash or <feature>=preserve (repeatable); default --mode"
+          },
+          {
+            "name": "plan",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "save and print the plan without publishing"
+          },
+          {
+            "name": "title",
+            "shorthand": "",
+            "type": "string",
+            "default": "",
+            "usage": "PR title (needed when more than one commit is published; default: the only commit's subject, or the squash message's first line)"
+          },
+          {
+            "name": "title-for",
+            "shorthand": "",
+            "type": "stringArray",
+            "default": "[]",
+            "usage": "one branch's PR title in a stack promote: <feature>=<title> (repeatable)"
+          },
+          {
+            "name": "yes",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "publish under an agent grant (ghostbranch agents allow); on its own it never skips the console"
+          }
+        ]
+      },
+      {
+        "path": "remove",
+        "use": "remove",
+        "short": "Unregister the pair from this machine (needs a person at a console)",
+        "long": "remove takes the pair off this machine: it revokes the pair's agent grants and waivers, deletes\nits plan files and its local mirror, and drops it from the workspace. Nothing on GitHub changes: the\nshadow repo, its branches and features stay, and the ledger keeps its history. Because it drops grants\nand waivers, a person confirms by typing a code at the console; --plan shows what would go. It needs\nno GitHub token.",
+        "read_only": false,
+        "flags": [
+          {
+            "name": "plan",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "preview exactly what would change, and change nothing (same as --dry-run)"
+          }
+        ]
+      },
+      {
+        "path": "status",
+        "use": "status",
+        "short": "Pair health and every feature's state",
+        "long": "status reports whether shadow main is behind public main, whether the overlay's managed files\nneed an upgrade, and whether scheduled sync is on; then every feature, abandoned ones included, with its\nstate, whether it still merges cleanly onto public main (drift), its last gate and its public PR. It only\nreads: nothing is pushed and nothing is written to the ledger.",
+        "read_only": true,
+        "flags": []
+      },
+      {
+        "path": "sync",
+        "use": "sync",
+        "short": "Fast-forward shadow main to public main",
+        "long": "sync fast-forwards the shadow repo's main to public main. It never force-pushes: if shadow main has diverged it stops with exit 4.\nIts pushes start the shadow repo's push-triggered workflows, which re-test what public CI already tested,\nso it then cancels those runs (the token needs Actions write on the shadow repo); --no-cancel leaves them running.\nLast, it closes each feature whose public PR merged and whose branch hasn't moved since it was published,\nas feature close does; --no-close leaves them. It never closes a feature that needs a person.",
+        "read_only": false,
+        "flags": [
+          {
+            "name": "no-cancel",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "don't cancel the workflow runs the sync's pushes start in the shadow repo"
+          },
+          {
+            "name": "no-close",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "don't close features whose public PR merged"
+          },
+          {
+            "name": "plan",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "preview exactly what would change, and change nothing (same as --dry-run)"
+          },
+          {
+            "name": "yes",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "accepted for consistency; sync never asks"
+          }
+        ]
+      },
+      {
+        "path": "upgrade",
+        "use": "upgrade",
+        "short": "Bring the pair's Ghostbranch-managed overlay files up to date",
+        "long": "upgrade compares the overlay branch's managed files (today the opt-in sync workflow) with this\nversion's templates and .ghostbranch.yml, then adds, updates or removes them in one overlay commit.\nTurning scheduled sync on or off is: edit sync.schedule, then run upgrade. A file someone edited by hand\nis replaced; --plan shows that first. It writes only the shadow repo's overlay branch, then runs the audit.",
+        "read_only": false,
+        "flags": [
+          {
+            "name": "plan",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "preview exactly what would change, and change nothing (same as --dry-run)"
+          },
+          {
+            "name": "yes",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "accepted for consistency; upgrade never asks"
+          }
+        ]
+      },
+      {
+        "path": "version",
+        "use": "version",
+        "short": "Print this binary's version",
+        "long": "version prints this binary's module version and VCS commit, and the JSON contract version it speaks. ghostbranch --version does the same.",
+        "read_only": true,
+        "flags": []
+      },
+      {
+        "path": "wait",
+        "use": "wait <job>",
+        "short": "Wait for a gate job's CI and record its result",
+        "long": "wait finishes a gate started with --detach (or interrupted): it waits for the candidate's CI, records the result, and prints what gate would have. A finished job answers at once. With --json it streams one JSON event per line on stdout, and the last line is the result envelope.",
+        "read_only": false,
+        "flags": [
+          {
+            "name": "timeout",
+            "shorthand": "",
+            "type": "duration",
+            "default": "0s",
+            "usage": "stop waiting after this long and report pending; the job keeps running (0, the default, waits until CI settles)"
+          }
+        ]
+      },
+      {
+        "path": "waivers add",
+        "use": "add <feature> <id>...",
+        "short": "Waive leak findings that are false positives (needs a person at a console)",
+        "long": "waivers add lets a publish go ahead despite leak findings a person has checked and judged safe,\nsuch as a fake key in a test fixture. It rebases, strips and scans the feature again on this machine\n(no push, no CI), shows each finding at the console, and needs a person to type a code: an agent\ncannot waive. A waiver covers exactly that content in that file; changed content is a new finding.\nFindings in the commit message, branch or PR text are never waivable: change the text instead.\nWaivers live on this machine only.",
+        "read_only": false,
+        "flags": [
+          {
+            "name": "plan",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "show what would be waived without waiving it"
+          },
+          {
+            "name": "reason",
+            "shorthand": "",
+            "type": "string",
+            "default": "",
+            "usage": "why these findings are safe to publish (recorded in the ledger)"
+          }
+        ]
+      },
+      {
+        "path": "waivers list",
+        "use": "list",
+        "short": "List waivers for this repo (or every repo when none can be told apart)",
+        "long": "",
+        "read_only": true,
+        "flags": []
+      },
+      {
+        "path": "waivers revoke",
+        "use": "revoke <id>... | --all",
+        "short": "Revoke waivers for this repo, or every waiver with --all; needs no console",
+        "long": "",
+        "read_only": false,
+        "flags": [
+          {
+            "name": "all",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "revoke every waiver in this workspace (also clears a waivers.json that isn't valid JSON; a file from a newer Ghostbranch is kept)"
+          },
+          {
+            "name": "plan",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "preview what would be revoked"
+          }
+        ]
+      }
+    ],
+    "global_flags": [
+      {
+        "name": "dry-run",
+        "shorthand": "",
+        "type": "bool",
+        "default": "false",
+        "usage": "preview exactly what would change, and change nothing"
+      },
+      {
+        "name": "json",
+        "shorthand": "",
+        "type": "bool",
+        "default": "false",
+        "usage": "print JSON on stdout: one object (wait streams one event per line, the result last)"
+      },
+      {
+        "name": "no-color",
+        "shorthand": "",
+        "type": "bool",
+        "default": "false",
+        "usage": "never colour human output (NO_COLOR does the same)"
+      },
+      {
+        "name": "non-interactive",
+        "shorthand": "",
+        "type": "bool",
+        "default": "false",
+        "usage": "never prompt; missing input is an error"
+      },
+      {
+        "name": "repo",
+        "shorthand": "",
+        "type": "string",
+        "default": "",
+        "usage": "public or shadow repo (owner/name) to act on"
+      },
+      {
+        "name": "workspace",
+        "shorthand": "",
+        "type": "string",
+        "default": "",
+        "usage": "workspace name (default $GHOSTBRANCH_WORKSPACE or \"default\")"
+      }
+    ]
+  },
+  "warnings": [],
+  "next": [],
+  "error": null
+}

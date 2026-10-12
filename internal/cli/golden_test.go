@@ -34,7 +34,7 @@ var dataSchemas = map[string]string{
 	"feature abandon": "feature-abandon.schema.json", "feature close": "feature-close.schema.json",
 	"wait": "gate.schema.json", "login": "login.schema.json", "logout": "logout.schema.json", "auth status": "auth-status.schema.json",
 	"doctor": "doctor.schema.json", "feature fold": "feature-fold.schema.json", "feature restack": "feature-restack.schema.json", "feature pull": "feature-pull.schema.json",
-	"version": "version.schema.json",
+	"version": "version.schema.json", "reference": "reference.schema.json",
 }
 
 var rootPath = regexp.MustCompile(`<ROOT>[^"]*`)
@@ -62,6 +62,7 @@ func TestGoldenContract(t *testing.T) {
 	}{
 		{"init", nil, []string{"init", "acme/widget"}, 0},
 		{"version", nil, []string{"version"}, 0},
+		{"reference", nil, []string{"reference"}, 0},
 		{"version_flag", nil, []string{"--version"}, 0},
 		{"update_available", func(te *testEnv) {
 			_, url := newFakeReleases(te.t, "v0.13.0", "[]")
@@ -519,4 +520,27 @@ func withGatedStack(te *testEnv) {
 	te.shadowCommit("feat-b", map[string]string{"b.txt": "b\n"})
 	te.mustRun("gate", "feat-a")
 	te.mustRun("gate", "feat-b")
+}
+
+// Run pre-scans argv for --json and --no-color; the reference must still
+// report their real defaults.
+func TestReferenceDefaultsIgnoreArgv(t *testing.T) {
+	te := newTestEnv(t)
+	code, env := te.runJSON("reference", "--no-color")
+	if code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	data, _ := env["data"].(map[string]any)
+	flags, _ := data["global_flags"].([]any)
+	seen := map[string]string{}
+	for _, f := range flags {
+		m, _ := f.(map[string]any)
+		seen[m["name"].(string)], _ = m["default"].(string)
+	}
+	for _, n := range []string{"json", "no-color"} {
+		d, ok := seen[n]
+		if !ok || d != "false" {
+			t.Errorf("%s default %q (present %v), want false", n, d, ok)
+		}
+	}
 }

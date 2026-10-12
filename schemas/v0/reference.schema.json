@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "reference data",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["commands", "global_flags"],
+  "$defs": {
+    "flag": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "shorthand", "type", "default", "usage"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "shorthand": { "type": "string" },
+        "type": { "type": "string", "minLength": 1 },
+        "default": { "type": "string" },
+        "usage": { "type": "string" }
+      }
+    }
+  },
+  "properties": {
+    "commands": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["path", "use", "short", "long", "read_only", "flags"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1 },
+          "use": { "type": "string", "minLength": 1 },
+          "short": { "type": "string" },
+          "long": { "type": "string" },
+          "read_only": { "type": "boolean" },
+          "flags": { "type": "array", "items": { "$ref": "#/$defs/flag" } }
+        }
+      }
+    },
+    "global_flags": { "type": "array", "items": { "$ref": "#/$defs/flag" } }
+  }
+}
