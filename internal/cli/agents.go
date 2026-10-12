@@ -21,7 +21,7 @@ func (a *app) agentsAllowCmd() *cobra.Command {
 		Use:   "allow",
 		Short: "Let agents publish to this repo with --yes, for a while (needs a person at a console)",
 		Long: `agents allow lets coding agents on this machine publish to one repo pair with --yes, without the
-console code, for 6h (the default), 24h or 30d, or --until-revoked. Making the grant itself needs a
+console code, for 1h, 6h (the default), 1d, 7d, 15d, 30d or 90d, or --until-revoked. Making the grant itself needs a
 person to type a code at a console, so an agent cannot grant itself. Agents still need a green gate
 and a clean leak scan for every publish. Grants live on this machine only.`,
 		Args: cobra.NoArgs,
@@ -42,7 +42,7 @@ and a clean leak scan for every publish. Grants live on this machine only.`,
 			return done(a, res, w, err)
 		},
 	}
-	c.Flags().StringVar(&o.For, "for", "", "how long: 6h (default), 24h or 30d")
+	c.Flags().StringVar(&o.For, "for", "", "how long: 1h, 6h (default), 1d, 7d, 15d, 30d or 90d")
 	c.Flags().BoolVar(&o.UntilRevoked, "until-revoked", false, "never expire; take it back with ghostbranch agents revoke")
 	c.Flags().BoolVar(&a.dryRun, "plan", false, "preview the grant without making it")
 	return c

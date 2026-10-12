@@ -86,7 +86,7 @@ func TestNextForAPersonDropsAgentFlags(t *testing.T) {
 	initOnly(te)
 	for _, args := range [][]string{
 		{"agents", "allow", "--non-interactive", "--json"},
-		{"agents", "allow", "--json=true", "--non-interactive", "--for", "24h"},
+		{"agents", "allow", "--json=true", "--non-interactive", "--for", "1d"},
 	} {
 		_, out, errOut := te.run(args...)
 		var env map[string]any
@@ -96,7 +96,7 @@ func TestNextForAPersonDropsAgentFlags(t *testing.T) {
 		n := nextOf(t, env)
 		want := []string{"ghostbranch", "agents", "allow"}
 		if len(args) > 4 {
-			want = append(want, "--for", "24h")
+			want = append(want, "--for", "1d")
 		}
 		want = append(want, "--repo", "acme/widget")
 		if len(n) != 1 || !reflect.DeepEqual(argv(n[0]), want) || n[0]["needs_human"] != true {

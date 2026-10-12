@@ -8,7 +8,7 @@
   "next": [],
   "error": {
     "code": "BAD_FLAG",
-    "message": "--for must be 6h, 24h or 30d, or pass --until-revoked; got \"7h\"",
+    "message": "--for must be 1h, 6h, 1d, 7d, 15d, 30d or 90d, or pass --until-revoked; got \"7h\"",
     "field": "for",
     "retryable": false,
     "details": {}

@@ -84,7 +84,7 @@ func TestAgentsAllowRefusalsAndBadInput(t *testing.T) {
 	}
 	h.approver.err = nil
 	h.eng.DryRun = true
-	res, _, err := h.eng.AgentsAllow(h.ctx, h.pair, engine.AgentsAllowOptions{For: "24h"})
+	res, _, err := h.eng.AgentsAllow(h.ctx, h.pair, engine.AgentsAllowOptions{For: "1d"})
 	h.eng.DryRun = false
 	if err != nil || res.Preview == nil || res.Preview.Ops[0]["op"] != "grant" || len(h.approver.asked) != 1 {
 		t.Fatalf("dry run = %+v %v (asked %d)", res, err, len(h.approver.asked))

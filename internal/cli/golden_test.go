@@ -187,7 +187,7 @@ func TestGoldenContract(t *testing.T) {
 		{"bad_flag", nil, []string{"gate"}, 2},
 		{"shadow_not_private", func(te *testEnv) { initOnly(te); te.forge.SetPrivate("acme/widget-shadow", false) }, []string{"sync"}, 1},
 		{"agents_allow_no_console", initOnly, []string{"agents", "allow"}, 5},
-		{"agents_allow_plan", initOnly, []string{"agents", "allow", "--for", "24h", "--plan"}, 0},
+		{"agents_allow_plan", initOnly, []string{"agents", "allow", "--for", "1d", "--plan"}, 0},
 		{"agents_allow_bad_for", initOnly, []string{"agents", "allow", "--for", "7h"}, 2},
 		{"agents_status", func(te *testEnv) { initOnly(te); grantAgents(te) }, []string{"agents", "status"}, 0},
 		{"explain_code", nil, []string{"explain", "approval_required"}, 0},

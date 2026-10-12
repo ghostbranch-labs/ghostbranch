@@ -9,7 +9,7 @@
         "path": "agents allow",
         "use": "allow",
         "short": "Let agents publish to this repo with --yes, for a while (needs a person at a console)",
-        "long": "agents allow lets coding agents on this machine publish to one repo pair with --yes, without the\nconsole code, for 6h (the default), 24h or 30d, or --until-revoked. Making the grant itself needs a\nperson to type a code at a console, so an agent cannot grant itself. Agents still need a green gate\nand a clean leak scan for every publish. Grants live on this machine only.",
+        "long": "agents allow lets coding agents on this machine publish to one repo pair with --yes, without the\nconsole code, for 1h, 6h (the default), 1d, 7d, 15d, 30d or 90d, or --until-revoked. Making the grant itself needs a\nperson to type a code at a console, so an agent cannot grant itself. Agents still need a green gate\nand a clean leak scan for every publish. Grants live on this machine only.",
         "read_only": false,
         "flags": [
           {
@@ -17,7 +17,7 @@
             "shorthand": "",
             "type": "string",
             "default": "",
-            "usage": "how long: 6h (default), 24h or 30d"
+            "usage": "how long: 1h, 6h (default), 1d, 7d, 15d, 30d or 90d"
           },
           {
             "name": "plan",

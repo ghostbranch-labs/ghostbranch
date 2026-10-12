@@ -30,7 +30,7 @@ func mk(id, public, shadow string, d time.Duration) grant.Grant {
 }
 
 func TestParseFor(t *testing.T) {
-	for in, want := range map[string]time.Duration{"": 6 * time.Hour, "6h": 6 * time.Hour, "24h": 24 * time.Hour, "30d": 720 * time.Hour} {
+	for in, want := range map[string]time.Duration{"": 6 * time.Hour, "1h": time.Hour, "6h": 6 * time.Hour, "1d": 24 * time.Hour, "7d": 168 * time.Hour, "15d": 360 * time.Hour, "30d": 720 * time.Hour, "90d": 2160 * time.Hour} {
 		d, err := grant.ParseFor(in, false)
 		if err != nil || *d != want {
 			t.Errorf("%q: %v %v", in, d, err)
@@ -42,10 +42,32 @@ func TestParseFor(t *testing.T) {
 	for _, c := range []struct {
 		f string
 		u bool
-	}{{"7h", false}, {"1h", false}, {"forever", false}, {"6h", true}} {
+	}{{"7h", false}, {"24h", false}, {"2h", false}, {"forever", false}, {"6h", true}} {
 		_, err := grant.ParseFor(c.f, c.u)
 		if ce := contract.From(err); ce == nil || ce.Code != contract.BadFlag || ce.Field != "for" {
 			t.Errorf("%+v: want BAD_FLAG on for, got %v", c, err)
+		}
+	}
+}
+
+func TestParseForRejectsRetired24h(t *testing.T) {
+	_, err := grant.ParseFor("24h", false)
+	ce := contract.From(err)
+	if ce == nil || ce.Code != contract.BadFlag {
+		t.Fatalf("want BAD_FLAG, got %v", err)
+	}
+	if want := "--for must be 1h, 6h, 1d, 7d, 15d, 30d or 90d, or pass --until-revoked; got \"24h\""; ce.Message != want {
+		t.Errorf("message = %q, want %q", ce.Message, want)
+	}
+}
+
+func TestLengthsMatchDurations(t *testing.T) {
+	if len(grant.Lengths) != len(grant.Durations) {
+		t.Fatalf("Lengths %v and Durations differ in size", grant.Lengths)
+	}
+	for _, l := range grant.Lengths {
+		if _, ok := grant.Durations[l]; !ok {
+			t.Errorf("%q is in Lengths but not Durations", l)
 		}
 	}
 }

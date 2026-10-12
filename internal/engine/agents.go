@@ -15,7 +15,7 @@ import (
 )
 
 type AgentsAllowOptions struct {
-	For          string // 6h (default), 24h or 30d
+	For          string // 1h, 6h (default), 1d, 7d, 15d, 30d or 90d
 	UntilRevoked bool
 }
 
