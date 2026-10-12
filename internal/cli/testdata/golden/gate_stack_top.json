@@ -5,17 +5,17 @@
   "exit_code": 0,
   "data": {
     "feature": "feat-b",
-    "feature_head": "ee3faf62ddad2889d7e08bf0866efbde7c79ee7e",
-    "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+    "feature_head": "<SHA1>",
+    "public_main": "<SHA2>",
     "parent": "feat-a",
-    "base": "0c23d2f8e602b60a8e5fd90011724120ee01728a",
-    "overlay": "9117cba7936897faabab51f432905949dcc6af39",
-    "candidate": "5199030630e5a9cbdd4b988fec288088a3de12be",
-    "published_tree": "4ad86912c4df49d33c31aeae5c55f13ae05ac642",
+    "base": "<SHA3>",
+    "overlay": "<SHA4>",
+    "candidate": "<SHA5>",
+    "published_tree": "<SHA6>",
     "scanned_as": "preserve",
     "commits": [
       {
-        "source": "ee3faf62ddad2889d7e08bf0866efbde7c79ee7e",
+        "source": "<SHA1>",
         "subject": "work",
         "author": "Test Author <author@example.com>",
         "files": [
@@ -35,7 +35,7 @@
       "skipped": []
     },
     "shadow_pr": 2,
-    "job": "gate/feat-b/5199030630e5",
+    "job": "gate/feat-b/<SHA5:short>",
     "reused": false,
     "chain": [
       "feat-a",

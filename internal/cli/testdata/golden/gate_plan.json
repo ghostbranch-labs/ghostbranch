@@ -5,17 +5,17 @@
   "exit_code": 0,
   "data": {
     "feature": "feat-x",
-    "feature_head": "d7407485ce685c126afcfc258f0a9eeb0092d776",
-    "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+    "feature_head": "<SHA1>",
+    "public_main": "<SHA2>",
     "parent": "",
-    "base": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
-    "overlay": "9117cba7936897faabab51f432905949dcc6af39",
-    "candidate": "7c89f9877adbf1b388c92932c6015449c46cbfb2",
-    "published_tree": "ef9061717144a4bf03a0230d8f8926d019f2adeb",
+    "base": "<SHA2>",
+    "overlay": "<SHA3>",
+    "candidate": "<SHA4>",
+    "published_tree": "<SHA5>",
     "scanned_as": "preserve",
     "commits": [
       {
-        "source": "d7407485ce685c126afcfc258f0a9eeb0092d776",
+        "source": "<SHA1>",
         "subject": "work",
         "author": "Test Author <author@example.com>",
         "files": [
@@ -39,9 +39,9 @@
     "reused": false,
     "preview": {
       "fingerprint": {
-        "feature_head": "d7407485ce685c126afcfc258f0a9eeb0092d776",
-        "overlay": "9117cba7936897faabab51f432905949dcc6af39",
-        "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7"
+        "feature_head": "<SHA1>",
+        "overlay": "<SHA3>",
+        "public_main": "<SHA2>"
       },
       "ops": [
         {
@@ -49,7 +49,7 @@
           "op": "push_ref",
           "ref": "refs/heads/ghostbranch-gate/feat-x",
           "repo": "acme/widget-shadow",
-          "to": "7c89f9877adbf1b388c92932c6015449c46cbfb2"
+          "to": "<SHA4>"
         },
         {
           "base": "main",
@@ -59,7 +59,7 @@
           "repo": "acme/widget-shadow"
         },
         {
-          "from": "b21f4e417a59365cb1d316f30a68412d36d48d10",
+          "from": "<SHA6>",
           "op": "push_ref",
           "ref": "refs/ghostbranch/features/feat-x",
           "repo": "acme/widget-shadow",
@@ -68,7 +68,7 @@
         {
           "op": "wait_checks",
           "repo": "acme/widget-shadow",
-          "sha": "7c89f9877adbf1b388c92932c6015449c46cbfb2"
+          "sha": "<SHA4>"
         },
         {
           "from": null,

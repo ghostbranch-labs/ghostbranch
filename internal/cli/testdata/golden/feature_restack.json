@@ -10,9 +10,9 @@
       {
         "feature": "feat-y",
         "parent": "feat-x",
-        "from": "a80b011a96e35ed4ece66a7071d69d205af6e967",
-        "to": "4a60d5cb7964500c7d304cddeaa0ebb38ba2162a",
-        "forked_at": "4655f2ffddef92a3a3f79ec5abcdd230590b2bed"
+        "from": "<SHA1>",
+        "to": "<SHA2>",
+        "forked_at": "<SHA3>"
       }
     ],
     "pending": [],

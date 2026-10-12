@@ -40,7 +40,7 @@
         "rebase",
         "--onto",
         "shadow/feat-x",
-        "d7407485ce685c126afcfc258f0a9eeb0092d776",
+        "<SHA1>",
         "feat-y"
       ],
       "why": "rebase feat-y's own commits onto feat-x; you resolve any conflict, Ghostbranch never does",
@@ -75,7 +75,7 @@
   ],
   "error": {
     "code": "REBASE_CONFLICT",
-    "message": "feat-y does not restack cleanly onto feat-x: commit 15c79a266160 stopped on conflicts in feature.txt. The branches restacked before it stay restacked, and feat-y is unchanged; Ghostbranch never resolves conflicts: rebase it yourself (details.steps), push it, then run ghostbranch feature restack feat-x",
+    "message": "feat-y does not restack cleanly onto feat-x: commit <SHA2:short> stopped on conflicts in feature.txt. The branches restacked before it stay restacked, and feat-y is unchanged; Ghostbranch never resolves conflicts: rebase it yourself (details.steps), push it, then run ghostbranch feature restack feat-x",
     "field": "feature",
     "retryable": false,
     "details": {
@@ -84,7 +84,7 @@
         "restack",
         "feat-x"
       ],
-      "commit": "15c79a2661607fc6c0a93a95419fecbf4983e7dd",
+      "commit": "<SHA2>",
       "feature": "feat-y",
       "files": [
         "feature.txt"
@@ -106,7 +106,7 @@
           "rebase",
           "--onto",
           "shadow/feat-x",
-          "d7407485ce685c126afcfc258f0a9eeb0092d776",
+          "<SHA1>",
           "feat-y"
         ],
         [
@@ -117,7 +117,7 @@
           "feat-y"
         ]
       ],
-      "upstream": "d7407485ce685c126afcfc258f0a9eeb0092d776"
+      "upstream": "<SHA1>"
     }
   }
 }

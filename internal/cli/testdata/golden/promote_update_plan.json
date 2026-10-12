@@ -6,17 +6,17 @@
   "data": {
     "gate": {
       "feature": "feat-x",
-      "feature_head": "127b4a784cc83febecd756c649837e2893bf2706",
-      "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+      "feature_head": "<SHA1>",
+      "public_main": "<SHA2>",
       "parent": "",
-      "base": "ab259aef486ab5224da7f5499af6fab0a07f75db",
-      "overlay": "9117cba7936897faabab51f432905949dcc6af39",
-      "candidate": "ade730d09f0f71d5989d5857f7e888cffb49f56d",
-      "published_tree": "bbdaad1cd319121f420fa6041767872b662f975e",
+      "base": "<SHA3>",
+      "overlay": "<SHA4>",
+      "candidate": "<SHA5>",
+      "published_tree": "<SHA6>",
       "scanned_as": "preserve",
       "commits": [
         {
-          "source": "127b4a784cc83febecd756c649837e2893bf2706",
+          "source": "<SHA1>",
           "subject": "work",
           "author": "Test Author <author@example.com>",
           "files": [
@@ -36,12 +36,12 @@
         "skipped": []
       },
       "shadow_pr": 1,
-      "job": "gate/feat-x/ade730d09f0f",
+      "job": "gate/feat-x/<SHA5:short>",
       "reused": false,
       "preview": null,
       "update": {
         "pr": 1,
-        "head": "ab259aef486ab5224da7f5499af6fab0a07f75db",
+        "head": "<SHA3>",
         "base": "main",
         "style": "append"
       }
@@ -59,16 +59,16 @@
       "feature": "feat-x",
       "mode": "preserve",
       "fingerprint": {
-        "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
-        "feature_head": "127b4a784cc83febecd756c649837e2893bf2706",
-        "overlay": "9117cba7936897faabab51f432905949dcc6af39",
-        "gate_candidate": "ade730d09f0f71d5989d5857f7e888cffb49f56d"
+        "public_main": "<SHA2>",
+        "feature_head": "<SHA1>",
+        "overlay": "<SHA4>",
+        "gate_candidate": "<SHA5>"
       },
       "curate": null,
       "publish": {
-        "commit": "8dd7c77d3747605085e22037916294dd5260ea57",
-        "tree": "bbdaad1cd319121f420fa6041767872b662f975e",
-        "parent": "ab259aef486ab5224da7f5499af6fab0a07f75db",
+        "commit": "<SHA7>",
+        "tree": "<SHA6>",
+        "parent": "<SHA3>",
         "target_branch": "feat-x",
         "pr": {
           "title": "",
@@ -76,11 +76,11 @@
         },
         "commits": [
           {
-            "commit": "8dd7c77d3747605085e22037916294dd5260ea57",
-            "tree": "bbdaad1cd319121f420fa6041767872b662f975e",
-            "parent": "ab259aef486ab5224da7f5499af6fab0a07f75db",
+            "commit": "<SHA7>",
+            "tree": "<SHA6>",
+            "parent": "<SHA3>",
             "sources": [
-              "127b4a784cc83febecd756c649837e2893bf2706"
+              "<SHA1>"
             ],
             "author": {
               "name": "octo",
@@ -93,7 +93,7 @@
         "dropped_empty": [],
         "update": true,
         "style": "append",
-        "expected_head": "ab259aef486ab5224da7f5499af6fab0a07f75db"
+        "expected_head": "<SHA3>"
       },
       "typed": {
         "title": false,

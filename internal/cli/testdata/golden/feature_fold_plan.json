@@ -6,34 +6,34 @@
   "data": {
     "feature": "feat-y",
     "parent": "feat-x",
-    "from": "d7407485ce685c126afcfc258f0a9eeb0092d776",
-    "to": "a80b011a96e35ed4ece66a7071d69d205af6e967",
+    "from": "<SHA1>",
+    "to": "<SHA2>",
     "reparented": [],
     "deleted": {},
     "gate_pr": null,
     "preview": {
       "fingerprint": {
-        "feature_head": "a80b011a96e35ed4ece66a7071d69d205af6e967"
+        "feature_head": "<SHA2>"
       },
       "ops": [
         {
           "op": "delete_ref",
           "ref": "refs/ghostbranch/features/feat-y",
           "repo": "acme/widget-shadow",
-          "sha": "82b63b1d138c2212853d0535fb5ffdd612862fab"
+          "sha": "<SHA3>"
         },
         {
           "op": "delete_ref",
           "ref": "refs/heads/feat-y",
           "repo": "acme/widget-shadow",
-          "sha": "a80b011a96e35ed4ece66a7071d69d205af6e967"
+          "sha": "<SHA2>"
         },
         {
-          "from": "d7407485ce685c126afcfc258f0a9eeb0092d776",
+          "from": "<SHA1>",
           "op": "push_ref",
           "ref": "refs/heads/feat-x",
           "repo": "acme/widget-shadow",
-          "to": "a80b011a96e35ed4ece66a7071d69d205af6e967"
+          "to": "<SHA2>"
         }
       ]
     }

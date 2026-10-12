@@ -32,7 +32,7 @@
         "rebase",
         "--onto",
         "shadow/feat-x",
-        "d7407485ce685c126afcfc258f0a9eeb0092d776",
+        "<SHA1>",
         "feat-y"
       ],
       "why": "rebase feat-y's own commits onto feat-x; you resolve any conflict, Ghostbranch never does",
@@ -67,14 +67,14 @@
   ],
   "error": {
     "code": "FOLD_NEEDS_REBASE",
-    "message": "feat-x has moved on since feat-y was started from it (it is at 4655f2ffddef, which feat-y doesn't contain), so fold can't fast-forward it; rebase feat-y onto feat-x yourself (details.steps), push it, and fold again. Ghostbranch never rebases or resolves conflicts",
+    "message": "feat-x has moved on since feat-y was started from it (it is at <SHA2:short>, which feat-y doesn't contain), so fold can't fast-forward it; rebase feat-y onto feat-x yourself (details.steps), push it, and fold again. Ghostbranch never rebases or resolves conflicts",
     "field": "feature",
     "retryable": false,
     "details": {
       "feature": "feat-y",
-      "forked_at": "d7407485ce685c126afcfc258f0a9eeb0092d776",
+      "forked_at": "<SHA1>",
       "parent": "feat-x",
-      "parent_head": "4655f2ffddef92a3a3f79ec5abcdd230590b2bed",
+      "parent_head": "<SHA2>",
       "steps": [
         [
           "git",
@@ -91,7 +91,7 @@
           "rebase",
           "--onto",
           "shadow/feat-x",
-          "d7407485ce685c126afcfc258f0a9eeb0092d776",
+          "<SHA1>",
           "feat-y"
         ],
         [

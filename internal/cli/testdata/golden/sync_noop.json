@@ -7,14 +7,14 @@
     "public": "acme/widget",
     "shadow": "acme/widget-shadow",
     "action": "noop",
-    "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
-    "shadow_main_before": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
-    "shadow_main_after": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+    "public_main": "<SHA1>",
+    "shadow_main_before": "<SHA1>",
+    "shadow_main_after": "<SHA1>",
     "branches": [
       {
         "name": "main",
-        "from": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
-        "to": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+        "from": "<SHA1>",
+        "to": "<SHA1>",
         "status": "up_to_date"
       }
     ],
