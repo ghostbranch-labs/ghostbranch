@@ -107,6 +107,13 @@ type Env struct {
 	// DefaultEnv sets them, tests leave them false. The app also drops
 	// colour for --json and --no-color. TrueColor picks 24-bit colours.
 	StdoutColor, StderrColor, TrueColor bool
+	// StderrTerminal says stderr is a terminal (the update reminder).
+	// StderrAnimate says it also takes ANSI control and TERM isn't dumb, so
+	// progress may animate there (NO_COLOR doesn't matter). StderrWidth is
+	// its width in columns, 0 when unknown. DefaultEnv sets them; tests
+	// leave them false and nil.
+	StderrTerminal, StderrAnimate bool
+	StderrWidth                   func() int
 }
 
 // colorAllowed is the environment's say on colour: NO_COLOR set to any
@@ -154,6 +161,9 @@ func DefaultEnv() Env {
 		env.StderrColor = console.ColorCapable(os.Stderr)
 		env.TrueColor = trueColorTerm(env.Getenv)
 	}
+	env.StderrTerminal = console.IsTerminal(os.Stderr)
+	env.StderrAnimate = animateAllowed(env.Getenv, console.ColorCapable(os.Stderr))
+	env.StderrWidth = func() int { return console.Width(os.Stderr) }
 	env.Asker = func() (prompt.Asker, error) { return prompt.OnConsole(env.ConsoleUsable, env.OpenConsole) }
 	return env
 }
@@ -175,9 +185,10 @@ type app struct {
 	args           []string
 	pairFull       workspace.Pair
 	shadowRemote   string
-	startName      string // feature start's name argument, for next
-	startFrom      string // feature start's --from, for next
-	versionFlag    bool   // ghostbranch --version ran: the command is version
+	startName      string     // feature start's name argument, for next
+	startFrom      string     // feature start's --from, for next
+	versionFlag    bool       // ghostbranch --version ran: the command is version
+	prog           uiProgress // this run's progress (newProgress); Finish runs before any output
 }
 
 // Run executes one command and returns the process exit code.
@@ -199,6 +210,10 @@ func Run(args []string, env Env) int {
 			}
 		}
 	}
+	a.prog = a.newProgress()
+	// A panic or an early return never leaves a spinner or a hidden cursor;
+	// render normally finishes first, and Finish is idempotent.
+	defer a.prog.Finish(true)
 	root := a.root()
 	root.SetArgs(args)
 	root.SetOut(env.Stdout)
@@ -211,6 +226,7 @@ func Run(args []string, env Env) int {
 	// After the first Ctrl-C, stop restores the default handling, so a
 	// second Ctrl-C kills the process if the command is slow to wind down.
 	context.AfterFunc(ctx, stop)
+	a.finishOnCancel(ctx)
 	cmd, err := root.ExecuteContextC(ctx)
 	a.command = commandName(cmd)
 	if a.versionFlag {
@@ -282,6 +298,9 @@ func commandName(cmd *cobra.Command) string {
 }
 
 func (a *app) render(err error) int {
+	// The spinner line goes before anything else is written: warnings, the
+	// result, the error.
+	a.reporter().Finish(err != nil)
 	err = a.permissionMissing(err)
 	if a.eng != nil {
 		a.warnings = append(a.warnings, a.eng.LedgerWarnings()...)
@@ -463,9 +482,7 @@ func (a *app) authSource() auth.Source {
 		},
 		// The error is never shown: it could carry a secret.
 		OnSaveError: func(error) {
-			if a.env.Stderr != nil {
-				_, _ = fmt.Fprintln(a.env.Stderr, "the refreshed GitHub login couldn't be saved to the OS keychain; the next command will ask you to log in again")
-			}
+			a.reporter().Note(progress.Warn, "the refreshed GitHub login couldn't be saved to the OS keychain; the next command will ask you to log in again")
 		},
 		Lock: func() (func(), error) {
 			home, err := workspace.HomeDir(a.env.Getenv, runtime.GOOS, os.UserHomeDir)
@@ -505,14 +522,18 @@ func (a *app) engine(ctx context.Context) (*engine.Engine, error) {
 		}
 	}
 	e := &engine.Engine{Forge: f, WS: ws, Actor: actor, Token: token, TokenSource: source,
-		LooksLikeAgent: auth.LooksLikeAgent(a.env.Getenv, a.env.ConsoleUsable), Now: a.env.Now, Sleep: a.env.Sleep, Rand: a.env.Rand, Progress: progress.Lines(a.env.Stderr),
+		LooksLikeAgent: auth.LooksLikeAgent(a.env.Getenv, a.env.ConsoleUsable), Now: a.env.Now, Sleep: a.env.Sleep, Rand: a.env.Rand, Progress: a.reporter(),
 		NewScanner: a.env.NewScanner, PollInterval: a.env.PollInterval, SettleWindow: a.env.SettleWindow, CIAppearWindow: a.env.CIAppearWindow, CIAppearPoll: a.env.CIAppearPoll,
 		DryRun: a.dryRun, OnPush: a.env.OnPush, Grants: grant.NewStore(ws.GrantsPath(), ws.GrantsLockPath()),
 		Waivers: waiver.NewStore(ws.WaiversPath(), ws.WaiversLockPath())}
 	if a.env.ConsoleUsable && !a.nonInteractive {
-		e.Editor = a.editor
+		e.Editor = func(s string) (string, error) {
+			a.reporter().Pause()
+			defer a.reporter().Resume()
+			return a.editor(s)
+		}
 		if a.env.OpenConsole != nil {
-			e.Approver = &console.Challenger{Open: a.env.OpenConsole, Rand: a.env.Rand}
+			e.Approver = pausingApprover{inner: &console.Challenger{Open: a.env.OpenConsole, Rand: a.env.Rand}, p: a.reporter()}
 		}
 	}
 	a.eng = e

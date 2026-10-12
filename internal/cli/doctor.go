@@ -94,7 +94,8 @@ func (a *app) doctorRun(ctx context.Context, repo string) (*engine.DoctorResult,
 	// DryRun: every engine write path refuses a dry run. Doctor makes none;
 	// this keeps it so.
 	e := &engine.Engine{Actor: actor, Token: token, TokenSource: source,
-		LooksLikeAgent: auth.LooksLikeAgent(a.env.Getenv, a.env.ConsoleUsable), Now: a.env.Now, Sleep: a.env.Sleep, Rand: a.env.Rand, DryRun: true}
+		LooksLikeAgent: auth.LooksLikeAgent(a.env.Getenv, a.env.ConsoleUsable), Now: a.env.Now, Sleep: a.env.Sleep, Rand: a.env.Rand, DryRun: true,
+		Progress: a.reporter()}
 	if token != "" {
 		f, err := a.env.NewForge(token)
 		if err != nil {

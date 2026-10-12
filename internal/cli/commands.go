@@ -34,6 +34,15 @@ Coding agents: run "ghostbranch guide" first.`,
 	pf.StringVar(&a.workspace, "workspace", "", `workspace name (default $GHOSTBRANCH_WORKSPACE or "default")`)
 	pf.BoolVar(&a.nonInteractive, "non-interactive", false, "never prompt; missing input is an error")
 	pf.BoolVar(&a.dryRun, "dry-run", false, "preview exactly what would change, and change nothing")
+	// Spinner only for read-only commands and dry runs (R16). Flags are parsed
+	// by now, so a.dryRun is set. No subcommand defines its own
+	// PersistentPreRun*, so this runs for every command.
+	root.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
+		if c, ok := a.reporter().(*checklist); ok {
+			c.setQuiet(quietProgress(commandName(cmd), a.dryRun))
+		}
+		return nil
+	}
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
 		return contract.New(contract.BadFlag, "%s", err.Error())
 	})

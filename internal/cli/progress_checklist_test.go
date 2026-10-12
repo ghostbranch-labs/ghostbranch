@@ -273,3 +273,74 @@ func TestChecklistIsSafeAcrossGoroutines(t *testing.T) {
 		t.Errorf("the cursor stays hidden: %q", out)
 	}
 }
+
+// The ticker goroutine writes nothing once Finish returns, and a second
+// start is ignored.
+func TestChecklistWritesNothingAfterFinish(t *testing.T) {
+	t.Parallel()
+	var b syncBuffer
+	c := newChecklist(&b, styleOff(), time.Now, func() int { return 80 })
+	c.start()
+	c.start() // ignored: one ticker only
+	c.Step("Waiting for CI")
+	time.Sleep(150 * time.Millisecond) // let it tick
+	c.Finish(false)
+	at := b.String()
+	time.Sleep(300 * time.Millisecond)
+	if got := b.String(); got != at {
+		t.Fatalf("written after Finish: %q", strings.TrimPrefix(got, at))
+	}
+	if !strings.HasSuffix(at, showCursor) {
+		t.Fatalf("%q", at)
+	}
+}
+
+// start after Finish starts nothing.
+func TestChecklistStartAfterFinishDoesNothing(t *testing.T) {
+	t.Parallel()
+	var b syncBuffer
+	c := newChecklist(&b, styleOff(), time.Now, func() int { return 80 })
+	c.Finish(false)
+	c.start()
+	if c.stop != nil {
+		t.Fatal("a ticker started after Finish")
+	}
+}
+
+// R16: a quiet run that fails still shows the step it failed on.
+func TestQuietChecklistFinishFailedPrintsTheCross(t *testing.T) {
+	t.Parallel()
+	w := 80
+	c, b, _ := testChecklist(&w)
+	c.setQuiet(true)
+	c.Step("Reading acme/widget")
+	c.Finish(true)
+	if !strings.HasSuffix(b.String(), clearLine+"✗ Reading acme/widget\n"+showCursor) {
+		t.Fatalf("%q", b.String())
+	}
+}
+
+// A quiet step ended by the next one doesn't show and hide the cursor in
+// between: the next step is drawn over it in place.
+func TestQuietChecklistNextStepDoesNotFlickerTheCursor(t *testing.T) {
+	t.Parallel()
+	w := 80
+	c, b, _ := testChecklist(&w)
+	c.setQuiet(true)
+	c.Step("Reading")
+	b.Reset()
+	c.Step("Surveying")
+	if b.String() != clearLine+"⠋ Surveying" {
+		t.Fatalf("%q", b.String())
+	}
+}
+
+// A one-column terminal has no room for a line: not even the mark is drawn.
+func TestMarkedIsEmptyWhenNothingFits(t *testing.T) {
+	t.Parallel()
+	w := 1
+	c, _, _ := testChecklist(&w)
+	if got := c.marked("✓", style.New(true, false).OK, "text", ""); got != "" {
+		t.Fatalf("%q", got)
+	}
+}

@@ -66,15 +66,22 @@ func newChecklist(w io.Writer, st style.Styler, now func() time.Time, width func
 	return &checklist{w: w, st: st, now: now, width: width}
 }
 
-// start redraws the spinner about ten times a second until Finish.
+// start redraws the spinner about ten times a second until Finish. It
+// starts one ticker at most, and none once Finish has run.
 func (c *checklist) start() {
-	c.stop = make(chan struct{})
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.done || c.stop != nil {
+		return
+	}
+	stop := make(chan struct{})
+	c.stop = stop
 	go func() {
 		t := time.NewTicker(100 * time.Millisecond)
 		defer t.Stop()
 		for {
 			select {
-			case <-c.stop:
+			case <-stop:
 				return
 			case <-t.C:
 				c.tick()
@@ -137,9 +144,12 @@ func (c *checklist) line(s string) {
 	c.redraw()
 }
 
-// marked lays out a line and colours only its mark.
+// marked lays out a line and colours only its mark; "" when nothing fits.
 func (c *checklist) marked(mark string, color func(string) string, text, timer string) string {
 	l := fit(mark, text, timer, c.cols())
+	if l == "" {
+		return ""
+	}
 	return color(mark) + strings.TrimPrefix(l, mark)
 }
 
@@ -185,11 +195,16 @@ func (c *checklist) Step(text string) progress.Step {
 		c.write(flat(text) + "\n")
 		return s
 	}
-	if c.cur != nil {
-		c.end(c.cur, "✓", c.st.OK, "")
-	}
+	prev := c.cur
 	c.cur = s
-	c.redraw()
+	if prev != nil {
+		// The new step is already current, so ending the last one draws it
+		// in place: in spinner-only mode the cursor isn't shown and hidden
+		// again in between.
+		c.end(prev, "✓", c.st.OK, "")
+	} else {
+		c.redraw()
+	}
 	return s
 }
 
