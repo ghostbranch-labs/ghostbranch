@@ -130,3 +130,7 @@ func (c *Challenger) Confirm(ctx context.Context, summary string) error {
 		}
 	}
 }
+
+// IsTerminal reports whether f is a terminal (a real console handle on
+// Windows).
+func IsTerminal(f *os.File) bool { return isTerminal(f) }
