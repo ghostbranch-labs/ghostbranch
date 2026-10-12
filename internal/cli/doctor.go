@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"runtime/debug"
 	"strings"
 
@@ -176,13 +177,18 @@ func (a *app) doctorNext() []contract.Next {
 func (a *app) doctorUpdateCheck(ctx context.Context) updatecheck.Status {
 	u := a.newUpdateRun()
 	a.updates = u
+	_, u.override, _ = updatecheck.BaseURL(a.env.Getenv) // shown even when the check is off
 	if u.off == "" {
 		if c, ok := a.updateClient(u); ok {
 			r := updatecheck.Look(ctx, c, u.current, a.env.Now, updatecheck.Budget)
-			u.mu.Lock()
-			u.cache.Merge(r, u.current)           // r.Err is stored cleaned, never printed here
-			_ = updatecheck.Save(u.path, u.cache) // a cache: a failed write is silent
-			u.mu.Unlock()
+			// A Ctrl-C'd look is not a failed one: record nothing, so the
+			// schedule and the last result stay as they were.
+			if ctx.Err() == nil && !errors.Is(r.Err, context.Canceled) {
+				u.mu.Lock()
+				u.cache.Merge(r, u.current)           // r.Err is stored cleaned, never printed here
+				_ = updatecheck.Save(u.path, u.cache) // a cache: a failed write is silent
+				u.mu.Unlock()
+			}
 		}
 	}
 	page := "https://github.com/" + updatecheck.Repo + "/releases/latest"

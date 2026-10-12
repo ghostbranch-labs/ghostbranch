@@ -1,7 +1,10 @@
 package cli_test
 
 import (
+	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -153,15 +156,36 @@ func TestDoctorSaysWhyTheCheckIsOff(t *testing.T) {
 		if !strings.Contains(out, c.want+"\n") || f.count() != 0 {
 			t.Errorf("%v: %d hits\n%s", c.vars, f.count(), out)
 		}
+		// The override is reported in the object even when the check is off.
+		_, env := te.runJSON("doctor")
+		uc, _ := env["data"].(map[string]any)["update_check"].(map[string]any)
+		if uc["enabled"] != false || uc["override"] != url {
+			t.Errorf("%v: update_check = %v", c.vars, uc)
+		}
 	}
 }
 
 func TestDoctorShowsAFailedLook(t *testing.T) {
 	t.Parallel()
 	te := newTestEnv(t)
-	te.releaseBuild("v0.12.0", "http://127.0.0.1:1") // nothing listens on port 1
+	closed := httptest.NewServer(http.NotFoundHandler())
+	closed.Close() // a port that was just in use and now refuses
+	te.releaseBuild("v0.12.0", closed.URL)
 	_, out, _ := te.run("doctor")
 	if !strings.Contains(out, "update check: on · last look failed: ") {
+		t.Fatalf("%s", out)
+	}
+}
+
+// No state directory: the check is off, and doctor says so.
+func TestDoctorSaysTheCheckIsOffWithoutAStateDirectory(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	te.releaseBuild("v0.12.0", "http://127.0.0.1:1")
+	delete(te.vars, "GHOSTBRANCH_HOME")
+	te.env.UserHome = func() (string, error) { return "", errors.New("no home") }
+	_, out, _ := te.run("doctor")
+	if !strings.Contains(out, "update check: off (no state directory)") {
 		t.Fatalf("%s", out)
 	}
 }
