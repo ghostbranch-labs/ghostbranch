@@ -348,6 +348,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 			return res, warns, internalErr(err, "read the public PR's head")
 		}
 	}
+	planStep := e.startStep("Building the publish plan for %s", opt.Feature)
 	links, dropped, err := deriveChain(ctx, g, cfg, in,
 		func(cs []string, onto string) ([]string, error) { return e.replay(ctx, pc, cs, onto) })
 	if err != nil {
@@ -481,6 +482,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 		}
 		prs = []plan.StackPR{{Feature: opt.Feature, Base: gu.Base, Number: gu.PR, Update: true, Style: gu.Style}}
 	}
+	planStep.Done("")
 	pl := plan.Plan{SchemaVersion: plan.SchemaVersion, ID: planID, Kind: "promote", Actor: e.Actor, CreatedAt: e.now(),
 		Pair: plan.Pair{Public: p.Public, Shadow: p.Shadow}, Feature: opt.Feature, Mode: mode, Curate: groups,
 		Fingerprint: plan.Fingerprint{PublicMain: pm, FeatureHead: head, Overlay: O, GateCandidate: C},

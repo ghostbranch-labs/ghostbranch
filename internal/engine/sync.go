@@ -615,7 +615,14 @@ looking:
 				stuck = append(stuck, stuckRun{CancelledRun: r, why: stuckInterrupted})
 			}
 		} else {
+			check := e.startStep("Checking that the cancelled CI runs stopped")
 			done, left := e.verifyCancels(ctx, repo, asked, requested, interval)
+			if len(left) == 0 {
+				check.Done("Checked that the cancelled CI runs stopped")
+			} else {
+				check.Update(fmt.Sprintf("%d cancelled CI run(s) didn't stop", len(left)))
+				check.Fail()
+			}
 			cancelled = append(cancelled, done...)
 			stuck = append(stuck, left...)
 		}

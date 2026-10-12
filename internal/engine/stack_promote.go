@@ -426,6 +426,7 @@ func (e *Engine) promoteStack(ctx context.Context, pc *pairCtx, cfg config.Confi
 	var firstGroups []plan.Group
 	var needTitle []string
 	version := ""
+	planStep := e.startStep("Building the publish plan for %s", strings.Join(names, ", "))
 	for i := range branches {
 		b := &branches[i]
 		if i > 0 {
@@ -646,6 +647,7 @@ func (e *Engine) promoteStack(ctx context.Context, pc *pairCtx, cfg config.Confi
 		return "", warns, internalErr(err, "make a plan id")
 	}
 	first := entries[0]
+	planStep.Done("")
 	pl := plan.Plan{SchemaVersion: plan.SchemaVersion, ID: planID, Kind: "promote", Actor: e.Actor, CreatedAt: e.now(),
 		Pair: plan.Pair{Public: pc.pair.Public, Shadow: pc.pair.Shadow}, Feature: first.Feature, Mode: first.Mode, Curate: firstGroups,
 		Fingerprint: first.Fingerprint, Publish: first.Publish, Typed: first.Typed,
@@ -1074,7 +1076,8 @@ func (e *Engine) stackUp(ctx context.Context, pc *pairCtx, bottom stackBranch, p
 		s, err := st.CreateStack(ctx, repo, want)
 		switch {
 		case errors.Is(err, forge.ErrStacksUnavailable):
-			step.Fail()
+			// Deferred, so the note with the host's answer comes first.
+			defer step.Done(fmt.Sprintf("Kept PRs %s chained (no native stacked PRs)", prNumbers(want)))
 			return unavailable(err)
 		case err != nil:
 			return nil, forgeErr(err, "register PRs %s as a native stack", prNumbers(want))
@@ -1102,7 +1105,8 @@ func (e *Engine) stackUp(ctx context.Context, pc *pairCtx, bottom stackBranch, p
 	s, err := st.AddToStack(ctx, repo, have.Number, missing)
 	switch {
 	case errors.Is(err, forge.ErrStacksUnavailable):
-		step.Fail()
+		// Deferred, so the note with the host's answer comes first.
+		defer step.Done(fmt.Sprintf("Kept PRs %s chained (no native stacked PRs)", prNumbers(missing)))
 		return unavailable(err)
 	case err != nil:
 		return nil, forgeErr(err, "add PRs %s to native stack #%d", prNumbers(missing), have.Number)

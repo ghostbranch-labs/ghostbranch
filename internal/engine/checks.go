@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
+	"github.com/ghostbranch-labs/ghostbranch/internal/progress"
 )
 
 type checkOutcome struct {
@@ -51,6 +53,7 @@ type waitOpts struct {
 	start, deadline time.Time
 	job             string
 	emit            func(JobEvent)
+	step            progress.Step // step shows the wait (nil: none)
 }
 
 func (e *Engine) event(o waitOpts, ev JobEvent) {
@@ -114,6 +117,19 @@ func (e *Engine) waitChecks(ctx context.Context, repo, sha string, cfg config.Ga
 				return checkOutcome{}, interruptedErr(o.job, "")
 			}
 			return checkOutcome{}, forgeErr(err, "list checks on %s", short(sha))
+		}
+		if o.step != nil {
+			if len(checks) == 0 {
+				o.step.Update("Waiting for CI to start")
+			} else {
+				n := 0
+				for _, c := range checks {
+					if c.Status == "completed" {
+						n++
+					}
+				}
+				o.step.Update(fmt.Sprintf("Waiting for CI (%d of %d checks done)", n, len(checks)))
+			}
 		}
 		now := e.Now()
 		if len(checks) != last {

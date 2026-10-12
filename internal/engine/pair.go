@@ -74,6 +74,7 @@ func (e *Engine) open(ctx context.Context, op string, p workspace.Pair, mutating
 	if err := sameRepo(p); err != nil {
 		return nil, err
 	}
+	st := e.startStep("Reading %s and %s from GitHub", p.Public, p.Shadow)
 	pub, err := e.Forge.GetRepo(ctx, p.Public)
 	if err != nil {
 		return nil, forgeErr(err, "look up public repo %s", p.Public)
@@ -108,6 +109,7 @@ func (e *Engine) open(ctx context.Context, op string, p workspace.Pair, mutating
 		pc.release()
 		return nil, err
 	}
+	st.Done("")
 	return pc, nil
 }
 
