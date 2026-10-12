@@ -5,11 +5,11 @@
   "exit_code": 4,
   "data": {
     "feature": "feat-y",
-    "feature_head": "a80b011a96e35ed4ece66a7071d69d205af6e967",
-    "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+    "feature_head": "<SHA1>",
+    "public_main": "<SHA2>",
     "parent": "feat-x",
     "base": "",
-    "overlay": "9117cba7936897faabab51f432905949dcc6af39",
+    "overlay": "<SHA3>",
     "candidate": "",
     "published_tree": "",
     "scanned_as": "preserve",
@@ -58,12 +58,12 @@
   ],
   "error": {
     "code": "PARENT_REWRITTEN",
-    "message": "feature feat-x was rewritten after feat-y was started from it, so it no longer contains the fork point d7407485ce68; run ghostbranch feature restack feat-x",
+    "message": "feature feat-x was rewritten after feat-y was started from it, so it no longer contains the fork point <SHA4:12>; run ghostbranch feature restack feat-x",
     "field": "feature",
     "retryable": false,
     "details": {
       "feature": "feat-y",
-      "forked_at": "d7407485ce685c126afcfc258f0a9eeb0092d776",
+      "forked_at": "<SHA4>",
       "parent": "feat-x",
       "reason": "parent_rewritten"
     }

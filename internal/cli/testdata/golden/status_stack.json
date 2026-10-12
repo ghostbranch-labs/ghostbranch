@@ -6,10 +6,10 @@
   "data": {
     "public": "acme/widget",
     "shadow": "acme/widget-shadow",
-    "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
-    "shadow_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+    "public_main": "<SHA1>",
+    "shadow_main": "<SHA1>",
     "shadow_behind": false,
-    "overlay": "9117cba7936897faabab51f432905949dcc6af39",
+    "overlay": "<SHA2>",
     "overlay_status": "current",
     "scheduled_sync": false,
     "features": [
@@ -17,8 +17,8 @@
         "name": "feat-a",
         "state": "gate_passed",
         "branch": "feat-a",
-        "head": "bbd420d3c5e21ee95ebc81464a424a47714e3fb8",
-        "base": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+        "head": "<SHA3>",
+        "base": "<SHA1>",
         "parent": "main",
         "children": [
           "feat-b"
@@ -46,8 +46,8 @@
         "name": "feat-b",
         "state": "gate_passed",
         "branch": "feat-b",
-        "head": "ee3faf62ddad2889d7e08bf0866efbde7c79ee7e",
-        "base": "bbd420d3c5e21ee95ebc81464a424a47714e3fb8",
+        "head": "<SHA4>",
+        "base": "<SHA3>",
         "parent": "feat-a",
         "children": [],
         "stack": null,

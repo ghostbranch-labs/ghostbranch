@@ -6,7 +6,7 @@
   "data": {
     "name": "feat-x",
     "branch": "feat-x",
-    "base": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+    "base": "<SHA1>",
     "parent": "main",
     "checkout": [
       [

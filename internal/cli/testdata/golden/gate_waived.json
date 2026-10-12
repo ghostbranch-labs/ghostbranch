@@ -5,17 +5,17 @@
   "exit_code": 0,
   "data": {
     "feature": "feat-x",
-    "feature_head": "4d1d49322a3efd3fda9f092af6dd0ddce5b0a824",
-    "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+    "feature_head": "<SHA1>",
+    "public_main": "<SHA2>",
     "parent": "",
-    "base": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
-    "overlay": "9117cba7936897faabab51f432905949dcc6af39",
-    "candidate": "d185826b888788bf8ecec09269d48ff04921657e",
-    "published_tree": "b0c171b27508197c71fd9aaf45002e46841f61e2",
+    "base": "<SHA2>",
+    "overlay": "<SHA3>",
+    "candidate": "<SHA4>",
+    "published_tree": "<SHA5>",
     "scanned_as": "preserve",
     "commits": [
       {
-        "source": "4d1d49322a3efd3fda9f092af6dd0ddce5b0a824",
+        "source": "<SHA1>",
         "subject": "work",
         "author": "Test Author <author@example.com>",
         "files": [
@@ -37,7 +37,7 @@
         "secret": "[REDACTED]",
         "waivable": true,
         "commits": [
-          "4d1d49322a3efd3fda9f092af6dd0ddce5b0a824"
+          "<SHA1>"
         ],
         "reason": "test fixture"
       }
@@ -49,7 +49,7 @@
       "skipped": []
     },
     "shadow_pr": 1,
-    "job": "gate/feat-x/d185826b8887",
+    "job": "gate/feat-x/<SHA4:12>",
     "reused": false,
     "preview": null
   },

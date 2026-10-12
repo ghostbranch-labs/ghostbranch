@@ -5,11 +5,11 @@
   "exit_code": 0,
   "data": {
     "feature": "feat-x",
-    "from": "d7407485ce685c126afcfc258f0a9eeb0092d776",
-    "to": "4439c3ce5f6880378e2a874e7e4a6115035c5217",
+    "from": "<SHA1>",
+    "to": "<SHA2>",
     "adopted": [
       {
-        "sha": "4671a8d375de46f53b62ecae3020f9306d11893e",
+        "sha": "<SHA3>",
         "author": "Test Author <author@example.com>",
         "subject": "their fix"
       }

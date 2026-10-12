@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -45,7 +47,62 @@ func normalize(out, root string) string {
 	esc, _ := json.Marshal(root)
 	out = strings.ReplaceAll(out, strings.Trim(string(esc), `"`), "<ROOT>")
 	out = strings.ReplaceAll(out, filepath.ToSlash(root), "<ROOT>")
-	return rootPath.ReplaceAllStringFunc(out, func(s string) string { return strings.ReplaceAll(s, `\\`, "/") })
+	out = rootPath.ReplaceAllStringFunc(out, func(s string) string { return strings.ReplaceAll(s, `\\`, "/") })
+	return normalizeSHAs(out)
+}
+
+// shaOrKeep matches a git hash (a word-bounded run of 7 to 40 lowercase hex
+// digits) or one of the things that look like one but are not, which are
+// kept as they are: paths under <ROOT>, and finding ids (f- and 12 hex of a
+// content SHA-256, stable across commits). Longer runs such as a 64-hex
+// match_sha256 have no word boundary inside them, so they never match.
+var shaOrKeep = regexp.MustCompile(`<ROOT>[^"\s]*|\bf-[0-9a-f]{12}\b|\b[0-9a-f]{7,40}\b`)
+
+func isSHA(m string) bool { return !strings.HasPrefix(m, "<ROOT>") && !strings.HasPrefix(m, "f-") }
+
+// normalizeSHAs replaces each git hash in out with <SHA1>, <SHA2>, ...,
+// numbered by first appearance in out. <SHAn> is always a full 40-hex hash;
+// anything shorter carries its length, as <SHAn:12> or <SHAn:7>. A hash
+// that is a prefix of a longer one in out (a short hash of a full one)
+// shares the longer one's number; a lone short hash gets its own. One
+// mapping covers all of out, so a hash repeated on other NDJSON lines keeps
+// its number. Goldens then pin which hashes are equal, which are short
+// forms of which, and every hash's length, but not their values, so a
+// change to commit identity or content does not churn them.
+func normalizeSHAs(out string) string {
+	var seen []string
+	for _, m := range shaOrKeep.FindAllString(out, -1) {
+		if isSHA(m) && !slices.Contains(seen, m) {
+			seen = append(seen, m)
+		}
+	}
+	// canon is the hash m stands for: the first-seen longest hash that m is
+	// a prefix of (m itself if none is longer).
+	canon := func(m string) string {
+		best := m
+		for _, h := range seen {
+			if len(h) > len(best) && strings.HasPrefix(h, m) {
+				best = h
+			}
+		}
+		return best
+	}
+	num := map[string]int{}
+	for _, m := range seen {
+		if c := canon(m); num[c] == 0 {
+			num[c] = len(num) + 1
+		}
+	}
+	return shaOrKeep.ReplaceAllStringFunc(out, func(m string) string {
+		if !isSHA(m) {
+			return m
+		}
+		n := num[canon(m)]
+		if len(m) == 40 {
+			return fmt.Sprintf("<SHA%d>", n)
+		}
+		return fmt.Sprintf("<SHA%d:%d>", n, len(m))
+	})
 }
 
 func failing(string, string) []forge.Check {
@@ -542,5 +599,69 @@ func TestReferenceDefaultsIgnoreArgv(t *testing.T) {
 		if !ok || d != "false" {
 			t.Errorf("%s default %q (present %v), want false", n, d, ok)
 		}
+	}
+}
+
+func TestNormalizeSHAs(t *testing.T) {
+	t.Parallel()
+	full1 := "fdbdd961a40b1633b04895ab8e5e0a6a7e0c3f11"
+	full2 := "3f55f01aba5c834d4915c93f0a1b2c3d4e5f6a7b"
+	cases := []struct{ name, in, want string }{
+		{"same hash, same placeholder",
+			`{"a":"` + full1 + `","b":"` + full1 + `"}`,
+			`{"a":"<SHA1>","b":"<SHA1>"}`},
+		{"numbered by first appearance",
+			`{"a":"` + full2 + `","b":"` + full1 + `","c":"` + full2 + `"}`,
+			`{"a":"<SHA1>","b":"<SHA2>","c":"<SHA1>"}`},
+		{"short prefix after the full",
+			`{"a":"` + full1 + `","job":"gate/feat-x/` + full1[:12] + `"}`,
+			`{"a":"<SHA1>","job":"gate/feat-x/<SHA1:12>"}`},
+		{"short prefix before the full takes the full's number",
+			`{"m":"candidate ` + full2[:12] + `","x":"` + full1 + `","a":"` + full2 + `"}`,
+			`{"m":"candidate <SHA1:12>","x":"<SHA2>","a":"<SHA1>"}`},
+		{"7-hex prefix",
+			`{"a":"` + full1 + `","m":"at ` + full1[:7] + `"}`,
+			`{"a":"<SHA1>","m":"at <SHA1:7>"}`},
+		{"lone short hash",
+			`{"commit":"0123456789ab"}`,
+			`{"commit":"<SHA1:12>"}`},
+		{"lengths pinned; a lone short hash gets its own number",
+			`{"j":"gate/feat-x/` + full2[:12] + `","a":"` + full1 + `","m":"at ` + full1[:7] + ` and ` + full1[:12] + `"}`,
+			`{"j":"gate/feat-x/<SHA1:12>","a":"<SHA2>","m":"at <SHA2:7> and <SHA2:12>"}`},
+		{"6-hex ids untouched",
+			`{"id":"20261005T120005Z-0c0d0e","g":"g-030405"}`,
+			`{"id":"20261005T120005Z-0c0d0e","g":"g-030405"}`},
+		{"41-hex untouched",
+			`{"a":"` + full1 + `f"}`,
+			`{"a":"` + full1 + `f"}`},
+		{"64-hex untouched",
+			`{"match_sha256":"76375e21aaeadbb33067f84087af1bb4f81a039c0f0e3ab2b684e20858af07ad"}`,
+			`{"match_sha256":"76375e21aaeadbb33067f84087af1bb4f81a039c0f0e3ab2b684e20858af07ad"}`},
+		{"not word-bounded untouched",
+			`{"a":"x` + full1[:12] + `","b":"` + full1[:12] + `g","t":"20261005T120005Z"}`,
+			`{"a":"x` + full1[:12] + `","b":"` + full1[:12] + `g","t":"20261005T120005Z"}`},
+		{"finding ids untouched",
+			`{"id":"f-7b1b6723317f","m":"f-000000000000: not a waivable finding"}`,
+			`{"id":"f-7b1b6723317f","m":"f-000000000000: not a waivable finding"}`},
+		{"root paths untouched",
+			`{"p":"<ROOT>/home/` + full1[:12] + `/x.json","c":"` + full1 + `"}`,
+			`{"p":"<ROOT>/home/` + full1[:12] + `/x.json","c":"<SHA1>"}`},
+		{"one mapping across NDJSON lines",
+			`{"job":"gate/feat-x/` + full2[:12] + `"}` + "\n" + `{"data":{"candidate":"` + full2 + `"}}` + "\n",
+			`{"job":"gate/feat-x/<SHA1:12>"}` + "\n" + `{"data":{"candidate":"<SHA1>"}}` + "\n"},
+		{"version strings untouched",
+			`{"schema_version":"0.13","version":"v0.13.0"}`,
+			`{"schema_version":"0.13","version":"v0.13.0"}`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := normalizeSHAs(c.in)
+			if got != c.want {
+				t.Fatalf("normalizeSHAs:\n got  %s\n want %s", got, c.want)
+			}
+			if again := normalizeSHAs(c.in); again != got {
+				t.Fatalf("not deterministic: %s then %s", got, again)
+			}
+		})
 	}
 }

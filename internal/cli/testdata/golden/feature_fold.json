@@ -6,12 +6,12 @@
   "data": {
     "feature": "feat-y",
     "parent": "feat-x",
-    "from": "d7407485ce685c126afcfc258f0a9eeb0092d776",
-    "to": "a80b011a96e35ed4ece66a7071d69d205af6e967",
+    "from": "<SHA1>",
+    "to": "<SHA2>",
     "reparented": [],
     "deleted": {
-      "refs/ghostbranch/features/feat-y": "82b63b1d138c2212853d0535fb5ffdd612862fab",
-      "refs/heads/feat-y": "a80b011a96e35ed4ece66a7071d69d205af6e967"
+      "refs/ghostbranch/features/feat-y": "<SHA3>",
+      "refs/heads/feat-y": "<SHA2>"
     },
     "gate_pr": null,
     "preview": null

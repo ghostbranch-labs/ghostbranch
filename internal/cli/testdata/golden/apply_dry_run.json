@@ -13,10 +13,10 @@
     "waived": [],
     "preview": {
       "fingerprint": {
-        "feature_head": "d7407485ce685c126afcfc258f0a9eeb0092d776",
-        "gate_candidate": "7c89f9877adbf1b388c92932c6015449c46cbfb2",
-        "overlay": "9117cba7936897faabab51f432905949dcc6af39",
-        "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7"
+        "feature_head": "<SHA1>",
+        "gate_candidate": "<SHA2>",
+        "overlay": "<SHA3>",
+        "public_main": "<SHA4>"
       },
       "ops": [
         {
@@ -24,7 +24,7 @@
           "op": "push_ref",
           "ref": "refs/heads/feat-x",
           "repo": "acme/widget",
-          "to": "15dd9c9bcb7655bdb426fb4a24f440fc9c31fb65"
+          "to": "<SHA5>"
         },
         {
           "base": "main",

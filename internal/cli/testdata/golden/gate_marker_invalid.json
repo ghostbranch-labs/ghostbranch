@@ -5,17 +5,17 @@
   "exit_code": 3,
   "data": {
     "feature": "feat-x",
-    "feature_head": "88139fd7713142e8d37f9460193493611415f2cb",
-    "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+    "feature_head": "<SHA1>",
+    "public_main": "<SHA2>",
     "parent": "",
-    "base": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
-    "overlay": "9117cba7936897faabab51f432905949dcc6af39",
+    "base": "<SHA2>",
+    "overlay": "<SHA3>",
     "candidate": "",
     "published_tree": "",
     "scanned_as": "preserve",
     "commits": [
       {
-        "source": "88139fd7713142e8d37f9460193493611415f2cb",
+        "source": "<SHA1>",
         "subject": "work",
         "author": "Test Author <author@example.com>",
         "files": [

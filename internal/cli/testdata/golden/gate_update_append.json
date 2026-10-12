@@ -5,17 +5,17 @@
   "exit_code": 0,
   "data": {
     "feature": "feat-x",
-    "feature_head": "127b4a784cc83febecd756c649837e2893bf2706",
-    "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+    "feature_head": "<SHA1>",
+    "public_main": "<SHA2>",
     "parent": "",
-    "base": "ab259aef486ab5224da7f5499af6fab0a07f75db",
-    "overlay": "9117cba7936897faabab51f432905949dcc6af39",
-    "candidate": "ade730d09f0f71d5989d5857f7e888cffb49f56d",
-    "published_tree": "bbdaad1cd319121f420fa6041767872b662f975e",
+    "base": "<SHA3>",
+    "overlay": "<SHA4>",
+    "candidate": "<SHA5>",
+    "published_tree": "<SHA6>",
     "scanned_as": "preserve",
     "commits": [
       {
-        "source": "127b4a784cc83febecd756c649837e2893bf2706",
+        "source": "<SHA1>",
         "subject": "work",
         "author": "Test Author <author@example.com>",
         "files": [
@@ -35,12 +35,12 @@
       "skipped": []
     },
     "shadow_pr": 1,
-    "job": "gate/feat-x/ade730d09f0f",
+    "job": "gate/feat-x/<SHA5:12>",
     "reused": false,
     "preview": null,
     "update": {
       "pr": 1,
-      "head": "ab259aef486ab5224da7f5499af6fab0a07f75db",
+      "head": "<SHA3>",
       "base": "main",
       "style": "append"
     }

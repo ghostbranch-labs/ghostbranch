@@ -19,7 +19,7 @@
     "audit": null,
     "preview": {
       "fingerprint": {
-        "overlay": "1558ddc18348081b5f43e75e10fc22030a55a14c"
+        "overlay": "<SHA1>"
       },
       "ops": [
         {
@@ -29,7 +29,7 @@
           "repo": "acme/widget-shadow"
         },
         {
-          "from": "1558ddc18348081b5f43e75e10fc22030a55a14c",
+          "from": "<SHA1>",
           "op": "push_ref",
           "ref": "refs/heads/ghostbranch",
           "repo": "acme/widget-shadow",

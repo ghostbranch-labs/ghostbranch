@@ -11,7 +11,7 @@
       "fingerprint": {},
       "ops": [
         {
-          "from": "b21f4e417a59365cb1d316f30a68412d36d48d10",
+          "from": "<SHA1>",
           "op": "push_ref",
           "ref": "refs/ghostbranch/features/feat-x",
           "repo": "acme/widget-shadow",

@@ -18,7 +18,7 @@
     "audit": null,
     "preview": {
       "fingerprint": {
-        "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7"
+        "public_main": "<SHA1>"
       },
       "ops": [
         {
@@ -31,7 +31,7 @@
           "op": "push_ref",
           "ref": "refs/heads/main",
           "repo": "acme/widget-shadow",
-          "to": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7"
+          "to": "<SHA1>"
         },
         {
           "from": null,

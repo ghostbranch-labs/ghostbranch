@@ -18,16 +18,16 @@
       "feature": "feat-a",
       "mode": "squash",
       "fingerprint": {
-        "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
-        "feature_head": "bbd420d3c5e21ee95ebc81464a424a47714e3fb8",
-        "overlay": "9117cba7936897faabab51f432905949dcc6af39",
-        "gate_candidate": "2221342c44be161e0f6652c277d8660e644850f1"
+        "public_main": "<SHA1>",
+        "feature_head": "<SHA2>",
+        "overlay": "<SHA3>",
+        "gate_candidate": "<SHA4>"
       },
       "curate": null,
       "publish": {
-        "commit": "fdbdd961a40b1633b04895ab8c7938c79028445e",
-        "tree": "5fb33c6a6e2905ad3b9591d536c4eec7bade485c",
-        "parent": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+        "commit": "<SHA5>",
+        "tree": "<SHA6>",
+        "parent": "<SHA1>",
         "target_branch": "feat-a",
         "pr": {
           "title": "work",
@@ -35,11 +35,11 @@
         },
         "commits": [
           {
-            "commit": "fdbdd961a40b1633b04895ab8c7938c79028445e",
-            "tree": "5fb33c6a6e2905ad3b9591d536c4eec7bade485c",
-            "parent": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+            "commit": "<SHA5>",
+            "tree": "<SHA6>",
+            "parent": "<SHA1>",
             "sources": [
-              "bbd420d3c5e21ee95ebc81464a424a47714e3fb8"
+              "<SHA2>"
             ],
             "author": {
               "name": "octo",
@@ -74,15 +74,15 @@
           "feature": "feat-a",
           "mode": "squash",
           "fingerprint": {
-            "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
-            "feature_head": "bbd420d3c5e21ee95ebc81464a424a47714e3fb8",
-            "overlay": "9117cba7936897faabab51f432905949dcc6af39",
-            "gate_candidate": "2221342c44be161e0f6652c277d8660e644850f1"
+            "public_main": "<SHA1>",
+            "feature_head": "<SHA2>",
+            "overlay": "<SHA3>",
+            "gate_candidate": "<SHA4>"
           },
           "publish": {
-            "commit": "fdbdd961a40b1633b04895ab8c7938c79028445e",
-            "tree": "5fb33c6a6e2905ad3b9591d536c4eec7bade485c",
-            "parent": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+            "commit": "<SHA5>",
+            "tree": "<SHA6>",
+            "parent": "<SHA1>",
             "target_branch": "feat-a",
             "pr": {
               "title": "work",
@@ -90,11 +90,11 @@
             },
             "commits": [
               {
-                "commit": "fdbdd961a40b1633b04895ab8c7938c79028445e",
-                "tree": "5fb33c6a6e2905ad3b9591d536c4eec7bade485c",
-                "parent": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
+                "commit": "<SHA5>",
+                "tree": "<SHA6>",
+                "parent": "<SHA1>",
                 "sources": [
-                  "bbd420d3c5e21ee95ebc81464a424a47714e3fb8"
+                  "<SHA2>"
                 ],
                 "author": {
                   "name": "octo",
@@ -123,15 +123,15 @@
           "feature": "feat-b",
           "mode": "squash",
           "fingerprint": {
-            "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
-            "feature_head": "ee3faf62ddad2889d7e08bf0866efbde7c79ee7e",
-            "overlay": "9117cba7936897faabab51f432905949dcc6af39",
-            "gate_candidate": "5199030630e5a9cbdd4b988fec288088a3de12be"
+            "public_main": "<SHA1>",
+            "feature_head": "<SHA7>",
+            "overlay": "<SHA3>",
+            "gate_candidate": "<SHA8>"
           },
           "publish": {
-            "commit": "3f55f01aba5c834d4915c93f06971db5a53e9c2a",
-            "tree": "4ad86912c4df49d33c31aeae5c55f13ae05ac642",
-            "parent": "fdbdd961a40b1633b04895ab8c7938c79028445e",
+            "commit": "<SHA9>",
+            "tree": "<SHA10>",
+            "parent": "<SHA5>",
             "target_branch": "feat-b",
             "pr": {
               "title": "work",
@@ -139,11 +139,11 @@
             },
             "commits": [
               {
-                "commit": "3f55f01aba5c834d4915c93f06971db5a53e9c2a",
-                "tree": "4ad86912c4df49d33c31aeae5c55f13ae05ac642",
-                "parent": "fdbdd961a40b1633b04895ab8c7938c79028445e",
+                "commit": "<SHA9>",
+                "tree": "<SHA10>",
+                "parent": "<SHA5>",
                 "sources": [
-                  "ee3faf62ddad2889d7e08bf0866efbde7c79ee7e"
+                  "<SHA7>"
                 ],
                 "author": {
                   "name": "octo",
