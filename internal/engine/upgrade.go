@@ -141,7 +141,7 @@ func (e *Engine) Upgrade(ctx context.Context, p workspace.Pair) (res *UpgradeRes
 		return res, warns, forgeErr(err, "look up the current user")
 	}
 	who := gitx.Identity{Name: u.Login, Email: forge.NoreplyEmail(u), When: e.now()}
-	c, err := g.CommitTree(ctx, tree, []string{O}, "ghostbranch: upgrade overlay ("+managed.Describe()+")", who, who)
+	c, err := g.CommitTree(ctx, tree, []string{O}, "ghostbranch: upgrade overlay ("+managed.Describe()+")", who, e.bot())
 	if err != nil {
 		return res, warns, internalErr(err, "write the overlay commit")
 	}

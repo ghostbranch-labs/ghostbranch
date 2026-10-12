@@ -15,7 +15,7 @@
         "replaces_local_edits": false
       }
     ],
-    "commit": "032b5443a2c8e62ccbdc21589bcfbfc5f85ade1e",
+    "commit": "ac07e3dcbb0a708917cc97375270bf772de7c39f",
     "audit": {
       "public": "acme/widget",
       "shadow": "acme/widget-shadow",
