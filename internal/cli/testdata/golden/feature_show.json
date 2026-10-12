@@ -58,7 +58,7 @@
         "pair": "acme/widget",
         "feature": "feat-x",
         "exit_code": 0,
-        "summary": "checks passed, leak clean, candidate ad7c1d975251"
+        "summary": "checks passed, leak clean, candidate 7c89f9877adb"
       }
     ]
   },

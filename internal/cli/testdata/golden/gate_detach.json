@@ -10,7 +10,7 @@
     "parent": "",
     "base": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
     "overlay": "a1ef151295bf2b53d15b18523ab0184d02178bbd",
-    "candidate": "ad7c1d9752519d03b74752a472ecf072aacd2fb7",
+    "candidate": "7c89f9877adbf1b388c92932c6015449c46cbfb2",
     "published_tree": "ef9061717144a4bf03a0230d8f8926d019f2adeb",
     "scanned_as": "preserve",
     "commits": [
@@ -35,7 +35,7 @@
       "skipped": []
     },
     "shadow_pr": 1,
-    "job": "gate/feat-x/ad7c1d975251",
+    "job": "gate/feat-x/7c89f9877adb",
     "reused": false,
     "preview": null
   },
@@ -45,7 +45,7 @@
       "command": [
         "ghostbranch",
         "wait",
-        "gate/feat-x/ad7c1d975251",
+        "gate/feat-x/7c89f9877adb",
         "--repo",
         "acme/widget"
       ],

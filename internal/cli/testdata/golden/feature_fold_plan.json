@@ -20,7 +20,7 @@
           "op": "delete_ref",
           "ref": "refs/ghostbranch/features/feat-y",
           "repo": "acme/widget-shadow",
-          "sha": "8097b21cdef7dd382a1296fe9af4faf12db6523b"
+          "sha": "82b63b1d138c2212853d0535fb5ffdd612862fab"
         },
         {
           "op": "delete_ref",

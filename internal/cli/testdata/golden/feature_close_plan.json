@@ -20,7 +20,7 @@
           "op": "delete_ref",
           "ref": "refs/ghostbranch/features/feat-x",
           "repo": "acme/widget-shadow",
-          "sha": "8deb5567aad483b071bcfb0db60214db1cc1a520"
+          "sha": "537cc1f0a45a747fbb6643c2ddf51064b2b0d97b"
         },
         {
           "op": "delete_ref",
@@ -32,7 +32,7 @@
           "op": "delete_ref",
           "ref": "refs/heads/ghostbranch-gate/feat-x",
           "repo": "acme/widget-shadow",
-          "sha": "ad7c1d9752519d03b74752a472ecf072aacd2fb7"
+          "sha": "7c89f9877adbf1b388c92932c6015449c46cbfb2"
         },
         {
           "number": 1,

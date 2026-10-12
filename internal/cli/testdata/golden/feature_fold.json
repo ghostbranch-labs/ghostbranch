@@ -10,7 +10,7 @@
     "to": "a80b011a96e35ed4ece66a7071d69d205af6e967",
     "reparented": [],
     "deleted": {
-      "refs/ghostbranch/features/feat-y": "8097b21cdef7dd382a1296fe9af4faf12db6523b",
+      "refs/ghostbranch/features/feat-y": "82b63b1d138c2212853d0535fb5ffdd612862fab",
       "refs/heads/feat-y": "a80b011a96e35ed4ece66a7071d69d205af6e967"
     },
     "gate_pr": null,

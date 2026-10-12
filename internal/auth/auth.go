@@ -35,6 +35,16 @@ var (
 	AppSlug  = "ghostbranch-cli"
 )
 
+// BotName and BotEmail sign the commits that only ever live in the shadow
+// repo. 340449680 is the app bot user's GitHub ID (GET
+// /users/ghostbranch-cli[bot]); GitHub links <id>+<login>@users.noreply.github.com
+// to that account and shows the app's name and logo. Both change if the app
+// is renamed or recreated, so they live next to ClientID and AppSlug.
+const (
+	BotName  = "ghostbranch-cli[bot]"
+	BotEmail = "340449680+ghostbranch-cli[bot]@users.noreply.github.com"
+)
+
 // Kind names a token's type from its prefix.
 func Kind(token string) string {
 	switch {
