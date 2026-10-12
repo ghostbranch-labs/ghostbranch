@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -92,5 +93,33 @@ func TestMerge(t *testing.T) {
 	c.Merge(updatecheck.Result{At: later, Err: updatecheck.ErrNoRelease}, cur)
 	if c.Latest != nil || c.LastError != "" {
 		t.Fatalf("after 404: %+v", c)
+	}
+}
+
+// Load reads only a regular file of at most 1 MiB: a directory, or a
+// valid cache padded past the cap, reads as empty.
+func TestLoadReadsOnlyASmallRegularFile(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	valid := `{"format": 1, "checked_at": "2026-10-11T12:00:00Z"}`
+	small := filepath.Join(dir, "small.json")
+	if err := os.WriteFile(small, []byte(valid), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := updatecheck.Load(small); got.CheckedAt.IsZero() {
+		t.Fatalf("a valid cache read as empty")
+	}
+	big := filepath.Join(dir, "big.json")
+	if err := os.WriteFile(big, []byte(valid+strings.Repeat(" ", 1<<20)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sub := filepath.Join(dir, "sub.json")
+	if err := os.Mkdir(sub, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{big, sub} {
+		if got := updatecheck.Load(p); !got.CheckedAt.IsZero() {
+			t.Errorf("%s loaded %+v", filepath.Base(p), got)
+		}
 	}
 }

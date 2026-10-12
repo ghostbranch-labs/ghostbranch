@@ -2,6 +2,7 @@ package updatecheck_test
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -86,5 +87,32 @@ func TestStatusOfReparsesAndCleans(t *testing.T) {
 	c.LastError, c.Latest.Version = "", "v0.13.0"
 	if s := updatecheck.StatusOf("", cur, c, "", "u", now); s.Latest != "0.13.0" {
 		t.Fatalf("%+v", s)
+	}
+}
+
+// A hand-built security notice with no IDs still reads, never panics.
+func TestASecurityNoticeWithoutIDs(t *testing.T) {
+	t.Parallel()
+	n := updatecheck.Notice{Current: "0.13.0", Latest: "0.13.1", Security: true, Upgrade: "u"}
+	if _, a, _ := n.Lines(); a != "Ghostbranch 0.13.1 fixes a security issue; you have 0.13.0." {
+		t.Fatalf("%q", a)
+	}
+	if w := n.Warning(); w.Message != "Ghostbranch 0.13.1 is out (this is 0.13.0); it fixes a security issue" {
+		t.Fatalf("%q", w.Message)
+	}
+}
+
+// The override is the person's own variable, but it is still printed
+// cleaned, in the line and in doctor's object.
+func TestTheOverrideIsCleaned(t *testing.T) {
+	t.Parallel()
+	now := clock()
+	s := updatecheck.StatusOf("", mustParse(t, "v0.12.0"), cacheWith(t, "0.12.0", "0.12.0", now), "http://127.0.0.1:1/\x1b[2J‮", "u", now)
+	if s.Override != "http://127.0.0.1:1/[2J" || s.Line() != "update check: on · last looked just now · up to date · GHOSTBRANCH_UPDATE_URL=http://127.0.0.1:1/[2J (test-only)" {
+		t.Fatalf("%q %q", s.Override, s.Line())
+	}
+	raw := updatecheck.Status{Enabled: true, CheckedAt: &now, Override: "x\x1by"}
+	if strings.Contains(raw.Line(), "\x1b") {
+		t.Fatalf("%q", raw.Line())
 	}
 }

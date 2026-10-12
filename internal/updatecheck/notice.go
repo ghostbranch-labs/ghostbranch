@@ -17,6 +17,9 @@ type Notice struct {
 }
 
 func (n Notice) issues() string {
+	if len(n.Advisories) == 0 {
+		return "a security issue"
+	}
 	if len(n.Advisories) > 1 {
 		return fmt.Sprintf("security issues (%s and %d more)", n.Advisories[0], len(n.Advisories)-1)
 	}
@@ -62,7 +65,7 @@ type Status struct {
 // holds now. As in NoticeFor, nothing comes from the cache file as is: the
 // latest version must parse, and the error and IDs are cleaned.
 func StatusOf(off string, current Version, c Cache, override, upgrade string, now time.Time) Status {
-	s := Status{Enabled: off == "", OffReason: off, Advisories: []string{}, Override: override}
+	s := Status{Enabled: off == "", OffReason: off, Advisories: []string{}, Override: clean(override)}
 	if off != "" {
 		return s
 	}
@@ -121,7 +124,7 @@ func (s Status) Line() string {
 		}
 	}
 	if s.Override != "" {
-		parts = append(parts, EnvURL+"="+s.Override+" (test-only)")
+		parts = append(parts, EnvURL+"="+clean(s.Override)+" (test-only)")
 	}
 	return strings.Join(parts, " · ")
 }

@@ -44,10 +44,16 @@ type Client struct {
 // honour HTTPS_PROXY, HTTP_PROXY and NO_PROXY, and no cookie jar. A look
 // that started on https never follows a redirect to anything else.
 func NewHTTPClient() *http.Client {
-	return &http.Client{
-		Transport:     http.DefaultTransport.(*http.Transport).Clone(),
-		CheckRedirect: noDowngrade,
+	// Something may have replaced http.DefaultTransport; a look runs in the
+	// background, where a panic would kill the command, so fall back to a
+	// fresh transport that still honours the proxy settings.
+	var t *http.Transport
+	if dt, ok := http.DefaultTransport.(*http.Transport); ok {
+		t = dt.Clone()
+	} else {
+		t = &http.Transport{Proxy: http.ProxyFromEnvironment}
 	}
+	return &http.Client{Transport: t, CheckRedirect: noDowngrade}
 }
 
 func noDowngrade(req *http.Request, via []*http.Request) error {
@@ -186,7 +192,7 @@ type Result struct {
 func Look(ctx context.Context, c Client, current Version, now func() time.Time, budget time.Duration) Result {
 	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
-	r := Result{At: now()}
+	r := Result{At: now().UTC().Truncate(time.Second)} // like every other contract time
 	rel, err := c.Latest(ctx)
 	if err != nil {
 		r.Err = err

@@ -289,3 +289,33 @@ func TestLookGivesUpOnAStalledBody(t *testing.T) {
 		t.Fatalf("look = %+v after %s", r, time.Since(start))
 	}
 }
+
+// checked_at is UTC whole seconds, like every other contract time, whatever
+// the local clock gives.
+func TestLookStampsUTCWholeSeconds(t *testing.T) {
+	t.Parallel()
+	_, c := newGH(t, http.StatusOK, release("v0.13.0"), "[]")
+	local := time.FixedZone("AEDT", 11*3600)
+	now := func() time.Time { return time.Date(2026, 10, 12, 9, 30, 15, 123456789, local) }
+	r := updatecheck.Look(context.Background(), c, mustParse(t, "v0.13.0"), now, time.Second)
+	if r.At.Location() != time.UTC || !r.At.Equal(time.Date(2026, 10, 11, 22, 30, 15, 0, time.UTC)) {
+		t.Fatalf("at %v", r.At)
+	}
+}
+
+// Not parallel: it swaps the process-wide default transport. A replaced
+// one gives a working client, never a panic in the background look.
+func TestNewHTTPClientSurvivesAReplacedDefaultTransport(t *testing.T) {
+	saved := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = saved })
+	http.DefaultTransport = roundTripFunc(func(*http.Request) (*http.Response, error) { return nil, errors.New("unused") })
+	c := updatecheck.NewHTTPClient()
+	tr, ok := c.Transport.(*http.Transport)
+	if !ok || tr.Proxy == nil || c.Jar != nil {
+		t.Fatalf("client %+v", c)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

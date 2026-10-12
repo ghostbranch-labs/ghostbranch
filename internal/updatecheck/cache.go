@@ -3,6 +3,7 @@ package updatecheck
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -36,11 +37,15 @@ type CachedRelease struct {
 	URL     string `json:"url"`
 }
 
-// Load reads the cache; anything missing, damaged or of another format reads
-// as an empty cache.
+// maxCacheSize caps what Load reads: the real file is a few hundred bytes.
+const maxCacheSize = 1 << 20
+
+// Load reads the cache; anything missing, damaged, of another format, not a
+// regular file (a FIFO would block every command) or over maxCacheSize
+// reads as an empty cache.
 func Load(path string) Cache {
-	b, err := os.ReadFile(path)
-	if err != nil {
+	b, ok := readCache(path)
+	if !ok {
 		return Cache{}
 	}
 	var c Cache
@@ -48,6 +53,24 @@ func Load(path string) Cache {
 		return Cache{}
 	}
 	return c
+}
+
+// readCache reads path when it is a regular file of at most maxCacheSize.
+func readCache(path string) ([]byte, bool) {
+	fi, err := os.Lstat(path)
+	if err != nil || !fi.Mode().IsRegular() || fi.Size() > maxCacheSize {
+		return nil, false
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, false
+	}
+	defer func() { _ = f.Close() }()
+	b, err := io.ReadAll(io.LimitReader(f, maxCacheSize+1))
+	if err != nil || len(b) > maxCacheSize {
+		return nil, false
+	}
+	return b, true
 }
 
 // Save writes c atomically (a temp file, then a rename), mode 0600 on macOS
