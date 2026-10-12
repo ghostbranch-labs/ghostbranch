@@ -28,9 +28,22 @@ const DefaultFor = "6h"
 // Durations are the only grant lengths, so "forever" is always typed out as
 // --until-revoked.
 var Durations = map[string]time.Duration{
+	"1h":  time.Hour,
 	"6h":  6 * time.Hour,
-	"24h": 24 * time.Hour,
+	"1d":  24 * time.Hour,
+	"7d":  7 * 24 * time.Hour,
+	"15d": 15 * 24 * time.Hour,
 	"30d": 30 * 24 * time.Hour,
+	"90d": 90 * 24 * time.Hour,
+}
+
+// Lengths are the keys of Durations in the order messages list them.
+var Lengths = []string{"1h", "6h", "1d", "7d", "15d", "30d", "90d"}
+
+// lengthList reads "1h, 6h, 1d, 7d, 15d, 30d or 90d".
+func lengthList() string {
+	n := len(Lengths)
+	return strings.Join(Lengths[:n-1], ", ") + " or " + Lengths[n-1]
 }
 
 type Grant struct {
@@ -64,7 +77,7 @@ func ParseFor(forFlag string, untilRevoked bool) (*time.Duration, error) {
 	}
 	d, ok := Durations[forFlag]
 	if !ok {
-		return nil, contract.New(contract.BadFlag, "--for must be 6h, 24h or 30d, or pass --until-revoked; got %q", forFlag).WithField("for")
+		return nil, contract.New(contract.BadFlag, "--for must be %s, or pass --until-revoked; got %q", lengthList(), forFlag).WithField("for")
 	}
 	return &d, nil
 }

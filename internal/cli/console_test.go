@@ -66,7 +66,7 @@ func TestAgentsAllowThroughTheCLI(t *testing.T) {
 		t.Fatalf("without a console: %d %v", code, env)
 	}
 	atConsole(te, typeTheCode)
-	if code, env := te.runJSON("agents", "allow", "--for", "24h"); code != 0 {
+	if code, env := te.runJSON("agents", "allow", "--for", "1d"); code != 0 {
 		t.Fatalf("at a console: %d %v", code, env)
 	}
 	te.env.ConsoleUsable, te.env.OpenConsole = false, nil
