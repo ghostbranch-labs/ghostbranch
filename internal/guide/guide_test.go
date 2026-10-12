@@ -445,7 +445,7 @@ func TestGuideTeachesUpdates(t *testing.T) {
 		"`UPDATE_AVAILABLE`",
 		"never run the upgrade yourself",
 		"`GHOSTBRANCH_NO_UPDATE_CHECK=1`",
-		"Progress and the update reminder are on stderr only, never in `--json` stdout",
+		"Progress is on stderr only, never in `--json` stdout; with `--json` the update reminder comes only as the `UPDATE_AVAILABLE` warning",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the guide lacks %q", want)
