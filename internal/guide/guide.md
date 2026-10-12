@@ -205,6 +205,7 @@ main, green CI, and a leak scan of exactly what will be published.
 
 - Always pass `--json`. Act on `exit_code`, `error.code` and `next`; don't parse the text.
   JSON is on stdout and progress on stderr: never merge the two streams (no `2>&1`).
+  Progress and the update reminder are on stderr only, never in `--json` stdout.
   Human output uses colour on a terminal; `--no-color` or `NO_COLOR` turns it off, and `--json` has none.
 - Run `next` commands exactly as given. Add the flags listed in `needs_input` yourself.
 - **When `needs_human` is true, stop.** Tell the person the exact command and why, and don't look
@@ -246,6 +247,16 @@ main, green CI, and a leak scan of exactly what will be published.
   finding; that is the person's call.
 - The warnings `WORKFLOW_CHANGED`, `LARGE_FILE` and `BINARY_FILE` don't block. Mention them to the
   person when you hand over a publish.
+
+## Updates
+
+- Ghostbranch looks for a newer release in the background: one anonymous request to GitHub, no
+  token, no IDs. It never downloads or installs anything, and never changes `ok` or `exit_code`.
+- `UPDATE_AVAILABLE` in `warnings` means a newer release is out. Tell the person and quote
+  `details.upgrade`; never run the upgrade yourself. With `details.security: true` it fixes a
+  security issue in this version (`details.advisories`): say that first.
+- Before 1.0 it appears on every `--json` command; ignore repeats within one task.
+- `GHOSTBRANCH_NO_UPDATE_CHECK=1` turns it off; CI turns it off by itself. `doctor` shows its state.
 
 ## Never
 
