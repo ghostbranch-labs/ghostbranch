@@ -61,6 +61,9 @@ func skipsUpdateCheck(cmd *cobra.Command, showVersion bool) bool {
 	if cmd.Name() == "check" && cmd.Parent() != nil && cmd.Parent().Name() == "guard" {
 		return true
 	}
+	if cmd.Name() == "reference" && cmd.Parent() != nil && !cmd.Parent().HasParent() {
+		return true
+	}
 	return cmd.Name() == "doctor" && cmd.Parent() != nil && !cmd.Parent().HasParent()
 }
 

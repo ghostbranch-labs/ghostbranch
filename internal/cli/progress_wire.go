@@ -61,7 +61,7 @@ func (a *app) finishOnCancel(ctx context.Context) {
 // (owner, 2026-10-11; R16). Plain mode is the same for every command.
 // TestEveryCommandIsClassified keeps this and changingCommands complete.
 var readOnlyCommands = map[string]bool{
-	"status": true, "audit": true, "doctor": true, "version": true, "log": true, "explain": true, "guide": true,
+	"status": true, "audit": true, "doctor": true, "version": true, "reference": true, "log": true, "explain": true, "guide": true,
 	"feature list": true, "feature show": true, "agents status": true, "waivers list": true,
 	"guard status": true, "guard check": true, "auth status": true,
 }

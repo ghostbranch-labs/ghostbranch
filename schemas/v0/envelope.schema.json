@@ -6,7 +6,7 @@
   "required": ["schema_version", "command", "ok", "exit_code", "data", "warnings", "next", "error"],
   "properties": {
     "schema_version": { "const": "0.13" },
-    "command": { "enum": ["ghostbranch", "init", "sync", "audit", "upgrade", "feature start", "gate", "promote", "apply", "agents allow", "agents revoke", "agents status", "explain", "guide", "guard install", "guard uninstall", "guard status", "guard check", "waivers add", "waivers list", "waivers revoke", "status", "feature list", "feature show", "feature abandon", "feature close", "remove", "log", "wait", "login", "logout", "auth status", "doctor", "feature fold", "feature restack", "feature pull", "version"] },
+    "command": { "enum": ["ghostbranch", "init", "sync", "audit", "upgrade", "feature start", "gate", "promote", "apply", "agents allow", "agents revoke", "agents status", "explain", "guide", "guard install", "guard uninstall", "guard status", "guard check", "waivers add", "waivers list", "waivers revoke", "status", "feature list", "feature show", "feature abandon", "feature close", "remove", "log", "wait", "login", "logout", "auth status", "doctor", "feature fold", "feature restack", "feature pull", "version", "reference"] },
     "ok": { "type": "boolean" },
     "exit_code": { "type": "integer", "minimum": 0, "maximum": 6 },
     "data": { "type": "object" },

@@ -34,7 +34,7 @@ var dataSchemas = map[string]string{
 	"feature abandon": "feature-abandon.schema.json", "feature close": "feature-close.schema.json",
 	"wait": "gate.schema.json", "login": "login.schema.json", "logout": "logout.schema.json", "auth status": "auth-status.schema.json",
 	"doctor": "doctor.schema.json", "feature fold": "feature-fold.schema.json", "feature restack": "feature-restack.schema.json", "feature pull": "feature-pull.schema.json",
-	"version": "version.schema.json",
+	"version": "version.schema.json", "reference": "reference.schema.json",
 }
 
 var rootPath = regexp.MustCompile(`<ROOT>[^"]*`)
@@ -62,6 +62,7 @@ func TestGoldenContract(t *testing.T) {
 	}{
 		{"init", nil, []string{"init", "acme/widget"}, 0},
 		{"version", nil, []string{"version"}, 0},
+		{"reference", nil, []string{"reference"}, 0},
 		{"version_flag", nil, []string{"--version"}, 0},
 		{"update_available", func(te *testEnv) {
 			_, url := newFakeReleases(te.t, "v0.13.0", "[]")
