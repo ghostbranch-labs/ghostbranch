@@ -11,9 +11,15 @@ import (
 	"strings"
 )
 
-// SchemaVersion versions the envelope and every data schema. It stays 0.x
-// until launch, and 0.x versions may break.
-const SchemaVersion = "0.12"
+// SchemaVersion versions the envelope and every result and event schema. It
+// stays 0.x until launch, and 0.x versions may break.
+const SchemaVersion = "0.13"
+
+// RecordVersion versions what Ghostbranch stores: feature records, plans,
+// grants, waivers, workspace.json and the stored login. It moves only when a
+// record's format changes, so a binary one contract version older keeps
+// working on records a newer one wrote (6.4a changed only the contract).
+const RecordVersion = "0.12"
 
 // Exit codes. Agents branch on these, so they never change meaning.
 const (
@@ -336,6 +342,10 @@ const (
 	// already landed, but didn't set the PR title or body the plan types: no
 	// one approved them.
 	PRTextNotSet WarningCode = "PR_TEXT_NOT_SET"
+	// UpdateAvailable means a newer Ghostbranch release is out. details:
+	// current, latest, url, security, advisories, upgrade. It never changes
+	// ok or exit_code.
+	UpdateAvailable WarningCode = "UPDATE_AVAILABLE"
 )
 
 var warningCodes = []WarningCode{ConfigKeyIgnored, PublicNotPublic, GateNotRecorded, ChecksLimited, ActorUnknown,
@@ -343,7 +353,7 @@ var warningCodes = []WarningCode{ConfigKeyIgnored, PublicNotPublic, GateNotRecor
 	OverlayOutdated, RepoGuard, RepoGuardUnrewritable, SecretsUnlisted, SecretsMissing, PushTriggersOnSync,
 	ActionsMinutesBilled, ShadowBehind, AuditIncomplete, CINotCancelled, PRStateUnknown, DriftUnknown, FeatureNotClosed,
 	MirrorNotUpdated, RecordNewer, RecordUnreadable, LedgerNotWritten, SyncPushFailed, PlanFileUnreadable, AgentOnPersonLogin,
-	PublicBranchChanged, PRTextNotSet}
+	PublicBranchChanged, PRTextNotSet, UpdateAvailable}
 
 // AllWarnings lists every warning code, sorted.
 func AllWarnings() []WarningCode {
@@ -360,7 +370,7 @@ type Warning struct {
 }
 
 // Newer reports whether a record's schema version v (major.minor) is newer
-// than the one this binary writes. A malformed or empty v is not newer:
+// than the records this binary writes (RecordVersion). A malformed or empty v is not newer:
 // records from before versions existed stay readable.
 func Newer(v string) bool {
 	// Only ASCII digits: Atoi alone takes a sign, so "+1.0" would be newer
@@ -378,7 +388,7 @@ func Newer(v string) bool {
 		return x, y, err1 == nil && err2 == nil
 	}
 	x, y, ok := parse(v)
-	cx, cy, _ := parse(SchemaVersion)
+	cx, cy, _ := parse(RecordVersion)
 	return ok && (x > cx || (x == cx && y > cy))
 }
 
@@ -387,6 +397,6 @@ func Newer(v string) bool {
 func NewerRecord(kind, version string) *Error {
 	return New(UpgradeNeeded,
 		"this %s record was written by a newer Ghostbranch (schema %s; this binary knows %s); upgrade ghostbranch before changing it",
-		kind, version, SchemaVersion).
-		WithDetails(map[string]any{"record": kind, "record_version": version, "supported": SchemaVersion})
+		kind, version, RecordVersion).
+		WithDetails(map[string]any{"record": kind, "record_version": version, "supported": RecordVersion})
 }

@@ -1,12 +1,12 @@
 {
-  "schema_version": "0.12",
+  "schema_version": "0.13",
   "command": "version",
   "ok": true,
   "exit_code": 0,
   "data": {
     "version": "(unknown)",
     "commit": "(unknown)",
-    "schema_version": "0.12"
+    "schema_version": "0.13"
   },
   "warnings": [],
   "next": [],

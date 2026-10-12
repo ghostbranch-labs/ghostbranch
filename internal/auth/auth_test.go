@@ -75,7 +75,7 @@ func TestLoginRoundTrip(t *testing.T) {
 	}
 	got, err := auth.LoadLogin(s)
 	if err != nil || got.Token != app.Token || got.RefreshToken != app.RefreshToken || !got.Expires.Equal(app.Expires) ||
-		!got.RefreshExpires.Equal(app.RefreshExpires) || got.Account != "octo" || got.Kind != "app" || got.SchemaVersion != contract.SchemaVersion {
+		!got.RefreshExpires.Equal(app.RefreshExpires) || got.Account != "octo" || got.Kind != "app" || got.SchemaVersion != contract.RecordVersion {
 		t.Fatalf("app login: %v %v", got, err)
 	}
 	if err := auth.SaveLogin(s, auth.Login{Token: "ghp_test_b", Account: "octo", Kind: "pat"}); err != nil {

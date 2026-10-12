@@ -9,6 +9,23 @@
       "description": "every check, in order: tools, token, pair, guard, state, ci (fewer only when doctor was interrupted)",
       "type": "array", "maxItems": 6,
       "items": { "$ref": "#/$defs/check" }
+    },
+    "update_check": {
+      "description": "the update checker (6.4a): whether it is on and what a fresh look found. The CLI always sets it; the engine's own result lacks it",
+      "type": "object", "additionalProperties": false,
+      "required": ["enabled", "off_reason", "checked_at", "current", "latest", "security", "advisories", "upgrade", "error", "override"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "off_reason": { "enum": ["", "GHOSTBRANCH_NO_UPDATE_CHECK", "CI", "development build", "no state directory"] },
+        "checked_at": { "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/time" }] },
+        "current": { "description": "this binary's version, without the v", "type": "string" },
+        "latest": { "description": "the newest release seen, without the v; empty when none", "type": "string" },
+        "security": { "type": "boolean" },
+        "advisories": { "type": "array", "items": { "type": "string" } },
+        "upgrade": { "description": "the command that upgrades this install, or the release page", "type": "string" },
+        "error": { "description": "why the last look failed; empty when it didn't", "type": "string" },
+        "override": { "description": "GHOSTBRANCH_UPDATE_URL (test-only), empty when unset", "type": "string" }
+      }
     }
   },
   "$defs": {

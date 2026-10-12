@@ -185,7 +185,7 @@ func TestNewerGrantsFile(t *testing.T) {
 	}
 	_, err := s.Load()
 	if ce := contract.From(err); ce == nil || ce.Code != contract.UpgradeNeeded || ce.Details["record"] != "grants" ||
-		ce.Details["record_version"] != "0.99" || ce.Details["supported"] != contract.SchemaVersion {
+		ce.Details["record_version"] != "0.99" || ce.Details["supported"] != contract.RecordVersion {
 		t.Fatalf("want UPGRADE_NEEDED for grants, got %v", err)
 	}
 	upgrade := func(err error) bool { ce := contract.From(err); return ce != nil && ce.Code == contract.UpgradeNeeded }

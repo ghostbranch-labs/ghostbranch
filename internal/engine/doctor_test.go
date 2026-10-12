@@ -304,7 +304,7 @@ func TestDoctorTokenCheck(t *testing.T) {
 	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC) // the harness clock
 	login := func(expires, refreshExpires time.Time) *auth.Login {
 		return &auth.Login{Token: "ghu_test", RefreshToken: "ghr_test", Expires: expires, RefreshExpires: refreshExpires,
-			Account: "octo", Kind: "app", SchemaVersion: contract.SchemaVersion}
+			Account: "octo", Kind: "app", SchemaVersion: contract.RecordVersion}
 	}
 	cases := []struct {
 		name    string

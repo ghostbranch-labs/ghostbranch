@@ -54,7 +54,7 @@ func TestANewerRecordRefusesWrites(t *testing.T) {
 		if ce == nil || ce.Code != contract.UpgradeNeeded {
 			t.Fatalf("%s: want UPGRADE_NEEDED, got %v", c.name, err)
 		}
-		if ce.Details["record"] != "feature" || ce.Details["record_version"] != "0.99" || ce.Details["supported"] != contract.SchemaVersion {
+		if ce.Details["record"] != "feature" || ce.Details["record_version"] != "0.99" || ce.Details["supported"] != contract.RecordVersion {
 			t.Fatalf("%s: details = %+v", c.name, ce.Details)
 		}
 		if got := h.shadowRefs()[meta]; got != before {

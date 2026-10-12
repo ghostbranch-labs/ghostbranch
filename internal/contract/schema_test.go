@@ -89,7 +89,8 @@ func TestEnvelopeSchemaMatchesTheContract(t *testing.T) {
 			t.Errorf("envelope command enum lacks %q", cmd)
 		}
 	}
-	for _, name := range []string{"feature.schema.json", "grants.schema.json", "plan.schema.json", "waivers.schema.json", "wait-event.schema.json"} {
+	for name, want := range map[string]string{"feature.schema.json": contract.RecordVersion, "grants.schema.json": contract.RecordVersion,
+		"plan.schema.json": contract.RecordVersion, "waivers.schema.json": contract.RecordVersion, "wait-event.schema.json": contract.SchemaVersion} {
 		var r struct {
 			Properties struct {
 				SchemaVersion struct {
@@ -97,8 +98,8 @@ func TestEnvelopeSchemaMatchesTheContract(t *testing.T) {
 				} `json:"schema_version"`
 			} `json:"properties"`
 		}
-		if err := json.Unmarshal(schemaFile(t, name), &r); err != nil || r.Properties.SchemaVersion.Const != contract.SchemaVersion {
-			t.Errorf("%s schema_version const %q (%v), want %q", name, r.Properties.SchemaVersion.Const, err, contract.SchemaVersion)
+		if err := json.Unmarshal(schemaFile(t, name), &r); err != nil || r.Properties.SchemaVersion.Const != want {
+			t.Errorf("%s schema_version const %q (%v), want %q", name, r.Properties.SchemaVersion.Const, err, want)
 		}
 	}
 }
@@ -107,8 +108,8 @@ func TestRecordVersionsMatchTheContract(t *testing.T) {
 	t.Parallel()
 	for name, v := range map[string]string{"feature": feature.SchemaVersion, "grant": grant.SchemaVersion, "plan": plan.SchemaVersion,
 		"waiver": waiver.SchemaVersion, "workspace": workspace.SchemaVersion} {
-		if v != contract.SchemaVersion {
-			t.Errorf("%s.SchemaVersion = %q, want %q", name, v, contract.SchemaVersion)
+		if v != contract.RecordVersion {
+			t.Errorf("%s.SchemaVersion = %q, want %q", name, v, contract.RecordVersion)
 		}
 	}
 }
@@ -152,8 +153,8 @@ func TestSubProject61Schemas(t *testing.T) {
 			`{"pair":"acme/widget","grants":[],"token_can_publish":"false","token":{"source":"GHOSTBRANCH_TOKEN","http_status":403},"token_kind":"unknown"}`,
 		},
 		"envelope.schema.json": {
-			`{"schema_version":"0.12","command":"doctor","ok":false,"exit_code":1,"data":{},"warnings":[],"next":[],"error":{"code":"DOCTOR_FAILED","message":"m","field":null,"retryable":false,"details":{"failed":["guard"]}}}`,
-			`{"schema_version":"0.12","command":"auth status","ok":true,"exit_code":0,"data":{},"warnings":[{"code":"AGENT_ON_PERSON_LOGIN","message":"m"}],"next":[],"error":null}`,
+			`{"schema_version":"` + contract.SchemaVersion + `","command":"doctor","ok":false,"exit_code":1,"data":{},"warnings":[],"next":[],"error":{"code":"DOCTOR_FAILED","message":"m","field":null,"retryable":false,"details":{"failed":["guard"]}}}`,
+			`{"schema_version":"` + contract.SchemaVersion + `","command":"auth status","ok":true,"exit_code":0,"data":{},"warnings":[{"code":"AGENT_ON_PERSON_LOGIN","message":"m"}],"next":[],"error":null}`,
 		},
 	} {
 		for _, r := range raw {
@@ -174,7 +175,7 @@ func TestSubProject61Schemas(t *testing.T) {
 const sha40 = "0123456789abcdef0123456789abcdef01234567"
 
 func recordJSON(extra string) string {
-	return `{"schema_version":"` + contract.SchemaVersion + `","name":"b","branch":"b","created_by":"human:octo",` +
+	return `{"schema_version":"` + contract.RecordVersion + `","name":"b","branch":"b","created_by":"human:octo",` +
 		`"created_at":"2026-10-10T12:00:00Z","base":"` + sha40 + `","abandoned":false,"gate":null,"promoted":null` + extra + `}`
 }
 
@@ -193,7 +194,7 @@ func promoteJSON(extra string) string {
 }
 
 func planJSON(extra string) string {
-	p := `{"schema_version":"` + contract.SchemaVersion + `","id":"20261010T120000Z-0a0b0c","kind":"promote","actor":"human:octo",` +
+	p := `{"schema_version":"` + contract.RecordVersion + `","id":"20261010T120000Z-0a0b0c","kind":"promote","actor":"human:octo",` +
 		`"created_at":"2026-10-10T12:00:00Z","pair":{"public":"acme/widget","shadow":"acme/widget-shadow"},"feature":"a","mode":"squash",` +
 		`"fingerprint":{"public_main":"SHA","feature_head":"SHA","overlay":"SHA","gate_candidate":"SHA"},"curate":null,` +
 		`"publish":{"commit":"SHA","tree":"SHA","parent":"SHA","target_branch":"a","pr":{"title":"Add a","body":""},` +

@@ -252,6 +252,8 @@ var warningDocs = map[WarningCode]Doc{
 		WhatToDo: "Give the agent its own shadow-only token in GHOSTBRANCH_TOKEN (see ghostbranch guide § Tokens). The person's login still needs the console code to publish."},
 	PRTextNotSet: {Summary: "Apply recorded an update whose push had already landed, but didn't set the PR title or body its plan types: setting them needs approval, which wasn't given.",
 		WhatToDo: "The PR keeps its texts. To change them, make a new plan with ghostbranch promote <feature> --title/--body --plan (details.feature) and have a person approve it."},
+	UpdateAvailable: {Summary: "A newer Ghostbranch release is out (details.latest; this is details.current). details.security is true when it fixes a security issue that affects this version (details.advisories).",
+		WhatToDo: "Tell the person, quoting details.upgrade (the command that upgrades this install) and, for a security fix, details.advisories. Never run the upgrade yourself. GHOSTBRANCH_NO_UPDATE_CHECK=1 turns the check off."},
 	PublicBranchChanged: {Summary: "A published feature's public branch holds commits Ghostbranch didn't publish, so sync didn't adopt them; or (details.reason unrecorded_update) it is at an update Ghostbranch pushed but never recorded.",
 		WhatToDo: "Look at the PR on GitHub: someone pushed to its branch. Bring the commits in with ghostbranch feature pull <feature> (details.feature), then gate and promote; until then promote refuses to update the PR. Ghostbranch never adopts a change it didn't scan. For unrecorded_update, run ghostbranch apply <details.plan> on the machine that made the plan: it writes the record."},
 }
