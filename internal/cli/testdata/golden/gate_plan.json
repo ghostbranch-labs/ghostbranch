@@ -9,8 +9,8 @@
     "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
     "parent": "",
     "base": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
-    "overlay": "a1ef151295bf2b53d15b18523ab0184d02178bbd",
-    "candidate": "ad7c1d9752519d03b74752a472ecf072aacd2fb7",
+    "overlay": "9117cba7936897faabab51f432905949dcc6af39",
+    "candidate": "7c89f9877adbf1b388c92932c6015449c46cbfb2",
     "published_tree": "ef9061717144a4bf03a0230d8f8926d019f2adeb",
     "scanned_as": "preserve",
     "commits": [
@@ -40,7 +40,7 @@
     "preview": {
       "fingerprint": {
         "feature_head": "d7407485ce685c126afcfc258f0a9eeb0092d776",
-        "overlay": "a1ef151295bf2b53d15b18523ab0184d02178bbd",
+        "overlay": "9117cba7936897faabab51f432905949dcc6af39",
         "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7"
       },
       "ops": [
@@ -49,7 +49,7 @@
           "op": "push_ref",
           "ref": "refs/heads/ghostbranch-gate/feat-x",
           "repo": "acme/widget-shadow",
-          "to": "ad7c1d9752519d03b74752a472ecf072aacd2fb7"
+          "to": "7c89f9877adbf1b388c92932c6015449c46cbfb2"
         },
         {
           "base": "main",
@@ -59,7 +59,7 @@
           "repo": "acme/widget-shadow"
         },
         {
-          "from": "c53a9ddb7d446d4d1930750d9a8882f66aeb4236",
+          "from": "b21f4e417a59365cb1d316f30a68412d36d48d10",
           "op": "push_ref",
           "ref": "refs/ghostbranch/features/feat-x",
           "repo": "acme/widget-shadow",
@@ -68,7 +68,7 @@
         {
           "op": "wait_checks",
           "repo": "acme/widget-shadow",
-          "sha": "ad7c1d9752519d03b74752a472ecf072aacd2fb7"
+          "sha": "7c89f9877adbf1b388c92932c6015449c46cbfb2"
         },
         {
           "from": null,

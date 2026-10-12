@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/approval"
+	"github.com/ghostbranch-labs/ghostbranch/internal/auth"
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
@@ -105,9 +106,10 @@ func (e *Engine) notef(level progress.NoteLevel, format string, args ...any) {
 	e.reporter().Note(level, fmt.Sprintf(format, args...))
 }
 
-// bot is the identity for commits that only ever live in the shadow repo.
+// bot is the identity for commits that only ever live in the shadow repo:
+// the Ghostbranch GitHub App's bot (see auth.BotName).
 func (e *Engine) bot() gitx.Identity {
-	return gitx.Identity{Name: "ghostbranch", Email: "ghostbranch@invalid", When: e.now()}
+	return gitx.Identity{Name: auth.BotName, Email: auth.BotEmail, When: e.now()}
 }
 
 func (e *Engine) newID(prefix string) (string, error) {

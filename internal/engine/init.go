@@ -559,7 +559,7 @@ func (e *Engine) createOverlay(ctx context.Context, pc *pairCtx, schedule string
 		return forgeErr(err, "look up the current user")
 	}
 	who := gitx.Identity{Name: u.Login, Email: forge.NoreplyEmail(u), When: e.now()}
-	c, err := g.CommitTree(ctx, tree, nil, "ghostbranch: initialize overlay", who, who)
+	c, err := g.CommitTree(ctx, tree, nil, "ghostbranch: initialize overlay", who, e.bot())
 	if err != nil {
 		return internalErr(err, "write the overlay commit")
 	}

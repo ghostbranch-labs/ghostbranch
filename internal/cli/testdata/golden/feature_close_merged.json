@@ -7,10 +7,10 @@
     "feature": "feat-x",
     "state": "merged",
     "deleted": {
-      "refs/ghostbranch/features/feat-x": "3f76d9f91ea183f684a6102b89a73b6e0d690c5d",
+      "refs/ghostbranch/features/feat-x": "dcfa754b5f34eadfbbcb51e22ceb9f5e34f4339c",
       "refs/ghostbranch/plans/20261005T120005Z-0c0d0e": "bb838dc369ed9c0b9fdc8c59b54f43b737c9b75b",
       "refs/heads/feat-x": "93166b73c8d88a6b03d2719a4244f85c1daa14d5",
-      "refs/heads/ghostbranch-gate/feat-x": "b2482c2a452cada619378f5b9fb700b98d030fb9"
+      "refs/heads/ghostbranch-gate/feat-x": "16d03b0fba94eb47cc99db37db5a56131b1a8551"
     },
     "gate_pr": 1,
     "needs_console": false,

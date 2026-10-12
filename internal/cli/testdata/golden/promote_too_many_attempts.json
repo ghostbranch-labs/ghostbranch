@@ -10,8 +10,8 @@
       "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
       "parent": "",
       "base": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
-      "overlay": "a1ef151295bf2b53d15b18523ab0184d02178bbd",
-      "candidate": "ad7c1d9752519d03b74752a472ecf072aacd2fb7",
+      "overlay": "9117cba7936897faabab51f432905949dcc6af39",
+      "candidate": "7c89f9877adbf1b388c92932c6015449c46cbfb2",
       "published_tree": "ef9061717144a4bf03a0230d8f8926d019f2adeb",
       "scanned_as": "preserve",
       "commits": [
@@ -55,8 +55,8 @@
       "fingerprint": {
         "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
         "feature_head": "d7407485ce685c126afcfc258f0a9eeb0092d776",
-        "overlay": "a1ef151295bf2b53d15b18523ab0184d02178bbd",
-        "gate_candidate": "ad7c1d9752519d03b74752a472ecf072aacd2fb7"
+        "overlay": "9117cba7936897faabab51f432905949dcc6af39",
+        "gate_candidate": "7c89f9877adbf1b388c92932c6015449c46cbfb2"
       },
       "curate": null,
       "publish": {

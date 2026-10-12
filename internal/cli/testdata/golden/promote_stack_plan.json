@@ -20,8 +20,8 @@
       "fingerprint": {
         "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
         "feature_head": "bbd420d3c5e21ee95ebc81464a424a47714e3fb8",
-        "overlay": "a1ef151295bf2b53d15b18523ab0184d02178bbd",
-        "gate_candidate": "a5f14bdf6c4579dd29821bcf8108be9c6b5fee11"
+        "overlay": "9117cba7936897faabab51f432905949dcc6af39",
+        "gate_candidate": "2221342c44be161e0f6652c277d8660e644850f1"
       },
       "curate": null,
       "publish": {
@@ -76,8 +76,8 @@
           "fingerprint": {
             "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
             "feature_head": "bbd420d3c5e21ee95ebc81464a424a47714e3fb8",
-            "overlay": "a1ef151295bf2b53d15b18523ab0184d02178bbd",
-            "gate_candidate": "a5f14bdf6c4579dd29821bcf8108be9c6b5fee11"
+            "overlay": "9117cba7936897faabab51f432905949dcc6af39",
+            "gate_candidate": "2221342c44be161e0f6652c277d8660e644850f1"
           },
           "publish": {
             "commit": "fdbdd961a40b1633b04895ab8c7938c79028445e",
@@ -125,8 +125,8 @@
           "fingerprint": {
             "public_main": "007a3f6399026b4d9b9af3c155edf5ad99c6baa7",
             "feature_head": "ee3faf62ddad2889d7e08bf0866efbde7c79ee7e",
-            "overlay": "a1ef151295bf2b53d15b18523ab0184d02178bbd",
-            "gate_candidate": "776bf8a43e5473c183d47f9cbd9b5f237bf0133f"
+            "overlay": "9117cba7936897faabab51f432905949dcc6af39",
+            "gate_candidate": "5199030630e5a9cbdd4b988fec288088a3de12be"
           },
           "publish": {
             "commit": "3f55f01aba5c834d4915c93f06971db5a53e9c2a",
