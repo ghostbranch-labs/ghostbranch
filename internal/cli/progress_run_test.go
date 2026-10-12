@@ -102,3 +102,33 @@ func TestAPanicMidStepMarksItAndShowsTheCursor(t *testing.T) {
 		t.Fatalf("stderr %q", errOut)
 	}
 }
+
+// A shadow repo GitHub refused to create is a ✗, not a ✓ the next step
+// ends, and the dead step isn't redrawn around guided init's questions.
+func TestGuidedInitMarksARefusedCreationFailed(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	te.forge.CreateForbidden = true
+	te.env.StderrAnimate = true
+	p := atTerminal(te, "", "", "", "")
+	p.onWait = func() {
+		if _, err := te.forge.AddRepo("acme/widget-shadow", true); err != nil {
+			t.Error(err)
+		}
+	}
+	code, out, errOut := te.run("init", "acme/widget")
+	if code != 0 {
+		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
+	}
+	const step = "Creating the private repo acme/widget-shadow"
+	i := strings.Index(errOut, "✗ "+step)
+	if i < 0 || strings.Contains(errOut, "✓ "+step) {
+		t.Fatalf("stderr %q", errOut)
+	}
+	if strings.Contains(errOut[i+len("✗ "+step):], step) {
+		t.Fatalf("the refused step is drawn again: %q", errOut)
+	}
+	if !cursorShown(errOut) {
+		t.Fatalf("the cursor stays hidden: %q", errOut)
+	}
+}

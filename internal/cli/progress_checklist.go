@@ -266,6 +266,11 @@ func (c *checklist) Finish(failed bool) {
 	if c.done {
 		return
 	}
+	if c.paused > 0 && c.cur != nil && (failed || !c.quiet) {
+		// A prompt has the line (Ctrl-C at the approval code): the last
+		// line goes on a line of its own, not after the prompt's text.
+		c.write("\r\n")
+	}
 	c.paused = 0
 	if c.cur != nil {
 		if failed {

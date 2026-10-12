@@ -149,6 +149,7 @@ func (e *Engine) Init(ctx context.Context, opt InitOptions) (res *InitResult, wa
 		}
 		st := e.startStep("Creating the private repo %s", p.Shadow)
 		if _, err := e.Forge.CreatePrivateRepo(ctx, p.Shadow); err != nil {
+			st.Fail() // guided init asks next; the step mustn't spin or end as ✓
 			if errors.Is(err, forge.ErrForbidden) {
 				return res, warns, shadowCreateDenied(p, opt.Shadow != "", err)
 			}

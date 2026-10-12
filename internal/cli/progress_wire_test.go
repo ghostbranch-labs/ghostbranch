@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/cli/style"
+	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 )
 
 // syncBuffer is a bytes.Buffer safe for the AfterFunc goroutine.
@@ -178,5 +179,22 @@ func TestQuietProgressChoice(t *testing.T) {
 		if got := quietProgress(c.command, c.dryRun); got != c.want {
 			t.Errorf("%s dry-run %v: quiet %v", c.command, c.dryRun, got)
 		}
+	}
+}
+
+// render finishes the progress before it writes anything: a step still
+// running when the command fails becomes ✗, the cursor comes back, and only
+// then the error line.
+func TestRenderMarksTheRunningStepFailedBeforeTheError(t *testing.T) {
+	t.Parallel()
+	var out, b syncBuffer
+	c := newChecklist(&b, styleOff(), time.Now, func() int { return 80 })
+	a := &app{env: Env{Stdout: &out, Stderr: &b, Getenv: func(string) string { return "" }}, prog: c, command: "gate"}
+	c.Step("x")
+	a.render(contract.New(contract.ForgeError, "GitHub went away"))
+	got := b.String()
+	i, j := strings.Index(got, "✗ x\n"+showCursor), strings.Index(got, "error: ")
+	if i < 0 || j < i {
+		t.Fatalf("%q", got)
 	}
 }

@@ -344,3 +344,18 @@ func TestMarkedIsEmptyWhenNothingFits(t *testing.T) {
 		t.Fatalf("%q", got)
 	}
 }
+
+// Ctrl-C while a prompt has the line (paused): the ✗ goes on a line of its
+// own, not after the prompt's text.
+func TestChecklistFinishWhilePausedStartsANewLine(t *testing.T) {
+	t.Parallel()
+	w := 80
+	c, b, _ := testChecklist(&w)
+	c.Step("Publishing")
+	c.Pause()
+	b.WriteString("Type the code: ")
+	c.Finish(true)
+	if !strings.HasSuffix(b.String(), "Type the code: \r\n✗ Publishing\n") {
+		t.Fatalf("%q", b.String())
+	}
+}
