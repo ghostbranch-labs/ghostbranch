@@ -16,6 +16,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/overlay"
 	"github.com/ghostbranch-labs/ghostbranch/internal/plan"
 	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
+	"github.com/ghostbranch-labs/ghostbranch/internal/progress"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workflow"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
@@ -227,6 +228,10 @@ type built struct {
 	update      *prUpdate
 	scanTip     string
 	scanSources map[string][]string
+	// scanning is the leak scan's step, still running when build returns
+	// so that a leak found after it marks it failed; the caller's next step
+	// ends it, or the caller does.
+	scanning progress.Step
 }
 
 // build resolves the feature and public main, rebases, strips and scans as
@@ -284,7 +289,7 @@ func (e *Engine) build(ctx context.Context, pc *pairCtx, name, mode string, waiv
 	}
 	if len(levels) == 0 {
 		b.base = pm
-		e.progressf("replaying %s onto public main %s", name, short(pm))
+		e.startStep("Replaying %s onto public main", name)
 	} else {
 		below := levels[len(levels)-1].name
 		sb, err := e.stackBase(ctx, pc, cfg, levels, pm, O)
@@ -292,7 +297,7 @@ func (e *Engine) build(ctx context.Context, pc *pairCtx, name, mode string, waiv
 			return b, warns, err
 		}
 		b.parent, b.forkedAt, b.stack, b.base = below, m.ForkedAt, &sb, sb.R
-		e.progressf("replaying %s's own commits onto %s's rebased tip %s", name, below, short(sb.R))
+		e.startStep("Replaying %s's own commits onto %s", name, below)
 	}
 	// forked_at..head when the feature records a fork point (stacked, or
 	// moved onto main off a parent), else every commit not on public main.
@@ -331,7 +336,7 @@ func (e *Engine) build(ctx context.Context, pc *pairCtx, name, mode string, waiv
 	if err := e.buildUpdate(ctx, pc, b, name); err != nil {
 		return b, warns, err
 	}
-	e.progressf("scanning what %s would publish for leaks", b.scannedAs)
+	b.scanning = e.startStep("Scanning what %s would publish for leaks (%s)", name, b.scannedAs)
 	switch {
 	case b.update != nil:
 		// An update scans what isn't public yet, from the PR's head H: the
@@ -351,6 +356,10 @@ func (e *Engine) build(ctx context.Context, pc *pairCtx, name, mode string, waiv
 	}
 	if err != nil {
 		return b, warns, namedMarkerErr(err, name)
+	}
+	if waiving {
+		// waivers add only reads the findings: the scan was the last step.
+		b.scanning.Done("")
 	}
 	return b, addWarnings(warns, b.report.Warnings...), nil
 }
@@ -486,15 +495,19 @@ func (e *Engine) gate(ctx context.Context, pc *pairCtx, name, mode string, how g
 			pv.Add(preview.WaitChecks(pc.pair.Shadow, C), preview.PushRef(pc.pair.Shadow, remoteMetaRef(name), "", ""))
 		}
 		res.Preview = pv
+		// A dry run stops after the scan.
+		b.scanning.Done("")
 		return res, warns, nil
 	}
 
 	gateRef := "refs/heads/" + gateBranch(name)
 	old, _, _ := g.Resolve(ctx, shadowRef(gateBranch(name)))
-	e.progressf("pushing gate candidate %s", short(C))
+	st := e.startStep("Pushing the gate candidate to the shadow repo")
+	e.notef(progress.Info, "gate candidate %s → %s:%s", short(C), pc.pair.Shadow, gateBranch(name))
 	if err := e.push(ctx, pc, remoteShadow, gitx.PushOptions{Leases: []gitx.Lease{{Ref: gateRef, Expect: old}}}, C+":"+gateRef); err != nil {
 		return res, warns, err
 	}
+	st.Done("Pushed the gate candidate")
 	warns = addWarnings(warns, e.updateMirror(ctx, g, shadowRef(gateBranch(name)), C)...)
 	pr, err := e.Forge.FindOpenPR(ctx, pc.pair.Shadow, gateBranch(name), "main")
 	if err != nil {

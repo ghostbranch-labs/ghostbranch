@@ -22,6 +22,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
+	"github.com/ghostbranch-labs/ghostbranch/internal/progress"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
@@ -127,7 +128,8 @@ func (e *Engine) finish(ctx context.Context, pc *pairCtx, name string, res *Gate
 	if pr, err := e.Forge.GetPR(ctx, shadow, pending.ShadowPR); err == nil {
 		url = pr.URL
 	}
-	e.progressf("waiting for CI on %s (shadow PR #%d: %s)", short(C), pending.ShadowPR, url)
+	e.notef(progress.Info, "CI runs on shadow PR #%d: %s (gate candidate %s)", pending.ShadowPR, url, short(C))
+	e.startStep("Waiting for CI to start")
 	o.job = job
 	e.event(o, JobEvent{Type: EventWaiting, Candidate: C, ShadowPR: pending.ShadowPR, ShadowPRURL: url, CITimeout: cfg.Gate.CITimeout.String()})
 	out, err := e.waitChecks(ctx, shadow, C, cfg.Gate, waitOpts{start: pending.StartedAt, deadline: o.deadline, job: job, emit: o.emit})

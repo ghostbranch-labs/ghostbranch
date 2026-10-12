@@ -22,6 +22,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/grant"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
 	"github.com/ghostbranch-labs/ghostbranch/internal/ledger"
+	"github.com/ghostbranch-labs/ghostbranch/internal/progress"
 	"github.com/ghostbranch-labs/ghostbranch/internal/waiver"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
@@ -60,9 +61,10 @@ type Engine struct {
 	LooksLikeAgent bool
 	Now            func() time.Time
 	// Sleep waits d, or returns ctx.Err() as soon as ctx is done.
-	Sleep        func(context.Context, time.Duration) error
-	Rand         io.Reader
-	Progress     io.Writer
+	Sleep func(context.Context, time.Duration) error
+	Rand  io.Reader
+	// Progress receives the steps and notes of slow work; nil prints nothing.
+	Progress     progress.Progress
 	Approver     approval.Approver
 	Grants       *grant.Store
 	Waivers      *waiver.Store
@@ -85,10 +87,22 @@ type Engine struct {
 
 func (e *Engine) now() time.Time { return e.Now().UTC().Truncate(time.Second) }
 
-func (e *Engine) progressf(format string, args ...any) {
-	if e.Progress != nil {
-		_, _ = fmt.Fprintf(e.Progress, format+"\n", args...)
+// reporter is e.Progress, or a Progress that prints nothing.
+func (e *Engine) reporter() progress.Progress {
+	if e.Progress == nil {
+		return progress.Nop()
 	}
+	return e.Progress
+}
+
+// startStep starts a step: plain words, never a SHA (notes carry those).
+func (e *Engine) startStep(format string, args ...any) progress.Step {
+	return e.reporter().Step(fmt.Sprintf(format, args...))
+}
+
+// notef prints a one-off line above the running step.
+func (e *Engine) notef(level progress.NoteLevel, format string, args ...any) {
+	e.reporter().Note(level, fmt.Sprintf(format, args...))
 }
 
 // bot is the identity for commits that only ever live in the shadow repo.

@@ -34,6 +34,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/grant"
 	"github.com/ghostbranch-labs/ghostbranch/internal/keychain"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
+	"github.com/ghostbranch-labs/ghostbranch/internal/progress"
 	"github.com/ghostbranch-labs/ghostbranch/internal/prompt"
 	"github.com/ghostbranch-labs/ghostbranch/internal/waiver"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
@@ -504,7 +505,7 @@ func (a *app) engine(ctx context.Context) (*engine.Engine, error) {
 		}
 	}
 	e := &engine.Engine{Forge: f, WS: ws, Actor: actor, Token: token, TokenSource: source,
-		LooksLikeAgent: auth.LooksLikeAgent(a.env.Getenv, a.env.ConsoleUsable), Now: a.env.Now, Sleep: a.env.Sleep, Rand: a.env.Rand, Progress: a.env.Stderr,
+		LooksLikeAgent: auth.LooksLikeAgent(a.env.Getenv, a.env.ConsoleUsable), Now: a.env.Now, Sleep: a.env.Sleep, Rand: a.env.Rand, Progress: progress.Lines(a.env.Stderr),
 		NewScanner: a.env.NewScanner, PollInterval: a.env.PollInterval, SettleWindow: a.env.SettleWindow, CIAppearWindow: a.env.CIAppearWindow, CIAppearPoll: a.env.CIAppearPoll,
 		DryRun: a.dryRun, OnPush: a.env.OnPush, Grants: grant.NewStore(ws.GrantsPath(), ws.GrantsLockPath()),
 		Waivers: waiver.NewStore(ws.WaiversPath(), ws.WaiversLockPath())}

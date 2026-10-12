@@ -1,8 +1,8 @@
 package engine_test
 
 import (
-	"bytes"
 	"reflect"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -13,6 +13,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
+	"github.com/ghostbranch-labs/ghostbranch/internal/progress"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
 )
 
@@ -48,11 +49,14 @@ func TestGatePassesAndRecordsTheResult(t *testing.T) {
 	head := h.startFeature("feat-x", map[string]string{"feature.txt": "new\n", ".ghostbranch/notes.md": "private\n"})
 	before := h.publicRefs()
 
-	var progress bytes.Buffer
-	h.eng.Progress = &progress
+	var rec progress.Recorder
+	h.eng.Progress = &rec
 	res, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
-	if wantLine := "waiting for CI on " + res.Candidate[:12] + " (shadow PR #1: https://github.example/" + shadowName + "/pull/1)"; !strings.Contains(progress.String(), wantLine) {
-		t.Errorf("progress lacks %q in %q", wantLine, progress.String())
+	if wantNote := "CI runs on shadow PR #1: https://github.example/" + shadowName + "/pull/1 (gate candidate " + res.Candidate[:12] + ")"; !slices.Contains(rec.Notes(), wantNote) {
+		t.Errorf("notes lack %q:\n%s", wantNote, rec.String())
+	}
+	if !slices.Contains(rec.Steps(), "Waiting for CI to start") {
+		t.Errorf("no CI step:\n%s", rec.String())
 	}
 	if err != nil || res.Checks != feature.ChecksPassed || res.Leak != feature.LeakClean || res.FeatureHead != head {
 		t.Fatalf("gate = %+v %v", res, err)

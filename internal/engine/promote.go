@@ -21,6 +21,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/overlay"
 	"github.com/ghostbranch-labs/ghostbranch/internal/plan"
 	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
+	"github.com/ghostbranch-labs/ghostbranch/internal/progress"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workflow"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
@@ -298,7 +299,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 		res.Preview.Add(preview.RunGate(opt.Feature))
 		return res, warns, nil
 	default:
-		e.progressf("the gate for %s is missing or stale; running it", opt.Feature)
+		e.notef(progress.Info, "The gate for %s is missing or stale, so it runs first", opt.Feature)
 		// The internal gate scans for the mode this promote publishes.
 		gr, gw, err := e.gate(ctx, pc, opt.Feature, mode, gateHow{detach: opt.Detach})
 		res.Gate = gr

@@ -8,6 +8,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/grant"
+	"github.com/ghostbranch-labs/ghostbranch/internal/progress"
 	"github.com/ghostbranch-labs/ghostbranch/internal/waiver"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
@@ -60,7 +61,7 @@ func (a *app) localEngine() (*engine.Engine, error) {
 				Message: "GHOSTBRANCH_ACTOR is unset, and remove asks GitHub nothing, so the ledger records human:unknown; set GHOSTBRANCH_ACTOR, for example human:<your login>"})
 		}
 	}
-	e := &engine.Engine{WS: ws, Actor: actor, Now: a.env.Now, Sleep: a.env.Sleep, Rand: a.env.Rand, Progress: a.env.Stderr,
+	e := &engine.Engine{WS: ws, Actor: actor, Now: a.env.Now, Sleep: a.env.Sleep, Rand: a.env.Rand, Progress: progress.Lines(a.env.Stderr),
 		DryRun: a.dryRun, OnPush: a.env.OnPush,
 		Grants:  grant.NewStore(ws.GrantsPath(), ws.GrantsLockPath()),
 		Waivers: waiver.NewStore(ws.WaiversPath(), ws.WaiversLockPath())}

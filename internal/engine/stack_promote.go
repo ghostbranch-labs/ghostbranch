@@ -24,6 +24,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/overlay"
 	"github.com/ghostbranch-labs/ghostbranch/internal/plan"
 	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
+	"github.com/ghostbranch-labs/ghostbranch/internal/progress"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workflow"
 )
 
@@ -935,7 +936,8 @@ func (e *Engine) applyStack(ctx context.Context, pc *pairCtx, pl plan.Plan, yes 
 		if exists[i] {
 			res.Resumed = true
 		} else {
-			e.progressf("publishing %s to %s:%s", short(P), pc.pair.Public, branch)
+			step := e.startStep("Publishing %s to %s (branch %s)", en.Feature, pc.pair.Public, branch)
+			e.notef(progress.Info, "commit %s → %s:%s", short(P), pc.pair.Public, branch)
 			opt := gitx.PushOptions{Leases: []gitx.Lease{{Ref: "refs/heads/" + branch}}}
 			if err := e.push(ctx, pc, remotePublic, opt, P+":refs/heads/"+branch); err != nil {
 				if contract.From(err).Code == contract.RefMoved {
@@ -943,6 +945,7 @@ func (e *Engine) applyStack(ctx context.Context, pc *pairCtx, pl plan.Plan, yes 
 				}
 				return res, warns, err
 			}
+			step.Done(fmt.Sprintf("Published %s to %s (branch %s)", en.Feature, pc.pair.Public, branch))
 		}
 		pr, err := e.Forge.FindOpenPR(ctx, pc.pair.Public, branch, base)
 		if err != nil {
@@ -1050,7 +1053,7 @@ func (e *Engine) stackUp(ctx context.Context, pc *pairCtx, bottom stackBranch, p
 	// for a token that may not use them; either way the PRs stay chained,
 	// and the host's answer is shown.
 	unavailable := func(err error) (*forge.Stack, error) {
-		e.progressf("%s has no native stacked PRs (%v); the PRs stay chained, each based on the branch below", repo, err)
+		e.notef(progress.Warn, "%s has no native stacked PRs (%v), so the PRs stay chained, each based on the branch below", repo, err)
 		return nil, nil
 	}
 	var have *forge.Stack
@@ -1067,14 +1070,16 @@ func (e *Engine) stackUp(ctx context.Context, pc *pairCtx, bottom stackBranch, p
 		return nil, forgeErr(err, "read the native stacks of %s", repo)
 	}
 	if have == nil {
-		e.progressf("registering PRs %s as a native stack", prNumbers(want))
+		step := e.startStep("Registering PRs %s as a native stack", prNumbers(want))
 		s, err := st.CreateStack(ctx, repo, want)
 		switch {
 		case errors.Is(err, forge.ErrStacksUnavailable):
+			step.Fail()
 			return unavailable(err)
 		case err != nil:
 			return nil, forgeErr(err, "register PRs %s as a native stack", prNumbers(want))
 		}
+		step.Done(fmt.Sprintf("Registered PRs %s as a native stack", prNumbers(want)))
 		return &s, nil
 	}
 	var missing []int
@@ -1089,18 +1094,20 @@ func (e *Engine) stackUp(ctx context.Context, pc *pairCtx, bottom stackBranch, p
 	// A native stack grows only at its top: PRs that would go above one
 	// lower down (a second branch on the same parent) stay chained.
 	if i := slices.Index(want, missing[0]); i > 0 && len(have.PRs) > 0 && want[i-1] != have.PRs[len(have.PRs)-1] {
-		e.progressf("PR #%d isn't the top of native stack #%d (#%d is), and a native stack only grows at its top; PRs %s stay chained, each based on the branch below",
+		e.notef(progress.Warn, "PR #%d isn't the top of native stack #%d (#%d is), and a native stack only grows at its top, so PRs %s stay chained, each based on the branch below",
 			want[i-1], have.Number, have.PRs[len(have.PRs)-1], prNumbers(missing))
 		return nil, nil
 	}
-	e.progressf("adding PRs %s to native stack #%d", prNumbers(missing), have.Number)
+	step := e.startStep("Adding PRs %s to native stack #%d", prNumbers(missing), have.Number)
 	s, err := st.AddToStack(ctx, repo, have.Number, missing)
 	switch {
 	case errors.Is(err, forge.ErrStacksUnavailable):
+		step.Fail()
 		return unavailable(err)
 	case err != nil:
 		return nil, forgeErr(err, "add PRs %s to native stack #%d", prNumbers(missing), have.Number)
 	}
+	step.Done(fmt.Sprintf("Added PRs %s to native stack #%d", prNumbers(missing), have.Number))
 	return &s, nil
 }
 

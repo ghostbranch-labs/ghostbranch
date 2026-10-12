@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -17,6 +18,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/overlay"
 	"github.com/ghostbranch-labs/ghostbranch/internal/plan"
 	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
+	"github.com/ghostbranch-labs/ghostbranch/internal/progress"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
@@ -330,7 +332,8 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 		return res, warns, nil
 	}
 	if !exists {
-		e.progressf("publishing %s to %s:%s", short(P), pc.pair.Public, branch)
+		st := e.startStep("Publishing %s to %s (branch %s)", pl.Feature, pc.pair.Public, branch)
+		e.notef(progress.Info, "commit %s → %s:%s", short(P), pc.pair.Public, branch)
 		opt := gitx.PushOptions{Leases: []gitx.Lease{{Ref: "refs/heads/" + branch}}}
 		if err := e.push(ctx, pc, remotePublic, opt, P+":refs/heads/"+branch); err != nil {
 			if contract.From(err).Code == contract.RefMoved {
@@ -338,6 +341,7 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 			}
 			return res, warns, err
 		}
+		st.Done(fmt.Sprintf("Published %s to %s (branch %s)", pl.Feature, pc.pair.Public, branch))
 	} else {
 		res.Resumed = true
 	}

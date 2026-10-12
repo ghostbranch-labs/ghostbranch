@@ -1,7 +1,6 @@
 package engine_test
 
 import (
-	"bytes"
 	"reflect"
 	"strings"
 	"testing"
@@ -10,6 +9,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
+	"github.com/ghostbranch-labs/ghostbranch/internal/progress"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
 )
 
@@ -63,19 +63,25 @@ func TestSyncSaysMovingOntoMainOnlyForBranchesThatStayOpen(t *testing.T) {
 	for _, p := range prs {
 		h.forge.SetPRMerged(publicName, p.Number)
 	}
-	var out bytes.Buffer
-	h.eng.Progress = &out
+	var rec progress.Recorder
+	h.eng.Progress = &rec
 	h.syncOK(engine.SyncOptions{})
-	if strings.Contains(out.String(), "moving b onto main") {
-		t.Fatalf("b closed in the same sync, yet:\n%s", out.String())
+	if strings.Contains(rec.String(), "Moving b onto main") {
+		t.Fatalf("b closed in the same sync, yet:\n%s", rec.String())
+	}
+	if rec.Running() {
+		t.Fatalf("a step is still running after sync:\n%s", rec.String())
 	}
 	h2, prs2 := publishedStack(t, "a", "b")
 	h2.squashMergeBottom(prs2)
-	out.Reset()
-	h2.eng.Progress = &out
+	var rec2 progress.Recorder
+	h2.eng.Progress = &rec2
 	h2.syncOK(engine.SyncOptions{})
-	if !strings.Contains(out.String(), "moving b onto main") {
-		t.Fatalf("b stays open, and the line is missing:\n%s", out.String())
+	if !strings.Contains(rec2.String(), "Moving b onto main") {
+		t.Fatalf("b stays open, and the line is missing:\n%s", rec2.String())
+	}
+	if rec2.Running() {
+		t.Fatalf("a step is still running after sync:\n%s", rec2.String())
 	}
 }
 
