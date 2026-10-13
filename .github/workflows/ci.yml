@@ -14,6 +14,10 @@ on:
   pull_request:
   push:
     branches: [main]
+    # Markdown-only commits go straight to main and need no CI. Pull requests always run, because the Ghostbranch gate
+    # waits for their checks.
+    paths-ignore:
+      - '**/*.md'
   workflow_dispatch:
 
 permissions:
