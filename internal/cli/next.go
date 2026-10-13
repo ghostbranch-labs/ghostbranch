@@ -513,6 +513,12 @@ func (a *app) steps(err error) []contract.Next {
 				return []contract.Next{{Command: onPair("promote", f, "--plan"),
 					Why: "plan files stay on the machine that made them: plan " + f + " again here (a person approves it), or apply the plan on the machine that made it"}}
 			}
+			if pub == "" {
+				// No pair was found to look in (several pairs, none, or
+				// not a checkout): status needs one too (review M2).
+				return []contract.Next{{Command: a.gb("status"), NeedsInput: []string{"--repo"},
+					Why: "pass --repo <owner/repo> to see that pair's features, then plan the one you meant again with promote <feature> --plan; apply <plan> --repo <owner/repo> looks the plan up in that pair's shadow repo"}}
+			}
 			return []contract.Next{{Command: onPair("status"), Why: "see the features, then plan the one you meant again with promote <feature> --plan"}}
 		case contract.NoOpenPR:
 			f, _ := ce.Details["feature"].(string)

@@ -3,6 +3,7 @@ package cli_test
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"testing"
 
@@ -109,6 +110,37 @@ func TestNextAfterPlanNotFound(t *testing.T) {
 	n := nextOf(t, env)
 	if e, _ := env["error"].(map[string]any); code != 2 || e["code"] != "PLAN_NOT_FOUND" || len(n) != 1 ||
 		!slices.Equal(argv(n[0]), []string{"ghostbranch", "promote", "feat-x", "--plan", "--repo", "acme/widget"}) {
+		t.Fatalf("exit %d, env %v", code, env)
+	}
+}
+
+// Review M2: with several pairs and no --repo, PLAN_NOT_FOUND's status step
+// asks for --repo, so it runs once given; with it, apply looks the plan up.
+func TestNextAfterPlanNotFoundWithoutAPair(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	twoPairs(te)
+	code, env := te.runJSON("apply", "20261005T120000Z-0a0b0c")
+	n := nextOf(t, env)
+	if e, _ := env["error"].(map[string]any); code != 2 || e["code"] != "PLAN_NOT_FOUND" || len(n) != 1 ||
+		!slices.Equal(argv(n[0]), []string{"ghostbranch", "status"}) || !reflect.DeepEqual(n[0]["needs_input"], []any{"--repo"}) {
+		t.Fatalf("exit %d, env %v", code, env)
+	}
+	if code, out, errOut := te.run("status", "--repo", "acme/widget"); code != 0 {
+		t.Fatalf("status --repo: exit %d\n%s\n%s", code, out, errOut)
+	}
+}
+
+// Review M3: an apply --repo that names a repo that isn't set up says so
+// (PAIR_NOT_FOUND, with the init steps), not "pass --repo".
+func TestApplyWithAnUnregisteredRepoIsPairNotFound(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	code, env := te.runJSON("apply", "20261005T120000Z-0a0b0c", "--repo", "acme/other")
+	e, _ := env["error"].(map[string]any)
+	d, _ := e["details"].(map[string]any)
+	if code != 2 || e["code"] != "PAIR_NOT_FOUND" || d["public"] != "acme/other" || len(nextOf(t, env)) != 2 {
 		t.Fatalf("exit %d, env %v", code, env)
 	}
 }
