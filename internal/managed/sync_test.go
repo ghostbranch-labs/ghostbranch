@@ -167,10 +167,26 @@ func TestSyncScriptRefusesDivergedAndMissing(t *testing.T) {
 	})
 }
 
+// F-19: a private public repo is not something a token can fix here (a
+// token that could read it could also write it): the hint says to turn
+// scheduled sync off and sync locally, never to add a read token.
 func TestSyncScriptPublicUnreadable(t *testing.T) {
 	eachShell(t, func(t *testing.T, s *syncEnv) {
 		code, out := s.run("main", filepath.Join(t.TempDir(), "missing.git"))
-		if code != 1 || !strings.Contains(out, "cannot read the public repo acme/widget") || !strings.Contains(out, "GHOSTBRANCH_SYNC_TOKEN") {
+		if code != 1 || !strings.Contains(out, "cannot read the public repo acme/widget: ") ||
+			!strings.Contains(out, "scheduled sync isn't supported for a private public repo") ||
+			!strings.Contains(out, "run ghostbranch sync --repo acme/widget locally. Nothing was pushed.") ||
+			strings.Contains(out, "GHOSTBRANCH_SYNC_TOKEN") {
+			t.Fatalf("%d %s", code, out)
+		}
+	})
+}
+
+// Review Focus 5: the echoed git line never carries credentials from a URL.
+func TestSyncScriptPublicUnreadableHidesURLCredentials(t *testing.T) {
+	eachShell(t, func(t *testing.T, s *syncEnv) {
+		code, out := s.run("main", "https://x-access-token:s3cr3t-value@127.0.0.1:9/acme/widget.git")
+		if code != 1 || strings.Contains(out, "s3cr3t-value") || !strings.Contains(out, "cannot read the public repo acme/widget: ") {
 			t.Fatalf("%d %s", code, out)
 		}
 	})

@@ -48,7 +48,11 @@ report() {
 echo "### ghostbranch sync" >> "$summary"
 
 if ! pub_refs="$(g ${pub_auth[@]+"${pub_auth[@]}"} ls-remote --heads "$public_url" 2>&1)"; then
-  report "cannot read the public repo ${PUBLIC_REPO:-$public_url}. If it is private, add a GHOSTBRANCH_SYNC_TOKEN secret with Contents read on it. Nothing was pushed."
+  # git's first line says why; strip any user:password@ from URLs in it
+  # (the auth is a header, so none is expected). No pipes: errexit+pipefail.
+  why="${pub_refs%%$'\n'*}"
+  why="$(sed -E 's#://[^/@[:space:]]+@#://#g' <<< "$why")"
+  report "cannot read the public repo ${PUBLIC_REPO:-$public_url}: ${why}. If it is private: scheduled sync isn't supported for a private public repo (a token that could read it here could also write it); set sync.schedule: off, run ghostbranch upgrade, and run ghostbranch sync --repo ${PUBLIC_REPO:-<public>} locally. Nothing was pushed."
   exit 1
 fi
 if ! sh_refs="$(g ${sh_auth[@]+"${sh_auth[@]}"} ls-remote --heads "$shadow_url" 2>&1)"; then
