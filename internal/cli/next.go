@@ -491,6 +491,19 @@ func (a *app) steps(err error) []contract.Next {
 				{Command: a.scoped("feature", "pull", f), Why: "someone pushed commits to " + f + "'s public PR on GitHub (error.details.foreign); bring them into the feature branch: an update never overwrites them"},
 				{Command: a.scoped("gate", f), Why: "then gate it, and promote again: the update keeps their commits"},
 			}
+		case contract.PlanNotFound:
+			pub, _ := ce.Details["public"].(string)
+			onPair := func(args ...string) []string {
+				if pub != "" {
+					args = append(args, "--repo", pub)
+				}
+				return a.gb(args...)
+			}
+			if f, _ := ce.Details["feature"].(string); f != "" {
+				return []contract.Next{{Command: onPair("promote", f, "--plan"),
+					Why: "plan files stay on the machine that made them: plan " + f + " again here (a person approves it), or apply the plan on the machine that made it"}}
+			}
+			return []contract.Next{{Command: onPair("status"), Why: "see the features, then plan the one you meant again with promote <feature> --plan"}}
 		case contract.NoOpenPR:
 			f, _ := ce.Details["feature"].(string)
 			if f == "" {

@@ -355,6 +355,15 @@ jobs:
 		{"doctor_failed", func(te *testEnv) { initOnly(te); delete(te.vars, "GHOSTBRANCH_TOKEN") }, []string{"doctor", "--repo", "acme/widget"}, 1},
 		{"doctor_unregistered", initOnly, []string{"doctor", "--repo", "acme/other"}, 1},
 		{"feature_pull_no_pr", withFeature, []string{"feature", "pull", "feat-x"}, contract.NoOpenPR.Exit()},
+		{"apply_plan_not_found", initOnly, []string{"apply", "20261005T120000Z-0a0b0c"}, contract.PlanNotFound.Exit()},
+		{"apply_plan_other_machine", func(te *testEnv) {
+			gatedFeature(te)
+			te.mustRun("promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--plan")
+			te.gonePlan = te.lastPlanID()
+			if err := os.Remove(filepath.Join(te.vars["GHOSTBRANCH_HOME"], "workspaces", "default", "plans", te.gonePlan+".json")); err != nil {
+				te.t.Fatal(err)
+			}
+		}, []string{"apply", "<GONE_PLAN>"}, contract.PlanNotFound.Exit()},
 		{"pair_not_found", initOnly, []string{"agents", "status", "--repo", "acme/other"}, contract.PairNotFound.Exit()},
 		{"pair_ambiguous", twoPairs, []string{"status"}, contract.PairAmbiguous.Exit()},
 	}
@@ -381,6 +390,9 @@ jobs:
 				}
 				if a == "<OLD_JOB>" {
 					args[i] = te.oldJob
+				}
+				if a == "<GONE_PLAN>" {
+					args[i] = te.gonePlan
 				}
 			}
 			code, out, errOut := te.run(append(args, "--json")...)

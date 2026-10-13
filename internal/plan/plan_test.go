@@ -66,8 +66,11 @@ func TestLoadRejectsPathsAndKeepsReadErrorsApart(t *testing.T) {
 			t.Fatalf("%q: want BAD_FLAG, got %v", ref, err)
 		}
 	}
-	if _, _, err := plan.Load(dir, "20261008T120000Z-abcdef"); !errors.Is(err, plan.ErrNotFound) || contract.From(err).Code != contract.BadFlag {
+	if _, _, err := plan.Load(dir, "20261008T120000Z-abcdef"); !errors.Is(err, plan.ErrNotFound) || contract.From(err).Code != contract.PlanNotFound {
 		t.Fatalf("missing plan: %v", err)
+	}
+	if _, _, err := plan.Load(dir, filepath.Join(dir, "missing.json")); !errors.Is(err, plan.ErrNotFound) || contract.From(err).Code != contract.BadFlag {
+		t.Fatalf("a missing .json path stays BAD_FLAG: %v", err)
 	}
 	// A path to a plan file still loads, as apply <path> promises.
 	p := plan.Plan{SchemaVersion: plan.SchemaVersion, ID: "20261008T120000Z-abcdef", Kind: "promote"}

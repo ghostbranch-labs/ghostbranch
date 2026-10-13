@@ -1,6 +1,8 @@
 package cli_test
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 
@@ -89,5 +91,24 @@ func TestApplyLeakNextForAnOlderCommit(t *testing.T) {
 	}
 	if !slices.Contains(needsInput(next[0]), "--message") || !slices.Contains(needsInput(next[1]), "--curate") {
 		t.Fatalf("needs_input = %v, %v", next[0]["needs_input"], next[1]["needs_input"])
+	}
+}
+
+// F-18: next after PLAN_NOT_FOUND re-plans the feature whose gate matches,
+// on this pair.
+func TestNextAfterPlanNotFound(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	gatedFeature(te)
+	te.mustRun("promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--plan")
+	id := te.lastPlanID()
+	if err := os.Remove(filepath.Join(te.vars["GHOSTBRANCH_HOME"], "workspaces", "default", "plans", id+".json")); err != nil {
+		t.Fatal(err)
+	}
+	code, env := te.runJSON("apply", id)
+	n := nextOf(t, env)
+	if e, _ := env["error"].(map[string]any); code != 2 || e["code"] != "PLAN_NOT_FOUND" || len(n) != 1 ||
+		!slices.Equal(argv(n[0]), []string{"ghostbranch", "promote", "feat-x", "--plan", "--repo", "acme/widget"}) {
+		t.Fatalf("exit %d, env %v", code, env)
 	}
 }

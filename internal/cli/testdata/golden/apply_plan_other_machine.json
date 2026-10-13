@@ -1,0 +1,35 @@
+{
+  "schema_version": "0.14",
+  "command": "apply",
+  "ok": false,
+  "exit_code": 2,
+  "data": {},
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "promote",
+        "feat-x",
+        "--plan",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "plan files stay on the machine that made them: plan feat-x again here (a person approves it), or apply the plan on the machine that made it",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
+  "error": {
+    "code": "PLAN_NOT_FOUND",
+    "message": "plan 20261005T120005Z-0c0d0e was made on another machine (the shadow repo has its ref, but plan files stay where they were made): apply it there, or make a new plan here",
+    "field": "plan",
+    "retryable": false,
+    "details": {
+      "feature": "feat-x",
+      "plan": "20261005T120005Z-0c0d0e",
+      "public": "acme/widget",
+      "reason": "other_machine"
+    }
+  }
+}

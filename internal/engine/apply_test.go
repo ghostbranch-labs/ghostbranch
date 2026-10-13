@@ -13,6 +13,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
+	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/plan"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
@@ -578,6 +579,100 @@ func TestApplyOfAPlanForAnUnregisteredRepoIsPairNotFound(t *testing.T) {
 	_, _, err = h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: res.Plan.ID})
 	ce := wantCode(t, err, contract.PairNotFound)
 	if ce.Field != "plan" || ce.Details["public"] != publicName {
+		t.Fatalf("error = %+v", ce)
+	}
+}
+
+// planGone promotes feat-x --plan, then deletes the plan file, as a plan
+// made on another machine looks from here. It returns the plan ID.
+func (h *harness) planGone() string {
+	h.t.Helper()
+	h.startFeature("feat-x", map[string]string{"x.txt": "x\n"})
+	h.gateFeature("feat-x")
+	res, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "Add x", PlanOnly: true})
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(h.eng.WS.PlansDir(), res.Plan.ID+".json")); err != nil {
+		h.t.Fatal(err)
+	}
+	return res.Plan.ID
+}
+
+// F-18: the shadow repo has the plan's ref, so the plan was made elsewhere;
+// the feature whose gate matches is named for the re-plan.
+func TestApplyPlanMadeElsewhere(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	id := h.planGone()
+	_, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: id, Lookup: &h.pair})
+	ce := wantCode(t, err, contract.PlanNotFound)
+	if ce.Field != "plan" || ce.Details["reason"] != "other_machine" || ce.Details["feature"] != "feat-x" ||
+		ce.Details["public"] != publicName || !strings.Contains(ce.Message, "was made on another machine") {
+		t.Fatalf("error = %+v", ce)
+	}
+}
+
+func TestApplyOfAnUnknownPlanID(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	const id = "20261005T120000Z-0a0b0c"
+	_, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: id, Lookup: &h.pair})
+	ce := wantCode(t, err, contract.PlanNotFound)
+	if ce.Details["reason"] != "unknown" || ce.Details["feature"] != nil || ce.Message != "no plan "+id+" on this machine or in "+shadowName {
+		t.Fatalf("error = %+v", ce)
+	}
+	_, _, err = h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: id})
+	if ce := wantCode(t, err, contract.PlanNotFound); ce.Details["reason"] != "unknown" || ce.Details["public"] != nil {
+		t.Fatalf("no pair: %+v", ce)
+	}
+}
+
+// getRepoCounter counts GetRepo calls: a look-up in the shadow repo starts
+// with one.
+type getRepoCounter struct {
+	forge.Forge
+	n int
+}
+
+func (c *getRepoCounter) GetRepo(ctx context.Context, full string) (forge.Repo, error) {
+	c.n++
+	return c.Forge.GetRepo(ctx, full)
+}
+
+// Review Focus 3: a malformed ID, or one with path characters, is BAD_FLAG
+// and nothing is looked up.
+func TestApplyOfAMalformedPlanIDNeverFetches(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	c := &getRepoCounter{Forge: h.forge}
+	h.eng.Forge = c
+	for _, id := range []string{"nope", "../20261005T120000Z-0a0b0c", "20261005T120000Z-0A0B0C"} {
+		_, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: id, Lookup: &h.pair})
+		_ = wantCode(t, err, contract.BadFlag)
+	}
+	if c.n != 0 {
+		t.Fatalf("%d GetRepo calls", c.n)
+	}
+}
+
+// Review Focus 3: the look-up takes no lock: it works while another
+// command holds the pair's.
+func TestApplyLookupTakesNoLock(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	id := h.planGone()
+	drop, err := workspace.Lock(h.eng.WS.LockPath(h.pair), time.Now(), "gate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer drop()
+	_, _, err = h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: id, Lookup: &h.pair})
+	if ce := wantCode(t, err, contract.PlanNotFound); ce.Details["reason"] != "other_machine" {
 		t.Fatalf("error = %+v", ce)
 	}
 }

@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"reflect"
@@ -25,6 +26,10 @@ import (
 type ApplyOptions struct {
 	Plan string // plan ID or path to a plan .json
 	Yes  bool
+	// Lookup is the pair to look in when the plan file isn't on this
+	// machine (--repo or the checkout's; nil when none resolves). A plan
+	// that is here names its own pair.
+	Lookup *workspace.Pair
 }
 
 type ApplyResult struct {
@@ -61,6 +66,9 @@ func (e *Engine) Apply(ctx context.Context, opt ApplyOptions) (res *ApplyResult,
 		})
 	}()
 	if pl, _, err = plan.Load(e.WS.PlansDir(), opt.Plan); err != nil {
+		if errors.Is(err, plan.ErrNotFound) && plan.ValidID(opt.Plan) {
+			return nil, nil, e.planNotHere(ctx, opt.Plan, opt.Lookup)
+		}
 		return nil, nil, err
 	}
 	// The plan file is local and unsigned: re-check where it would publish.
