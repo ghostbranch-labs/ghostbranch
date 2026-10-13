@@ -613,7 +613,7 @@ func TestNextOffersAdoptWhenThePairIsNotRegistered(t *testing.T) {
 	te := newTestEnv(t)
 	code, env := te.runJSON("gate", "feat-x", "--repo", "acme/widget")
 	n := nextOf(t, env)
-	if e, _ := env["error"].(map[string]any); code != 2 || e["code"] != "PAIR_AMBIGUOUS" {
+	if e, _ := env["error"].(map[string]any); code != 2 || e["code"] != "PAIR_NOT_FOUND" {
 		t.Fatalf("exit %d, env = %v", code, env)
 	}
 	if len(n) != 2 ||
@@ -1235,5 +1235,40 @@ func TestNextForAPersonNamesThePairForARelativeRepo(t *testing.T) {
 	n := nextOf(t, env)
 	if len(n) != 1 || !reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "agents", "allow", "--repo", "acme/widget"}) || n[0]["needs_human"] != true {
 		t.Fatalf("next = %v", n)
+	}
+}
+
+// F-01: listings with no --repo still list everything in a workspace with
+// no pairs: PAIR_NOT_FOUND there means "no pair", as PAIR_AMBIGUOUS did.
+func TestListingsWithoutRepoWorkInAnEmptyWorkspace(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	for _, args := range [][]string{{"agents", "status"}, {"waivers", "list"}} {
+		if code, env := te.runJSON(args...); code != 0 {
+			t.Fatalf("%v: exit %d %v", args, code, env)
+		}
+	}
+}
+
+// F-01: next after PAIR_NOT_FOUND works taken literally: adopt where the
+// shadow repo exists (another GHOSTBRANCH_HOME), create where it doesn't.
+func TestNextAfterPairNotFoundRuns(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)                                                    // the pair exists on GitHub ...
+	te.vars["GHOSTBRANCH_HOME"] = filepath.Join(te.root, "home-2") // ... but not in this home
+	code, env := te.runJSON("gate", "feat-x", "--repo", "acme/widget")
+	if e, _ := env["error"].(map[string]any); code != 2 || e["code"] != "PAIR_NOT_FOUND" {
+		t.Fatalf("exit %d, env = %v", code, env)
+	}
+	n := nextOf(t, env)
+	if code, out, errOut := te.run(argv(n[0])[1:]...); code != 0 {
+		t.Fatalf("next[0] %v: exit %d\n%s\n%s", argv(n[0]), code, out, errOut)
+	}
+	fresh := newTestEnv(t) // no shadow repo yet
+	_, env = fresh.runJSON("gate", "feat-x", "--repo", "acme/widget")
+	n = nextOf(t, env)
+	if code, out, errOut := fresh.run(argv(n[1])[1:]...); code != 0 {
+		t.Fatalf("next[1] %v: exit %d\n%s\n%s", argv(n[1]), code, out, errOut)
 	}
 }

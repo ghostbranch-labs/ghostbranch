@@ -16,6 +16,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/plan"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
+	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
 func planned(t *testing.T) (*harness, string) {
@@ -556,5 +557,27 @@ func TestApplyLeakNamesTheFeatureHead(t *testing.T) {
 	_, _, err = h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: pr.Plan.ID})
 	if ce := wantCode(t, err, contract.LeakFound); ce.Details["feature_head"] != head {
 		t.Fatalf("details = %v, want feature_head %s", ce.Details, head)
+	}
+}
+
+// F-01: a plan for a repo that isn't set up here is PAIR_NOT_FOUND, naming
+// the repo, so next can offer init.
+func TestApplyOfAPlanForAnUnregisteredRepoIsPairNotFound(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.startFeature("feat-x", map[string]string{"x.txt": "x\n"})
+	h.gateFeature("feat-x")
+	res, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "Add x", PlanOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.eng.WS.Update(h.clock.Now(), func(w *workspace.Workspace) bool { return w.RemovePair(publicName) }); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: res.Plan.ID})
+	ce := wantCode(t, err, contract.PairNotFound)
+	if ce.Field != "plan" || ce.Details["public"] != publicName {
+		t.Fatalf("error = %+v", ce)
 	}
 }

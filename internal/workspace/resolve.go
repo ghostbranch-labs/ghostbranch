@@ -60,8 +60,10 @@ func publicFromRemotes(remotes []Remote) string {
 // the checkout the command runs in, so it skips the first and, when no remote
 // names a registered pair, never falls back to the only pair.
 //
-// When nothing is registered for the repo asked about, the error carries
-// details.public (the public repo it can name) so next can offer init.
+// When nothing is registered for the repo asked about, the error is
+// PAIR_NOT_FOUND and carries details.public (the public repo it can name) so
+// next can offer init. PAIR_AMBIGUOUS is left for a directory that isn't a
+// GitHub checkout and for several pairs with no --repo.
 func (w *Workspace) Resolve(repoFlag string, remotes []Remote) (Pair, error) {
 	here := repoFlag == "."
 	if here {
@@ -81,7 +83,7 @@ func (w *Workspace) Resolve(repoFlag string, remotes []Remote) (Pair, error) {
 		if ownerName.MatchString(repoFlag) && !strings.HasSuffix(strings.ToLower(repoFlag), "-shadow") {
 			public = repoFlag
 		}
-		return Pair{}, notRegistered(contract.New(contract.PairAmbiguous, "no repo %q in workspace %q; run ghostbranch init first", repoFlag, w.Name).WithField("repo"), public)
+		return Pair{}, notRegistered(contract.New(contract.PairNotFound, "no repo %q in workspace %q; run ghostbranch init first", repoFlag, w.Name).WithField("repo"), public)
 	}
 	for _, r := range remotes {
 		if name, ok := ParseRemoteURL(r.URL); ok {
@@ -100,13 +102,13 @@ func (w *Workspace) Resolve(repoFlag string, remotes []Remote) (Pair, error) {
 		if !hasGitHub {
 			return Pair{}, contract.New(contract.PairAmbiguous, "this directory is not a checkout with a GitHub remote").WithField("repo")
 		}
-		return Pair{}, notRegistered(contract.New(contract.PairAmbiguous, "the remotes of this checkout name no repo in workspace %q", w.Name).WithField("repo"), publicFromRemotes(remotes))
+		return Pair{}, notRegistered(contract.New(contract.PairNotFound, "the remotes of this checkout name no repo in workspace %q", w.Name).WithField("repo"), publicFromRemotes(remotes))
 	}
 	switch len(w.Pairs) {
 	case 1:
 		return w.Pairs[0], nil
 	case 0:
-		return Pair{}, notRegistered(contract.New(contract.PairAmbiguous, "workspace %q has no repos; run ghostbranch init <owner/repo>", w.Name), publicFromRemotes(remotes))
+		return Pair{}, notRegistered(contract.New(contract.PairNotFound, "workspace %q has no repos; run ghostbranch init <owner/repo>", w.Name), publicFromRemotes(remotes))
 	}
 	var names []string
 	for _, p := range w.Pairs {

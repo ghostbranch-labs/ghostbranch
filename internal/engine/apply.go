@@ -74,7 +74,8 @@ func (e *Engine) Apply(ctx context.Context, opt ApplyOptions) (res *ApplyResult,
 	}
 	p, ok := e.WS.Find(pl.Pair.Public)
 	if !ok {
-		return nil, nil, contract.New(contract.PairAmbiguous, "plan %s is for %s, which is not in workspace %q", pl.ID, pl.Pair.Public, e.WS.Name).WithField("plan")
+		return nil, nil, contract.New(contract.PairNotFound, "plan %s is for %s, which isn't set up in workspace %q", pl.ID, pl.Pair.Public, e.WS.Name).
+			WithField("plan").WithDetails(map[string]any{"public": pl.Pair.Public})
 	}
 	pair = &p
 	pc, err := e.open(ctx, "apply", p, true)

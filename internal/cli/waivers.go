@@ -65,7 +65,7 @@ func (a *app) waiversListCmd() *cobra.Command {
 			switch ce := contract.From(err); {
 			case err == nil:
 				pp = &p
-			case ce.Code != contract.PairAmbiguous || a.repo != "":
+			case (ce.Code != contract.PairAmbiguous && ce.Code != contract.PairNotFound) || a.repo != "":
 				return err
 			}
 			res, w, err := e.WaiversList(cmd.Context(), pp)

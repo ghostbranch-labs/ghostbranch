@@ -1,0 +1,44 @@
+{
+  "schema_version": "0.14",
+  "command": "agents status",
+  "ok": false,
+  "exit_code": 2,
+  "data": {},
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "init",
+        "acme/other",
+        "--adopt",
+        "--plan",
+        "--json"
+      ],
+      "why": "its shadow repo already exists (set up on another machine, or in another GHOSTBRANCH_HOME): adopt it — this only registers the pair here and checks the shadow repo. If the shadow repo has a non-default name, adopt it with --shadow <owner/name> instead",
+      "needs_human": false,
+      "needs_input": []
+    },
+    {
+      "command": [
+        "ghostbranch",
+        "init",
+        "acme/other",
+        "--plan",
+        "--json"
+      ],
+      "why": "no shadow repo yet: create one",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
+  "error": {
+    "code": "PAIR_NOT_FOUND",
+    "message": "no repo \"acme/other\" in workspace \"default\"; run ghostbranch init first",
+    "field": "repo",
+    "retryable": false,
+    "details": {
+      "public": "acme/other"
+    }
+  }
+}

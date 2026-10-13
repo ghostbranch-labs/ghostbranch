@@ -92,7 +92,7 @@ func (a *app) agentsStatusCmd() *cobra.Command {
 			switch ce := contract.From(err); {
 			case err == nil:
 				pp = &p
-			case ce.Code != contract.PairAmbiguous || a.repo != "":
+			case (ce.Code != contract.PairAmbiguous && ce.Code != contract.PairNotFound) || a.repo != "":
 				return err
 			}
 			res, w, err := e.AgentsStatus(cmd.Context(), pp)

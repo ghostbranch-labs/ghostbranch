@@ -353,6 +353,8 @@ jobs:
 		{"doctor", initOnly, []string{"doctor", "--repo", "acme/widget"}, 0},
 		{"doctor_no_pair", nil, []string{"doctor"}, 0},
 		{"doctor_failed", func(te *testEnv) { initOnly(te); delete(te.vars, "GHOSTBRANCH_TOKEN") }, []string{"doctor", "--repo", "acme/widget"}, 1},
+		{"pair_not_found", initOnly, []string{"agents", "status", "--repo", "acme/other"}, contract.PairNotFound.Exit()},
+		{"pair_ambiguous", twoPairs, []string{"status"}, contract.PairAmbiguous.Exit()},
 	}
 	for _, s := range scenarios {
 		t.Run(s.name, func(t *testing.T) {
@@ -487,6 +489,19 @@ func editConfig(te *testEnv, old, new string) {
 		te.t.Fatalf("config has no %q", old)
 	}
 	te.shadowCommit("ghostbranch", map[string]string{".ghostbranch.yml": strings.Replace(string(raw), old, new, 1)})
+}
+
+// twoPairs registers acme/widget and acme/other, so a command with no
+// --repo outside a checkout can't tell which one.
+func twoPairs(te *testEnv) {
+	te.t.Helper()
+	initOnly(te)
+	dir, err := te.forge.AddRepo("acme/other", false)
+	if err != nil {
+		te.t.Fatal(err)
+	}
+	testutil.Commit(te.t, gitx.New(dir), "main", "initial", map[string]string{"README.md": "# other\n"})
+	te.mustRun("init", "acme/other")
 }
 
 // Plans, feature.json and the ledger are part of the contract too.

@@ -103,7 +103,7 @@ func TestParseRemoteURL(t *testing.T) {
 func TestResolve(t *testing.T) {
 	ws, _ := workspace.Open(t.TempDir(), "default")
 	_, err := ws.Resolve("", nil)
-	if contract.From(err).Code != contract.PairAmbiguous {
+	if contract.From(err).Code != contract.PairNotFound {
 		t.Fatalf("empty workspace: %v", err)
 	}
 	a := workspace.Pair{Public: "acme/a", Shadow: "acme/a-shadow"}
@@ -126,6 +126,13 @@ func TestResolve(t *testing.T) {
 	if _, err := ws.Resolve("acme/zzz", nil); !errors.As(err, &ce) || ce.Field != "repo" {
 		t.Fatalf("unknown --repo: %v", err)
 	}
+	if _, err := ws.Resolve("acme/zzz", nil); contract.From(err).Code != contract.PairNotFound || contract.From(err).Details["public"] != "acme/zzz" {
+		t.Fatalf("unknown --repo: %v", err)
+	}
+	notGitHub := []workspace.Remote{{Name: "origin", URL: "https://example.com/acme/widget.git"}}
+	if _, err := ws.Resolve(".", notGitHub); contract.From(err).Code != contract.PairAmbiguous {
+		t.Fatalf("--repo . outside a GitHub checkout: %v", err)
+	}
 }
 
 func TestResolveDotMeansThisCheckout(t *testing.T) {
@@ -145,7 +152,7 @@ func TestResolveDotMeansThisCheckout(t *testing.T) {
 	one.AddPair(a)
 	_, err := one.Resolve(".", []workspace.Remote{{Name: "origin", URL: "https://github.com/acme/widget.git"}})
 	var ce *contract.Error
-	if !errors.As(err, &ce) || ce.Code != contract.PairAmbiguous || ce.Field != "repo" ||
+	if !errors.As(err, &ce) || ce.Code != contract.PairNotFound || ce.Field != "repo" ||
 		!strings.Contains(ce.Message, `the remotes of this checkout name no repo in workspace "default"`) ||
 		ce.Details["public"] != "acme/widget" {
 		t.Fatalf("--repo . with other remotes: %+v", err)
@@ -161,7 +168,7 @@ func TestResolveNotRegisteredNamesThePublicRepo(t *testing.T) {
 	}
 	// Empty workspace inside a checkout: the remote that parses names the repo.
 	_, err := ws.Resolve("", []workspace.Remote{{Name: "upstream", URL: "https://example.com/nope.git"}, {Name: "origin", URL: "git@github.com:acme/widget.git"}})
-	if !errors.As(err, &ce) || ce.Code != contract.PairAmbiguous || ce.Details["public"] != "acme/widget" {
+	if !errors.As(err, &ce) || ce.Code != contract.PairNotFound || ce.Details["public"] != "acme/widget" {
 		t.Fatalf("empty workspace: %+v", err)
 	}
 	// Several pairs stay a candidates error.

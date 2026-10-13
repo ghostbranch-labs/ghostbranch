@@ -121,14 +121,9 @@ func (a *app) steps(err error) []contract.Next {
 			}
 		case contract.LeakFound, contract.MarkerInvalid:
 			return a.leakNext(ce)
-		case contract.PairAmbiguous:
+		case contract.PairNotFound:
 			if pub, _ := ce.Details["public"].(string); pub != "" {
-				return []contract.Next{
-					{Command: a.gb("init", pub, "--adopt", "--plan", "--json"),
-						Why: "its shadow repo already exists (set up on another machine, or in another GHOSTBRANCH_HOME): adopt it — this only registers the pair here and checks the shadow repo. If the shadow repo has a non-default name, adopt it with --shadow <owner/name> instead"},
-					{Command: a.gb("init", pub, "--plan", "--json"),
-						Why: "no shadow repo yet: create one"},
-				}
+				return a.initNexts(pub)
 			}
 		case contract.DoctorFailed:
 			return a.doctorNext()
@@ -684,6 +679,19 @@ func (a *app) mergedThenSync(r *engine.ApplyResult) contract.Next {
 		why = "a maintainer reviews and merges the PRs on GitHub from the bottom up (#" + strconv.Itoa(r.PRs[0].Number) + " first, each into main); then sync closes each merged feature and moves the branches above it onto main"
 	}
 	return contract.Next{Command: a.scoped("sync"), Why: why}
+}
+
+// initNexts sets up pub on this machine: adopt its shadow repo when it
+// exists (another machine set it up, or another GHOSTBRANCH_HOME), else
+// create one. Both are dry runs. PAIR_NOT_FOUND and doctor's failing pair
+// check (F-27) give exactly these.
+func (a *app) initNexts(pub string) []contract.Next {
+	return []contract.Next{
+		{Command: a.gb("init", pub, "--adopt", "--plan", "--json"),
+			Why: "its shadow repo already exists (set up on another machine, or in another GHOSTBRANCH_HOME): adopt it — this only registers the pair here and checks the shadow repo. If the shadow repo has a non-default name, adopt it with --shadow <owner/name> instead"},
+		{Command: a.gb("init", pub, "--plan", "--json"),
+			Why: "no shadow repo yet: create one"},
+	}
 }
 
 // waitNext finishes the pending gate job.

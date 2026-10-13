@@ -59,7 +59,8 @@ func (e *Engine) Remove(ctx context.Context, p workspace.Pair) (res *RemoveResul
 	}()
 	reg, ok := e.WS.Find(p.Public)
 	if !ok {
-		return nil, nil, contract.New(contract.PairAmbiguous, "no repo %q in workspace %q", p.Public, e.WS.Name).WithField("repo")
+		return nil, nil, contract.New(contract.PairNotFound, "no repo %q in workspace %q", p.Public, e.WS.Name).
+			WithField("repo").WithDetails(map[string]any{"public": p.Public})
 	}
 	p = reg
 	// Before the console, the lock and any change: a refused remove
