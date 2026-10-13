@@ -189,10 +189,10 @@ func (g *Git) ProtectAttributes(ctx context.Context) error {
 		dir = filepath.Join(g.Dir, dir)
 	}
 	info := filepath.Join(dir, "info")
-	if err := os.MkdirAll(info, 0o755); err != nil {
+	if err := os.MkdirAll(info, 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(info, "attributes"), []byte(AttributesOverride), 0o644)
+	return os.WriteFile(filepath.Join(info, "attributes"), []byte(AttributesOverride), 0o600)
 }
 
 // CommitIdentities returns a commit's author and committer as

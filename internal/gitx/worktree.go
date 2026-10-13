@@ -12,7 +12,7 @@ import (
 // WorktreeAdd checks out rev, detached, into a new worktree at dir and
 // returns a Git for it.
 func (g *Git) WorktreeAdd(ctx context.Context, dir, rev string) (*Git, error) {
-	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dir), 0o700); err != nil {
 		return nil, err
 	}
 	if _, err := g.Run(ctx, "worktree", "add", "--detach", "--force", dir, rev); err != nil {
