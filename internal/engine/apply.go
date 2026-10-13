@@ -30,6 +30,10 @@ type ApplyOptions struct {
 	// machine (--repo or the checkout's; nil when none resolves). A plan
 	// that is here names its own pair.
 	Lookup *workspace.Pair
+	// LookupErr is why a --repo that was passed named no pair here. A plan
+	// this machine lacks then fails with it (PAIR_NOT_FOUND, say), so the
+	// ledger and the caller see the same code (re-review N4).
+	LookupErr error
 }
 
 type ApplyResult struct {
@@ -67,6 +71,9 @@ func (e *Engine) Apply(ctx context.Context, opt ApplyOptions) (res *ApplyResult,
 	}()
 	if pl, _, err = plan.Load(e.WS.PlansDir(), opt.Plan); err != nil {
 		if errors.Is(err, plan.ErrNotFound) && plan.ValidID(opt.Plan) {
+			if opt.Lookup == nil && opt.LookupErr != nil {
+				return nil, nil, opt.LookupErr
+			}
 			return nil, nil, e.planNotHere(ctx, opt.Plan, opt.Lookup)
 		}
 		return nil, nil, err

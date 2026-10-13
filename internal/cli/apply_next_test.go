@@ -1,10 +1,12 @@
 package cli_test
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
@@ -142,5 +144,15 @@ func TestApplyWithAnUnregisteredRepoIsPairNotFound(t *testing.T) {
 	d, _ := e["details"].(map[string]any)
 	if code != 2 || e["code"] != "PAIR_NOT_FOUND" || d["public"] != "acme/other" || len(nextOf(t, env)) != 2 {
 		t.Fatalf("exit %d, env %v", code, env)
+	}
+	// Re-review N4: the ledger records the code the agent got.
+	raw, err := os.ReadFile(filepath.Join(te.vars["GHOSTBRANCH_HOME"], "workspaces", "default", "ledger.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	var last map[string]any
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &last); err != nil || last["op"] != "apply" || last["error_code"] != "PAIR_NOT_FOUND" {
+		t.Fatalf("last ledger entry %v %v", last, err)
 	}
 }

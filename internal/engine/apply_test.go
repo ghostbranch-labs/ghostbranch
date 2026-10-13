@@ -680,3 +680,22 @@ func TestApplyLookupTakesNoLock(t *testing.T) {
 		t.Fatalf("error = %+v", ce)
 	}
 }
+
+// Re-review N4: a --repo that names no pair here is why a missing plan
+// can't be looked up; apply fails with that error, and the ledger says so.
+func TestApplyOfAMissingPlanWithAnUnresolvedRepo(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	_, resolveErr := h.eng.WS.Resolve("acme/other", nil)
+	_, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: "20261005T120000Z-0a0b0c", LookupErr: resolveErr})
+	if ce := wantCode(t, err, contract.PairNotFound); ce.Details["public"] != "acme/other" {
+		t.Fatalf("error = %+v", ce)
+	}
+	if es := h.ledger(); len(es) == 0 || es[len(es)-1].Op != "apply" || es[len(es)-1].ErrorCode != string(contract.PairNotFound) {
+		t.Fatalf("ledger = %+v", es)
+	}
+	// A plan that is here names its own pair: LookupErr doesn't matter.
+	_, _, err = h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: "nope", LookupErr: resolveErr})
+	_ = wantCode(t, err, contract.BadFlag)
+}
