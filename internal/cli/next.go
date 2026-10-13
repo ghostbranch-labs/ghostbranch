@@ -415,10 +415,13 @@ func (a *app) steps(err error) []contract.Next {
 					why := "its gate is missing or stale; gate it, then each branch above it, from the bottom up, then promote the stack again"
 					fs := stringList(ce.Details["features"])
 					if i := slices.Index(fs, f); i >= 0 && i < len(fs)-1 {
-						// An update of open PRs above it plans them together:
-						// each needs a fresh gate on the one below.
 						why = "its gate is missing or stale; gate it, then the branches above it from the bottom up (" + strings.Join(fs[i+1:], ", ") +
-							"), each gate on the one below, then promote again: the plan updates them all"
+							"), each gate on the one below, then promote the stack again"
+						if ce.Details["updating"] == true {
+							// Their PRs are open: one plan updates them together.
+							why = "its gate is missing or stale; gate it, then the branches above it from the bottom up (" + strings.Join(fs[i+1:], ", ") +
+								"), each gate on the one below, then promote again: the plan updates them all"
+						}
 					}
 					return []contract.Next{{Command: a.scoped("gate", f), Why: why}}
 				}
@@ -583,17 +586,28 @@ func (a *app) steps(err error) []contract.Next {
 		}
 	case *engine.GateResult:
 		if r.Preview == nil && r.Checks == feature.ChecksPassed && r.Leak == feature.LeakClean {
+			rd := r.Ready
 			switch {
-			case len(r.Children) > 0:
-				// Up the stack: each branch above builds on this gate.
-				for _, c := range r.Children {
+			case rd.GateFirst != "":
+				out = append(out, contract.Next{Command: a.scoped("gate", rd.GateFirst),
+					Why: rd.GateFirst + " below has no fresh gate; gate it first, then the branches above it"})
+			case len(r.Children) > 0 || len(r.Chain) > 1:
+				for _, c := range rd.StaleAbove {
 					out = append(out, contract.Next{Command: a.scoped("gate", c),
 						Why: "the gate passed; gate " + c + " next: it is stacked on this one, and its gate builds on this gate"})
 				}
-			case len(r.Chain) > 1:
-				args := append(append([]string{"promote"}, r.Chain...), "--mode", r.ScannedAs, "--plan")
-				out = append(out, contract.Next{Command: a.scoped(args...),
-					Why: "the gate passed; plan the publish of the stack up to here: one PR per branch, each on the branch below, one approval for all. A branch below whose gate is missing or stale stops it with NOT_A_STACK, and next names that branch. A branch with more than one commit needs --title-for <feature>=<title>"})
+				if len(rd.Levels) > 1 {
+					args := append(append([]string{"promote"}, rd.Levels...), "--mode", r.ScannedAs, "--plan")
+					var need []string
+					if r.ScannedAs == config.ModeCurated {
+						need = append(need, "--curate")
+					}
+					for _, f := range rd.TitleFor {
+						need = append(need, "--title-for "+f+"=<title>")
+					}
+					out = append(out, contract.Next{Command: a.scoped(args...), NeedsInput: need,
+						Why: "every gate from the bottom up to " + rd.Levels[len(rd.Levels)-1] + " is fresh; plan the publish of the stack: one PR per branch, each on the branch below, one approval for all"})
+				}
 			default:
 				// A feature on its own, or one on a published parent.
 				mode := r.ScannedAs

@@ -155,6 +155,15 @@ func (e *Engine) resolveStack(ctx context.Context, pc *pairCtx, cfg config.Confi
 		}
 		pos[n] = i
 	}
+	// stale is stale_gate for name; with PRs of this stack open, the new
+	// plan updates them all (details.updating), which next says.
+	stale := func(name string) error {
+		ce := staleGate(name, names)
+		if len(ups) > 0 {
+			ce.Details["updating"] = true
+		}
+		return ce
+	}
 	out := make([]stackBranch, len(names))
 	for i, n := range names {
 		m, sha, err := e.readMeta(ctx, pc, n)
@@ -202,7 +211,7 @@ func (e *Engine) resolveStack(ctx context.Context, pc *pairCtx, cfg config.Confi
 		}
 		gt := b.meta.Gate
 		if gt == nil {
-			return nil, staleGate(b.name, names)
+			return nil, stale(b.name)
 		}
 		// A stacked gate links to the branch below by tree; a gate on main
 		// has no base tree.
@@ -212,14 +221,14 @@ func (e *Engine) resolveStack(ctx context.Context, pc *pairCtx, cfg config.Confi
 			// An append's gate replayed only the new commits, onto the PR's
 			// head the plan saw: the PR gains exactly them, on that head.
 			if gt.Base != up.head {
-				return nil, staleGate(b.name, names)
+				return nil, stale(b.name)
 			}
 			b.pubParent = up.head
 		case updating && gt.Base == up.head:
 			// A gate built to append, for a plan that replaces.
-			return nil, staleGate(b.name, names)
+			return nil, stale(b.name)
 		case gt.BaseTree != belowTree:
-			return nil, staleGate(b.name, names)
+			return nil, stale(b.name)
 		}
 		stackFresh, err := e.gateStackFresh(ctx, pc, b.name, b.meta)
 		if err != nil {
@@ -228,14 +237,14 @@ func (e *Engine) resolveStack(ctx context.Context, pc *pairCtx, cfg config.Confi
 		b.onto = cmp.Or(gt.Base, pm)
 		fresh, T, entries, guards := e.reusableGate(ctx, pc, cfg, b.meta, b.name, b.head, pm, b.onto, O, wnames)
 		if !stackFresh || !fresh {
-			return nil, staleGate(b.name, names)
+			return nil, stale(b.name)
 		}
 		starts, err := chainStartsOn(ctx, g, gt.Commits, b.onto)
 		if err != nil {
 			return nil, err
 		}
 		if !starts {
-			return nil, staleGate(b.name, names)
+			return nil, stale(b.name)
 		}
 		b.T, b.entries, b.guards = T, entries, guards
 	}

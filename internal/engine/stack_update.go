@@ -94,7 +94,11 @@ func (e *Engine) stackUpdates(ctx context.Context, pc *pairCtx, names, modes []s
 				if err != nil {
 					return nil, internalErr(err, "read feature branch "+m.Branch)
 				}
-				return nil, updateGateErr(n, names, m, u, modes[i], defaultMode, above, m.Gate.FreshFor(head, pm, O))
+				ce := updateGateErr(n, names, m, u, modes[i], defaultMode, above, m.Gate.FreshFor(head, pm, O))
+				if slices.ContainsFunc(out, func(u *prUpdate) bool { return u != nil }) {
+					ce.Details["updating"] = true // the new plan updates the open PRs (next says so)
+				}
+				return nil, ce
 			}
 			if u != nil {
 				u.Style = m.Gate.Update.Style

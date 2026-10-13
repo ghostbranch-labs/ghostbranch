@@ -697,3 +697,19 @@ func TestNextForLockedOnAPersonOnlyCommand(t *testing.T) {
 		}
 	}
 }
+
+// F-12: stale_gate says the plan updates the stack's PRs only when they are
+// open (details.updating); otherwise it says to promote the stack again.
+func TestStaleGateSaysThePlanUpdatesOnlyWhenPRsAreOpen(t *testing.T) {
+	t.Parallel()
+	a := testApp("promote", "promote", "feat-a", "feat-b", "--plan")
+	ce := contract.New(contract.NotAStack, "stale").WithDetails(map[string]any{
+		"reason": "stale_gate", "feature": "feat-a", "features": []string{"feat-a", "feat-b"}})
+	if n := a.next(ce); len(n) != 1 || !strings.Contains(n[0].Why, "then promote the stack again") || strings.Contains(n[0].Why, "updates them all") {
+		t.Fatalf("no open PRs: %+v", n)
+	}
+	ce.Details["updating"] = true
+	if n := a.next(ce); len(n) != 1 || !strings.Contains(n[0].Why, "the plan updates them all") {
+		t.Fatalf("open PRs: %+v", n)
+	}
+}
