@@ -521,6 +521,13 @@ func (a *app) steps(err error) []contract.Next {
 			}
 			switch reason, _ := ce.Details["reason"].(string); reason {
 			case "not_published":
+				if id, _ := ce.Details["plan"].(string); id != "" {
+					// The publish reached GitHub but its record wasn't
+					// written: apply of that plan finishes it (review M1).
+					nx := a.applyNext(id, true)
+					nx.Why = "plan " + id + " published " + f + " but its record was never written; apply finds the push landed and finishes the record (on the machine that made the plan). " + nx.Why
+					return []contract.Next{nx}
+				}
 				return []contract.Next{{Command: a.scoped("promote", f, "--plan"), Why: "nothing of " + f + " is public yet; publish it first"}}
 			case "merged":
 				return []contract.Next{{Command: a.scoped("sync"), Why: "sync closes the merged feature"}}

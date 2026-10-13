@@ -634,3 +634,31 @@ func TestNextForLockedRunsTheCommandAgain(t *testing.T) {
 		t.Fatalf("with a job, next = %+v", next)
 	}
 }
+
+// F-14, review M1 and M6(b): next after NO_OPEN_PR for every reason.
+func TestNextForNoOpenPRByReason(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		details map[string]any
+		want    []string
+		human   bool
+	}{
+		{"not published", map[string]any{"feature": "feat-x", "reason": "not_published"},
+			[]string{"ghostbranch", "promote", "feat-x", "--plan", "--repo", "acme/widget"}, false},
+		{"publish not recorded", map[string]any{"feature": "feat-x", "reason": "not_published", "plan": "20261005T120000Z-0a0b0c"},
+			[]string{"ghostbranch", "apply", "20261005T120000Z-0a0b0c"}, true},
+		{"merged", map[string]any{"feature": "feat-x", "reason": "merged", "public_pr": 3},
+			[]string{"ghostbranch", "sync", "--repo", "acme/widget"}, false},
+		{"closed", map[string]any{"feature": "feat-x", "reason": "closed", "public_pr": 3},
+			[]string{"ghostbranch", "feature", "show", "feat-x", "--repo", "acme/widget"}, false},
+		{"branch gone", map[string]any{"feature": "feat-x", "reason": "branch_gone", "public_pr": 3},
+			[]string{"ghostbranch", "feature", "show", "feat-x", "--repo", "acme/widget"}, false},
+	} {
+		a := testApp("feature pull", "feature", "pull", "feat-x", "--repo", "acme/widget")
+		next := a.next(contract.New(contract.NoOpenPR, "x").WithField("feature").WithDetails(tc.details))
+		if len(next) == 0 || !slices.Equal(next[0].Command, tc.want) || next[0].NeedsHuman != tc.human {
+			t.Errorf("%s: next = %+v, want %v", tc.name, next, tc.want)
+		}
+	}
+}

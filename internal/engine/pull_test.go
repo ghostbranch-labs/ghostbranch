@@ -3,11 +3,13 @@ package engine_test
 import (
 	"fmt"
 	"reflect"
+	"strings"
 	"sync/atomic"
 	"testing"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
+	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
 )
@@ -343,6 +345,22 @@ func TestPullWithoutOpenPRNeverGuessesFromAFailedRead(t *testing.T) {
 	}
 	_, err := h.pull("a")
 	if ce := wantCode(t, err, contract.ForgeError); !ce.Retryable {
+		t.Fatalf("error = %+v", ce)
+	}
+}
+
+// Review M1: apply pushed the branch and opened the PR but never wrote the
+// record. The reason stays not_published (the record says so), but the
+// error names the plan whose apply finishes the record, not a new promote.
+func TestPullWithoutOpenPRNamesAnUnrecordedPublish(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	_, id := h.publish("a")
+	h.editRemoteMeta("a", func(m *feature.Meta) { m.Promoted = nil })
+	_, err := h.pull("a")
+	ce := wantCode(t, err, contract.NoOpenPR)
+	if ce.Details["reason"] != "not_published" || ce.Details["plan"] != id || !strings.Contains(ce.Message, "apply "+id) {
 		t.Fatalf("error = %+v", ce)
 	}
 }
