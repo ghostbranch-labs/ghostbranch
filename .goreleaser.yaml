@@ -1,0 +1,100 @@
+# GoReleaser config for Ghostbranch releases. See RELEASING.md.
+#
+# A tag push runs .github/workflows/release.yml, which runs this into a draft
+# GitHub release; the maintainer reviews the draft and publishes it.
+# Locally: goreleaser check, then goreleaser release --snapshot --clean
+# --skip=sign,sbom (cosign and syft run in CI only).
+version: 2
+
+project_name: ghostbranch
+
+before:
+  hooks:
+    - go mod verify
+
+builds:
+  - id: ghostbranch
+    main: ./cmd/ghostbranch
+    binary: ghostbranch
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    # A release stamps its tag; a snapshot stamps the snapshot version below,
+    # whose "+" metadata the update checker refuses, so a snapshot binary
+    # never looks for updates (internal/updatecheck.ParseRelease).
+    ldflags:
+      - -s -w -X github.com/ghostbranch-labs/ghostbranch/internal/cli.stampedVersion={{ if .IsSnapshot }}{{ .Version }}{{ else }}{{ .Tag }}{{ end }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+    # Only platforms we can test ship. Windows on ARM runs the amd64 build.
+    ignore:
+      - goos: windows
+        goarch: arm64
+
+archives:
+  - id: default
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-devel+{{ .ShortCommit }}"
+
+sboms:
+  - artifacts: archive
+
+# Keyless: the identity is the release workflow's GitHub OIDC token.
+signs:
+  - cmd: cosign
+    artifacts: checksum
+    signature: "${artifact}.sigstore.json"
+    args:
+      - sign-blob
+      - --bundle=${signature}
+      - ${artifact}
+      - --yes
+
+# Paid signing, later. Uncomment and configure when there is a certificate.
+# notarize:
+#   macos:
+#     - enabled: false   # Apple Developer ID notarization
+# binary_signs:
+#   - id: windows
+#     ids: [ghostbranch]  # Authenticode, for example Azure Artifact Signing
+
+release:
+  github:
+    owner: ghostbranch-labs
+    name: ghostbranch
+  draft: true
+  prerelease: auto
+
+changelog:
+  use: git
+  sort: asc
+  filters:
+    exclude:
+      - '^(docs|test|style|ci|chore|build)(\(.+\))?!?:'
+  groups:
+    - title: Features
+      regexp: '^feat(\(.+\))?!?:'
+      order: 0
+    - title: Fixes
+      regexp: '^fix(\(.+\))?!?:'
+      order: 1
+    - title: Performance
+      regexp: '^perf(\(.+\))?!?:'
+      order: 2
+    - title: Other
+      order: 999
