@@ -597,15 +597,27 @@ func (d *doctorRun) state(ctx context.Context) DoctorCheck {
 		}
 	}
 	if runtime.GOOS == "windows" {
-		if msg, fix := windowsHomeWarning(d.opt.Getenv); msg != "" {
+		if msg, fix := windowsHomeWarning(d.opt.Getenv, e.WS.Home()); msg != "" {
 			v.add(DoctorWarn, msg, fix...)
 		}
 	} else {
 		if dirs := looseDirs(e.WS); len(dirs) > 0 {
-			pairs := filepath.Join(e.WS.Dir, "pairs")
-			v.add(DoctorWarn, "other users on this machine can open "+strings.Join(dirs, ", ")+
-				"; any writing ghostbranch command makes the ones under "+e.WS.Home()+" private, or run chmod 700 on each (and chmod -R go-rwx "+pairs+" for the local mirror's files)",
-				append([]string{"chmod", "700"}, dirs...)...)
+			home, pairs := e.WS.Home(), filepath.Join(e.WS.Dir, "pairs")
+			var fixed []string // the ones the next writing command tightens
+			for _, d := range dirs {
+				if d != home || e.WS.OwnHome {
+					fixed = append(fixed, d)
+				}
+			}
+			msg := "other users on this machine can open " + strings.Join(dirs, ", ")
+			if len(fixed) > 0 {
+				msg += "; the next writing ghostbranch command makes " + strings.Join(fixed, ", ") + " private"
+			}
+			if len(fixed) < len(dirs) {
+				msg += "; ghostbranch never changes the mode of " + home + " itself, because you chose it: run chmod 700 " + home + " if no one else uses it"
+			}
+			msg += "; to close everything now, run chmod 700 on each, and chmod -R go-rwx " + pairs + " for the local mirror's files"
+			v.add(DoctorWarn, msg, append([]string{"chmod", "700"}, dirs...)...)
 		}
 		paths := []string{e.WS.LedgerPath(), e.WS.GrantsPath(), e.WS.WaiversPath()}
 		plans, _ := filepath.Glob(filepath.Join(e.WS.PlansDir(), "*.json"))
@@ -619,16 +631,25 @@ func (d *doctorRun) state(ctx context.Context) DoctorCheck {
 			v.add(DoctorWarn, "other users on this machine can read "+strings.Join(loose, ", "), append([]string{"chmod", "600"}, loose...)...)
 		}
 	}
+	// On Windows this assumes the home inherits the profile's private ACL;
+	// doctor can't check that, and without USERPROFILE it can't even tell
+	// whether the home is under the profile. Keeping the clause on every OS
+	// keeps the goldens shared (R3).
 	tail += "; its state directories are private to you"
 	return v.result(fmt.Sprintf("workspace %q", e.WS.Name), tail, det)
 }
 
-// looseDirs are the state directories other users can open: the home, its
-// workspaces folder, the workspace and its pairs folder (F-28). Doctor only
-// reports them; a writing command tightens every one but the home.
+// looseDirs are the state directories other users can open: the home and
+// every directory Tighten looks after (F-28). Doctor only reports them; a
+// writing command tightens all of them, and the home only when it is
+// Ghostbranch's own default folder (OwnHome).
 func looseDirs(w *workspace.Workspace) []string {
+	dirs := w.StateDirs()
+	if !w.OwnHome {
+		dirs = append([]string{w.Home()}, dirs...)
+	}
 	var out []string
-	for _, d := range []string{w.Home(), filepath.Join(w.Home(), "workspaces"), w.Dir, filepath.Join(w.Dir, "pairs")} {
+	for _, d := range dirs {
 		if fi, err := os.Stat(d); err == nil && fi.Mode().Perm()&0o077 != 0 {
 			out = append(out, d)
 		}
@@ -641,15 +662,24 @@ func looseDirs(w *workspace.Workspace) []string {
 // drive's ACL, which often lets every local user read it. The default home
 // (%LOCALAPPDATA%) and any folder under %USERPROFILE% inherit the
 // profile's private ACL. Ghostbranch never changes an ACL (decision 3); the
-// fix is a line the person runs. "" when there is nothing to say, or when
-// USERPROFILE is unknown.
-func windowsHomeWarning(getenv func(string) string) (string, []string) {
-	home, profile := getenv("GHOSTBRANCH_HOME"), getenv("USERPROFILE")
-	if home == "" || profile == "" || underDir(home, profile) {
+// fix is a line the person runs. home is the absolute home in use (a
+// relative GHOSTBRANCH_HOME resolves against the working directory). ""
+// when there is nothing to say, or when USERPROFILE is unknown. Doctor
+// can't read the ACL, so the warning stays after the fix, and says so.
+func windowsHomeWarning(getenv func(string) string, home string) (string, []string) {
+	profile := getenv("USERPROFILE")
+	if getenv("GHOSTBRANCH_HOME") == "" || profile == "" {
+		return "", nil
+	}
+	if abs, err := filepath.Abs(home); err == nil {
+		home = abs
+	}
+	if underDir(home, profile) {
 		return "", nil
 	}
 	msg := "GHOSTBRANCH_HOME=" + home + " is outside your profile (" + profile +
-		"), so it may inherit a drive ACL that lets other users on this machine read it; move it under your profile"
+		"), so it may inherit a drive ACL that lets other users on this machine read it; " +
+		"doctor can't read the folder's permissions, so this warning stays while the home is outside your profile; move it under your profile"
 	user := getenv("USERNAME")
 	if user == "" {
 		return msg, nil
