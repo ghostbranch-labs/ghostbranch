@@ -25,8 +25,11 @@ Windows on ARM runs the amd64 build.
 2. Wait for the `release` workflow. It leaves a draft pre-release.
 3. Download it: `gh release download v0.2.0-rc.1 --repo ghostbranch-labs/ghostbranch --dir rc`.
 4. Check it (below) and try the binary on each machine you have.
-5. Delete the draft and the tag when you are done:
-   `gh release delete v0.2.0-rc.1 --repo ghostbranch-labs/ghostbranch --cleanup-tag`.
+5. Delete the draft and the tag when you are done. `--cleanup-tag` deletes
+   the tag on GitHub; also delete your local copy, so a later
+   `git push --tags` can't push it again:
+   `gh release delete v0.2.0-rc.1 --repo ghostbranch-labs/ghostbranch --cleanup-tag`,
+   then `git tag -d v0.2.0-rc.1`.
 
 ## Cut a release
 
@@ -49,6 +52,7 @@ Windows on ARM runs the amd64 build.
 ```sh
 # The files are what was released:
 sha256sum --ignore-missing -c checksums.txt
+shasum -a 256 -c --ignore-missing checksums.txt   # macOS
 
 # checksums.txt was signed by this repo's release workflow:
 cosign verify-blob \
@@ -57,6 +61,7 @@ cosign verify-blob \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   checksums.txt
 
-# GitHub's build provenance for an archive:
+# GitHub's build provenance for an archive (releases made after the repo
+# went public; GitHub attests public repos only):
 gh attestation verify ghostbranch_0.2.0_linux_amd64.tar.gz --repo ghostbranch-labs/ghostbranch
 ```
