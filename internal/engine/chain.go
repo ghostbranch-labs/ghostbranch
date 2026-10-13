@@ -185,7 +185,7 @@ func deriveChain(ctx context.Context, g *gitx.Git, cfg config.Config, in chainIn
 	if len(links) == 0 {
 		return nil, nil, contract.New(contract.NothingToPublish,
 			"nothing would be published: every commit is empty once overlay paths and internal sections are stripped").
-			WithDetails(map[string]any{"dropped_empty": dropped})
+			WithDetails(map[string]any{"reason": "all_stripped", "dropped_empty": dropped})
 	}
 	if last := links[len(links)-1].tree; last != in.T {
 		return nil, nil, contract.New(contract.Internal, "the %s chain ends at tree %s, not the gated tree %s", in.mode, short(last), short(in.T))

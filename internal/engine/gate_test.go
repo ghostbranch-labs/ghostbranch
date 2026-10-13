@@ -734,10 +734,16 @@ func TestNoCIMessageNamesMissingWorkflow(t *testing.T) {
 			h.init()
 			h.forge.Checks = func(string, string) []forge.Check { return nil }
 			h.startFeature("feat-x", map[string]string{"x.txt": "x\n"})
-			_, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
+			res, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
 			ce := wantCode(t, err, contract.NoCI)
 			if ce.Details["reason"] != c.reason || !strings.Contains(ce.Message, c.says) {
 				t.Fatalf("error = %+v", ce)
+			}
+			// wait on the settled job re-reads the record and says the same.
+			_, _, err = h.eng.Wait(h.ctx, h.pair, "gate/feat-x/"+res.Candidate[:12], engine.WaitOptions{})
+			ce = wantCode(t, err, contract.NoCI)
+			if ce.Details["reason"] != c.reason || !strings.Contains(ce.Message, c.says) {
+				t.Fatalf("wait: %+v", ce)
 			}
 		})
 	}

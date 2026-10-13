@@ -109,14 +109,20 @@ func outcomeErr(out checkOutcome, pr int, cfg config.Gate, shadow string, workfl
 		return contract.New(contract.ChecksFailed, "checks failed on the gate candidate: %s", strings.Join(out.failed, ", ")).
 			WithDetails(map[string]any{"failed": out.failed, "shadow_pr": pr})
 	case feature.ChecksNoCI:
-		if wf, known := workflows(); known && len(wf) == 0 {
+		wf, known := workflows()
+		if known && len(wf) == 0 {
 			return contract.New(contract.NoCI,
 				"no checks appeared on shadow PR #%d within %s, and the gate candidate has no workflow under .github/workflows (public main has none): add CI to the public repo, or, if your CI is an external app, install it on %s",
 				pr, cfg.CIAppearTimeout, shadow).WithDetails(map[string]any{"reason": "no_workflow", "shadow_pr": pr})
 		}
+		// An unreadable candidate gives no reason: which one holds is unknown.
+		details := map[string]any{"shadow_pr": pr}
+		if known {
+			details["reason"] = "actions_disabled_or_untriggered"
+		}
 		return contract.New(contract.NoCI,
 			"no checks appeared on shadow PR #%d within %s; check that Actions is enabled in %s, or no workflow triggers on pull_request", pr, cfg.CIAppearTimeout, shadow).
-			WithDetails(map[string]any{"reason": "actions_disabled_or_untriggered", "shadow_pr": pr})
+			WithDetails(details)
 	case feature.ChecksTimeout:
 		return contract.New(contract.CITimeout, "checks did not finish within %s", cfg.CITimeout)
 	}
