@@ -230,11 +230,8 @@ func (a *app) steps(err error) []contract.Next {
 			}
 			who := "another ghostbranch command"
 			if h, _ := ce.Details["held_by"].(map[string]any); h != nil {
-				op, _ := h["op"].(string)
-				pid, _ := h["pid"].(int)
-				since, _ := h["since"].(string)
-				if op != "" && pid != 0 && since != "" {
-					who += " (" + op + ", pid " + strconv.Itoa(pid) + ", since " + since + ")"
+				if text := workspace.HolderText(h); text != "" {
+					who += " (" + text + ")"
 				}
 			}
 			return []contract.Next{{Command: a.again(false), Why: who + " holds the lock; wait a few seconds for it to end, then run this again"}}

@@ -662,3 +662,16 @@ func TestNextForNoOpenPRByReason(t *testing.T) {
 		}
 	}
 }
+
+// Review M8: a holder whose text isn't as Ghostbranch writes it is left out
+// of next's why.
+func TestNextForLockedLeavesOutAnOddHolder(t *testing.T) {
+	t.Parallel()
+	a := testApp("sync", "sync", "--repo", "acme/widget")
+	err := contract.New(contract.Locked, "busy").WithDetails(map[string]any{
+		"held_by": map[string]any{"op": "gate\x1b]0;pwned\x07", "pid": 13096, "since": "2026-10-13T07:58:14Z"}})
+	next := a.next(err)
+	if len(next) != 1 || strings.Contains(next[0].Why, "pid") || strings.ContainsAny(next[0].Why, "\x1b\x07") {
+		t.Fatalf("next = %+v", next)
+	}
+}
