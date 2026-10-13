@@ -34,6 +34,10 @@ type Workspace struct {
 	Name  string
 	Dir   string
 	Pairs []Pair
+	// OwnHome is true when the home is Ghostbranch's own default folder
+	// (GHOSTBRANCH_HOME unset), so Tighten may make it private too. A home
+	// the user chose may be a shared or parent folder and is left alone.
+	OwnHome bool
 }
 
 type file struct {
