@@ -623,28 +623,54 @@ func TestPromoteWithNoCommitsStopsBeforeGate(t *testing.T) {
 func TestGateOfOverlayOnlyCommitsStopsBeforeCI(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
-		name  string
-		files map[string]string
+		name string
+		// setup makes the feature to gate; it returns its name and its own
+		// commits, oldest first.
+		setup func(h *harness) (string, []string)
 	}{
-		{"overlay paths only", map[string]string{".ghostbranch/notes.md": "private\n"}},
-		{"internal sections only", map[string]string{"README.md": "# widget\n# BEGIN-INTERNAL\nship it on Friday\n# END-INTERNAL\n"}},
+		{"overlay paths only", func(h *harness) (string, []string) {
+			return "feat-x", []string{h.startFeature("feat-x", map[string]string{".ghostbranch/notes.md": "private\n"})}
+		}},
+		{"internal sections only", func(h *harness) (string, []string) {
+			return "feat-x", []string{h.startFeature("feat-x", map[string]string{"README.md": "# widget\n# BEGIN-INTERNAL\nship it on Friday\n# END-INTERNAL\n"})}
+		}},
+		// R13: commits that cancel each other out publish no change either.
+		{"commits that cancel out", func(h *harness) (string, []string) {
+			add := h.startFeature("feat-x", map[string]string{"x.txt": "x\n"})
+			drop := testutil.Commit(h.t, h.shadowGit(), "feat-x", "undo", map[string]string{"x.txt": testutil.Delete})
+			return "feat-x", []string{add, drop}
+		}},
+		// A stacked level compares with the published tree below it, not
+		// its parent's unstripped commit: the parent here has an internal
+		// section, so the two differ.
+		{"stacked, overlay paths only", func(h *harness) (string, []string) {
+			h.startFeature("feat-a", map[string]string{"a.txt": "a\n", "README.md": "# widget\n# BEGIN-INTERNAL\nship it on Friday\n# END-INTERNAL\n"})
+			if _, _, err := h.eng.FeatureStart(h.ctx, h.pair, "feat-x", engine.FeatureStartOptions{From: "feat-a"}); err != nil {
+				h.t.Fatal(err)
+			}
+			return "feat-x", []string{testutil.Commit(h.t, h.shadowGit(), "feat-x", "notes", map[string]string{".ghostbranch/notes.md": "private\n"})}
+		}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			h := newHarness(t)
 			h.init()
-			head := h.startFeature("feat-x", c.files)
+			name, own := c.setup(h)
 			pushes := len(h.pushes)
-			_, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
+			_, _, err := h.eng.Gate(h.ctx, h.pair, name)
 			ce := wantCode(t, err, contract.NothingToPublish)
-			if ce.Details["reason"] != "all_stripped" || !reflect.DeepEqual(ce.Details["dropped_empty"], []string{head}) {
+			if ce.Details["reason"] != "all_stripped" || !reflect.DeepEqual(ce.Details["dropped_empty"], own) {
 				t.Fatalf("gate: %+v", ce)
+			}
+			gateLeftNoTrace(t, h, pushes, name)
+			if strings.HasPrefix(c.name, "stacked") {
+				return
 			}
 			_, err = promote(h, engine.PromoteOptions{Mode: "squash", Message: "x", PlanOnly: true})
 			if ce := wantCode(t, err, contract.NothingToPublish); ce.Details["reason"] != "all_stripped" {
 				t.Fatalf("promote --mode squash: %+v", ce)
 			}
-			gateLeftNoTrace(t, h, pushes, "feat-x")
+			gateLeftNoTrace(t, h, pushes, name)
 		})
 	}
 }
@@ -658,10 +684,12 @@ func TestStackLevelWithNoCommitsIsRefused(t *testing.T) {
 	if _, _, err := h.eng.FeatureStart(h.ctx, h.pair, "feat-b", engine.FeatureStartOptions{From: "feat-a"}); err != nil {
 		t.Fatal(err)
 	}
+	pushes := len(h.pushes)
 	_, _, err := h.eng.Gate(h.ctx, h.pair, "feat-b")
 	if ce := wantCode(t, err, contract.NothingToPublish); ce.Details["feature"] != "feat-b" || ce.Details["reason"] != "no_commits" {
 		t.Fatalf("error = %+v", ce)
 	}
+	gateLeftNoTrace(t, h, pushes, "feat-b")
 }
 
 // The update of an open PR with nothing new keeps promote's own answer, and
