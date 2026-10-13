@@ -50,7 +50,8 @@ func TestRenderListsEveryCodeFromTheRegistry(t *testing.T) {
 	// 432: a clean rebase replaces, and stale_gate's update_mode (6.1a-2 acceptance fixes).
 	// 443: the Updates section and the stderr line (6.4a).
 	// 446: the three 6.3b error rows (PAIR_NOT_FOUND, NO_OPEN_PR, PLAN_NOT_FOUND).
-	if n := strings.Count(out, "\n"); n > 446 {
+	// 452: how a native stack merges and what a squash loses (6.3b, F-16/F-31).
+	if n := strings.Count(out, "\n"); n > 452 {
 		t.Errorf("the guide is %d lines; keep it short (spec: about 150 plus the tables)", n)
 	}
 }
@@ -402,6 +403,12 @@ func TestGuideTeachesStacks(t *testing.T) {
 		"`ghostbranch feature fold <c> --repo <public> --json`",
 		"`HAS_CHILDREN`", "`feature restack <child> --onto main`",
 		"`public_pr_needs_update`",
+		// F-16/F-31 (R11): how a stack merges, and what a squash loses.
+		"Merging is a maintainer's call, on GitHub.",
+		"on its bottom PR's page, the merge button merges the whole stack",
+		"`gh pr merge` refuses a stacked PR; the API route is `PUT repos/<public>/pulls/<top>/merge-async` with `merge_method=merge`",
+		"\"Squash and merge\" makes one commit per PR and loses a `preserve` or `curated` history",
+		"Never merge a PR yourself unless the person told you to.",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the guide lacks %q", want)
