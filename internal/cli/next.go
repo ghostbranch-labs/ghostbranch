@@ -234,6 +234,12 @@ func (a *app) steps(err error) []contract.Next {
 					who += " (" + text + ")"
 				}
 			}
+			if a.personOnly() {
+				// Only a person can finish it: say so, as its own next
+				// does (review M7).
+				return []contract.Next{{Command: a.again(true), NeedsHuman: true,
+					Why: who + " holds the lock; wait a few seconds for it to end, then a person runs this again in their own terminal"}}
+			}
 			return []contract.Next{{Command: a.again(false), Why: who + " holds the lock; wait a few seconds for it to end, then run this again"}}
 		case contract.FeatureMoved:
 			if f, _ := ce.Details["feature"].(string); f != "" {
@@ -726,6 +732,19 @@ func (a *app) mergedThenSync(r *engine.ApplyResult) contract.Next {
 		why = "a maintainer reviews and merges the PRs on GitHub from the bottom up (#" + strconv.Itoa(r.PRs[0].Number) + " first, each into main); then sync closes each merged feature and moves the branches above it onto main"
 	}
 	return contract.Next{Command: a.scoped("sync"), Why: why}
+}
+
+// personOnly is whether this command is one only a person can finish: it
+// asks for a console or an approval code (agents allow, waivers add,
+// login, and apply without --yes).
+func (a *app) personOnly() bool {
+	switch a.command {
+	case "agents allow", "waivers add", "login":
+		return true
+	case "apply":
+		return !slices.ContainsFunc(a.args, func(arg string) bool { return arg == "--yes" || arg == "--yes=true" })
+	}
+	return false
 }
 
 // initNexts sets up pub on this machine: adopt its shadow repo when it

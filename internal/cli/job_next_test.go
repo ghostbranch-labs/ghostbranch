@@ -675,3 +675,27 @@ func TestNextForLockedLeavesOutAnOddHolder(t *testing.T) {
 		t.Fatalf("next = %+v", next)
 	}
 }
+
+// Review M7: LOCKED on a command only a person can finish repeats it for a
+// person: needs_human, without --json, naming the pair.
+func TestNextForLockedOnAPersonOnlyCommand(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		command string
+		args    []string
+		human   bool
+	}{
+		{"agents allow", []string{"agents", "allow", "--json"}, true},
+		{"waivers add", []string{"waivers", "add", "feat-x", "f-0123456789ab", "--json"}, true},
+		{"login", []string{"login", "--json"}, true},
+		{"apply", []string{"apply", "20261005T120000Z-0a0b0c", "--json"}, true},
+		{"apply", []string{"apply", "20261005T120000Z-0a0b0c", "--yes", "--json"}, false},
+		{"sync", []string{"sync", "--json"}, false},
+	} {
+		a := testApp(tc.command, tc.args...)
+		next := a.next(contract.New(contract.Locked, "busy"))
+		if len(next) != 1 || next[0].NeedsHuman != tc.human || slices.Contains(next[0].Command, "--json") == tc.human {
+			t.Errorf("%v: next = %+v", tc.args, next)
+		}
+	}
+}
