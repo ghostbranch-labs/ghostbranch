@@ -1,0 +1,40 @@
+{
+  "schema_version": "0.14",
+  "command": "gate",
+  "ok": false,
+  "exit_code": 1,
+  "data": {
+    "feature": "feat-x",
+    "feature_head": "<SHA1>",
+    "public_main": "<SHA1>",
+    "parent": "",
+    "base": "<SHA1>",
+    "overlay": "<SHA2>",
+    "candidate": "",
+    "published_tree": "",
+    "scanned_as": "preserve",
+    "commits": [],
+    "checks": "not_run",
+    "failed_checks": [],
+    "leak": "not_run",
+    "findings": [],
+    "waived": [],
+    "repo_guards": null,
+    "shadow_pr": null,
+    "job": null,
+    "reused": false,
+    "preview": null
+  },
+  "warnings": [],
+  "next": [],
+  "error": {
+    "code": "NOTHING_TO_PUBLISH",
+    "message": "feature feat-x has no commits of its own yet: commit on its branch, push it to the shadow repo, then gate",
+    "field": null,
+    "retryable": false,
+    "details": {
+      "feature": "feat-x",
+      "reason": "no_commits"
+    }
+  }
+}

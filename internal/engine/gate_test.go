@@ -240,7 +240,9 @@ func TestGateOverlayCollision(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	h.init()
-	h.startFeature("feat-x", map[string]string{".ghostbranch.yml": "mine\n"})
+	// feature.txt keeps the feature from being overlay-only, which stops
+	// earlier as NOTHING_TO_PUBLISH (F-07).
+	h.startFeature("feat-x", map[string]string{".ghostbranch.yml": "mine\n", "feature.txt": "x\n"})
 	_, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
 	_ = wantCode(t, err, contract.OverlayCollision)
 }
@@ -567,5 +569,117 @@ func TestGateListsTheCommitsForCurating(t *testing.T) {
 	}
 	if !reflect.DeepEqual(res.Commits, want) {
 		t.Fatalf("commits = %+v", res.Commits)
+	}
+}
+
+// gateLeftNoTrace fails t when the gate pushed anything or opened a gate PR
+// since pushes were counted.
+func gateLeftNoTrace(t *testing.T, h *harness, pushes int, name string) {
+	t.Helper()
+	if len(h.pushes) != pushes {
+		t.Fatalf("pushed: %+v", h.pushes[pushes:])
+	}
+	if pr, err := h.forge.FindOpenPR(h.ctx, shadowName, "ghostbranch-gate/"+name, "main"); err != nil || pr != nil {
+		t.Fatalf("gate PR %+v %v", pr, err)
+	}
+}
+
+// F-07: a feature with no commits of its own stops in seconds, before any
+// push, gate PR or ten-minute CI wait.
+func TestGateWithNoCommitsIsNothingToPublish(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	if _, _, err := h.eng.FeatureStart(h.ctx, h.pair, "feat-x"); err != nil {
+		t.Fatal(err)
+	}
+	pushes := len(h.pushes)
+	_, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
+	ce := wantCode(t, err, contract.NothingToPublish)
+	if ce.Details["feature"] != "feat-x" || ce.Details["reason"] != "no_commits" || !strings.Contains(ce.Message, "has no commits of its own yet") {
+		t.Fatalf("error = %+v", ce)
+	}
+	gateLeftNoTrace(t, h, pushes, "feat-x")
+}
+
+// The gate promote runs first stops the same way.
+func TestPromoteWithNoCommitsStopsBeforeGate(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	if _, _, err := h.eng.FeatureStart(h.ctx, h.pair, "feat-x"); err != nil {
+		t.Fatal(err)
+	}
+	pushes := len(h.pushes)
+	_, err := promote(h, engine.PromoteOptions{Mode: "preserve", PlanOnly: true})
+	if ce := wantCode(t, err, contract.NothingToPublish); ce.Details["reason"] != "no_commits" {
+		t.Fatalf("error = %+v", ce)
+	}
+	gateLeftNoTrace(t, h, pushes, "feat-x")
+}
+
+// Commits that touch only overlay paths or internal sections publish
+// nothing; the gate stops before CI in the default mode and in squash.
+func TestGateOfOverlayOnlyCommitsStopsBeforeCI(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name  string
+		files map[string]string
+	}{
+		{"overlay paths only", map[string]string{".ghostbranch/notes.md": "private\n"}},
+		{"internal sections only", map[string]string{"README.md": "# widget\n# BEGIN-INTERNAL\nship it on Friday\n# END-INTERNAL\n"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			h := newHarness(t)
+			h.init()
+			head := h.startFeature("feat-x", c.files)
+			pushes := len(h.pushes)
+			_, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
+			ce := wantCode(t, err, contract.NothingToPublish)
+			if ce.Details["reason"] != "all_stripped" || !reflect.DeepEqual(ce.Details["dropped_empty"], []string{head}) {
+				t.Fatalf("gate: %+v", ce)
+			}
+			_, err = promote(h, engine.PromoteOptions{Mode: "squash", Message: "x", PlanOnly: true})
+			if ce := wantCode(t, err, contract.NothingToPublish); ce.Details["reason"] != "all_stripped" {
+				t.Fatalf("promote --mode squash: %+v", ce)
+			}
+			gateLeftNoTrace(t, h, pushes, "feat-x")
+		})
+	}
+}
+
+// A stack level with no commits of its own is refused, naming it.
+func TestStackLevelWithNoCommitsIsRefused(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.startFeature("feat-a", map[string]string{"a.txt": "a\n"})
+	if _, _, err := h.eng.FeatureStart(h.ctx, h.pair, "feat-b", engine.FeatureStartOptions{From: "feat-a"}); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := h.eng.Gate(h.ctx, h.pair, "feat-b")
+	if ce := wantCode(t, err, contract.NothingToPublish); ce.Details["feature"] != "feat-b" || ce.Details["reason"] != "no_commits" {
+		t.Fatalf("error = %+v", ce)
+	}
+}
+
+// The update of an open PR with nothing new keeps promote's own answer, and
+// waivers add (which reads tree findings only) never stops on the check.
+func TestEmptyFeatureCheckLeavesUpdatesAndWaiversAlone(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.publishPreserve("feat-x")
+	_, err := promote(h, engine.PromoteOptions{Mode: "preserve", PlanOnly: true})
+	if ce := wantCode(t, err, contract.NothingToPublish); !strings.Contains(ce.Message, "already holds every change") || ce.Details["reason"] != nil {
+		t.Fatalf("update: %+v", ce)
+	}
+	if _, _, err := h.eng.FeatureStart(h.ctx, h.pair, "feat-y"); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = h.eng.WaiversAdd(h.ctx, h.pair, engine.WaiversAddOptions{Feature: "feat-y", IDs: []string{"f-000000000000"}, Reason: "test"})
+	if codeOf(err) == contract.NothingToPublish {
+		t.Fatalf("waivers add stopped on the empty-feature check: %v", err)
 	}
 }

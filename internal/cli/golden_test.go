@@ -166,6 +166,8 @@ func TestGoldenContract(t *testing.T) {
 		{"feature_start_from", withFeature, []string{"feature", "start", "feat-y", "--from", "feat-x"}, 0},
 		{"feature_start_from_plan", withFeature, []string{"feature", "start", "feat-y", "--from", "feat-x", "--plan"}, 0},
 		{"feature_start_from_unknown", initOnly, []string{"feature", "start", "feat-y", "--from", "nope"}, 2},
+		{"gate_no_commits", func(te *testEnv) { initOnly(te); te.mustRun("feature", "start", "feat-x") }, []string{"gate", "feat-x"}, contract.NothingToPublish.Exit()},
+		{"promote_no_commits", func(te *testEnv) { initOnly(te); te.mustRun("feature", "start", "feat-x") }, []string{"promote", "feat-x", "--plan"}, contract.NothingToPublish.Exit()},
 		{"feature_start_from_behind", func(te *testEnv) {
 			withFeature(te)
 			testutil.Commit(te.t, te.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})

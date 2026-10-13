@@ -305,6 +305,14 @@ func (e *Engine) build(ctx context.Context, pc *pairCtx, name, mode string, waiv
 	if err != nil {
 		return b, warns, err
 	}
+	// A feature with no commits of its own stops here, before anything is
+	// pushed (F-07). waivers add and the update of an open PR keep their
+	// own paths: an update with nothing new is promote's to answer.
+	if !waiving && b.update == nil && len(sources) == 0 {
+		return b, warns, contract.New(contract.NothingToPublish,
+			"feature %s has no commits of its own yet: commit on its branch, push it to the shadow repo, then gate", name).
+			WithDetails(map[string]any{"feature": name, "reason": "no_commits"})
+	}
 	rebased, err := e.replay(ctx, pc, sources, b.base)
 	if err != nil {
 		var ce *gitx.ConflictError
@@ -332,6 +340,23 @@ func (e *Engine) build(ctx context.Context, pc *pairCtx, name, mode string, waiv
 	b.infos = infos
 	if b.T, b.entries, err = publishedTree(ctx, g, b.R, cfg); err != nil {
 		return b, warns, namedMarkerErr(err, name)
+	}
+	// Commits that touch only overlay paths or internal sections, or cancel
+	// out, leave the tree they build on as it is: nothing would publish, so
+	// stop before CI (F-07). The tree below a stacked feature is its
+	// published one; an unstacked feature builds on public main.
+	if !waiving && b.update == nil {
+		below := ""
+		if b.stack != nil {
+			below = b.stack.T
+		} else if below, err = g.TreeOf(ctx, b.base); err != nil {
+			return b, warns, internalErr(err, "read public main's tree")
+		}
+		if b.T == below {
+			return b, warns, contract.New(contract.NothingToPublish,
+				"feature %s publishes nothing: once overlay paths and internal sections are stripped, its commits leave the tree they build on as it is", name).
+				WithDetails(map[string]any{"feature": name, "reason": "all_stripped", "dropped_empty": sources})
+		}
 	}
 	if err := e.buildUpdate(ctx, pc, b, name); err != nil {
 		return b, warns, err

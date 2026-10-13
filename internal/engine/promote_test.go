@@ -489,12 +489,11 @@ func TestPromoteNothingToPublish(t *testing.T) {
 	h := newHarness(t)
 	h.init()
 	src := h.startFeature("feat-x", map[string]string{".ghostbranch/notes.md": "private\n"})
-	if _, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x"); err != nil {
-		t.Fatal(err)
-	}
+	// The gate promote runs first stops on it now, with the same details
+	// (F-07).
 	for _, o := range []engine.PromoteOptions{{PlanOnly: true}, {Mode: "squash", Message: "m", PlanOnly: true}} {
 		_, err := promote(h, o)
-		if ce := wantCode(t, err, contract.NothingToPublish); !reflect.DeepEqual(ce.Details["dropped_empty"], []string{src}) {
+		if ce := wantCode(t, err, contract.NothingToPublish); !reflect.DeepEqual(ce.Details["dropped_empty"], []string{src}) || ce.Details["reason"] != "all_stripped" {
 			t.Fatalf("%+v: details = %v", o, ce.Details)
 		}
 	}
