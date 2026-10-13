@@ -354,6 +354,7 @@ jobs:
 		{"doctor_no_pair", nil, []string{"doctor"}, 0},
 		{"doctor_failed", func(te *testEnv) { initOnly(te); delete(te.vars, "GHOSTBRANCH_TOKEN") }, []string{"doctor", "--repo", "acme/widget"}, 1},
 		{"doctor_unregistered", initOnly, []string{"doctor", "--repo", "acme/other"}, 1},
+		{"feature_pull_no_pr", withFeature, []string{"feature", "pull", "feat-x"}, contract.NoOpenPR.Exit()},
 		{"pair_not_found", initOnly, []string{"agents", "status", "--repo", "acme/other"}, contract.PairNotFound.Exit()},
 		{"pair_ambiguous", twoPairs, []string{"status"}, contract.PairAmbiguous.Exit()},
 	}

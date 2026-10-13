@@ -491,6 +491,20 @@ func (a *app) steps(err error) []contract.Next {
 				{Command: a.scoped("feature", "pull", f), Why: "someone pushed commits to " + f + "'s public PR on GitHub (error.details.foreign); bring them into the feature branch: an update never overwrites them"},
 				{Command: a.scoped("gate", f), Why: "then gate it, and promote again: the update keeps their commits"},
 			}
+		case contract.NoOpenPR:
+			f, _ := ce.Details["feature"].(string)
+			if f == "" {
+				break
+			}
+			switch reason, _ := ce.Details["reason"].(string); reason {
+			case "not_published":
+				return []contract.Next{{Command: a.scoped("promote", f, "--plan"), Why: "nothing of " + f + " is public yet; publish it first"}}
+			case "merged":
+				return []contract.Next{{Command: a.scoped("sync"), Why: "sync closes the merged feature"}}
+			case "closed", "branch_gone":
+				return []contract.Next{{Command: a.scoped("feature", "show", f),
+					Why: "a person decides: promote " + f + " again to open a new PR, or close the feature"}}
+			}
 		case contract.BadFlag:
 			switch ce.Field {
 			case "message":

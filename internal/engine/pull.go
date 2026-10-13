@@ -85,8 +85,7 @@ func (e *Engine) FeaturePull(ctx context.Context, p workspace.Pair, opt PullOpti
 		return nil, warns, err
 	}
 	if u == nil {
-		return nil, warns, contract.New(contract.BadFlag,
-			"feature pull brings in commits from a feature's open public PR, and %s has none (never published, its PR merged or closed, or its branch gone)", name).WithField("feature")
+		return nil, warns, e.noOpenPR(ctx, pc, m, name)
 	}
 	// An update Ghostbranch pushed but never recorded is its own, not
 	// someone else's: adopting it would rewrite the feature with copies of
@@ -164,6 +163,43 @@ func (e *Engine) FeaturePull(ctx context.Context, p workspace.Pair, opt PullOpti
 	}
 	warns = addWarnings(warns, e.updateMirror(ctx, g, metaRef(name), sha)...)
 	return res, warns, nil
+}
+
+// noOpenPR is NO_OPEN_PR for a feature prHead found no open PR for, naming
+// why (F-14): never published, its PR merged or closed, or its public
+// branch gone. It reads the PR again; a read that fails is that read's
+// error, never a guessed reason.
+func (e *Engine) noOpenPR(ctx context.Context, pc *pairCtx, m feature.Meta, name string) error {
+	d := map[string]any{"feature": name}
+	none := func(reason, why string) error {
+		d["reason"] = reason
+		return contract.New(contract.NoOpenPR, "feature pull brings in commits from a feature's open public PR, and %s has none: %s", name, why).
+			WithField("feature").WithDetails(d)
+	}
+	if m.Promoted == nil || m.Promoted.PublicPR == 0 {
+		return none("not_published", "it was never published")
+	}
+	n := m.Promoted.PublicPR
+	d["public_pr"] = n
+	pr, err := e.Forge.GetPR(ctx, pc.pair.Public, n)
+	if err != nil {
+		return forgeErr(err, "read public PR #%d", n)
+	}
+	switch {
+	case pr.Merged:
+		return none("merged", fmt.Sprintf("its PR #%d merged", n))
+	case pr.State != prOpen:
+		return none("closed", fmt.Sprintf("its PR #%d was closed", n))
+	}
+	branch := publishedBranch(m)
+	if _, ok, err := pc.git.Resolve(ctx, publicRef(branch)); err != nil {
+		return internalErr(err, "read public branch "+branch)
+	} else if !ok {
+		return none("branch_gone", fmt.Sprintf("its public branch %s is gone", branch))
+	}
+	// Open, with its branch, a moment after prHead saw otherwise: it changed
+	// while this ran.
+	return contract.New(contract.RefMoved, "public PR #%d of %s changed while feature pull read it; run it again", n, name)
 }
 
 // pullHead is the feature head that holds the PR's commits (u), and the
