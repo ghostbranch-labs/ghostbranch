@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"syscall"
 	"testing"
@@ -15,9 +16,9 @@ import (
 )
 
 // F-28: the mirror holds unreleased shadow commits. git writes a repo's
-// files with the umask unless the repo says otherwise; --shared=0600 makes
-// git keep them to the owner whatever the umask. Not parallel: the umask
-// is per process.
+// files with the umask unless the repo says otherwise;
+// core.sharedRepository=0600 (set by Init) makes git keep them to the owner
+// whatever the umask. Not parallel: the umask is per process.
 func TestInitSharedPrivate(t *testing.T) {
 	old := syscall.Umask(0o022)
 	defer syscall.Umask(old)
@@ -38,6 +39,14 @@ func TestInitSharedPrivate(t *testing.T) {
 	work := filepath.Join(root, "pairs", "acme__widget", "work", "gate-1")
 	if _, err := g.WorktreeAdd(ctx, work, "main"); err != nil {
 		t.Fatal(err)
+	}
+	// git ignores core.sharedRepository for FETCH_HEAD, a worktree's
+	// metadata (worktrees/<id>/, its gitdir and commondir) and the files it
+	// checks out: they follow the umask, and are private only because their
+	// parents (mirror.git, work) are 0700. So the walk below runs after the
+	// worktree is gone, and this pins the parent while it exists.
+	if fi, err := os.Stat(filepath.Dir(work)); err != nil || fi.Mode().Perm() != 0o700 {
+		t.Fatalf("the worktree's parent: %v %v", fi, err)
 	}
 	if err := g.WorktreeRemove(ctx, work); err != nil {
 		t.Fatal(err)
