@@ -8,6 +8,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/cli/style"
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/plan"
+	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
 )
 
 func TestGateCell(t *testing.T) {
@@ -152,5 +153,35 @@ func TestHumanSaysHowAnOpenPRWasUpdated(t *testing.T) {
 	want = "Updated PR #13 on a: " + u1 + "\nPublished b as PR #14: " + u2 + "\n"
 	if got := human(stack, style.Styler{}); !strings.HasPrefix(got, want) {
 		t.Errorf("human for an append and a first publish = %q, want it to start %q", got, want)
+	}
+}
+
+// F-13: a restack dry run that stops on a conflict says where it stops,
+// and never that it would do nothing.
+func TestRestackPlanConflictNeverSaysNothing(t *testing.T) {
+	t.Parallel()
+	r := &engine.RestackResult{Feature: "feat-x", Restacked: []engine.RestackedBranch{}, Pending: []string{"feat-y"},
+		Preview: preview.New(map[string]string{})}
+	want := "Dry run; nothing was changed.\nIt would stop at feat-y: it doesn't restack cleanly (see the error below).\n"
+	if got := human(r, style.Styler{}); got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	r.Pending = []string{"feat-y", "feat-z"}
+	r.Preview.Add(preview.PushRef("acme/widget-shadow", "refs/heads/feat-w", "a", "b"))
+	got := human(r, style.Styler{})
+	if !strings.Contains(got, "Before stopping, it would:\n  - ") || !strings.Contains(got, "It would stop at feat-y:") || strings.Contains(got, "(nothing)") {
+		t.Fatalf("got %q", got)
+	}
+}
+
+// The general guard: after an error, no preview says "(nothing)".
+func TestWithoutNothingAfterAnError(t *testing.T) {
+	t.Parallel()
+	out := "Dry run; nothing was changed. This would:\n" + nothingLine
+	if got := withoutNothing(out, true); strings.Contains(got, "(nothing)") {
+		t.Fatalf("failed: %q", got)
+	}
+	if got := withoutNothing(out, false); got != out {
+		t.Fatalf("succeeded: %q", got)
 	}
 }

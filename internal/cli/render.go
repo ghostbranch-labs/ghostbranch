@@ -47,14 +47,41 @@ func findings(b *strings.Builder, fs []leak.Finding) {
 	}
 }
 
+// nothingLine is previewText's line for a preview with no ops. A run that
+// ended in an error never prints it (withoutNothing): the run stopped, so
+// "nothing" would read as the whole answer (F-13).
+const nothingLine = "  (nothing)\n"
+
 func previewText(b *strings.Builder, p *preview.Preview) {
 	b.WriteString("Dry run; nothing was changed. This would:\n")
 	for _, line := range p.Describe() {
 		fmt.Fprintf(b, "  - %s\n", line)
 	}
 	if len(p.Ops) == 0 {
-		b.WriteString("  (nothing)\n")
+		b.WriteString(nothingLine)
 	}
+}
+
+// withoutNothing drops nothingLine from a result's text when the command
+// failed.
+func withoutNothing(out string, failed bool) string {
+	if !failed {
+		return out
+	}
+	return strings.ReplaceAll(out, nothingLine, "")
+}
+
+// restackStopText is a restack dry run that stopped on a conflict: what it
+// would do before stopping, and where it stops.
+func restackStopText(b *strings.Builder, v *engine.RestackResult) {
+	b.WriteString("Dry run; nothing was changed.\n")
+	if len(v.Preview.Ops) > 0 {
+		b.WriteString("Before stopping, it would:\n")
+		for _, line := range v.Preview.Describe() {
+			fmt.Fprintf(b, "  - %s\n", line)
+		}
+	}
+	fmt.Fprintf(b, "It would stop at %s: it doesn't restack cleanly (see the error below).\n", oneLine(v.Pending[0]))
 }
 
 // human renders a result for people. It never prints secret values.
@@ -372,6 +399,10 @@ func human(r any, st style.Styler) string {
 		}
 		b.WriteString("The ledger keeps each deleted ref's SHA (ghostbranch log).\n")
 	case *engine.RestackResult:
+		if v.Preview != nil && len(v.Pending) > 0 {
+			restackStopText(&b, v)
+			break
+		}
 		if v.Preview != nil {
 			previewText(&b, v.Preview)
 			break

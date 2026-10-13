@@ -163,3 +163,15 @@ func TestUnreadableRecordNextIsItsConsoleClose(t *testing.T) {
 		}
 	}
 }
+
+// F-13 through the CLI: the conflicting restack's dry run.
+func TestRestackPlanThatStopsOnAConflictSaysWhere(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	withConflictingStack(te)
+	code, out, errOut := te.run("feature", "restack", "feat-x", "--plan")
+	if code != contract.RebaseConflict.Exit() || strings.Contains(out, "(nothing)") ||
+		!strings.Contains(out, "It would stop at feat-y") || !strings.Contains(errOut, "[REBASE_CONFLICT]") {
+		t.Fatalf("exit %d\nstdout: %s\nstderr: %s", code, out, errOut)
+	}
+}
