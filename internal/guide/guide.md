@@ -73,7 +73,7 @@ main, green CI, and a leak scan of exactly what will be published.
 
 ## Set up a repo
 
-0. **`ghostbranch doctor --json` checks the setup and changes nothing.** `data.checks[]` holds
+0. **`ghostbranch doctor --json` checks the setup and changes nothing in your repos or records.** `data.checks[]` holds
    `tools`, `token`, `pair`, `guard`, `state` and `ci`, each `ok`, `warn`, `fail` or `skipped`, with a
    `fix` command when there is one. Exit 1 with `DOCTOR_FAILED` lists the failing checks in
    `error.details.failed`, and `next` gives their fixes. Run it first, and whenever a command fails in

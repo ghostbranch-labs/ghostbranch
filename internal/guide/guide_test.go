@@ -360,7 +360,7 @@ func TestGuideTeachesSetup(t *testing.T) {
 	t.Parallel()
 	out := strings.Join(strings.Fields(guide.Render(contract.Registry())), " ")
 	for _, want := range []string{
-		"**`ghostbranch doctor --json` checks the setup and changes nothing.**",
+		"**`ghostbranch doctor --json` checks the setup and changes nothing in your repos or records.**",
 		"`DOCTOR_FAILED` lists the failing checks in `error.details.failed`",
 		"with a `fix` command when there is one.",
 		"When you install the app, pick both the public repo and its shadow repo.",

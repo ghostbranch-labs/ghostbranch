@@ -272,3 +272,16 @@ func TestDoctorNextForAnUnregisteredRepoIsInit(t *testing.T) {
 		}
 	}
 }
+
+// F-26: doctor's help says what it does write: its fetch into the local
+// copy of the pair, and the update check's cache.
+func TestDoctorHelpSaysWhatItWrites(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	code, out, _ := te.run("doctor", "--help")
+	flat := strings.Join(strings.Fields(out), " ")
+	if code != 0 || strings.Contains(flat, "never writes") ||
+		!strings.Contains(flat, "It changes nothing in your repos, records or keychain and never prompts; it fetches into its local copy of the pair (making it if needed) and refreshes the update check's cache. It isn't ledgered.") {
+		t.Fatalf("exit %d\n%s", code, out)
+	}
+}
