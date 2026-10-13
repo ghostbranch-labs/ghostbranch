@@ -71,6 +71,12 @@ Coding agents run the same loop with `--json`, and `ghostbranch guide` prints th
 
 Ghostbranch is free and open source. Sponsoring it pays for the time spent building and fixing it, the CI that tests every change, the website's domain and, later, code signing, so your computer can tell that a download really came from us. If it saves you work, please consider [sponsoring it on GitHub](https://github.com/sponsors/ayushguptax).
 
+### Sponsors
+
+Thank you to the people and companies who sponsor Ghostbranch. Sponsors are listed here and on the website.
+
+No sponsors yet. [Be the first](https://github.com/sponsors/ayushguptax).
+
 ## License
 
 [Apache-2.0](LICENSE). Contributions will require signing a contributor license agreement.
