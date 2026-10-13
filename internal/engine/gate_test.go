@@ -683,3 +683,34 @@ func TestEmptyFeatureCheckLeavesUpdatesAndWaiversAlone(t *testing.T) {
 		t.Fatalf("waivers add stopped on the empty-feature check: %v", err)
 	}
 }
+
+// F-07: NO_CI says why: the candidate has no workflow at all, or it has one
+// that never ran. A gate is never refused up front for having no
+// workflow: an external CI app posts checks without one.
+func TestNoCIMessageNamesMissingWorkflow(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name         string
+		dropCI       bool
+		reason, says string
+	}{
+		{"no workflow at all", true, "no_workflow", "the gate candidate has no workflow under .github/workflows (public main has none)"},
+		{"a workflow that never ran", false, "actions_disabled_or_untriggered", "or no workflow triggers on pull_request"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			h := newHarness(t)
+			if c.dropCI {
+				testutil.Commit(t, h.pubGit, "main", "drop CI", map[string]string{".github/workflows/ci.yml": testutil.Delete})
+			}
+			h.init()
+			h.forge.Checks = func(string, string) []forge.Check { return nil }
+			h.startFeature("feat-x", map[string]string{"x.txt": "x\n"})
+			_, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
+			ce := wantCode(t, err, contract.NoCI)
+			if ce.Details["reason"] != c.reason || !strings.Contains(ce.Message, c.says) {
+				t.Fatalf("error = %+v", ce)
+			}
+		})
+	}
+}

@@ -60,12 +60,12 @@
         "code": "NO_CI",
         "kind": "error",
         "exit_code": 3,
-        "summary": "No CI checks appeared on the gate candidate.",
+        "summary": "No CI checks appeared on the gate candidate (error.details.reason).",
         "causes": [
-          "Actions is disabled in the shadow repo",
-          "no workflow triggers on pull_request or push"
+          "no_workflow: the candidate has no workflow under .github/workflows, and no CI app posts checks",
+          "actions_disabled_or_untriggered: Actions is disabled in the shadow repo, or no workflow triggers on pull_request"
         ],
-        "what_to_do": "Enable Actions or add a workflow, then gate again.",
+        "what_to_do": "For no_workflow, add CI to the public repo, or, if CI is an external app, install it on the shadow repo. Otherwise enable Actions in the shadow repo or add a pull_request trigger. Then gate again.",
         "needs_human": false
       }
     ]
