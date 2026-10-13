@@ -71,8 +71,9 @@ func withoutNothing(out string, failed bool) string {
 	return strings.ReplaceAll(out, nothingLine, "")
 }
 
-// restackStopText is a restack dry run that stopped on a conflict: what it
-// would do before stopping, and where it stops.
+// restackStopText is a restack dry run that stopped: what it would do
+// before stopping, and where it stops. Only a conflict says the branch
+// doesn't restack cleanly; Ctrl-C or a git failure says where it stopped.
 func restackStopText(b *strings.Builder, v *engine.RestackResult) {
 	b.WriteString("Dry run; nothing was changed.\n")
 	if len(v.Preview.Ops) > 0 {
@@ -81,7 +82,11 @@ func restackStopText(b *strings.Builder, v *engine.RestackResult) {
 			fmt.Fprintf(b, "  - %s\n", line)
 		}
 	}
-	fmt.Fprintf(b, "It would stop at %s: it doesn't restack cleanly (see the error below).\n", oneLine(v.Pending[0]))
+	if v.StoppedOnConflict {
+		fmt.Fprintf(b, "It would stop at %s: it doesn't restack cleanly (see the error below).\n", oneLine(v.Pending[0]))
+		return
+	}
+	fmt.Fprintf(b, "It stopped at %s (see the error below).\n", oneLine(v.Pending[0]))
 }
 
 // human renders a result for people. It never prints secret values.

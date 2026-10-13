@@ -161,7 +161,7 @@ func TestHumanSaysHowAnOpenPRWasUpdated(t *testing.T) {
 func TestRestackPlanConflictNeverSaysNothing(t *testing.T) {
 	t.Parallel()
 	r := &engine.RestackResult{Feature: "feat-x", Restacked: []engine.RestackedBranch{}, Pending: []string{"feat-y"},
-		Preview: preview.New(map[string]string{})}
+		Preview: preview.New(map[string]string{}), StoppedOnConflict: true}
 	want := "Dry run; nothing was changed.\nIt would stop at feat-y: it doesn't restack cleanly (see the error below).\n"
 	if got := human(r, style.Styler{}); got != want {
 		t.Fatalf("got %q, want %q", got, want)
@@ -171,6 +171,18 @@ func TestRestackPlanConflictNeverSaysNothing(t *testing.T) {
 	got := human(r, style.Styler{})
 	if !strings.Contains(got, "Before stopping, it would:\n  - ") || !strings.Contains(got, "It would stop at feat-y:") || strings.Contains(got, "(nothing)") {
 		t.Fatalf("got %q", got)
+	}
+}
+
+// A restack dry run that stopped on anything but a conflict (Ctrl-C, a git
+// failure) says only where it stopped, not that the branch conflicts.
+func TestRestackPlanOtherStopNeverClaimsAConflict(t *testing.T) {
+	t.Parallel()
+	r := &engine.RestackResult{Feature: "feat-x", Restacked: []engine.RestackedBranch{}, Pending: []string{"feat-y"},
+		Preview: preview.New(map[string]string{})}
+	want := "Dry run; nothing was changed.\nIt stopped at feat-y (see the error below).\n"
+	if got := human(r, style.Styler{}); got != want {
+		t.Fatalf("got %q, want %q", got, want)
 	}
 }
 
