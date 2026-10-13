@@ -63,7 +63,7 @@ ghostbranch apply <plan-id>               # a person types the code it shows; th
 ghostbranch sync                          # bring the merge in and close the feature
 ```
 
-Every result ends with **Next**: the command to run after it, and why. `ghostbranch doctor` checks your setup and names the fix for anything that's off. The full walkthrough is in the docs: [Your first feature](https://example.invalid/docs/getting-started/first-feature/) (the link works at launch).
+Every result ends with **Next**: the command to run after it, and why. `ghostbranch doctor` checks your setup and names the fix for anything that's off. The full walkthrough is in the docs: [Your first feature](https://example.invalid/docs/getting-started/first-feature) (the link works at launch).
 
 Coding agents run the same loop with `--json`, and `ghostbranch guide` prints their instructions. Only a person can approve a publish, unless that person has allowed agents to publish with `ghostbranch agents allow`.
 
@@ -71,7 +71,7 @@ Coding agents run the same loop with `--json`, and `ghostbranch guide` prints th
 
 Ghostbranch is free and open source. Sponsoring it pays for the time spent building and fixing it, the CI that tests every change, the website's domain and, later, code signing, so your computer can tell that a download really came from us. If it saves you work, please consider [sponsoring it on GitHub](https://github.com/sponsors/ayushguptax).
 
-Sponsorships go through the personal GitHub Sponsors page of Ayush Gupta ([@ayushguptax](https://github.com/ayushguptax)), Ghostbranch's maintainer, until Ghostbranch's organisation finishes its tax setup. Every penny goes into Ghostbranch.
+Sponsorships go through the personal GitHub Sponsors page of Ayush ([@ayushguptax](https://github.com/ayushguptax)), who builds and maintains Ghostbranch, until Ghostbranch's organisation finishes its tax setup. Every penny goes into Ghostbranch.
 
 ### Sponsors
 
