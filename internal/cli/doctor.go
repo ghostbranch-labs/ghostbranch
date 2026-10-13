@@ -166,6 +166,13 @@ func (a *app) doctorNext() []contract.Next {
 	var out []contract.Next
 	seen := map[string]bool{}
 	for _, c := range r.Checks {
+		if c.Status == engine.DoctorFail && c.Unregistered != "" {
+			if key := "init\x00" + c.Unregistered; !seen[key] {
+				seen[key] = true
+				out = append(out, a.initNexts(c.Unregistered)...)
+			}
+			continue
+		}
 		argv := c.FixArgv
 		key := strings.Join(argv, "\x00")
 		if c.Status != engine.DoctorFail || len(argv) == 0 || seen[key] {

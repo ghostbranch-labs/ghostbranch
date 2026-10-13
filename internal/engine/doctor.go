@@ -68,6 +68,9 @@ type DoctorCheck struct {
 	Fix     string         `json:"fix"`
 	FixArgv []string       `json:"-"`
 	Details map[string]any `json:"details"`
+	// Unregistered is the public repo a failing pair check is about when
+	// it isn't set up here: next offers both init forms (F-27).
+	Unregistered string `json:"-"`
 }
 
 // withFix sets c's fix to argv; no argv leaves it without one.

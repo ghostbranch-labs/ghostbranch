@@ -451,7 +451,7 @@ func TestDoctorPairCheck(t *testing.T) {
 		{"a public shadow repo", func(h *harness, _ *engine.DoctorOptions) { h.forge.SetPrivate(shadowName, false) },
 			engine.DoctorFail, ""},
 		{"--repo names an unregistered repo", func(h *harness, opt *engine.DoctorOptions) { opt.Repo = "acme/other" },
-			engine.DoctorFail, "ghostbranch init acme/other"},
+			engine.DoctorFail, "ghostbranch init acme/other --adopt --plan"},
 		{"a checkout of an unregistered repo", func(h *harness, opt *engine.DoctorOptions) {
 			opt.Repo, opt.Remotes = "", []workspace.Remote{{Name: "origin", URL: "https://github.com/acme/other.git"}}
 		}, engine.DoctorSkipped, ""},

@@ -249,3 +249,26 @@ func (l *lockedBuffer) Write(p []byte) (int, error) {
 	return l.b.Write(p)
 }
 func (l *lockedBuffer) String() string { l.mu.Lock(); defer l.mu.Unlock(); return l.b.String() }
+
+// F-27: doctor's next for a repo that isn't set up here is exactly
+// PAIR_NOT_FOUND's: adopt first, then create, both dry runs.
+func TestDoctorNextForAnUnregisteredRepoIsInit(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	code, env := te.runJSON("doctor", "--repo", "acme/other")
+	if code != 1 {
+		t.Fatalf("exit %d", code)
+	}
+	_, pairEnv := te.runJSON("agents", "status", "--repo", "acme/other")
+	got, want := nextOf(t, env), nextOf(t, pairEnv)
+	if len(got) != 2 || !reflect.DeepEqual(got, want) {
+		t.Fatalf("doctor next %v, PAIR_NOT_FOUND next %v", got, want)
+	}
+	data, _ := env["data"].(map[string]any)
+	for _, c := range data["checks"].([]any) {
+		if m := c.(map[string]any); m["id"] == "pair" && m["fix"] != "ghostbranch init acme/other --adopt --plan" {
+			t.Fatalf("pair fix %q", m["fix"])
+		}
+	}
+}
