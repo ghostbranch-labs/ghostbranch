@@ -583,8 +583,9 @@ func TestApplyOfAPlanForAnUnregisteredRepoIsPairNotFound(t *testing.T) {
 	}
 }
 
-// planGone promotes feat-x --plan, then deletes the plan file, as a plan
-// made on another machine looks from here. It returns the plan ID.
+// planGone promotes feat-x --plan, then deletes the plan file and the pair's
+// mirror, as a plan made on another machine looks from here: its ref can
+// only come from the shadow repo (review M6a). It returns the plan ID.
 func (h *harness) planGone() string {
 	h.t.Helper()
 	h.startFeature("feat-x", map[string]string{"x.txt": "x\n"})
@@ -594,6 +595,9 @@ func (h *harness) planGone() string {
 		h.t.Fatal(err)
 	}
 	if err := os.Remove(filepath.Join(h.eng.WS.PlansDir(), res.Plan.ID+".json")); err != nil {
+		h.t.Fatal(err)
+	}
+	if err := os.RemoveAll(h.eng.WS.MirrorDir(h.pair)); err != nil {
 		h.t.Fatal(err)
 	}
 	return res.Plan.ID

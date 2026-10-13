@@ -374,6 +374,15 @@ jobs:
 			if err := os.Remove(filepath.Join(te.vars["GHOSTBRANCH_HOME"], "workspaces", "default", "plans", te.gonePlan+".json")); err != nil {
 				te.t.Fatal(err)
 			}
+			// No mirror either: the plan's ref can only come from the
+			// shadow repo (review M6a).
+			mirror := filepath.Join(te.vars["GHOSTBRANCH_HOME"], "workspaces", "default", "pairs", "acme__widget", "mirror.git")
+			if _, err := os.Stat(mirror); err != nil {
+				te.t.Fatal(err)
+			}
+			if err := os.RemoveAll(mirror); err != nil {
+				te.t.Fatal(err)
+			}
 		}, []string{"apply", "<GONE_PLAN>"}, contract.PlanNotFound.Exit()},
 		{"locked", func(te *testEnv) { initOnly(te); holdPairLock(te) }, []string{"sync"}, contract.Locked.Exit()},
 		{"pair_not_found", initOnly, []string{"agents", "status", "--repo", "acme/other"}, contract.PairNotFound.Exit()},
