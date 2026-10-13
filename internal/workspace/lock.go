@@ -65,8 +65,9 @@ var holderOp = regexp.MustCompile(`^[a-z][a-z -]{0,40}$`)
 
 // HolderText is "op, pid N, since T" for a lock holder (holder's map, or
 // LOCKED's details.held_by), or "" unless every part looks as Ghostbranch
-// writes it: op a short lower-case name, pid above 0, since RFC 3339. The
-// file's text reaches a terminal, so nothing else is shown (review M8).
+// writes it: op a short lower-case name, pid above 0, since RFC 3339 in
+// UTC with whole seconds. The file's text reaches a terminal, so nothing
+// else is shown (review M8).
 func HolderText(h map[string]any) string {
 	op, _ := h["op"].(string)
 	pid, _ := h["pid"].(int)
@@ -74,7 +75,9 @@ func HolderText(h map[string]any) string {
 	if !holderOp.MatchString(op) || pid <= 0 {
 		return ""
 	}
-	if _, err := time.Parse(time.RFC3339, since); err != nil {
+	// since exactly as Lock writes it: UTC, whole seconds, so its length
+	// is fixed (re-review N2: a fraction may otherwise run on).
+	if at, err := time.Parse(time.RFC3339, since); err != nil || at.UTC().Format(time.RFC3339) != since {
 		return ""
 	}
 	return fmt.Sprintf("%s, pid %d, since %s", op, pid, since)

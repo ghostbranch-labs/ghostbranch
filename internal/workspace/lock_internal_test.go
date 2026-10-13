@@ -31,6 +31,8 @@ func TestHolderTextChecksEachPart(t *testing.T) {
 		"upper-case op":    {"op": "Gate", "pid": 42, "since": "2026-10-13T07:58:14Z"},
 		"negative pid":     {"op": "gate", "pid": -1, "since": "2026-10-13T07:58:14Z"},
 		"since not a time": {"op": "gate", "pid": 42, "since": "yesterday\x07"},
+		"overlong since":   {"op": "gate", "pid": 42, "since": "2026-10-13T07:58:14." + strings.Repeat("9", 100000) + "Z"},
+		"since off UTC":    {"op": "gate", "pid": 42, "since": "2026-10-13T07:58:14+23:59"},
 		"pid not a number": {"op": "gate", "pid": "42", "since": "2026-10-13T07:58:14Z"},
 	} {
 		if got := HolderText(h); got != "" {
