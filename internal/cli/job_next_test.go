@@ -62,9 +62,10 @@ func TestNextForJobErrors(t *testing.T) {
 			t.Errorf("%s: next = %+v, want %v", tc.name, next, tc.want)
 		}
 	}
-	a := &app{env: Env{Getenv: func(string) string { return "" }}}
-	if next := a.next(contract.New(contract.Locked, "x")); len(next) != 0 {
-		t.Errorf("a plain LOCKED offers nothing new: %+v", next)
+	// A plain LOCKED runs the same command again (F-29).
+	a := &app{env: Env{Getenv: func(string) string { return "" }}, args: []string{"sync"}}
+	if next := a.next(contract.New(contract.Locked, "x")); len(next) != 1 || !slices.Equal(next[0].Command, []string{"ghostbranch", "sync"}) {
+		t.Errorf("a plain LOCKED repeats the command: %+v", next)
 	}
 	// An interrupted promote --detach: wait on the job, then promote again
 	// without --detach, which reuses the green gate.
@@ -613,5 +614,23 @@ func TestNextAfterAStackPublish(t *testing.T) {
 	a.result = &engine.ApplyResult{PublicPR: 7, PRs: []plan.StackPR{{Feature: "feat-a", Number: 6}, {Feature: "feat-b", Number: 7}}}
 	if next = a.next(nil); len(next) != 1 || strings.Contains(next[0].Why, "merges them all") || !strings.Contains(next[0].Why, "#6 first") {
 		t.Fatalf("plain chain: next = %+v", next)
+	}
+}
+
+// F-29: next for a busy lock is the same command again, and says who holds
+// it. A LOCKED with a job keeps its wait step.
+func TestNextForLockedRunsTheCommandAgain(t *testing.T) {
+	t.Parallel()
+	a := testApp("sync", "sync", "--repo", "acme/widget")
+	err := contract.New(contract.Locked, "busy").WithDetails(map[string]any{
+		"held_by": map[string]any{"op": "gate", "pid": 13096, "since": "2026-10-13T07:58:14Z"}, "path": "/s/locks/acme__widget.lock"})
+	next := a.next(err)
+	if len(next) != 1 || !slices.Equal(next[0].Command, []string{"ghostbranch", "sync", "--repo", "acme/widget"}) || next[0].NeedsHuman ||
+		!strings.Contains(next[0].Why, "(gate, pid 13096, since 2026-10-13T07:58:14Z)") || !strings.Contains(next[0].Why, "wait") {
+		t.Fatalf("next = %+v", next)
+	}
+	err.Details["job"] = "gate/feat-x/0123456789ab"
+	if next = a.next(err); len(next) != 1 || next[0].Command[1] != "wait" {
+		t.Fatalf("with a job, next = %+v", next)
 	}
 }

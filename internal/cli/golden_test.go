@@ -20,6 +20,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
+	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
 var update = flag.Bool("update", false, "rewrite golden files")
@@ -41,6 +42,14 @@ var dataSchemas = map[string]string{
 
 var rootPath = regexp.MustCompile(`<ROOT>[^"]*`)
 
+// pidNumber and pidField are a process id in a LOCKED holder's message and
+// details; it differs per run. The field becomes the string "<PID>" so the
+// golden stays valid JSON.
+var (
+	pidNumber = regexp.MustCompile(`pid [0-9]+`)
+	pidField  = regexp.MustCompile(`"pid": [0-9]+`)
+)
+
 // normalize replaces the temp dir with <ROOT> and uses / in those paths, so
 // goldens match on every OS.
 func normalize(out, root string) string {
@@ -48,6 +57,8 @@ func normalize(out, root string) string {
 	out = strings.ReplaceAll(out, strings.Trim(string(esc), `"`), "<ROOT>")
 	out = strings.ReplaceAll(out, filepath.ToSlash(root), "<ROOT>")
 	out = rootPath.ReplaceAllStringFunc(out, func(s string) string { return strings.ReplaceAll(s, `\\`, "/") })
+	out = pidNumber.ReplaceAllString(out, "pid <PID>")
+	out = pidField.ReplaceAllString(out, `"pid": "<PID>"`)
 	return normalizeSHAs(out)
 }
 
@@ -364,6 +375,7 @@ jobs:
 				te.t.Fatal(err)
 			}
 		}, []string{"apply", "<GONE_PLAN>"}, contract.PlanNotFound.Exit()},
+		{"locked", func(te *testEnv) { initOnly(te); holdPairLock(te) }, []string{"sync"}, contract.Locked.Exit()},
 		{"pair_not_found", initOnly, []string{"agents", "status", "--repo", "acme/other"}, contract.PairNotFound.Exit()},
 		{"pair_ambiguous", twoPairs, []string{"status"}, contract.PairAmbiguous.Exit()},
 	}
@@ -503,6 +515,18 @@ func editConfig(te *testEnv, old, new string) {
 		te.t.Fatalf("config has no %q", old)
 	}
 	te.shadowCommit("ghostbranch", map[string]string{".ghostbranch.yml": strings.Replace(string(raw), old, new, 1)})
+}
+
+// holdPairLock takes acme/widget's pair lock as a gate started at the test
+// clock's time would, until the test ends.
+func holdPairLock(te *testEnv) {
+	te.t.Helper()
+	path := filepath.Join(te.vars["GHOSTBRANCH_HOME"], "workspaces", "default", "locks", "acme__widget.lock")
+	drop, err := workspace.Lock(path, time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC), "gate")
+	if err != nil {
+		te.t.Fatal(err)
+	}
+	te.t.Cleanup(drop)
 }
 
 // twoPairs registers acme/widget and acme/other, so a command with no

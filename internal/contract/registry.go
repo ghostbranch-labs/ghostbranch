@@ -88,7 +88,7 @@ var errorDocs = map[Code]Doc{
 		WhatToDo: "A person makes the shadow repo private (and not a fork) on GitHub.", NeedsHuman: true},
 	ConfigInvalid: {Summary: ".ghostbranch.yml on the overlay branch is missing or invalid, or the overlay branch holds non-overlay paths.",
 		WhatToDo: "A person fixes .ghostbranch.yml on the shadow repo's ghostbranch branch.", NeedsHuman: true},
-	Locked:   {Summary: "Another ghostbranch operation on this pair is running on this machine (error.details.held_by names it).", WhatToDo: "Wait for it to finish and retry. The lock frees itself when that process ends, even if it crashed; there is nothing to delete."},
+	Locked:   {Summary: "Another ghostbranch operation on this pair is running on this machine (error.details.held_by names it).", WhatToDo: "Wait a few seconds and run the command again (error.retryable is true; next repeats it, or waits on error.details.job). The lock frees itself when that process ends, even if it crashed; there is nothing to delete."},
 	Internal: {Summary: "An unexpected local failure.", WhatToDo: "Read the message; report it if it repeats."},
 	TokenCannotPublish: {Summary: "The token in use cannot push to the public repo.", Causes: []string{"the token is scoped to the shadow repo only (the strict-isolation setup)", "the token lacks Contents: write on the public repo"},
 		WhatToDo: "A person publishes from their own terminal with a token that can write to the public repo (`ghostbranch apply <plan>`).", NeedsHuman: true},

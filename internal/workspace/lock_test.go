@@ -225,3 +225,21 @@ func TestThePairLockIsOutsideThePairFolder(t *testing.T) {
 		t.Fatalf("LockPath %s is inside PairDir %s", w.LockPath(p), w.PairDir(p))
 	}
 }
+
+// F-29: a busy lock is transient, so LOCKED is retryable, and its message
+// names who holds it.
+func TestLockedIsRetryableAndNamesTheHolder(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "locks", "p.lock")
+	drop, err := workspace.Lock(path, time.Date(2026, 10, 13, 7, 58, 14, 0, time.UTC), "gate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer drop()
+	_, err = workspace.Lock(path, time.Now(), "sync")
+	ce := contract.From(err)
+	want := fmt.Sprintf("another ghostbranch operation (gate, pid %d, since 2026-10-13T07:58:14Z) holds the lock %s", os.Getpid(), path)
+	if ce == nil || ce.Code != contract.Locked || !ce.Retryable || ce.Message != want {
+		t.Fatalf("got %+v, want message %q", ce, want)
+	}
+}

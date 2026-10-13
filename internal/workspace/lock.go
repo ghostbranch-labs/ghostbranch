@@ -3,6 +3,7 @@ package workspace
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -27,8 +28,13 @@ func Lock(path string, now time.Time, op string) (func(), error) {
 	if err := lockFile(f); err != nil {
 		_ = f.Close()
 		if errors.Is(err, errBusy) {
-			return nil, contract.New(contract.Locked, "another ghostbranch operation holds the lock %s", path).
-				WithDetails(map[string]any{"held_by": holder(path), "path": path})
+			// Every busy OS lock is transient: its holder ends, or dies and
+			// the OS frees it (F-29).
+			h := holder(path)
+			ce := contract.New(contract.Locked, "%s", lockedMessage(path, h)).
+				WithDetails(map[string]any{"held_by": h, "path": path})
+			ce.Retryable = true
+			return nil, ce
 		}
 		return nil, err
 	}
@@ -43,6 +49,18 @@ func Lock(path string, now time.Time, op string) (func(), error) {
 }
 
 var errBusy = errors.New("lock busy")
+
+// lockedMessage names the lock's holder when its file says who: op, pid
+// and since all known. A holder that can't be read is left out.
+func lockedMessage(path string, h map[string]any) string {
+	op, _ := h["op"].(string)
+	pid, _ := h["pid"].(int)
+	since, _ := h["since"].(string)
+	if op == "" || pid == 0 || since == "" {
+		return "another ghostbranch operation holds the lock " + path
+	}
+	return fmt.Sprintf("another ghostbranch operation (%s, pid %d, since %s) holds the lock %s", op, pid, since, path)
+}
 
 // holder reads who holds the lock, best effort: a 5c-format or empty file
 // gives what it can.

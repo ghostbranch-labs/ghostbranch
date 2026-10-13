@@ -228,6 +228,16 @@ func (a *app) steps(err error) []contract.Next {
 				return []contract.Next{{Command: a.scoped("wait", job),
 					Why: "another ghostbranch command held the lock when the result was ready; wait records it"}}
 			}
+			who := "another ghostbranch command"
+			if h, _ := ce.Details["held_by"].(map[string]any); h != nil {
+				op, _ := h["op"].(string)
+				pid, _ := h["pid"].(int)
+				since, _ := h["since"].(string)
+				if op != "" && pid != 0 && since != "" {
+					who += " (" + op + ", pid " + strconv.Itoa(pid) + ", since " + since + ")"
+				}
+			}
+			return []contract.Next{{Command: a.again(false), Why: who + " holds the lock; wait a few seconds for it to end, then run this again"}}
 		case contract.FeatureMoved:
 			if f, _ := ce.Details["feature"].(string); f != "" {
 				why := "the feature changed while it was being closed and nothing was deleted; look at it again before closing it"
