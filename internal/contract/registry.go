@@ -99,7 +99,7 @@ var errorDocs = map[Code]Doc{
 		WhatToDo: "Publish features only with ghostbranch promote. Never bypass the hook with --no-verify."},
 	BadFlag:          {Summary: "A flag, argument or option value is invalid.", WhatToDo: "Fix the value named in error.field."},
 	MissingInput:     {Summary: "Required input is missing.", WhatToDo: "Pass the input named in error.field, for example --title or -m for promote."},
-	PairAmbiguous:    {Summary: "Ghostbranch cannot tell which repo pair to use.", WhatToDo: "Pass --repo owner/name, or --repo . inside a checkout of the public repo. If the pair isn't registered on this machine: ghostbranch init <public> --adopt when its shadow repo already exists, otherwise ghostbranch init <public>."},
+	PairAmbiguous:    {Summary: "Ghostbranch cannot tell which repo pair to use.", WhatToDo: "Pass --repo owner/name, or --repo . inside a checkout of the public repo."},
 	NameInvalid:      {Summary: "A feature or branch name is invalid or reserved.", WhatToDo: "Choose another name; main, HEAD and names starting with ghostbranch are reserved."},
 	FeatureNotFound:  {Summary: "No such feature in the shadow repo.", WhatToDo: "Check the name, or start it with ghostbranch feature start."},
 	NotAPairCheckout: {Summary: "This directory is not a checkout of a registered public repo.", WhatToDo: "Run the command inside a clone of the public repo, after ghostbranch init."},
@@ -195,6 +195,17 @@ var errorDocs = map[Code]Doc{
 			"adopted_missing: a preserve update would drop commits feature pull brought in from GitHub that the feature no longer has (error.details.foreign)",
 		},
 		WhatToDo: "Bring them into the feature with ghostbranch feature pull <feature>, then gate and promote again. They are already public, so the gate doesn't scan them again; it scans your commits as always. If feature pull can't replay them cleanly, it stops with the git steps to merge them in yourself. For unrecorded_update, run ghostbranch apply <error.details.plan> on the machine that made the plan: it finds the push landed and writes the record (never feature pull, which would copy Ghostbranch's own commits into the feature). For adopted_missing, cherry-pick the listed commits back onto the feature, push it to the shadow repo, then gate and promote again. Ghostbranch never resolves conflicts, and never overwrites commits made on GitHub. error.details.foreign lists each commit's sha, author and subject."},
+	PairNotFound: {Summary: "This repo isn't set up on this machine (in this workspace and GHOSTBRANCH_HOME); error.details.public names it.",
+		Causes:   []string{"it was set up on another machine, or under another GHOSTBRANCH_HOME or workspace", "it was never set up", "a typo in --repo"},
+		WhatToDo: "When its shadow repo already exists, run ghostbranch init <public> --adopt --plan (it only registers the pair here and checks the shadow repo); otherwise ghostbranch init <public> --plan creates one. next lists both, adopt first."},
+	NoOpenPR: {Summary: "feature pull brings in commits from a feature's open public PR, and this feature has none (error.details.reason).",
+		Causes: []string{"not_published: it was never published", "merged: its PR merged",
+			"closed: its PR was closed without merging", "branch_gone: its public branch is gone"},
+		WhatToDo: "Follow next: for not_published, promote <feature> --plan publishes it; for merged, sync closes the feature; for closed or branch_gone, a person decides whether to promote again (a new PR) or close the feature."},
+	PlanNotFound: {Summary: "No plan file with this ID is on this machine (error.details.reason).",
+		Causes: []string{"other_machine: the plan was made on another machine; the shadow repo has its ref, but plan files stay where they were made",
+			"unknown: no such plan here or in the shadow repo (a typo, or a plan from another workspace)"},
+		WhatToDo: "For other_machine, apply it on the machine that made it, or make a new plan here: next gives promote <error.details.feature> --plan when one feature's gate matches the plan. Otherwise run ghostbranch status and promote the feature you meant again."},
 }
 
 var warningDocs = map[WarningCode]Doc{

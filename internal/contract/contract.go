@@ -13,7 +13,7 @@ import (
 
 // SchemaVersion versions the envelope and every result and event schema. It
 // stays 0.x until launch, and 0.x versions may break.
-const SchemaVersion = "0.13"
+const SchemaVersion = "0.14"
 
 // RecordVersion versions what Ghostbranch stores: feature records, plans,
 // grants, waivers, workspace.json and the stored login. It moves only when a
@@ -158,6 +158,18 @@ const (
 	// details.foreign lists each commit as {sha, author, subject};
 	// details.feature and details.branch name where.
 	PRChangedOnGitHub Code = "PUBLIC_BRANCH_CHANGED"
+	// PairNotFound means the repo named (--repo, the checkout's remotes, or
+	// a plan) isn't set up in this workspace and GHOSTBRANCH_HOME.
+	// details.public names it when it can.
+	PairNotFound Code = "PAIR_NOT_FOUND"
+	// NoOpenPR means feature pull found no open public PR for the feature.
+	// details: feature, reason (not_published, merged, closed, branch_gone),
+	// public_pr once it was published.
+	NoOpenPR Code = "NO_OPEN_PR"
+	// PlanNotFound means no plan file with a well-formed ID is on this
+	// machine. details: plan, reason (other_machine, unknown), public and
+	// feature when known.
+	PlanNotFound Code = "PLAN_NOT_FOUND"
 )
 
 var exitCodes = map[Code]int{
@@ -190,6 +202,9 @@ var exitCodes = map[Code]int{
 	NotAStack:              ExitUsage,
 	ParentRewritten:        ExitConflict,
 	PRChangedOnGitHub:      ExitConflict,
+	PairNotFound:           ExitUsage,
+	NoOpenPR:               ExitUsage,
+	PlanNotFound:           ExitUsage,
 }
 
 // Exit is the process exit code for c.
