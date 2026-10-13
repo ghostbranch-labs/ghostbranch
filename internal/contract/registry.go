@@ -198,13 +198,13 @@ var errorDocs = map[Code]Doc{
 	PairNotFound: {Summary: "This repo isn't set up on this machine (in this workspace and GHOSTBRANCH_HOME); error.details.public names it.",
 		Causes:   []string{"it was set up on another machine, or under another GHOSTBRANCH_HOME or workspace", "it was never set up", "a typo in --repo"},
 		WhatToDo: "When its shadow repo already exists, run ghostbranch init <public> --adopt --plan (it only registers the pair here and checks the shadow repo); otherwise ghostbranch init <public> --plan creates one. next lists both, adopt first."},
-	NoOpenPR: {Summary: "feature pull brings in commits from a feature's open public PR, and this feature has none (error.details.reason).",
+	NoOpenPR: {Summary: "feature pull brings in commits from a feature's open public PR, and this feature (error.details.feature) has none (error.details.reason; error.details.public_pr once it was published).",
 		Causes: []string{"not_published: it was never published", "merged: its PR merged",
 			"closed: its PR was closed without merging", "branch_gone: its public branch is gone"},
-		WhatToDo: "Follow next: for not_published, promote <feature> --plan publishes it; for merged, sync closes the feature; for closed or branch_gone, a person decides whether to promote again (a new PR) or close the feature."},
-	PlanNotFound: {Summary: "No plan file with this ID is on this machine (error.details.reason).",
-		Causes: []string{"other_machine: the plan was made on another machine; the shadow repo has its ref, but plan files stay where they were made",
-			"unknown: no such plan here or in the shadow repo (a typo, or a plan from another workspace)"},
+		WhatToDo: "Follow next: for not_published, promote <feature> --plan publishes it, or, when error.details.plan is set (that plan's publish reached GitHub but was never recorded), apply <plan> finishes the record; for merged, sync closes the feature; for closed or branch_gone, a person decides whether to promote again (a new PR) or close the feature."},
+	PlanNotFound: {Summary: "No plan file with this ID (error.details.plan) is on this machine (error.details.reason; error.details.public names the pair looked in, when one was found).",
+		Causes: []string{"other_machine: the plan was made on another machine, or in another workspace or GHOSTBRANCH_HOME with the same shadow repo; the shadow repo has its ref, but plan files stay where they were made",
+			"unknown: no such plan here or in the shadow repo (a typo, or a plan for another shadow repo)"},
 		WhatToDo: "For other_machine, apply it on the machine that made it, or make a new plan here: next gives promote <error.details.feature> --plan when one feature's gate matches the plan. Otherwise run ghostbranch status and promote the feature you meant again."},
 }
 

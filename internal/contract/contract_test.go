@@ -688,3 +688,30 @@ func TestSubProject63bCodesAreRegistered(t *testing.T) {
 		t.Errorf("PLAN_NOT_FOUND causes = %q", es[0].Causes)
 	}
 }
+
+// Review M5: every details key the three codes carry is documented where
+// explain and the guide read it. Review M4: other_machine also covers a
+// plan made in another workspace or GHOSTBRANCH_HOME with this shadow repo.
+func TestSubProject63bDetailsAreDocumented(t *testing.T) {
+	t.Parallel()
+	for code, keys := range map[string][]string{
+		"PAIR_NOT_FOUND": {"error.details.public"},
+		"NO_OPEN_PR":     {"error.details.reason", "error.details.feature", "error.details.public_pr", "error.details.plan"},
+		"PLAN_NOT_FOUND": {"error.details.reason", "error.details.plan", "error.details.public", "error.details.feature"},
+	} {
+		es, err := contract.Explain(code)
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := es[0].Summary + " " + es[0].WhatToDo
+		for _, k := range keys {
+			if !strings.Contains(text, k) {
+				t.Errorf("%s doesn't document %s: %q", code, k, text)
+			}
+		}
+	}
+	es, _ := contract.Explain("PLAN_NOT_FOUND")
+	if !strings.Contains(es[0].Causes[0], "another workspace or GHOSTBRANCH_HOME") || strings.Contains(es[0].Causes[1], "another workspace") {
+		t.Errorf("PLAN_NOT_FOUND causes = %q", es[0].Causes)
+	}
+}
