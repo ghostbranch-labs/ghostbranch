@@ -8,13 +8,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
-	"github.com/ghostbranch-labs/ghostbranch/internal/plan"
 	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
@@ -179,16 +177,6 @@ func (e *Engine) noOpenPR(ctx context.Context, pc *pairCtx, m feature.Meta, name
 			WithField("feature").WithDetails(d)
 	}
 	if m.Promoted == nil || m.Promoted.PublicPR == 0 {
-		// The record says unpublished; a publish whose record was never
-		// written still left its branch and plan ref (review M1).
-		id, err := e.unrecordedPublish(ctx, pc, m)
-		if err != nil {
-			return err
-		}
-		if id != "" {
-			d["plan"] = id
-			return none("not_published", fmt.Sprintf("it isn't recorded as published, but plan %s's publish is on its public branch: apply %s finishes the record", id, id))
-		}
 		return none("not_published", "it was never published")
 	}
 	n := m.Promoted.PublicPR
@@ -212,36 +200,6 @@ func (e *Engine) noOpenPR(ctx context.Context, pc *pairCtx, m feature.Meta, name
 	// Open, with its branch, a moment after prHead saw otherwise: it changed
 	// while this ran.
 	return contract.New(contract.RefMoved, "public PR #%d of %s changed while feature pull read it; run it again", n, name)
-}
-
-// unrecordedPublish is the plan whose publish of m reached its public
-// branch though m's record was never written (apply stopped between the
-// push and the record): the oldest plan ref holding the branch's head. ""
-// when the branch isn't there or no plan holds it.
-func (e *Engine) unrecordedPublish(ctx context.Context, pc *pairCtx, m feature.Meta) (string, error) {
-	branch := publishedBranch(m)
-	head, ok, err := pc.git.Resolve(ctx, publicRef(branch))
-	if err != nil {
-		return "", internalErr(err, "read public branch "+branch)
-	}
-	if !ok {
-		return "", nil
-	}
-	out, err := pc.git.Run(ctx, "for-each-ref", "--contains", head, "--format=%(refname)", planRef(""))
-	if err != nil {
-		return "", internalErr(err, "list the plans holding public branch "+branch)
-	}
-	var ids []string
-	for _, ref := range strings.Split(out, "\n") {
-		if id := strings.TrimPrefix(ref, planRef("")); id != ref && plan.ValidID(id) {
-			ids = append(ids, id)
-		}
-	}
-	if len(ids) == 0 {
-		return "", nil
-	}
-	slices.Sort(ids) // plan ids start with their UTC time: oldest first
-	return ids[0], nil
 }
 
 // pullHead is the feature head that holds the PR's commits (u), and the

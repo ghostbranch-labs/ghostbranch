@@ -635,7 +635,7 @@ func TestNextForLockedRunsTheCommandAgain(t *testing.T) {
 	}
 }
 
-// F-14, review M1 and M6(b): next after NO_OPEN_PR for every reason.
+// F-14 and review M6(b): next after NO_OPEN_PR for every reason.
 func TestNextForNoOpenPRByReason(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -646,8 +646,6 @@ func TestNextForNoOpenPRByReason(t *testing.T) {
 	}{
 		{"not published", map[string]any{"feature": "feat-x", "reason": "not_published"},
 			[]string{"ghostbranch", "promote", "feat-x", "--plan", "--repo", "acme/widget"}, false},
-		{"publish not recorded", map[string]any{"feature": "feat-x", "reason": "not_published", "plan": "20261005T120000Z-0a0b0c"},
-			[]string{"ghostbranch", "apply", "20261005T120000Z-0a0b0c"}, true},
 		{"merged", map[string]any{"feature": "feat-x", "reason": "merged", "public_pr": 3},
 			[]string{"ghostbranch", "sync", "--repo", "acme/widget"}, false},
 		{"closed", map[string]any{"feature": "feat-x", "reason": "closed", "public_pr": 3},

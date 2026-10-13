@@ -696,7 +696,7 @@ func TestSubProject63bDetailsAreDocumented(t *testing.T) {
 	t.Parallel()
 	for code, keys := range map[string][]string{
 		"PAIR_NOT_FOUND": {"error.details.public"},
-		"NO_OPEN_PR":     {"error.details.reason", "error.details.feature", "error.details.public_pr", "error.details.plan"},
+		"NO_OPEN_PR":     {"error.details.reason", "error.details.feature", "error.details.public_pr"},
 		"PLAN_NOT_FOUND": {"error.details.reason", "error.details.plan", "error.details.public", "error.details.feature"},
 	} {
 		es, err := contract.Explain(code)
@@ -709,6 +709,10 @@ func TestSubProject63bDetailsAreDocumented(t *testing.T) {
 				t.Errorf("%s doesn't document %s: %q", code, k, text)
 			}
 		}
+	}
+	// NO_OPEN_PR carries only spec § 4.3's keys (re-review N1, N3).
+	if es, _ := contract.Explain("NO_OPEN_PR"); strings.Contains(es[0].Summary+es[0].WhatToDo, "details.plan") {
+		t.Errorf("NO_OPEN_PR documents a plan: %+v", es[0])
 	}
 	es, _ := contract.Explain("PLAN_NOT_FOUND")
 	if !strings.Contains(es[0].Causes[0], "another workspace or GHOSTBRANCH_HOME") || strings.Contains(es[0].Causes[1], "another workspace") {

@@ -349,18 +349,19 @@ func TestPullWithoutOpenPRNeverGuessesFromAFailedRead(t *testing.T) {
 	}
 }
 
-// Review M1: apply pushed the branch and opened the PR but never wrote the
-// record. The reason stays not_published (the record says so), but the
-// error names the plan whose apply finishes the record, not a new promote.
-func TestPullWithoutOpenPRNamesAnUnrecordedPublish(t *testing.T) {
+// Spec § 4.3: a feature whose record says unpublished is not_published,
+// with exactly {feature, reason}, even when a public branch of its name
+// holds a plan's commits. No plan is guessed from the branch: it could be
+// another feature's (re-review N1), and apply of it would publish that one.
+func TestPullWithoutOpenPRNeverNamesAPlan(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	h.init()
-	_, id := h.publish("a")
+	h.publish("a")
 	h.editRemoteMeta("a", func(m *feature.Meta) { m.Promoted = nil })
 	_, err := h.pull("a")
 	ce := wantCode(t, err, contract.NoOpenPR)
-	if ce.Details["reason"] != "not_published" || ce.Details["plan"] != id || !strings.Contains(ce.Message, "apply "+id) {
+	if !reflect.DeepEqual(ce.Details, map[string]any{"feature": "a", "reason": "not_published"}) || strings.Contains(ce.Message, "apply") {
 		t.Fatalf("error = %+v", ce)
 	}
 }
