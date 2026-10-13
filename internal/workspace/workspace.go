@@ -96,7 +96,7 @@ func Open(home, name string) (*Workspace, error) {
 
 // Save writes workspace.json atomically.
 func (w *Workspace) Save() error {
-	if err := os.MkdirAll(w.Dir, 0o755); err != nil {
+	if err := os.MkdirAll(w.Dir, 0o700); err != nil {
 		return err
 	}
 	pairs := w.Pairs
@@ -108,7 +108,7 @@ func (w *Workspace) Save() error {
 		return err
 	}
 	tmp := filepath.Join(w.Dir, "workspace.json.tmp")
-	if err := os.WriteFile(tmp, append(b, '\n'), 0o644); err != nil {
+	if err := os.WriteFile(tmp, append(b, '\n'), 0o600); err != nil {
 		return err
 	}
 	return os.Rename(tmp, filepath.Join(w.Dir, "workspace.json"))
