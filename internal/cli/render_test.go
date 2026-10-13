@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/cli/style"
+	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/plan"
 	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
@@ -190,10 +191,28 @@ func TestRestackPlanOtherStopNeverClaimsAConflict(t *testing.T) {
 func TestWithoutNothingAfterAnError(t *testing.T) {
 	t.Parallel()
 	out := "Dry run; nothing was changed. This would:\n" + nothingLine
-	if got := withoutNothing(out, true); strings.Contains(got, "(nothing)") {
+	// No header left dangling over an empty list either.
+	if got := withoutNothing(out, true); got != "Dry run; nothing was changed.\n" {
 		t.Fatalf("failed: %q", got)
 	}
 	if got := withoutNothing(out, false); got != out {
 		t.Fatalf("succeeded: %q", got)
+	}
+}
+
+// render applies the guard: a failed command whose result carries an empty
+// preview prints neither "(nothing)" nor a dangling "This would:".
+func TestRenderOfAFailedDryRunNeverSaysNothing(t *testing.T) {
+	t.Parallel()
+	var out, errOut strings.Builder
+	a := &app{env: Env{Stdout: &out, Stderr: &errOut, Getenv: func(string) string { return "" }}, command: "feature restack",
+		result: &engine.RestackResult{Feature: "feat-x", Restacked: []engine.RestackedBranch{}, Pending: []string{},
+			Preview: preview.New(map[string]string{})}}
+	a.render(contract.New(contract.Internal, "git went away"))
+	if got := out.String(); strings.Contains(got, "(nothing)") || strings.Contains(got, "This would:") {
+		t.Fatalf("stdout: %q", got)
+	}
+	if !strings.Contains(errOut.String(), "[INTERNAL]") {
+		t.Fatalf("stderr: %q", errOut.String())
 	}
 }

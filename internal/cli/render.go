@@ -63,11 +63,12 @@ func previewText(b *strings.Builder, p *preview.Preview) {
 }
 
 // withoutNothing drops nothingLine from a result's text when the command
-// failed.
+// failed, with the "This would:" header above it, so no empty list dangles.
 func withoutNothing(out string, failed bool) string {
 	if !failed {
 		return out
 	}
+	out = strings.ReplaceAll(out, " This would:\n"+nothingLine, "\n")
 	return strings.ReplaceAll(out, nothingLine, "")
 }
 
