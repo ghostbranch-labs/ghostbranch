@@ -599,21 +599,46 @@ func TestNextForUpdates(t *testing.T) {
 	}
 }
 
-// After a stack publish, next says merging the top PR merges them all.
+// F-16/F-31 (R11): after a stack publish, next says how a maintainer
+// merges the stack (the bottom PR's page, or merge-async on the top PR)
+// and, for a history worth keeping, not to squash it. A single PR's text
+// is unchanged (decision 5).
 func TestNextAfterAStackPublish(t *testing.T) {
 	t.Parallel()
 	a := testApp("apply", "apply")
 	stack := 3
-	a.result = &engine.ApplyResult{PublicPR: 7, StackNumber: &stack, PRs: []plan.StackPR{{Feature: "feat-a", Number: 6}, {Feature: "feat-b", Number: 7}}}
-	next := a.next(nil)
-	if len(next) != 1 || !slices.Equal(next[0].Command, []string{"ghostbranch", "sync", "--repo", "acme/widget"}) ||
-		!strings.Contains(next[0].Why, "#7") || !strings.Contains(next[0].Why, "merges them all") {
-		t.Fatalf("next = %+v", next)
+	prs := []plan.StackPR{{Feature: "feat-a", Number: 6}, {Feature: "feat-b", Number: 7}}
+	whyFor := func(r *engine.ApplyResult) string {
+		t.Helper()
+		a.result = r
+		next := a.next(nil)
+		if len(next) != 1 || !slices.Equal(next[0].Command, []string{"ghostbranch", "sync", "--repo", "acme/widget"}) {
+			t.Fatalf("next = %+v", next)
+		}
+		return next[0].Why
 	}
-	// Plain chained PRs (no native stack) merge one by one, bottom first.
-	a.result = &engine.ApplyResult{PublicPR: 7, PRs: []plan.StackPR{{Feature: "feat-a", Number: 6}, {Feature: "feat-b", Number: 7}}}
-	if next = a.next(nil); len(next) != 1 || strings.Contains(next[0].Why, "merges them all") || !strings.Contains(next[0].Why, "#6 first") {
-		t.Fatalf("plain chain: next = %+v", next)
+	w := whyFor(&engine.ApplyResult{PublicPR: 7, StackNumber: &stack, PRs: prs, KeepsHistory: true, PublicRepo: "acme/widget"})
+	for _, s := range []string{"on the bottom PR's page (#6), the merge button merges the whole stack", `Choose "Create a merge commit"`,
+		"`gh api -X PUT repos/acme/widget/pulls/7/merge-async -f merge_method=merge`", "Then sync closes the merged features"} {
+		if !strings.Contains(w, s) {
+			t.Errorf("native preserve stack: %q lacks %q", w, s)
+		}
+	}
+	if strings.Contains(w, "top PR's page") || strings.Contains(w, "merges them all") {
+		t.Errorf("native preserve stack: %q claims the top PR's page", w)
+	}
+	// An all-squash stack loses nothing to a squash.
+	if w = whyFor(&engine.ApplyResult{PublicPR: 7, StackNumber: &stack, PRs: prs, PublicRepo: "acme/widget"}); strings.Contains(w, "Create a merge commit") || !strings.Contains(w, "merge-async") {
+		t.Errorf("all-squash stack: %q", w)
+	}
+	// Plain chained PRs merge one by one, bottom first, and not by squash.
+	if w = whyFor(&engine.ApplyResult{PublicPR: 7, PRs: prs, KeepsHistory: true}); !strings.Contains(w, "#6 first") ||
+		!strings.Contains(w, "with a merge commit or a rebase, not a squash") || strings.Contains(w, "merge-async") {
+		t.Errorf("chained preserve: %q", w)
+	}
+	// A single PR: unchanged.
+	if w = whyFor(&engine.ApplyResult{PublicPR: 7, PRs: prs[1:], KeepsHistory: true}); w != "a maintainer reviews and merges PR #7 on GitHub; then sync closes the feature" {
+		t.Errorf("single PR: %q", w)
 	}
 }
 

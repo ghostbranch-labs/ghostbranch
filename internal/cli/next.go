@@ -729,14 +729,28 @@ func (a *app) steps(err error) []contract.Next {
 
 // mergedThenSync is the step after a publish or an update: a maintainer
 // merges on GitHub, then sync closes what merged. A native stack merges
-// whole from its top PR; plain chained PRs merge one by one, bottom first.
+// whole, from its bottom PR's page (as observed, R11) or through
+// merge-async on its top PR; plain chained PRs merge one by one, bottom
+// first. A history worth keeping must not be squashed (F-31); a single
+// PR's text is unchanged (decision 5).
 func (a *app) mergedThenSync(r *engine.ApplyResult) contract.Next {
 	why := "a maintainer reviews and merges PR #" + strconv.Itoa(r.PublicPR) + " on GitHub; then sync closes the feature"
 	switch {
 	case len(r.PRs) > 1 && r.StackNumber != nil:
-		why = "a maintainer reviews and merges the stack on GitHub (merging its top PR, #" + strconv.Itoa(r.PublicPR) + ", merges them all); then sync closes the merged features and moves any branch above onto main"
+		why = "A maintainer merges the stack on GitHub: on the bottom PR's page (#" + strconv.Itoa(r.PRs[0].Number) + "), the merge button merges the whole stack."
+		if r.KeepsHistory {
+			why += ` Choose "Create a merge commit": "Squash and merge" turns each PR into one commit and drops the history this stack was published with.`
+		}
+		pub := cmp.Or(r.PublicRepo, a.pairFull.Public)
+		why += " From a terminal, `gh pr merge` can't merge a stack; the API route is merge-async on the top PR: `gh api -X PUT repos/" + pub + "/pulls/" +
+			strconv.Itoa(r.PublicPR) + "/merge-async -f merge_method=merge`. Then sync closes the merged features and moves any branch above onto main."
 	case len(r.PRs) > 1:
-		why = "a maintainer reviews and merges the PRs on GitHub from the bottom up (#" + strconv.Itoa(r.PRs[0].Number) + " first, each into main); then sync closes each merged feature and moves the branches above it onto main"
+		how := ""
+		if r.KeepsHistory {
+			how = ", with a merge commit or a rebase, not a squash"
+		}
+		why = "a maintainer reviews and merges the PRs on GitHub from the bottom up (#" + strconv.Itoa(r.PRs[0].Number) + " first, each into main" + how +
+			"); then sync closes each merged feature and moves the branches above it onto main"
 	}
 	return contract.Next{Command: a.scoped("sync"), Why: why}
 }
