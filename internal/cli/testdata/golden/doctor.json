@@ -89,7 +89,7 @@
       {
         "id": "state",
         "status": "ok",
-        "message": "workspace \"default\"; the records are readable, none is newer than this binary, and no gate job has been pending for over an hour",
+        "message": "workspace \"default\"; the records are readable, none is newer than this binary, and no gate job has been pending for over an hour; its state directories are private to you",
         "fix": "",
         "details": {
           "dir": "<ROOT>/home/workspaces/default",

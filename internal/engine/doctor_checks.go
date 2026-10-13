@@ -596,7 +596,17 @@ func (d *doctorRun) state(ctx context.Context) DoctorCheck {
 			}
 		}
 	}
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS == "windows" {
+		if msg, fix := windowsHomeWarning(d.opt.Getenv); msg != "" {
+			v.add(DoctorWarn, msg, fix...)
+		}
+	} else {
+		if dirs := looseDirs(e.WS); len(dirs) > 0 {
+			pairs := filepath.Join(e.WS.Dir, "pairs")
+			v.add(DoctorWarn, "other users on this machine can open "+strings.Join(dirs, ", ")+
+				"; any writing ghostbranch command makes the ones under "+e.WS.Home()+" private, or run chmod 700 on each (and chmod -R go-rwx "+pairs+" for the local mirror's files)",
+				append([]string{"chmod", "700"}, dirs...)...)
+		}
 		paths := []string{e.WS.LedgerPath(), e.WS.GrantsPath(), e.WS.WaiversPath()}
 		plans, _ := filepath.Glob(filepath.Join(e.WS.PlansDir(), "*.json"))
 		var loose []string
@@ -609,7 +619,54 @@ func (d *doctorRun) state(ctx context.Context) DoctorCheck {
 			v.add(DoctorWarn, "other users on this machine can read "+strings.Join(loose, ", "), append([]string{"chmod", "600"}, loose...)...)
 		}
 	}
+	tail += "; its state directories are private to you"
 	return v.result(fmt.Sprintf("workspace %q", e.WS.Name), tail, det)
+}
+
+// looseDirs are the state directories other users can open: the home, its
+// workspaces folder, the workspace and its pairs folder (F-28). Doctor only
+// reports them; a writing command tightens every one but the home.
+func looseDirs(w *workspace.Workspace) []string {
+	var out []string
+	for _, d := range []string{w.Home(), filepath.Join(w.Home(), "workspaces"), w.Dir, filepath.Join(w.Dir, "pairs")} {
+		if fi, err := os.Stat(d); err == nil && fi.Mode().Perm()&0o077 != 0 {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// windowsHomeWarning is doctor's warning for a GHOSTBRANCH_HOME outside the
+// user's profile on Windows: a folder on another drive inherits that
+// drive's ACL, which often lets every local user read it. The default home
+// (%LOCALAPPDATA%) and any folder under %USERPROFILE% inherit the
+// profile's private ACL. Ghostbranch never changes an ACL (decision 3); the
+// fix is a line the person runs. "" when there is nothing to say, or when
+// USERPROFILE is unknown.
+func windowsHomeWarning(getenv func(string) string) (string, []string) {
+	home, profile := getenv("GHOSTBRANCH_HOME"), getenv("USERPROFILE")
+	if home == "" || profile == "" || underDir(home, profile) {
+		return "", nil
+	}
+	msg := "GHOSTBRANCH_HOME=" + home + " is outside your profile (" + profile +
+		"), so it may inherit a drive ACL that lets other users on this machine read it; move it under your profile"
+	user := getenv("USERNAME")
+	if user == "" {
+		return msg, nil
+	}
+	if dom := getenv("USERDOMAIN"); dom != "" {
+		user = dom + `\` + user
+	}
+	grant := user + ":(OI)(CI)F"
+	return msg + `, or run: icacls "` + home + `" /inheritance:r /grant:r "` + grant + `"`,
+		[]string{"icacls", home, "/inheritance:r", "/grant:r", grant}
+}
+
+// underDir reports whether path is dir or inside it, ignoring case as
+// Windows paths do.
+func underDir(path, dir string) bool {
+	p, d := strings.ToLower(filepath.Clean(path)), strings.ToLower(filepath.Clean(dir))
+	return p == d || strings.HasPrefix(p, strings.TrimRight(d, `\/`)+string(filepath.Separator))
 }
 
 func (d *doctorRun) ci(ctx context.Context) DoctorCheck {
