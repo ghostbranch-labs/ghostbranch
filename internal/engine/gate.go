@@ -61,9 +61,12 @@ type GateResult struct {
 	// to it, which a promote of the stack lists. Both are empty, and Parent
 	// is "", for a feature with neither a parent nor children; a bottom
 	// feature with children has Parent "main" (stackView).
-	Children []string         `json:"children,omitempty"`
-	Chain    []string         `json:"chain,omitempty"`
-	Preview  *preview.Preview `json:"preview"`
+	Children []string `json:"children,omitempty"`
+	Chain    []string `json:"chain,omitempty"`
+	// Ready is the stack's readiness after a passing gate (F-12), for next;
+	// empty for a feature on its own and for any other result.
+	Ready   StackReadiness   `json:"-"`
+	Preview *preview.Preview `json:"preview"`
 	// Update is how the gate built the update of the feature's open PR
 	// (append onto its head, or replace); absent for a first publish.
 	Update *feature.GateUpdate `json:"update,omitempty"`
@@ -613,6 +616,9 @@ func (e *Engine) stackView(ctx context.Context, pc *pairCtx, res *GateResult) {
 		p = stackParent(pr.meta)
 	}
 	res.Parent, res.Children, res.Chain = parent, kids, chain
+	if res.Preview == nil && res.Checks == feature.ChecksPassed && res.Leak == feature.LeakClean {
+		res.Ready = e.readiness(ctx, pc, recs, res, chain, kids)
+	}
 }
 
 // gateRecord is the metadata record of res's gate, stamped now.
