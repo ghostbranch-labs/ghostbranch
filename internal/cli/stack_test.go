@@ -175,3 +175,18 @@ func TestRestackPlanThatStopsOnAConflictSaysWhere(t *testing.T) {
 		t.Fatalf("exit %d\nstdout: %s\nstderr: %s", code, out, errOut)
 	}
 }
+
+// F-13 with --onto: moving a feature onto another one it conflicts with
+// says, in the dry run, where it would stop.
+func TestRestackOntoPlanThatStopsOnAConflictSaysWhere(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	withFeature(te)
+	te.mustRun("feature", "start", "feat-z")
+	te.shadowCommit("feat-z", map[string]string{"feature.txt": "from z\n"})
+	code, out, errOut := te.run("feature", "restack", "feat-x", "--onto", "feat-z", "--plan")
+	if code != contract.RebaseConflict.Exit() || strings.Contains(out, "(nothing)") ||
+		!strings.Contains(out, "It would stop at feat-x: it doesn't restack cleanly") || !strings.Contains(errOut, "[REBASE_CONFLICT]") {
+		t.Fatalf("exit %d\nstdout: %s\nstderr: %s", code, out, errOut)
+	}
+}
