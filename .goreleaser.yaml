@@ -78,14 +78,20 @@ release:
     owner: ghostbranch-labs
     name: ghostbranch
   draft: true
+  # A re-run of the release job replaces its own draft and files instead of
+  # adding a second draft for the same tag.
+  replace_existing_draft: true
+  replace_existing_artifacts: true
   prerelease: auto
 
 changelog:
   use: git
   sort: asc
+  abbrev: 7
   filters:
     exclude:
-      - '^(docs|test|style|ci|chore|build)(\(.+\))?!?:'
+      - '^(docs|test|style|ci|chore|build|ops|refactor)(\(.+\))?!?:'
+      - '^Merge'
   groups:
     - title: Features
       regexp: '^feat(\(.+\))?!?:'
