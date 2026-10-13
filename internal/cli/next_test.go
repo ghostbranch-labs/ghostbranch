@@ -1255,7 +1255,7 @@ func TestListingsWithoutRepoWorkInAnEmptyWorkspace(t *testing.T) {
 func TestNextAfterPairNotFoundRuns(t *testing.T) {
 	t.Parallel()
 	te := newTestEnv(t)
-	initOnly(te)                                                    // the pair exists on GitHub ...
+	initOnly(te)                                                   // the pair exists on GitHub ...
 	te.vars["GHOSTBRANCH_HOME"] = filepath.Join(te.root, "home-2") // ... but not in this home
 	code, env := te.runJSON("gate", "feat-x", "--repo", "acme/widget")
 	if e, _ := env["error"].(map[string]any); code != 2 || e["code"] != "PAIR_NOT_FOUND" {
