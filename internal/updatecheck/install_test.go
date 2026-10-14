@@ -106,13 +106,13 @@ func TestUpgradeCommandPerNPMManager(t *testing.T) {
 		`C:\Users\Ana\AppData\Roaming\fnm\node-versions\v22.11.0\installation\node_modules\@ghostbranch\cli-win32-x64\bin\ghostbranch.exe`: "npm update -g ghostbranch",
 		// npm hoists the platform package next to ghostbranch in the global folder
 		`C:\Users\Ana\AppData\Roaming\npm\node_modules\@ghostbranch\cli-win32-x64\bin\ghostbranch.exe`: "npm update -g ghostbranch",
-		// a project's dependency: no -g
-		"/home/ana/src/app/node_modules/@ghostbranch/cli-linux-x64/bin/ghostbranch": "npm update ghostbranch",
-		`D:\work\app\node_modules\@ghostbranch\cli-win32-x64\bin\ghostbranch.exe`:   "npm update ghostbranch",
+		// a project's dependency: no -g, and @latest so a 0.x minor release (outside ^0.y.z) upgrades
+		"/home/ana/src/app/node_modules/@ghostbranch/cli-linux-x64/bin/ghostbranch": "npm install ghostbranch@latest",
+		`D:\work\app\node_modules\@ghostbranch\cli-win32-x64\bin\ghostbranch.exe`:   "npm install ghostbranch@latest",
 		// pnpm: the global store, or a project's .pnpm folder
 		"/home/ana/.local/share/pnpm/global/5/node_modules/.pnpm/@ghostbranch+cli-linux-x64@0.1.0/node_modules/@ghostbranch/cli-linux-x64/bin/ghostbranch":         "pnpm update -g ghostbranch",
 		`C:\Users\Ana\AppData\Local\pnpm\global\5\node_modules\.pnpm\@ghostbranch+cli-win32-x64@0.1.0\node_modules\@ghostbranch\cli-win32-x64\bin\ghostbranch.exe`: "pnpm update -g ghostbranch",
-		"/home/ana/src/app/node_modules/.pnpm/@ghostbranch+cli-linux-x64@0.1.0/node_modules/@ghostbranch/cli-linux-x64/bin/ghostbranch":                            "pnpm update ghostbranch",
+		"/home/ana/src/app/node_modules/.pnpm/@ghostbranch+cli-linux-x64@0.1.0/node_modules/@ghostbranch/cli-linux-x64/bin/ghostbranch":                            "pnpm add ghostbranch@latest",
 		// Volta, on Unix and Windows
 		"/home/ana/.volta/tools/image/packages/ghostbranch/lib/node_modules/ghostbranch/node_modules/@ghostbranch/cli-linux-x64/bin/ghostbranch":                 "volta install ghostbranch",
 		`C:\Users\Ana\AppData\Local\Volta\tools\image\packages\ghostbranch\node_modules\ghostbranch\node_modules\@ghostbranch\cli-win32-x64\bin\ghostbranch.exe`: "volta install ghostbranch",

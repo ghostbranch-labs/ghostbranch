@@ -94,7 +94,9 @@ func UpgradeCommand(exe string, env InstallEnv, releasePage string) string {
 // npmCommand is the upgrade command for a binary under node_modules, by the
 // package manager that put it there. npx, Volta, bun, pnpm and yarn are
 // told apart by their folders; then a global npm install, and last a
-// project's own node_modules, which upgrades without -g.
+// project's own node_modules, which upgrades without -g. A project install
+// asks for @latest: "update" stays inside package.json's range, and ^0.y.z
+// never reaches the next 0.x minor release.
 func npmCommand(p string) string {
 	switch {
 	case strings.Contains(p, "/_npx/"):
@@ -106,13 +108,13 @@ func npmCommand(p string) string {
 	case strings.Contains(p, "/pnpm/global/"):
 		return "pnpm update -g " + NPMPackage
 	case strings.Contains(p, "/.pnpm/"):
-		return "pnpm update " + NPMPackage
+		return "pnpm add " + NPMPackage + "@latest"
 	case strings.Contains(p, "/yarn/global/"), strings.Contains(p, "/yarn/data/global/"):
 		return "yarn global upgrade " + NPMPackage
 	case npmGlobal(p):
 		return "npm update -g " + NPMPackage
 	}
-	return "npm update " + NPMPackage
+	return "npm install " + NPMPackage + "@latest"
 }
 
 // npmGlobal reports whether p's first node_modules is npm's global one. npm
