@@ -183,7 +183,9 @@ func ArchiveRef(name string) string { return ArchiveRefPrefix + name }
 
 // Archived records a feature handed off to the public repo: its shadow
 // branch was moved to Ref, at Head, at At. Its PR is fixed by pushing to
-// the PR's branch; promote, gate and feature pull refuse it.
+// the PR's branch. promote, gate, feature pull and waivers add refuse it,
+// and so do feature start --from and feature restack --onto: nothing is
+// stacked on it.
 type Archived struct {
 	At   time.Time `json:"at"`
 	Ref  string    `json:"ref"`
