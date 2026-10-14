@@ -159,3 +159,18 @@ test("build checks each archive against checksums.txt before packing", (t) => {
     assert.throws(() => statSync(out), /ENOENT/, `${what}: build wrote packages before failing`);
   }
 });
+
+test("build takes only a release's version shapes", (t) => {
+  const dir = fixture();
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  // Refused at the version check, before any archive is read.
+  for (const v of ["1.2", "1.2.3-beta", "1.2.3-rc", "1.2.3-rc.1.2", "1.2.3+abc", "1.2.3-rc.1+abc", "1.2.3-devel", "1.2.3-devel+", "1.2.3-devel+xyz", "01.2.3", "v1.2.3.4"]) {
+    assert.throws(() => build({ version: v, assets: dir, out: join(dir, "o"), root: dir }), /isn't X\.Y\.Z, X\.Y\.Z-rc\.N or a snapshot's X\.Y\.Z-devel\+<sha>/, v);
+  }
+  // Accepted: they get past the version check to the archives, which this
+  // fixture has only for 1.2.3.
+  for (const v of ["1.2.3", "v1.2.3"]) assert.ok(build({ version: v, assets: dir, out: join(dir, `o-${v}`), root: dir }).length === 6, v);
+  for (const v of ["1.2.3-rc.1", "v0.1.0-rc.12", "0.0.1-devel+b4051d7"]) {
+    assert.throws(() => build({ version: v, assets: dir, out: join(dir, "o"), root: dir }), /ENOENT/, v);
+  }
+});

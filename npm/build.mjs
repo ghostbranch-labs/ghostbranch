@@ -22,7 +22,9 @@ export const PLATFORMS = [
   { npm: "win32-x64", os: "win32", cpu: "x64", target: "windows_amd64", ext: ".zip", bin: "ghostbranch.exe" },
 ];
 
-const VERSION = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/;
+// VERSION is a release's version (R8: X.Y.Z or X.Y.Z-rc.N), or the snapshot
+// version ci.yml builds (X.Y.Z-devel+<short commit>), which is never published.
+const VERSION = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.[0-9]+|-devel\+[0-9a-f]+)?$/;
 
 // fromTarGz returns the regular file called name from a .tar.gz archive.
 export function fromTarGz(buf, name) {
@@ -77,7 +79,7 @@ export function fromZip(buf, name) {
 // build writes the six package folders for version from the archives in assets.
 export function build({ version, assets, out, root = join(here, "..") }) {
   version = String(version ?? "").replace(/^v/, "");
-  if (!VERSION.test(version)) throw new Error(`version "${version}" isn't X.Y.Z or X.Y.Z-pre`);
+  if (!VERSION.test(version)) throw new Error(`version "${version}" isn't X.Y.Z, X.Y.Z-rc.N or a snapshot's X.Y.Z-devel+<sha>`);
   const license = join(root, "LICENSE");
   const template = readFileSync(join(here, "platform", "package.json.tmpl"), "utf8");
   // Every archive is checked against the release's checksums.txt before
