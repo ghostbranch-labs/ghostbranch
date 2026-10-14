@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -240,10 +241,11 @@ func TestExplainTextHeaders(t *testing.T) {
 	if got := human(&ExplainResult{Entries: warn}, style.Styler{}); !strings.HasPrefix(got, "UPDATE_AVAILABLE (warning): ") {
 		t.Errorf("explain UPDATE_AVAILABLE = %q", got)
 	}
-	// explain --all: every exit code once, in the new form.
+	// explain --all: every exit code once, in the new form, each at the
+	// start of its own line (not only somewhere in another entry's text).
 	all := human(&ExplainResult{Entries: contract.Registry()}, style.Styler{})
 	for x := 0; x <= 6; x++ {
-		if !strings.Contains(all, fmt.Sprintf("exit %d: ", x)) {
+		if !regexp.MustCompile(fmt.Sprintf(`(?m)^exit %d: `, x)).MatchString(all) {
 			t.Errorf("explain --all lacks exit %d", x)
 		}
 	}
