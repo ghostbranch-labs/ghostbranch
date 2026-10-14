@@ -16,7 +16,7 @@ permissions:
 
 # One serial group, so releases published in order distribute in order and
 # the tap and bucket end on the newer one. GitHub keeps one run going and one
-# waiting; a third cancels the waiting one, which then needs a re-run (see
+# waiting; a third cancels the waiting one, which is older and usually left (see
 # RELEASING.md). The tap and bucket pushes retry once if someone else pushed
 # to them first.
 concurrency:
@@ -166,7 +166,7 @@ jobs:
             git -C "work/$1" -c user.name="$bot" -c user.email="$id+$bot@users.noreply.github.com" commit -m "ghostbranch $VERSION" || return 1
             git -C "work/$1" -c http.extraHeader="$auth" push origin HEAD:main
           }
-          # The change is one whole file, so a push that another publish beat
+          # The change is one whole file, so a push that someone else's push beat
           # is retried once on a fresh clone of the new main. A second failure
           # fails the job.
           push() {

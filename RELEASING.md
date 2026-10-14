@@ -80,9 +80,14 @@ gh attestation verify ghostbranch_0.2.0_linux_amd64.tar.gz --repo ghostbranch-la
 `publish.yml` runs when a release is published. A draft that is deleted
 never distributes anything. Publish runs go one at a time, in the order the
 releases were published. GitHub keeps only one queued publish run: a third
-release published while one runs and one waits cancels the waiting one;
-re-run it from the Actions tab, or set that release back to draft and
-publish it again.
+release published while one runs and one waits cancels the waiting one.
+The cancelled run is for an older release than the one published after it,
+which has already updated the tap, the bucket and npm, so usually leave it
+alone: re-running it would move the tap, the bucket and npm `latest` back
+to the older version. Re-run it (from the Actions tab, or set that release
+back to draft and publish it again) only when the newer release didn't
+replace it: for example, a stable release cancelled by a test build, which
+goes only to npm `next`.
 
 1. It downloads the release, checks every file against `checksums.txt`, and
    checks that `checksums.txt` was signed by `release.yml` at that tag. A
