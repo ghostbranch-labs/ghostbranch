@@ -1,10 +1,11 @@
 // Builds the six npm packages for a release from its archives. No
 // dependencies. The publish workflow runs it; see RELEASING.md.
 //
-//   node npm/build.mjs --version v0.1.0 --assets <folder with the archives> --out <folder>
+//   node npm/build.mjs --version v0.1.0 --assets <folder with the archives and checksums.txt> --out <folder>
 //
 // It writes <out>/ghostbranch (the launcher package) and one
 // <out>/cli-<os>-<arch> folder per platform, holding that platform's binary.
+import { createHash } from "node:crypto";
 import { chmodSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -79,8 +80,21 @@ export function build({ version, assets, out, root = join(here, "..") }) {
   if (!VERSION.test(version)) throw new Error(`version "${version}" isn't X.Y.Z or X.Y.Z-pre`);
   const license = join(root, "LICENSE");
   const template = readFileSync(join(here, "platform", "package.json.tmpl"), "utf8");
-  for (const p of PLATFORMS) {
-    const archive = readFileSync(join(assets, `ghostbranch_${version}_${p.target}${p.ext}`));
+  // Every archive is checked against the release's checksums.txt before
+  // anything is written, so npm never packs an archive the release didn't list.
+  const sums = readFileSync(join(assets, "checksums.txt"), "utf8").split(/\r?\n/).filter(Boolean).map((l) => l.split(/\s+/));
+  const archives = PLATFORMS.map((p) => {
+    const name = `ghostbranch_${version}_${p.target}${p.ext}`;
+    const data = readFileSync(join(assets, name));
+    const lines = sums.filter((f) => f.length === 2 && f[1] === name);
+    if (lines.length === 0) throw new Error(`checksums.txt has no line for ${name}`);
+    if (lines.length > 1) throw new Error(`checksums.txt has ${lines.length} lines for ${name}`);
+    const got = createHash("sha256").update(data).digest("hex");
+    if (got !== lines[0][0].toLowerCase()) throw new Error(`checksum mismatch for ${name} (expected ${lines[0][0]}, got ${got})`);
+    return data;
+  });
+  for (const [i, p] of PLATFORMS.entries()) {
+    const archive = archives[i];
     const bin = p.ext === ".zip" ? fromZip(archive, p.bin) : fromTarGz(archive, p.bin);
     const dir = join(out, `cli-${p.npm}`);
     mkdirSync(join(dir, "bin"), { recursive: true });

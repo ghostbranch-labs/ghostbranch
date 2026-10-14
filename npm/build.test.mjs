@@ -1,5 +1,6 @@
 // Tests for build.mjs: node --test npm/build.test.mjs npm/launcher.test.mjs
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -72,15 +73,28 @@ function zip(files) {
 }
 
 // fixture writes the five archives of a fake 1.2.3 release, each binary
-// naming its platform, plus a LICENSE in a fake repo root.
+// naming its platform, their checksums.txt (GoReleaser's "<sha256>  <name>"
+// lines, the install scripts listed too), plus a LICENSE in a fake repo root.
 function fixture() {
   const dir = mkdtempSync(join(tmpdir(), "ghostbranch-npm-"));
+  const sums = [];
   for (const p of PLATFORMS) {
     const files = { [p.bin]: Buffer.from(`binary for ${p.target}`), LICENSE: Buffer.from("license"), "README.md": Buffer.from("readme") };
-    writeFileSync(join(dir, `ghostbranch_1.2.3_${p.target}${p.ext}`), p.ext === ".zip" ? zip(files) : tarGz(files));
+    const name = `ghostbranch_1.2.3_${p.target}${p.ext}`;
+    const data = p.ext === ".zip" ? zip(files) : tarGz(files);
+    writeFileSync(join(dir, name), data);
+    sums.push(`${createHash("sha256").update(data).digest("hex")}  ${name}`);
   }
+  sums.push(`${"0".repeat(64)}  install.sh`, `${"1".repeat(64)}  install.ps1`);
+  writeFileSync(join(dir, "checksums.txt"), sums.join("\n") + "\n");
   writeFileSync(join(dir, "LICENSE"), "Apache License 2.0");
   return dir;
+}
+
+// editSums rewrites the fixture's checksums.txt line by line.
+function editSums(dir, f) {
+  const path = join(dir, "checksums.txt");
+  writeFileSync(path, f(readFileSync(path, "utf8").trimEnd().split("\n")).join("\n") + "\n");
 }
 
 test("the archive readers find the binary", () => {
@@ -127,4 +141,21 @@ test("build refuses a bad version or a missing archive", (t) => {
   assert.throws(() => build({ version: "latest", assets: dir, out: join(dir, "o1"), root: dir }), /isn't X.Y.Z/);
   rmSync(join(dir, "ghostbranch_1.2.3_linux_arm64.tar.gz"));
   assert.throws(() => build({ version: "1.2.3", assets: dir, out: join(dir, "o2"), root: dir }), /linux_arm64/);
+});
+
+test("build checks each archive against checksums.txt before packing", (t) => {
+  const linux = "ghostbranch_1.2.3_linux_arm64.tar.gz";
+  for (const [what, edit, want] of [
+    ["a mismatch", (dir) => editSums(dir, (ls) => ls.map((l) => (l.endsWith(`  ${linux}`) ? `${"f".repeat(64)}  ${linux}` : l))), /checksum mismatch for ghostbranch_1\.2\.3_linux_arm64\.tar\.gz/],
+    ["a missing line", (dir) => editSums(dir, (ls) => ls.filter((l) => !l.endsWith(`  ${linux}`))), /checksums\.txt has no line for ghostbranch_1\.2\.3_linux_arm64\.tar\.gz/],
+    ["a doubled line", (dir) => editSums(dir, (ls) => [...ls, ls.find((l) => l.endsWith(`  ${linux}`))]), /checksums\.txt has 2 lines for ghostbranch_1\.2\.3_linux_arm64\.tar\.gz/],
+    ["no checksums.txt", (dir) => rmSync(join(dir, "checksums.txt")), /checksums\.txt/],
+  ]) {
+    const dir = fixture();
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    edit(dir);
+    const out = join(dir, "out");
+    assert.throws(() => build({ version: "1.2.3", assets: dir, out, root: dir }), want, what);
+    assert.throws(() => statSync(out), /ENOENT/, `${what}: build wrote packages before failing`);
+  }
 });
