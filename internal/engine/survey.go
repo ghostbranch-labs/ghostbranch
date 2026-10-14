@@ -282,13 +282,15 @@ func (e *Engine) surveyOne(ctx context.Context, pc *pairCtx, name, pm, O string)
 		r.Moved = base == "" || cur != base || (m.Archived != nil && exists && head != m.Archived.Head)
 		// The archive ref a close would delete, marked in the record or
 		// left by an archive that stopped before marking it, closes
-		// unattended only when it holds the head that was published:
-		// otherwise it may hold commits never published (R9).
+		// unattended only when it holds the head that was published (the
+		// same base the branch is compared with, so an old record's head
+		// comes from its plan; none known counts as moved): otherwise it
+		// may hold commits never published (R9).
 		arch, hasArch, err := pc.git.Resolve(ctx, archiveRef(name))
 		if err != nil {
 			return FeatureReport{}, nil, internalErr(err, "read archive ref "+remoteArchiveRef(name))
 		}
-		if hasArch && arch != m.Promoted.FeatureHead {
+		if hasArch && (base == "" || arch != base) {
 			r.Moved, archiveMoved = true, true
 		}
 		// A branch_gone feature has nothing to compare with its PR.

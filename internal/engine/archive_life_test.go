@@ -327,3 +327,19 @@ func TestGateReadinessLeavesArchivedChildrenOut(t *testing.T) {
 		t.Fatalf("gate feat-a = %+v %v", res.Ready, err)
 	}
 }
+
+// A record that doesn't name its published head (made by a binary from
+// before FeatureHead was recorded) takes it from the plan file, for the
+// archive as for the branch (review M1): an archive holding exactly that
+// head, merged, closes without a person.
+func TestAnArchiveOfARecordWithoutItsHeadUsesThePlan(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	pr := h.archived("feat-x")
+	h.editRemoteMeta("feat-x", func(m *feature.Meta) { m.Promoted.FeatureHead = "" })
+	h.forge.SetPRMerged(publicName, pr)
+	if r := h.report("feat-x"); r.State != feature.StateMerged || r.Moved || !engine.ClosableWithoutConsole(r) {
+		t.Fatalf("report = %+v", r)
+	}
+}
