@@ -273,7 +273,7 @@ func waiveSummary(p workspace.Pair, feat string, fs []leak.Finding, ids []string
 	}
 	fmt.Fprintf(&b, "Reason: %s\n", visible(reason))
 	fmt.Fprintf(&b, "Each waiver covers exactly this content in this file; changed content is a new finding.\n")
-	fmt.Fprintf(&b, "Undo with: ghostbranch waivers revoke %s --repo %s", strings.Join(ids, " "), p.Public)
+	fmt.Fprintf(&b, "Undo with: ghostbranch waivers revoke %s --repo %s", strings.Join(ids, " "), visible(p.Public))
 	return b.String()
 }
 
