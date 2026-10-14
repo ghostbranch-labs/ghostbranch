@@ -347,6 +347,14 @@ jobs:
 			te.shadowCommit("feat-x", map[string]string{"two.txt": "2\n"})
 			te.mustRun("gate", "feat-x", "--detach")
 		}, []string{"wait", "<OLD_JOB>"}, 4},
+		{"wait_stack_child_first", func(te *testEnv) {
+			initOnly(te)
+			te.mustRun("feature", "start", "feat-a")
+			te.shadowCommit("feat-a", map[string]string{"a.txt": "a\n"})
+			te.mustRun("feature", "start", "feat-b", "--from", "feat-a")
+			te.shadowCommit("feat-b", map[string]string{"b.txt": "b\n"})
+			te.mustRun("gate", "feat-b", "--detach")
+		}, []string{"wait", "<JOB:feat-b>"}, 0},
 		{"wait_bad_job", initOnly, []string{"wait", "nope"}, 2},
 		{"promote_detach", withFeature, []string{"promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--plan", "--detach"}, 0},
 		{"login_with_token", func(te *testEnv) {
@@ -413,6 +421,9 @@ jobs:
 				}
 				if a == "<OLD_JOB>" {
 					args[i] = te.oldJob
+				}
+				if name, ok := strings.CutPrefix(a, "<JOB:"); ok {
+					args[i] = te.job(strings.TrimSuffix(name, ">"))
 				}
 				if a == "<GONE_PLAN>" {
 					args[i] = te.gonePlan

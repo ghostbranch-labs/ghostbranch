@@ -599,21 +599,49 @@ func TestNextForUpdates(t *testing.T) {
 	}
 }
 
-// After a stack publish, next says merging the top PR merges them all.
+// F-16/F-31: after a stack publish, next says how a maintainer merges the
+// stack (the top PR's page, or merge-async on the top PR; observed on a real
+// merge, 2026-10-14)
+// and, for a history worth keeping, not to squash it. A single PR's text
+// is unchanged (decision 5).
 func TestNextAfterAStackPublish(t *testing.T) {
 	t.Parallel()
 	a := testApp("apply", "apply")
 	stack := 3
-	a.result = &engine.ApplyResult{PublicPR: 7, StackNumber: &stack, PRs: []plan.StackPR{{Feature: "feat-a", Number: 6}, {Feature: "feat-b", Number: 7}}}
-	next := a.next(nil)
-	if len(next) != 1 || !slices.Equal(next[0].Command, []string{"ghostbranch", "sync", "--repo", "acme/widget"}) ||
-		!strings.Contains(next[0].Why, "#7") || !strings.Contains(next[0].Why, "merges them all") {
-		t.Fatalf("next = %+v", next)
+	prs := []plan.StackPR{{Feature: "feat-a", Number: 6}, {Feature: "feat-b", Number: 7}}
+	whyFor := func(r *engine.ApplyResult) string {
+		t.Helper()
+		a.result = r
+		next := a.next(nil)
+		if len(next) != 1 || !slices.Equal(next[0].Command, []string{"ghostbranch", "sync", "--repo", "acme/widget"}) {
+			t.Fatalf("next = %+v", next)
+		}
+		return next[0].Why
 	}
-	// Plain chained PRs (no native stack) merge one by one, bottom first.
-	a.result = &engine.ApplyResult{PublicPR: 7, PRs: []plan.StackPR{{Feature: "feat-a", Number: 6}, {Feature: "feat-b", Number: 7}}}
-	if next = a.next(nil); len(next) != 1 || strings.Contains(next[0].Why, "merges them all") || !strings.Contains(next[0].Why, "#6 first") {
-		t.Fatalf("plain chain: next = %+v", next)
+	w := whyFor(&engine.ApplyResult{PublicPR: 7, StackNumber: &stack, PRs: prs, KeepsHistory: true, PublicRepo: "acme/widget"})
+	for _, s := range []string{"on the top PR's page (#7), the merge button merges that PR and every PR below it",
+		"Merging a lower PR lands only part of the stack.", `Choose "Create a merge commit"`,
+		"`gh pr merge` refuses a stacked PR; use merge-async on the top PR: `gh api -X PUT repos/acme/widget/pulls/7/merge-async -f merge_method=merge`",
+		"Then sync closes the merged features"} {
+		if !strings.Contains(w, s) {
+			t.Errorf("native preserve stack: %q lacks %q", w, s)
+		}
+	}
+	if strings.Contains(w, "bottom PR's page") || strings.Contains(w, "#6") {
+		t.Errorf("native preserve stack: %q points at the bottom PR", w)
+	}
+	// An all-squash stack loses nothing to a squash.
+	if w = whyFor(&engine.ApplyResult{PublicPR: 7, StackNumber: &stack, PRs: prs, PublicRepo: "acme/widget"}); strings.Contains(w, "Create a merge commit") || !strings.Contains(w, "merge-async") {
+		t.Errorf("all-squash stack: %q", w)
+	}
+	// Plain chained PRs merge one by one, bottom first, and not by squash.
+	if w = whyFor(&engine.ApplyResult{PublicPR: 7, PRs: prs, KeepsHistory: true}); !strings.Contains(w, "#6 first") ||
+		!strings.Contains(w, "with a merge commit or a rebase, not a squash") || strings.Contains(w, "merge-async") {
+		t.Errorf("chained preserve: %q", w)
+	}
+	// A single PR: unchanged.
+	if w = whyFor(&engine.ApplyResult{PublicPR: 7, PRs: prs[1:], KeepsHistory: true}); w != "a maintainer reviews and merges PR #7 on GitHub; then sync closes the feature" {
+		t.Errorf("single PR: %q", w)
 	}
 }
 
@@ -695,5 +723,32 @@ func TestNextForLockedOnAPersonOnlyCommand(t *testing.T) {
 		if len(next) != 1 || next[0].NeedsHuman != tc.human || slices.Contains(next[0].Command, "--json") == tc.human {
 			t.Errorf("%v: next = %+v", tc.args, next)
 		}
+	}
+}
+
+// F-12: stale_gate says the plan updates the stack's PRs only when they are
+// open (details.updating); otherwise it says to promote the stack again.
+func TestStaleGateSaysThePlanUpdatesOnlyWhenPRsAreOpen(t *testing.T) {
+	t.Parallel()
+	a := testApp("promote", "promote", "feat-a", "feat-b", "--plan")
+	ce := contract.New(contract.NotAStack, "stale").WithDetails(map[string]any{
+		"reason": "stale_gate", "feature": "feat-a", "features": []string{"feat-a", "feat-b"}})
+	if n := a.next(ce); len(n) != 1 || !strings.Contains(n[0].Why, "then promote the stack again") || strings.Contains(n[0].Why, "updates them all") {
+		t.Fatalf("no open PRs: %+v", n)
+	}
+	ce.Details["updating"] = true
+	if n := a.next(ce); len(n) != 1 || !strings.Contains(n[0].Why, "the plan updates them all") {
+		t.Fatalf("open PRs: %+v", n)
+	}
+	// Review M1: a stale top level has no branches above it; with open PRs
+	// the plan still updates them all.
+	top := contract.New(contract.NotAStack, "stale").WithDetails(map[string]any{
+		"reason": "stale_gate", "feature": "feat-b", "features": []string{"feat-a", "feat-b"}})
+	if n := a.next(top); len(n) != 1 || strings.Contains(n[0].Why, "above it") || !strings.Contains(n[0].Why, "then promote the stack again") {
+		t.Fatalf("stale top, no open PRs: %+v", n)
+	}
+	top.Details["updating"] = true
+	if n := a.next(top); len(n) != 1 || strings.Contains(n[0].Why, "above it") || !strings.Contains(n[0].Why, "the plan updates them all") {
+		t.Fatalf("stale top, open PRs: %+v", n)
 	}
 }

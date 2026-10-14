@@ -185,7 +185,7 @@ var errorDocs = map[Code]Doc{
 			"parent_not_public: the bottom feature's parent is neither main nor already published",
 			"parent_merged: the bottom's published parent merged; run sync",
 			"parent_moved: the bottom's published parent changed since it was published",
-			"stale_gate: a listed feature has no fresh, green gate; a gate goes stale when its own branch or any branch below it moves. With error.details.update_mode, the bottom's gate built its open PR's update in another history mode (gate builds in promote.default_mode), so gating again won't help: promote that feature on its own with --mode <update_mode>, which gates it in that mode, then the branches above it",
+			"stale_gate: a listed feature has no fresh, green gate; a gate goes stale when its own branch or any branch below it moves. With error.details.update_mode, the bottom's gate built its open PR's update in another history mode (gate builds in promote.default_mode), so gating again won't help: promote that feature on its own with --mode <update_mode>, which gates it in that mode, then the branches above it. error.details.updating is true when the stack's PRs are open: the new plan updates them all.",
 			"open_above: two or more lines of open PRs stack on one published feature, and one plan updates one line: close or merge every other line's PRs on that feature on GitHub, then promote it again",
 			"parent_stale: a branch above wasn't restacked after the branch below moved; restack, gate up, promote",
 		},

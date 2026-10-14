@@ -103,6 +103,9 @@ func TestPromoteRefusesWhatIsNotAStack(t *testing.T) {
 	// A stale gate anywhere in the chain: a moves, so a's gate is stale ...
 	testutil.Commit(t, h.shadowGit(), "a", "more a", map[string]string{"a2.txt": "a2\n"})
 	refuse([]string{"a", "b", "c"}, "stale_gate", "a", nil)
+	if _, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Features: []string{"a", "b", "c"}, Mode: "squash", PlanOnly: true}); contract.From(err).Details["updating"] != nil {
+		t.Fatalf("no PR is open, yet updating is set: %v", contract.From(err).Details)
+	}
 	// ... and once a is gated again, b's gate no longer builds on a as it is.
 	h.gateFeature("a")
 	refuse([]string{"a", "b", "c"}, "stale_gate", "b", nil)

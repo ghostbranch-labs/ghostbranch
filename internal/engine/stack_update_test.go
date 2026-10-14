@@ -247,7 +247,7 @@ func TestStackUpdateRefusesWhatIsNotRestackedAndGated(t *testing.T) {
 	}
 	h.gateFeature("a")
 	_, _, err = promoteStack(h, opt)
-	if ce := wantCode(t, err, contract.NotAStack); ce.Details["reason"] != "stale_gate" || ce.Details["feature"] != "b" {
+	if ce := wantCode(t, err, contract.NotAStack); ce.Details["reason"] != "stale_gate" || ce.Details["feature"] != "b" || ce.Details["updating"] != true {
 		t.Fatalf("details = %+v", ce.Details)
 	}
 	if n := len(h.forge.PRs(publicName)); n != 2 {
@@ -605,7 +605,8 @@ func TestStackUpdateAskForAGateWhenGatingAgainFits(t *testing.T) {
 // A bottom gate that is stale (a moved since it was gated) is plain
 // stale_gate: gating again builds on the new head, so the refusal never
 // says gating again won't help (no update_mode), even when the stale
-// record was an append in promote.default_mode.
+// record was an append in promote.default_mode. a's PR is open, so the
+// new plan updates it (details.updating).
 func TestStackUpdateCallsAStaleBottomGateStale(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
@@ -630,7 +631,8 @@ func TestStackUpdateCallsAStaleBottomGateStale(t *testing.T) {
 	_, _, err := promoteStack(h, engine.PromoteOptions{Features: []string{"a", "b"}, Mode: "squash",
 		Titles: map[string]string{"a": "Add a", "b": "Add b"}, PlanOnly: true})
 	ce := wantCode(t, err, contract.NotAStack)
-	if ce.Details["reason"] != "stale_gate" || ce.Details["feature"] != "a" || ce.Details["update_mode"] != nil || strings.Contains(ce.Message, "won't") {
+	if ce.Details["reason"] != "stale_gate" || ce.Details["feature"] != "a" || ce.Details["update_mode"] != nil || strings.Contains(ce.Message, "won't") ||
+		ce.Details["updating"] != true {
 		t.Fatalf("refusal = %s %+v", ce.Message, ce.Details)
 	}
 }

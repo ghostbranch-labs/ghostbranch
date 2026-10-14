@@ -57,7 +57,7 @@
         "--repo",
         "acme/widget"
       ],
-      "why": "the gate passed; plan the publish of the stack up to here: one PR per branch, each on the branch below, one approval for all. A branch below whose gate is missing or stale stops it with NOT_A_STACK, and next names that branch. A branch with more than one commit needs --title-for <feature>=<title>",
+      "why": "every gate from the bottom up to feat-b is fresh; plan the publish of the stack: one PR per branch, each on the branch below, one approval for all",
       "needs_human": false,
       "needs_input": []
     }

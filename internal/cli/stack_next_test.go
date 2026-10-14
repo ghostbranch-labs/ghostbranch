@@ -1,6 +1,7 @@
 package cli_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -72,5 +73,81 @@ func TestNextWalksUpTheStack(t *testing.T) {
 	}
 	if n != 1 {
 		t.Fatalf("feat-b and feat-c on a moved feat-a need one restack, next = %v", nextCommands(env))
+	}
+}
+
+// F-12 (K-02): gating the branch above first leads with the bottom; once
+// the bottom is gated, next offers the stack's promote, not a re-gate of
+// the branch above, and that promote works as given.
+func TestNextAfterAnOutOfOrderGate(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	te.mustRun("feature", "start", "feat-a")
+	te.shadowCommit("feat-a", map[string]string{"a.txt": "a\n"})
+	te.mustRun("feature", "start", "feat-b", "--from", "feat-a")
+	te.shadowCommit("feat-b", map[string]string{"b.txt": "b\n"})
+
+	_, env := te.runJSON("gate", "feat-b")
+	if cmds := nextCommands(env); len(cmds) == 0 || cmds[0] != "ghostbranch gate feat-a --repo acme/widget" || hasNext(env, "promote") {
+		t.Fatalf("after gate feat-b, next = %v", cmds)
+	}
+	_, env = te.runJSON("gate", "feat-a")
+	if !hasNext(env, "promote feat-a feat-b --mode preserve --plan") || hasNext(env, "gate feat-b") {
+		t.Fatalf("after gate feat-a, next = %v", nextCommands(env))
+	}
+	n := nextOf(t, env)
+	if code, out, errOut := te.run(argv(n[0])[1:]...); code != 0 {
+		t.Fatalf("next[0] %v: exit %d\n%s\n%s", argv(n[0]), code, out, errOut)
+	}
+}
+
+// A level with more than one commit needs its PR's title: next asks for it,
+// and with it the promote plans.
+func TestNextAsksForTheTitleOfALevelWithSeveralCommits(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	te.mustRun("feature", "start", "feat-a")
+	te.shadowCommit("feat-a", map[string]string{"a.txt": "a\n"})
+	te.shadowCommit("feat-a", map[string]string{"a2.txt": "a2\n"})
+	te.mustRun("feature", "start", "feat-b", "--from", "feat-a")
+	te.shadowCommit("feat-b", map[string]string{"b.txt": "b\n"})
+	te.mustRun("gate", "feat-a")
+	_, env := te.runJSON("gate", "feat-b")
+	n := nextOf(t, env)
+	if len(n) == 0 || !strings.Contains(strings.Join(argv(n[0]), " "), "promote feat-a feat-b --mode preserve --plan") ||
+		!slices.Equal(needsInput(n[0]), []string{"--title-for feat-a=<title>"}) {
+		t.Fatalf("next = %v", n)
+	}
+	if code, out, errOut := te.run(append(argv(n[0])[1:], "--title-for", "feat-a=Add a")...); code != 0 {
+		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
+	}
+}
+
+// Review I1: at a fork whose children are all fresh, a passing gate of the
+// bottom never leaves next empty: it offers the bottom's own promote, which
+// plans as given.
+func TestNextAtAForkOffersTheBottomsPromote(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	te.mustRun("feature", "start", "feat-a")
+	te.shadowCommit("feat-a", map[string]string{"a.txt": "a\n"})
+	te.mustRun("feature", "start", "feat-b", "--from", "feat-a")
+	te.shadowCommit("feat-b", map[string]string{"b.txt": "b\n"})
+	te.mustRun("feature", "start", "feat-c", "--from", "feat-a")
+	te.shadowCommit("feat-c", map[string]string{"c.txt": "c\n"})
+	te.mustRun("gate", "feat-a")
+	te.mustRun("gate", "feat-b")
+	te.mustRun("gate", "feat-c")
+
+	_, env := te.runJSON("gate", "feat-a")
+	if cmds := nextCommands(env); len(cmds) == 0 || cmds[0] != "ghostbranch promote feat-a --mode preserve --plan --repo acme/widget" {
+		t.Fatalf("at a fork, next = %v", cmds)
+	}
+	n := nextOf(t, env)
+	if code, out, errOut := te.run(argv(n[0])[1:]...); code != 0 {
+		t.Fatalf("next[0] %v: exit %d\n%s\n%s", argv(n[0]), code, out, errOut)
 	}
 }

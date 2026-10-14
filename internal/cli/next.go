@@ -414,11 +414,21 @@ func (a *app) steps(err error) []contract.Next {
 					}
 					why := "its gate is missing or stale; gate it, then each branch above it, from the bottom up, then promote the stack again"
 					fs := stringList(ce.Details["features"])
-					if i := slices.Index(fs, f); i >= 0 && i < len(fs)-1 {
-						// An update of open PRs above it plans them together:
-						// each needs a fresh gate on the one below.
+					switch i := slices.Index(fs, f); {
+					case i >= 0 && i == len(fs)-1:
+						// The top level: no branches above it (review M1).
+						why = "its gate is missing or stale; gate it, then promote the stack again"
+						if ce.Details["updating"] == true {
+							why = "its gate is missing or stale; gate it, then promote again: the plan updates them all"
+						}
+					case i >= 0:
 						why = "its gate is missing or stale; gate it, then the branches above it from the bottom up (" + strings.Join(fs[i+1:], ", ") +
-							"), each gate on the one below, then promote again: the plan updates them all"
+							"), each gate on the one below, then promote the stack again"
+						if ce.Details["updating"] == true {
+							// Their PRs are open: one plan updates them together.
+							why = "its gate is missing or stale; gate it, then the branches above it from the bottom up (" + strings.Join(fs[i+1:], ", ") +
+								"), each gate on the one below, then promote again: the plan updates them all"
+						}
 					}
 					return []contract.Next{{Command: a.scoped("gate", f), Why: why}}
 				}
@@ -583,26 +593,47 @@ func (a *app) steps(err error) []contract.Next {
 		}
 	case *engine.GateResult:
 		if r.Preview == nil && r.Checks == feature.ChecksPassed && r.Leak == feature.LeakClean {
-			switch {
-			case len(r.Children) > 0:
-				// Up the stack: each branch above builds on this gate.
-				for _, c := range r.Children {
-					out = append(out, contract.Next{Command: a.scoped("gate", c),
-						Why: "the gate passed; gate " + c + " next: it is stacked on this one, and its gate builds on this gate"})
-				}
-			case len(r.Chain) > 1:
-				args := append(append([]string{"promote"}, r.Chain...), "--mode", r.ScannedAs, "--plan")
-				out = append(out, contract.Next{Command: a.scoped(args...),
-					Why: "the gate passed; plan the publish of the stack up to here: one PR per branch, each on the branch below, one approval for all. A branch below whose gate is missing or stale stops it with NOT_A_STACK, and next names that branch. A branch with more than one commit needs --title-for <feature>=<title>"})
-			default:
-				// A feature on its own, or one on a published parent.
+			rd := r.Ready
+			// promoteOne is the feature's own promote, on its own.
+			promoteOne := func(why string) {
 				mode := r.ScannedAs
 				need := modeInputs(mode)
 				if mode != config.ModeSquash && len(r.Commits) > 1 {
 					need = append(need, "--title")
 				}
-				out = append(out, contract.Next{Command: a.scoped("promote", r.Feature, "--mode", mode, "--plan"),
-					Why: "the gate passed; plan the publish", NeedsInput: need})
+				out = append(out, contract.Next{Command: a.scoped("promote", r.Feature, "--mode", mode, "--plan"), Why: why, NeedsInput: need})
+			}
+			switch {
+			case rd.GateFirst != "":
+				out = append(out, contract.Next{Command: a.scoped("gate", rd.GateFirst),
+					Why: rd.GateFirst + " below has no fresh gate; gate it first, then the branches above it"})
+			case len(r.Children) > 0 || len(r.Chain) > 1:
+				for _, c := range rd.StaleAbove {
+					out = append(out, contract.Next{Command: a.scoped("gate", c),
+						Why: "the gate passed; gate " + c + " next: it is stacked on this one, and its gate builds on this gate"})
+				}
+				if len(rd.Levels) > 1 {
+					args := append(append([]string{"promote"}, rd.Levels...), "--mode", r.ScannedAs, "--plan")
+					var need []string
+					if r.ScannedAs == config.ModeCurated {
+						need = append(need, "--curate")
+					}
+					for _, f := range rd.TitleFor {
+						need = append(need, "--title-for "+f+"=<title>")
+					}
+					out = append(out, contract.Next{Command: a.scoped(args...), NeedsInput: need,
+						Why: "every gate from the bottom up to " + rd.Levels[len(rd.Levels)-1] + " is fresh; plan the publish of the stack: one PR per branch, each on the branch below, one approval for all"})
+				} else if len(rd.StaleAbove) == 0 {
+					// Review I1: the stack forks above this feature, and every
+					// line on it is fresh. One plan publishes one line, so
+					// publish this feature on its own first; next never ends
+					// empty after a passing gate.
+					promoteOne("the gate passed, and the stack forks above " + r.Feature + " (" + strings.Join(r.Children, ", ") +
+						"); plan the publish of " + r.Feature + " on its own, then promote each line above it")
+				}
+			default:
+				// A feature on its own, or one on a published parent.
+				promoteOne("the gate passed; plan the publish")
 			}
 		} else if r.Checks == feature.ChecksPending && r.Job != nil {
 			out = append(out, a.waitNext(*r.Job))
@@ -715,14 +746,30 @@ func (a *app) steps(err error) []contract.Next {
 
 // mergedThenSync is the step after a publish or an update: a maintainer
 // merges on GitHub, then sync closes what merged. A native stack merges
-// whole from its top PR; plain chained PRs merge one by one, bottom first.
+// whole from its top PR, whose merge button (or merge-async) merges it and
+// every PR below it; merging a lower PR lands only part of the stack
+// (observed on a real merge, 2026-10-14). Plain chained PRs merge one by
+// one, bottom first. A history worth keeping must not be squashed (F-31); a single
+// PR's text is unchanged (decision 5).
 func (a *app) mergedThenSync(r *engine.ApplyResult) contract.Next {
 	why := "a maintainer reviews and merges PR #" + strconv.Itoa(r.PublicPR) + " on GitHub; then sync closes the feature"
 	switch {
 	case len(r.PRs) > 1 && r.StackNumber != nil:
-		why = "a maintainer reviews and merges the stack on GitHub (merging its top PR, #" + strconv.Itoa(r.PublicPR) + ", merges them all); then sync closes the merged features and moves any branch above onto main"
+		why = "A maintainer merges the stack on GitHub: on the top PR's page (#" + strconv.Itoa(r.PublicPR) + "), the merge button merges that PR and every PR below it." +
+			" Merging a lower PR lands only part of the stack."
+		if r.KeepsHistory {
+			why += ` Choose "Create a merge commit": "Squash and merge" turns each PR into one commit and drops the history this stack was published with.`
+		}
+		pub := cmp.Or(r.PublicRepo, a.pairFull.Public)
+		why += " From a terminal, `gh pr merge` refuses a stacked PR; use merge-async on the top PR: `gh api -X PUT repos/" + pub + "/pulls/" +
+			strconv.Itoa(r.PublicPR) + "/merge-async -f merge_method=merge`. Then sync closes the merged features and moves any branch above onto main."
 	case len(r.PRs) > 1:
-		why = "a maintainer reviews and merges the PRs on GitHub from the bottom up (#" + strconv.Itoa(r.PRs[0].Number) + " first, each into main); then sync closes each merged feature and moves the branches above it onto main"
+		how := ""
+		if r.KeepsHistory {
+			how = ", with a merge commit or a rebase, not a squash"
+		}
+		why = "a maintainer reviews and merges the PRs on GitHub from the bottom up (#" + strconv.Itoa(r.PRs[0].Number) + " first, each into main" + how +
+			"); then sync closes each merged feature and moves the branches above it onto main"
 	}
 	return contract.Next{Command: a.scoped("sync"), Why: why}
 }

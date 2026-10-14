@@ -141,6 +141,12 @@ main, green CI, and a leak scan of exactly what will be published.
   GitHub groups them as a native stack where it offers one. Set one branch's mode or PR title with
   `--mode-for b=squash` or `--title-for b="<title>"`. `NOT_A_STACK` names the branch that breaks the
   list (`error.details.feature`) and why (`error.details.reason`): follow `next`.
+- Merging is a maintainer's call, on GitHub. Merge a native stack from the top: on its top PR's page,
+  the merge button merges that PR and every PR below it. Merging a lower PR lands only part of the stack.
+  `gh pr merge` refuses a stacked PR; from a terminal use `PUT repos/<public>/pulls/<top>/merge-async`
+  with `merge_method=merge`. "Create a merge commit" keeps every commit as published (one merge commit
+  for the group); "Squash and merge" makes one commit per PR and loses a `preserve` or `curated`
+  history. Either way `sync` then closes the merged features. Never merge a PR yourself unless the person told you to.
 - `ghostbranch feature fold <c> --repo <public> --json` folds a finished top branch into its parent
   (fast-forward only; `FOLD_NEEDS_REBASE` gives git steps). `abandon` and `close` refuse a branch with children
   (`HAS_CHILDREN`): fold each, `feature restack <child> --onto main` it, or abandon it (for `close`: `close <child>`, as an abandoned child still blocks `close`).

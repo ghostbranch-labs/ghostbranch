@@ -50,6 +50,11 @@ type ApplyResult struct {
 	// PublicBranch, PublicPR and PRURL are the top PR's.
 	PRs         []plan.StackPR `json:"prs"`
 	StackNumber *int           `json:"stack_number"`
+	// KeepsHistory: some PR publishes more than one commit in preserve or
+	// curated mode, which "Squash and merge" would flatten (F-31).
+	// PublicRepo is the plan's public repo. Both are for next.
+	KeepsHistory bool   `json:"-"`
+	PublicRepo   string `json:"-"`
 }
 
 // Apply publishes a saved plan if the repos still match it. Every step is
@@ -203,7 +208,37 @@ func (e *Engine) previewPublish(ctx context.Context, pc *pairCtx, pv *preview.Pr
 	return nil
 }
 
+// apply publishes pl (applyPlan) and notes what next needs to advise the
+// merge: whether a squash would flatten the history, and the public repo.
 func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool) (*ApplyResult, []contract.Warning, error) {
+	res, warns, err := e.applyPlan(ctx, pc, pl, yes)
+	if res != nil {
+		res.KeepsHistory, res.PublicRepo = keepsHistory(pl), pl.Pair.Public
+	}
+	return res, warns, err
+}
+
+// keepsHistory reports whether some PR of pl holds more than one commit
+// in preserve or curated mode. An append adds its commits on top of the
+// open PR's own, so one appended commit already makes two (review M2).
+func keepsHistory(pl plan.Plan) bool {
+	entries := pl.Chain
+	if len(entries) == 0 {
+		entries = []plan.Entry{{Mode: pl.Mode, Publish: pl.Publish}}
+	}
+	for _, en := range entries {
+		n := len(en.Publish.Commits)
+		if en.Publish.Update && en.Publish.Style == plan.StyleAppend && n > 0 {
+			n++ // the PR's head, and whatever came before it
+		}
+		if (en.Mode == config.ModePreserve || en.Mode == config.ModeCurated) && n > 1 {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *Engine) applyPlan(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool) (*ApplyResult, []contract.Warning, error) {
 	g := pc.git
 	if pl.SchemaVersion != plan.SchemaVersion {
 		return nil, nil, contract.New(contract.PlanStale,

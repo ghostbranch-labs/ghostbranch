@@ -699,3 +699,19 @@ func TestApplyOfAMissingPlanWithAnUnresolvedRepo(t *testing.T) {
 	_, _, err = h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: "nope", LookupErr: resolveErr})
 	_ = wantCode(t, err, contract.BadFlag)
 }
+
+// The apply result carries whether the history is worth keeping, and the
+// public repo, for next's merge advice.
+func TestApplyResultSaysWhetherTheHistoryIsKept(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.startFeature("feat-x", map[string]string{"x.txt": "x\n"})
+	testutil.Commit(t, h.shadowGit(), "feat-x", "more", map[string]string{"y.txt": "y\n"})
+	h.gateFeature("feat-x")
+	h.grant(time.Hour)
+	res, err := promote(h, engine.PromoteOptions{Mode: "preserve", Title: "Add x and y", Yes: true})
+	if err != nil || res.Applied == nil || !res.Applied.KeepsHistory || res.Applied.PublicRepo != publicName {
+		t.Fatalf("promote = %+v %v", res, err)
+	}
+}
