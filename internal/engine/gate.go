@@ -622,6 +622,7 @@ func (e *Engine) stackView(ctx context.Context, pc *pairCtx, res *GateResult) {
 	if res.Preview == nil && res.Checks == feature.ChecksPassed && res.Leak == feature.LeakClean {
 		live := liveChildren(recs, kids)
 		res.Ready = e.readiness(ctx, pc, recs, res, chain, live)
+		res.Ready.Live = live
 	}
 }
 

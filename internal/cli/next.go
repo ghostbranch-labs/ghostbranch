@@ -641,7 +641,9 @@ func (a *app) steps(err error) []contract.Next {
 			case rd.GateFirst != "":
 				out = append(out, contract.Next{Command: a.scoped("gate", rd.GateFirst),
 					Why: rd.GateFirst + " below has no fresh gate; gate it first, then the branches above it"})
-			case len(r.Children) > 0 || len(r.Chain) > 1:
+			case len(rd.Live) > 0 || len(r.Chain) > 1:
+				// Archived children are left out: their PRs are handed
+				// off (R12).
 				for _, c := range rd.StaleAbove {
 					out = append(out, contract.Next{Command: a.scoped("gate", c),
 						Why: "the gate passed; gate " + c + " next: it is stacked on this one, and its gate builds on this gate"})
@@ -662,7 +664,7 @@ func (a *app) steps(err error) []contract.Next {
 					// line on it is fresh. One plan publishes one line, so
 					// publish this feature on its own first; next never ends
 					// empty after a passing gate.
-					promoteOne("the gate passed, and the stack forks above " + r.Feature + " (" + strings.Join(r.Children, ", ") +
+					promoteOne("the gate passed, and the stack forks above " + r.Feature + " (" + strings.Join(rd.Live, ", ") +
 						"); plan the publish of " + r.Feature + " on its own, then promote each line above it")
 				}
 			default:

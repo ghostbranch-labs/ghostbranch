@@ -3,6 +3,7 @@ package cli_test
 import (
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
@@ -101,5 +102,26 @@ func TestNextForAPartlyArchivedFeature(t *testing.T) {
 	_, env := te.runJSON("status")
 	if !hasNext(env, "ghostbranch feature archive feat-x") || hasNext(env, "feature close feat-x") {
 		t.Fatalf("status next = %v", nextCommands(env))
+	}
+}
+
+// A kept parent's gate with only an archived child above it (R12) offers
+// the parent's own promote, and never names the handed-off child as a line
+// to promote (review M6).
+func TestNextAfterTheGateOfAParentWithAnArchivedChild(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	withGatedStack(te)
+	grantAgents(te)
+	te.mustRun("promote", "feat-a", "feat-b", "--mode", "squash", "--yes", "--keep")
+	te.mustRun("feature", "archive", "feat-b")
+	te.shadowCommit("feat-a", map[string]string{"a2.txt": "a2\n"})
+	_, env := te.runJSON("gate", "feat-a")
+	ns, _ := env["next"].([]any)
+	if !hasNext(env, "promote feat-a") || len(ns) != 1 {
+		t.Fatalf("next = %v", nextCommands(env))
+	}
+	if why, _ := ns[0].(map[string]any)["why"].(string); strings.Contains(why, "feat-b") {
+		t.Fatalf("the gate's next names the handed-off child: %s", why)
 	}
 }

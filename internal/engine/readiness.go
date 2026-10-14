@@ -25,6 +25,9 @@ type StackReadiness struct {
 	// TitleFor are the levels with more than one gate commit: their PRs
 	// need --title-for.
 	TitleFor []string
+	// Live are the features stacked directly on this one that aren't
+	// archived: a handed-off child's PR is the person's (R12).
+	Live []string
 }
 
 // readiness works out res.Ready. chain is the unpublished stack from its
