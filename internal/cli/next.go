@@ -414,7 +414,14 @@ func (a *app) steps(err error) []contract.Next {
 					}
 					why := "its gate is missing or stale; gate it, then each branch above it, from the bottom up, then promote the stack again"
 					fs := stringList(ce.Details["features"])
-					if i := slices.Index(fs, f); i >= 0 && i < len(fs)-1 {
+					switch i := slices.Index(fs, f); {
+					case i >= 0 && i == len(fs)-1:
+						// The top level: no branches above it (review M1).
+						why = "its gate is missing or stale; gate it, then promote the stack again"
+						if ce.Details["updating"] == true {
+							why = "its gate is missing or stale; gate it, then promote again: the plan updates them all"
+						}
+					case i >= 0:
 						why = "its gate is missing or stale; gate it, then the branches above it from the bottom up (" + strings.Join(fs[i+1:], ", ") +
 							"), each gate on the one below, then promote the stack again"
 						if ce.Details["updating"] == true {

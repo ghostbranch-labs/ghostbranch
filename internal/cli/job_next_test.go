@@ -737,4 +737,15 @@ func TestStaleGateSaysThePlanUpdatesOnlyWhenPRsAreOpen(t *testing.T) {
 	if n := a.next(ce); len(n) != 1 || !strings.Contains(n[0].Why, "the plan updates them all") {
 		t.Fatalf("open PRs: %+v", n)
 	}
+	// Review M1: a stale top level has no branches above it; with open PRs
+	// the plan still updates them all.
+	top := contract.New(contract.NotAStack, "stale").WithDetails(map[string]any{
+		"reason": "stale_gate", "feature": "feat-b", "features": []string{"feat-a", "feat-b"}})
+	if n := a.next(top); len(n) != 1 || strings.Contains(n[0].Why, "above it") || !strings.Contains(n[0].Why, "then promote the stack again") {
+		t.Fatalf("stale top, no open PRs: %+v", n)
+	}
+	top.Details["updating"] = true
+	if n := a.next(top); len(n) != 1 || strings.Contains(n[0].Why, "above it") || !strings.Contains(n[0].Why, "the plan updates them all") {
+		t.Fatalf("stale top, open PRs: %+v", n)
+	}
 }
