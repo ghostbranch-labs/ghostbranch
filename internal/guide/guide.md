@@ -14,7 +14,7 @@ main, green CI, and a leak scan of exactly what will be published.
 2. Run the commands in `data.checkout`, in order (argvs; `data.checkout_hint` is the same as one shell
    line). They fetch the branch from the shadow repo (in a checkout of the public repo, usually a remote
    named `shadow`) and switch to it. Commit there, and push **to the
-   shadow repo only** (`git push shadow <name>`), never to `origin`.
+   shadow repo only** (`git push shadow <name>`), never to `origin` (a handed-off PR: see *After publishing*).
 3. `ghostbranch gate <name> --repo <public> --json` rebases on public main, scans for leaks and runs CI.
 4. `ghostbranch promote <name> --repo <public> --plan --json` publishes in the repo's `promote.default_mode`
    (`preserve` unless set); pass `--mode` to choose. With more than one commit, add
@@ -185,14 +185,15 @@ main, green CI, and a leak scan of exactly what will be published.
   **Archive** (the default) or **Keep**. Under `--yes` or `--non-interactive` it archives unless you pass
   `--keep`. `data.after_publish` says, per feature: `archived`, `kept` or `incomplete`.
 - Archive hands the PR off: the shadow branch moves to `refs/ghostbranch/archive/<name>` (nothing is
-  lost) and the feature's state is `archived`. Fix or change its PR on the PR's branch:
-  `git fetch origin <branch>`, commit on `origin/<branch>` (never on the old shadow branch: the guard
-  refuses its private commits), then `git push origin HEAD:<branch>`. No gate, no plan, no apply.
+  lost) and the feature's state is `archived`. Fix or change its PR on the PR's branch (`<branch>` is
+  `error.details.branch` of `FEATURE_ARCHIVED`, or in its `next`): `git fetch origin && git switch --detach origin/<branch>`,
+  commit there (never on the old shadow branch: the guard refuses its private commits; a plain
+  `git switch <branch>` lands on it), then `git push origin HEAD:<branch>`. No gate, no plan, no apply.
 - `promote`, `gate` and `feature pull` refuse an archived feature (`FEATURE_ARCHIVED`). When its PR merges,
-  `sync` closes it and deletes the archive.
-- Archive is unavailable while another feature is built on this one: publish or restack that one first,
+  `sync` closes it and deletes the archive (unless it reads `merged_moved`: a person closes it).
+- Archive is unavailable while another feature is built on this one: publish it with this one, restack it onto main, or close an abandoned one first,
   then `ghostbranch feature archive <name> --repo <public> --json`. `ARCHIVE_INCOMPLETE`: the publish stands;
-  run `feature archive <name>` to finish. An older Ghostbranch shows an archived feature as `branch_gone`: update it.
+  run `ghostbranch feature archive <name> --repo <public> --json` to finish. An older Ghostbranch shows an archived feature as `branch_gone`: update it.
 - Keep is the loop above: fixes go through the shadow branch, `gate` and `promote`.
 
 ## Keeping up with public

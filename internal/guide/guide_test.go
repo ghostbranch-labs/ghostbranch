@@ -53,7 +53,8 @@ func TestRenderListsEveryCodeFromTheRegistry(t *testing.T) {
 	// 452: how a native stack merges and what a squash loses (6.3b, F-16/F-31).
 	// 453: the FEATURE_ARCHIVED error row (6.5).
 	// 472: the After publishing section, the archived state, the Never exception and the guard's archived-branch sentence (6.5).
-	if n := strings.Count(out, "\n"); n > 472 {
+	// 473: the hand-off follow-ups: how to reach the PR branch, merged_moved, the three archive-blocked cases (6.5 Task 11 review).
+	if n := strings.Count(out, "\n"); n > 473 {
 		t.Errorf("the guide is %d lines; keep it short (spec: about 150 plus the tables)", n)
 	}
 }
@@ -479,6 +480,11 @@ func TestGuideTeachesHandOff(t *testing.T) {
 		"never on the old shadow branch: the guard refuses its private commits",
 		"`promote`, `gate` and `feature pull` refuse an archived feature (`FEATURE_ARCHIVED`)",
 		"`ghostbranch feature archive <name> --repo <public> --json`",
+		"feature's own PR branch (see *After publishing*)",              // the Never bullet
+		"deletes their shadow branches (and an archived one's archive)", // the sync bullet
+		"`git fetch origin && git switch --detach origin/<branch>`",
+		"(unless it reads `merged_moved`: a person closes it)",
+		"(a handed-off PR: see *After publishing*)",
 		"`ARCHIVE_INCOMPLETE`: the publish stands",
 		"An older Ghostbranch shows an archived feature as `branch_gone`: update it.",
 		"`branch_gone`, `archived`, `abandoned`",
