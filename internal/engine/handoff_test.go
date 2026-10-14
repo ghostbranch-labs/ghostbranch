@@ -111,6 +111,13 @@ func TestApplyWithoutArchiveIsToday(t *testing.T) {
 	if len(c.asked) != 0 || res.AfterPublish["feat-x"] != engine.AfterKept {
 		t.Fatalf("asked %v, apply = %+v", c.asked, res)
 	}
+	refs := h.shadowRefs()
+	if _, ok := refs["refs/heads/feat-x"]; !ok {
+		t.Fatal("the branch must stay")
+	}
+	if _, ok := refs["refs/ghostbranch/archive/feat-x"]; ok || h.meta("feat-x").Archived != nil {
+		t.Fatal("nothing may be archived")
+	}
 }
 
 // Under a grant with --yes, no console: Archive applies without a
@@ -121,9 +128,13 @@ func TestApplyUnderAGrantArchivesWithoutAsking(t *testing.T) {
 	h.grant(time.Hour)
 	c := &chooser{pick: 1}
 	h.eng.Approver = c
+	head := h.head("feat-x")
 	res, _ := h.applyPlan(engine.ApplyOptions{Plan: id, Yes: true, Archive: true})
 	if len(c.asked) != 0 || len(c.approver.asked) != 0 || res.AfterPublish["feat-x"] != engine.AfterArchived {
 		t.Fatalf("asked %v, apply = %+v", c.asked, res)
+	}
+	if got := h.shadowRefs()["refs/ghostbranch/archive/feat-x"]; got != head {
+		t.Fatalf("archive ref = %q, want %s", got, head)
 	}
 }
 
@@ -153,6 +164,7 @@ func TestApplyOfAStackArchivesEveryLevel(t *testing.T) {
 	}
 	c := &chooser{pick: -1}
 	h.eng.Approver = c
+	heads := map[string]string{"feat-a": h.head("feat-a"), "feat-b": h.head("feat-b")}
 	ar, _ := h.applyPlan(engine.ApplyOptions{Plan: res.Plan.ID, Archive: true})
 	want := map[string]string{"feat-a": engine.AfterArchived, "feat-b": engine.AfterArchived}
 	if len(c.asked) != 1 || c.asked[0].Title != "After publishing, these features:" || !reflect.DeepEqual(ar.AfterPublish, want) ||
@@ -160,6 +172,26 @@ func TestApplyOfAStackArchivesEveryLevel(t *testing.T) {
 		t.Fatalf("asked %+v, apply = %+v", c.asked, ar)
 	}
 	defaultsAvailable(t, c.asked)
+	handedOff(t, h, heads)
+}
+
+// handedOff fails t unless each feature in heads is archived at its head:
+// the archive ref holds it, the shadow branch is gone, and the record says
+// so.
+func handedOff(t *testing.T, h *harness, heads map[string]string) {
+	t.Helper()
+	refs := h.shadowRefs()
+	for name, head := range heads {
+		if got := refs["refs/ghostbranch/archive/"+name]; got != head {
+			t.Errorf("%s: archive ref = %q, want %s", name, got, head)
+		}
+		if _, ok := refs["refs/heads/"+name]; ok {
+			t.Errorf("%s: the shadow branch must be gone", name)
+		}
+		if h.meta(name).Archived == nil {
+			t.Errorf("%s: the record isn't archived", name)
+		}
+	}
 }
 
 // A stack hands off top first and stops at the first failure (P5): the top
@@ -204,11 +236,45 @@ func TestPromoteArchives(t *testing.T) {
 	t.Parallel()
 	h := gated(t)
 	h.eng.Approver = &chooser{pick: -1}
+	head := h.head("feat-x")
 	res, err := promote(h, engine.PromoteOptions{Mode: "squash", Message: "Add feature", Archive: true})
 	if err != nil || res.Applied == nil || res.Applied.AfterPublish["feat-x"] != engine.AfterArchived {
 		t.Fatalf("promote = %+v %v", res, err)
 	}
 	validateResult(t, "promote.schema.json", res)
+	handedOff(t, h, map[string]string{"feat-x": head})
+}
+
+// A publish that fails archives nothing (review M2): the hand-off runs
+// only after a successful publish, so the feature stays kept, with no
+// archive ref and its shadow branch intact.
+func TestApplyWhosePublishFailsArchivesNothing(t *testing.T) {
+	t.Parallel()
+	h, id := planned(t)
+	h.eng.Approver = &chooser{pick: -1}
+	head := h.head("feat-x")
+	h.forge.MissingPermission = map[string]string{"CreatePR": "pull_requests"}
+	res, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: id, Archive: true})
+	if err == nil {
+		t.Fatal("apply must fail when the PR can't be opened")
+	}
+	if res != nil {
+		for name, v := range res.AfterPublish {
+			if v != engine.AfterKept {
+				t.Errorf("after_publish[%s] = %s, want kept", name, v)
+			}
+		}
+		if len(res.Archived) != 0 {
+			t.Errorf("archived = %v", res.Archived)
+		}
+	}
+	refs := h.shadowRefs()
+	if refs["refs/heads/feat-x"] != head {
+		t.Fatalf("the shadow branch must stay at %s: %v", head, refs)
+	}
+	if _, ok := refs["refs/ghostbranch/archive/feat-x"]; ok || h.meta("feat-x").Archived != nil {
+		t.Fatal("a failed publish archived the feature")
+	}
 }
 
 // A gate PR that won't close: the publish stands, ARCHIVE_INCOMPLETE says
