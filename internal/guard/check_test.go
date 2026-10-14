@@ -453,6 +453,8 @@ func writeRaw(t *testing.T, g *gitx.Git, name string, raw []byte) {
 // commit never published), and no shadow branch. Feature arch-b is
 // archived too, but published under the name of live feature feat-x.
 // Feature broken's record is corrupt JSON that claims arch's branch (P12).
+// Feature noarch's record is archived, but its archive ref is missing from
+// the mirror, so its private commits are unknown and it stays refused.
 func archivedMirror(t *testing.T) (g *gitx.Git, main, feat, pub, priv string) {
 	t.Helper()
 	ctx := context.Background()
@@ -470,9 +472,15 @@ func archivedMirror(t *testing.T) (g *gitx.Git, main, feat, pub, priv string) {
 	writeRecord(t, g, "arch", feature.Meta{Name: "arch", Branch: "arch",
 		Promoted: &feature.Promoted{PublicPR: 7, Branch: "arch"},
 		Archived: &feature.Archived{Ref: "refs/ghostbranch/archive/arch", Head: priv}})
+	if err := g.UpdateRef(ctx, "refs/shadow-meta/archive/arch-b", main); err != nil {
+		t.Fatal(err)
+	}
 	writeRecord(t, g, "arch-b", feature.Meta{Name: "arch-b", Branch: "arch-b",
 		Promoted: &feature.Promoted{PublicPR: 8, Branch: "feat-x"},
 		Archived: &feature.Archived{Ref: "refs/ghostbranch/archive/arch-b", Head: main}})
+	writeRecord(t, g, "noarch", feature.Meta{Name: "noarch", Branch: "noarch",
+		Promoted: &feature.Promoted{PublicPR: 10, Branch: "noarch"},
+		Archived: &feature.Archived{Ref: "refs/ghostbranch/archive/noarch", Head: priv}})
 	writeRaw(t, g, "broken", []byte(`{"name":"broken","branch":"broken","promoted":{"public_pr":9,"branch":"arch"},"archived":{"ref":"refs/ghostbranch/archive/broken"`))
 	return g, main, feat, pub, priv
 }
@@ -509,6 +517,11 @@ func TestLoadFactsArchived(t *testing.T) {
 	}
 	if !f.Names["broken"] {
 		t.Fatal("broken must stay refused by name")
+	}
+	// Review fix: noarch's archive ref is missing, so its private commits
+	// are unknown; it is never archived and stays refused by name.
+	if !f.Names["noarch"] || f.Archived["noarch"] != "" {
+		t.Fatalf("noarch: names %v, archived %v", f.Names, f.Archived)
 	}
 }
 
@@ -551,6 +564,8 @@ func TestCheckArchivedBranch(t *testing.T) {
 		// P12: features whose records can't be read stay refused by name.
 		{"a feature whose record can't be read (done)", line("HEAD", fix, "refs/heads/done", zero), true},
 		{"a feature whose record is corrupt (broken)", line("HEAD", fix, "refs/heads/broken", zero), true},
+		// Review fix: an archived record whose archive ref is missing.
+		{"an archived feature without its archive ref (noarch)", line("refs/heads/noarch", fix, "refs/heads/noarch", zero), true},
 	} {
 		blocks, err := guard.Check(ctx, objects{g}, []guard.Line{c.line}, f)
 		if err != nil {

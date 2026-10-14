@@ -111,8 +111,8 @@ func LoadFacts(ctx context.Context, mirror *gitx.Git) (Facts, error) {
 // maps its public branch to name, and its archive's commits that aren't in
 // public main join f.Commits under name (R7), never f.Heads: a head
 // already on its PR's branch would refuse every fix. A record that can't
-// be read changes nothing, so the name stays refused (fail closed); a git
-// failure is an error.
+// be read, or an archive ref missing from the mirror, changes nothing, so
+// the name stays refused (fail closed); a git failure is an error.
 func loadArchive(ctx context.Context, mirror *gitx.Git, f *Facts, name, pm string, hasPM bool) error {
 	raw, ok, err := mirror.ShowFile(ctx, "refs/shadow-meta/features/"+name, feature.MetaFile)
 	if err != nil || !ok {
@@ -126,7 +126,6 @@ func loadArchive(ctx context.Context, mirror *gitx.Git, f *Facts, name, pm strin
 	if branch == "" {
 		branch = name
 	}
-	f.Archived[branch] = name
 	arch, ok, err := mirror.Resolve(ctx, "refs/shadow-meta/archive/"+name)
 	if err != nil || !ok {
 		return err
@@ -144,6 +143,9 @@ func loadArchive(ctx context.Context, mirror *gitx.Git, f *Facts, name, pm strin
 			f.Commits[c] = name
 		}
 	}
+	// Only now, with the archive's private commits known, is the branch
+	// handed to name: without them the exception would let them through.
+	f.Archived[branch] = name
 	return nil
 }
 
