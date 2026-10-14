@@ -137,11 +137,15 @@ func human(r any, st style.Styler) string {
 		// It runs inside every public git push: a pass says nothing.
 	case *ExplainResult:
 		for _, e := range v.Entries {
-			exit := ""
-			if e.ExitCode != nil {
-				exit = fmt.Sprintf(", exit %d", *e.ExitCode)
+			switch {
+			case e.Kind == contract.KindExit:
+				// "exit 5: …", not "5 (exit, exit 5): …" (F-23).
+				fmt.Fprintf(&b, "exit %s: %s\n", e.Code, e.Summary)
+			case e.ExitCode != nil:
+				fmt.Fprintf(&b, "%s (%s, exit %d): %s\n", e.Code, e.Kind, *e.ExitCode, e.Summary)
+			default:
+				fmt.Fprintf(&b, "%s (%s): %s\n", e.Code, e.Kind, e.Summary)
 			}
-			fmt.Fprintf(&b, "%s (%s%s): %s\n", e.Code, e.Kind, exit, e.Summary)
 			for _, c := range e.Causes {
 				fmt.Fprintf(&b, "  cause: %s\n", c)
 			}

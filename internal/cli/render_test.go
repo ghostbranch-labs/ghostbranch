@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -214,5 +215,39 @@ func TestRenderOfAFailedDryRunNeverSaysNothing(t *testing.T) {
 	}
 	if !strings.Contains(errOut.String(), "[INTERNAL]") {
 		t.Fatalf("stderr: %q", errOut.String())
+	}
+}
+
+// F-23: an exit code's header says "exit 5:" once; a code keeps its kind
+// and exit code in brackets.
+func TestExplainTextHeaders(t *testing.T) {
+	t.Parallel()
+	exit, err := contract.Explain("5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := human(&ExplainResult{Entries: exit}, style.Styler{})
+	if !strings.HasPrefix(got, "exit 5: A person has to approve this before it runs") || strings.Contains(got, "(exit,") {
+		t.Errorf("explain 5 = %q", got)
+	}
+	if !strings.Contains(got, "\nAPPROVAL_REQUIRED (error, exit 5): ") {
+		t.Errorf("explain 5 lacks its codes: %q", got)
+	}
+	warn, err := contract.Explain("UPDATE_AVAILABLE")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := human(&ExplainResult{Entries: warn}, style.Styler{}); !strings.HasPrefix(got, "UPDATE_AVAILABLE (warning): ") {
+		t.Errorf("explain UPDATE_AVAILABLE = %q", got)
+	}
+	// explain --all: every exit code once, in the new form.
+	all := human(&ExplainResult{Entries: contract.Registry()}, style.Styler{})
+	for x := 0; x <= 6; x++ {
+		if !strings.Contains(all, fmt.Sprintf("exit %d: ", x)) {
+			t.Errorf("explain --all lacks exit %d", x)
+		}
+	}
+	if strings.Contains(all, "(exit,") {
+		t.Errorf("explain --all still says (exit, …)")
 	}
 }
