@@ -124,3 +124,77 @@ func TestGateResultReadinessLinksTheBottomAsPromoteDoes(t *testing.T) {
 		}
 	}
 }
+
+// Review M5: a three-level stack gated top first leads with the bottom,
+// then the middle, then is ready as a whole, and that promote plans.
+func TestGateResultReadinessOfAThreeLevelStack(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.startFeature("feat-a", map[string]string{"a.txt": "a\n"})
+	h.startOn("feat-b", "feat-a", map[string]string{"b.txt": "b\n"})
+	h.startOn("feat-c", "feat-b", map[string]string{"c.txt": "c\n"})
+
+	if rd := gateOK(h, "feat-c").Ready; rd.GateFirst != "feat-a" || rd.Levels != nil {
+		t.Fatalf("feat-c first: %+v", rd)
+	}
+	if rd := gateOK(h, "feat-a").Ready; !slices.Equal(rd.StaleAbove, []string{"feat-b"}) || !slices.Equal(rd.Levels, []string{"feat-a"}) {
+		t.Fatalf("then feat-a: %+v", rd)
+	}
+	if rd := gateOK(h, "feat-b").Ready; rd.GateFirst != "" || len(rd.StaleAbove) != 0 ||
+		!slices.Equal(rd.Levels, []string{"feat-a", "feat-b", "feat-c"}) {
+		t.Fatalf("then feat-b: %+v", rd)
+	}
+	if _, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Features: []string{"feat-a", "feat-b", "feat-c"}, Mode: "preserve", PlanOnly: true}); err != nil {
+		t.Fatalf("promote = %v", err)
+	}
+}
+
+// Review M5: a level below with a failed gate, or none, is gated first.
+func TestGateResultReadinessGatesAFailedOrMissingGateBelowFirst(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.startFeature("feat-a", map[string]string{"a.txt": "a\n"})
+	h.startOn("feat-b", "feat-a", map[string]string{"b.txt": "b\n"})
+	gateOK(h, "feat-a")
+	gateOK(h, "feat-b")
+
+	h.editRemoteMeta("feat-a", func(m *feature.Meta) { m.Gate.Checks = feature.ChecksFailed })
+	if rd := gateOK(h, "feat-b").Ready; rd.GateFirst != "feat-a" || rd.Levels != nil {
+		t.Fatalf("failed gate below: %+v", rd)
+	}
+	h.editRemoteMeta("feat-a", func(m *feature.Meta) { m.Gate = nil })
+	if rd := gateOK(h, "feat-b").Ready; rd.GateFirst != "feat-a" || rd.Levels != nil {
+		t.Fatalf("no gate below: %+v", rd)
+	}
+}
+
+// Review M5: when the bottom moves and its child is restacked onto it, the
+// child's old gate is stale above the bottom's new gate; once the child is
+// gated again, the stack is ready and plans.
+func TestGateResultReadinessAfterARestack(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.startFeature("feat-a", map[string]string{"a.txt": "a\n"})
+	h.startOn("feat-b", "feat-a", map[string]string{"b.txt": "b\n"})
+	gateOK(h, "feat-a")
+	gateOK(h, "feat-b")
+
+	testutil.Commit(t, h.shadowGit(), "feat-a", "more a", map[string]string{"a2.txt": "a2\n"})
+	if _, _, err := h.eng.FeatureRestack(h.ctx, h.pair, engine.RestackOptions{Feature: "feat-a"}); err != nil {
+		t.Fatal(err)
+	}
+	if rd := gateOK(h, "feat-a").Ready; !slices.Equal(rd.StaleAbove, []string{"feat-b"}) || !slices.Equal(rd.Levels, []string{"feat-a"}) {
+		t.Fatalf("after the restack, feat-a: %+v", rd)
+	}
+	if rd := gateOK(h, "feat-b").Ready; rd.GateFirst != "" || !slices.Equal(rd.Levels, []string{"feat-a", "feat-b"}) ||
+		!slices.Equal(rd.TitleFor, []string{"feat-a"}) {
+		t.Fatalf("then feat-b: %+v", rd)
+	}
+	if _, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Features: []string{"feat-a", "feat-b"}, Mode: "preserve",
+		Titles: map[string]string{"feat-a": "Add a"}, PlanOnly: true}); err != nil {
+		t.Fatalf("promote = %v", err)
+	}
+}
