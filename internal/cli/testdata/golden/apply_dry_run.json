@@ -32,6 +32,37 @@
           "head": "feat-x",
           "op": "open_pr",
           "repo": "acme/widget"
+        },
+        {
+          "from": null,
+          "op": "push_ref",
+          "ref": "refs/ghostbranch/archive/feat-x",
+          "repo": "acme/widget-shadow",
+          "to": "<SHA1>"
+        },
+        {
+          "op": "delete_ref",
+          "ref": "refs/heads/feat-x",
+          "repo": "acme/widget-shadow",
+          "sha": "<SHA1>"
+        },
+        {
+          "op": "delete_ref",
+          "ref": "refs/heads/ghostbranch-gate/feat-x",
+          "repo": "acme/widget-shadow",
+          "sha": "<SHA2>"
+        },
+        {
+          "number": 1,
+          "op": "close_pr",
+          "repo": "acme/widget-shadow"
+        },
+        {
+          "from": "<SHA6>",
+          "op": "push_ref",
+          "ref": "refs/ghostbranch/features/feat-x",
+          "repo": "acme/widget-shadow",
+          "to": null
         }
       ]
     },
@@ -45,7 +76,7 @@
     ],
     "stack_number": null,
     "after_publish": {
-      "feat-x": "kept"
+      "feat-x": "archived"
     }
   },
   "warnings": [],

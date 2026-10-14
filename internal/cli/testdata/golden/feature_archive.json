@@ -1,0 +1,27 @@
+{
+  "schema_version": "0.15",
+  "command": "feature archive",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "feature": "feat-x",
+    "changed": true,
+    "archived": {
+      "at": "2026-10-05T12:00:05Z",
+      "ref": "refs/ghostbranch/archive/feat-x",
+      "head": "<SHA1>"
+    },
+    "moved": {
+      "refs/ghostbranch/archive/feat-x": "<SHA1>",
+      "refs/heads/feat-x": "<SHA1>",
+      "refs/heads/ghostbranch-gate/feat-x": "<SHA2>"
+    },
+    "gate_pr": 1,
+    "public_pr": 1,
+    "branch": "feat-x",
+    "preview": null
+  },
+  "warnings": [],
+  "next": [],
+  "error": null
+}

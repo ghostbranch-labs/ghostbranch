@@ -76,7 +76,7 @@ func TestACloseAfterTheDeletesKeepsItsOwnCode(t *testing.T) {
 	te := newTestEnv(t)
 	initOnly(te)
 	grantAgents(te)
-	te.forge.SetPRMerged("acme/widget", publishFeature(te, "feat-a"))
+	te.forge.SetPRMerged("acme/widget", publishFeature(te, "feat-a", "--keep"))
 	te.forge.MissingPermission = map[string]string{"ClosePullRequest": "Pull requests: write"}
 	code, env := te.runJSON("feature", "close", "feat-a")
 	e, _ := env["error"].(map[string]any)

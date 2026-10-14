@@ -445,6 +445,8 @@ func human(r any, st style.Styler) string {
 					oneLine(v.Feature), short(v.From), short(v.To), oneLine(v.Feature))
 			}
 		}
+	case *engine.FeatureArchiveResult:
+		fmt.Fprintf(&b, "Archived %s.\n", v.Feature)
 	case *engine.FeatureCloseResult:
 		if v.Preview != nil {
 			previewText(&b, v.Preview)

@@ -37,7 +37,7 @@ var dataSchemas = map[string]string{
 	"feature abandon": "feature-abandon.schema.json", "feature close": "feature-close.schema.json",
 	"wait": "gate.schema.json", "login": "login.schema.json", "logout": "logout.schema.json", "auth status": "auth-status.schema.json",
 	"doctor": "doctor.schema.json", "feature fold": "feature-fold.schema.json", "feature restack": "feature-restack.schema.json", "feature pull": "feature-pull.schema.json",
-	"version": "version.schema.json", "reference": "reference.schema.json",
+	"feature archive": "feature-archive.schema.json", "version": "version.schema.json", "reference": "reference.schema.json",
 }
 
 var rootPath = regexp.MustCompile(`<ROOT>[^"]*`)
@@ -182,7 +182,7 @@ func TestGoldenContract(t *testing.T) {
 		{"gate_stacked", withStack, []string{"gate", "feat-y"}, 0},
 		{"gate_update_append", func(te *testEnv) {
 			publishable(te)
-			te.mustRun("promote", "feat-x", "--yes")
+			te.mustRun("promote", "feat-x", "--yes", "--keep")
 			te.shadowCommit("feat-x", map[string]string{"more.txt": "more\n"})
 		}, []string{"gate", "feat-x"}, 0},
 		{"gate_parent_rewritten", func(te *testEnv) {
@@ -221,7 +221,7 @@ func TestGoldenContract(t *testing.T) {
 		{"promote_plan_under_grant", publishable, []string{"promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--plan"}, 0},
 		{"promote_update_plan", func(te *testEnv) {
 			publishable(te)
-			te.mustRun("promote", "feat-x", "--yes")
+			te.mustRun("promote", "feat-x", "--yes", "--keep")
 			te.shadowCommit("feat-x", map[string]string{"more.txt": "more\n"})
 		}, []string{"promote", "feat-x", "--plan"}, 0},
 		{"promote_grant_needs_yes", publishable, []string{"promote", "feat-x", "--mode", "squash", "-m", "Add feature"}, 5},
@@ -319,6 +319,10 @@ jobs:
 			grantAgents(te)
 			te.forge.SetPRMerged("acme/widget", publishFeature(te, "feat-x"))
 		}, []string{"feature", "close", "feat-x"}, 0},
+		{"feature_archive", func(te *testEnv) {
+			publishable(te)
+			te.mustRun("promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--yes", "--keep")
+		}, []string{"feature", "archive", "feat-x"}, 0},
 		{"feature_close_needs_human", withFeature, []string{"feature", "close", "feat-x"}, 5},
 		{"feature_close_plan", gatedFeature, []string{"feature", "close", "feat-x", "--plan"}, 0},
 		{"feature_fold", withStack, []string{"feature", "fold", "feat-y"}, 0},

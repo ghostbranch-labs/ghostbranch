@@ -70,9 +70,16 @@
         "path": "apply",
         "use": "apply <plan-id|plan.json>",
         "short": "Publish a saved plan if the repos still match it",
-        "long": "apply publishes a plan saved by promote. It refuses with exit 6 if public main, the feature, the overlay or the gate candidate moved since the plan was made. Re-running it finishes an interrupted publish. A person confirms on the console, or --yes publishes under an agent grant.",
+        "long": "apply publishes a plan saved by promote. It refuses with exit 6 if public main, the feature, the overlay or the gate candidate moved since the plan was made. Re-running it finishes an interrupted publish. A person confirms on the console, or --yes publishes under an agent grant.\nAfter publishing, a person at the console picks Archive (the default: the shadow branch is archived and the PR is fixed by pushing to it) or Keep; with --yes, Archive applies unless --keep.",
         "read_only": false,
         "flags": [
+          {
+            "name": "keep",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "after publishing, keep the feature's shadow branch: fixes go through gate and promote (default: archive it, and fix the PR by pushing to its branch)"
+          },
           {
             "name": "yes",
             "shorthand": "",
@@ -142,6 +149,22 @@
             "type": "bool",
             "default": "false",
             "usage": "restore an abandoned feature"
+          }
+        ]
+      },
+      {
+        "path": "feature archive",
+        "use": "archive <name>",
+        "short": "Hand a published feature off to the public repo: archive its shadow branch",
+        "long": "feature archive hands a published feature off to the public repo, as apply's Archive does: in one\npush to the shadow repo it moves the feature's branch to refs/ghostbranch/archive/<name> and deletes the\nbranch and its gate branch, then closes the gate's draft PR and marks the record. Nothing is lost: the\narchive keeps the branch's head. From then on, fix or change its PR by pushing to the PR's branch;\npromote, gate and feature pull refuse it, and sync closes it when the PR merges.\nIt runs only while the PR is open and no other feature is built on this one. An archived feature is\nleft as it is. --plan shows what would change.",
+        "read_only": false,
+        "flags": [
+          {
+            "name": "plan",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "preview exactly what would change, and change nothing (same as --dry-run)"
           }
         ]
       },
@@ -508,7 +531,7 @@
         "path": "promote",
         "use": "promote <feature>...",
         "short": "Publish a gated feature, or a stack of them, to the public repo as PRs",
-        "long": "promote reuses a fresh green gate (or runs one), builds the public commits (each feature commit\nwith --mode preserve, one with squash, or the groups of a --curate file) on public main, ending on\nexactly the gated tree, scans every commit's files, message and author, the branch name and PR text\nfor leaks, and saves a plan.\nWith --plan it stops there. Otherwise a person confirms by typing a code shown on the console, or, if they have allowed agents with \"ghostbranch agents allow\", --yes publishes. Without either it stops at the plan with exit 5.\nSeveral features, bottom first (promote a b c), publish a stack: each branch's PR is based on the\nbranch below (a's on main) and shows only that branch's commits, and one approval covers every PR.\nEach branch needs a fresh green gate built on the branch below. Where GitHub offers native stacked\nPRs, they are registered as one stack. --mode-for and --title-for set one branch's mode and PR title.",
+        "long": "promote reuses a fresh green gate (or runs one), builds the public commits (each feature commit\nwith --mode preserve, one with squash, or the groups of a --curate file) on public main, ending on\nexactly the gated tree, scans every commit's files, message and author, the branch name and PR text\nfor leaks, and saves a plan.\nWith --plan it stops there. Otherwise a person confirms by typing a code shown on the console, or, if they have allowed agents with \"ghostbranch agents allow\", --yes publishes. Without either it stops at the plan with exit 5.\nSeveral features, bottom first (promote a b c), publish a stack: each branch's PR is based on the\nbranch below (a's on main) and shows only that branch's commits, and one approval covers every PR.\nEach branch needs a fresh green gate built on the branch below. Where GitHub offers native stacked\nPRs, they are registered as one stack. --mode-for and --title-for set one branch's mode and PR title.\nAfter publishing, a person at the console picks Archive (the default: the shadow branch is archived and the PR is fixed by pushing to it) or Keep; with --yes, Archive applies unless --keep.",
         "read_only": false,
         "flags": [
           {
@@ -538,6 +561,13 @@
             "type": "bool",
             "default": "false",
             "usage": "if a gate is needed, start it and return its job instead of waiting"
+          },
+          {
+            "name": "keep",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "after publishing, keep the feature's shadow branch: fixes go through gate and promote (default: archive it, and fix the PR by pushing to its branch)"
           },
           {
             "name": "message",

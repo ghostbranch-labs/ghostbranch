@@ -103,6 +103,35 @@ its branch, gate and plans stay, status still shows it, and feature list hides i
 	return c
 }
 
+func (a *app) featureArchiveCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "archive <name>",
+		Short: "Hand a published feature off to the public repo: archive its shadow branch",
+		Long: `feature archive hands a published feature off to the public repo, as apply's Archive does: in one
+push to the shadow repo it moves the feature's branch to refs/ghostbranch/archive/<name> and deletes the
+branch and its gate branch, then closes the gate's draft PR and marks the record. Nothing is lost: the
+archive keeps the branch's head. From then on, fix or change its PR by pushing to the PR's branch;
+promote, gate and feature pull refuse it, and sync closes it when the PR merges.
+It runs only while the PR is open and no other feature is built on this one. An archived feature is
+left as it is. --plan shows what would change.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			e, err := a.engine(cmd.Context())
+			if err != nil {
+				return err
+			}
+			p, err := a.pair(e)
+			if err != nil {
+				return err
+			}
+			res, w, err := e.FeatureArchive(cmd.Context(), p, args[0])
+			return done(a, res, w, err)
+		},
+	}
+	c.Flags().BoolVar(&a.dryRun, "plan", false, "preview exactly what would change, and change nothing (same as --dry-run)")
+	return c
+}
+
 func (a *app) featureCloseCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "close <name>",

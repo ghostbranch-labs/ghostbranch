@@ -34,7 +34,7 @@ func TestAbandonAndCloseHumanOutput(t *testing.T) {
 		}
 	}
 
-	te.forge.SetPRMerged("acme/widget", publishFeature(te, "feat-a"))
+	te.forge.SetPRMerged("acme/widget", publishFeature(te, "feat-a", "--keep"))
 	code, out, errOut := te.run("feature", "close", "feat-a")
 	if code != 0 || !strings.HasPrefix(out, "Closed feat-a (merged): deleted 4 ref(s) from the shadow repo; closed gate PR #") {
 		t.Fatalf("close: exit %d\nstdout: %s\nstderr: %s", code, out, errOut)
@@ -55,8 +55,8 @@ func TestAPartialCloseDoesNotReadAsClosed(t *testing.T) {
 	te := newTestEnv(t)
 	initOnly(te)
 	grantAgents(te)
-	te.forge.SetPRMerged("acme/widget", publishFeature(te, "feat-a"))
-	te.forge.SetPRMerged("acme/widget", publishFeature(te, "feat-b"))
+	te.forge.SetPRMerged("acme/widget", publishFeature(te, "feat-a", "--keep"))
+	te.forge.SetPRMerged("acme/widget", publishFeature(te, "feat-b", "--keep"))
 	te.forge.ClosePRErr = errors.New("boom")
 	code, out, errOut := te.run("feature", "close", "feat-a")
 	if code == 0 || !strings.HasPrefix(out, "Deleted 4 ref(s) of feat-a (merged) from the shadow repo, but its gate PR #") || strings.Contains(out, "Closed") {

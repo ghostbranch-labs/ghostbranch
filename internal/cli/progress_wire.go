@@ -69,7 +69,7 @@ var readOnlyCommands = map[string]bool{
 // changingCommands change something; they keep the full checklist.
 var changingCommands = map[string]bool{
 	"init": true, "sync": true, "upgrade": true, "gate": true, "wait": true, "promote": true, "apply": true, "remove": true,
-	"feature start": true, "feature abandon": true, "feature close": true, "feature fold": true, "feature restack": true, "feature pull": true,
+	"feature start": true, "feature abandon": true, "feature close": true, "feature fold": true, "feature restack": true, "feature pull": true, "feature archive": true,
 	"agents allow": true, "agents revoke": true, "waivers add": true, "waivers revoke": true,
 	"guard install": true, "guard uninstall": true, "login": true, "logout": true,
 }

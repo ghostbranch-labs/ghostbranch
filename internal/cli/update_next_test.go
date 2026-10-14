@@ -9,7 +9,7 @@ import (
 
 func published(te *testEnv) {
 	publishable(te)
-	te.mustRun("promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--yes")
+	te.mustRun("promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--yes", "--keep")
 }
 
 // status shows a PR behind its feature, and one changed on GitHub; next

@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/ghostbranch-labs/ghostbranch/internal/approval"
 	"github.com/ghostbranch-labs/ghostbranch/internal/cli/style"
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 )
@@ -88,6 +89,50 @@ func TestPausingApproverPausesAroundTheCode(t *testing.T) {
 	}
 	if strings.Join(log, ",") != "pause,confirm,resume" {
 		t.Fatalf("log = %v", log)
+	}
+}
+
+// chooserFunc is an approver that asks apply's Archive or Keep choice.
+type chooserFunc struct {
+	approverFunc
+	choose func(context.Context, string, approval.Choice) (int, error)
+}
+
+func (f chooserFunc) ConfirmChoosing(ctx context.Context, s string, c approval.Choice) (int, error) {
+	return f.choose(ctx, s, c)
+}
+
+// The choice and code are asked with the spinner paused, like Confirm, and
+// the spinner comes back after the answer; the pick passes through. An
+// inner approver that can't ask a choice confirms with the default (review
+// M2).
+func TestPausingApproverPausesAroundTheChoice(t *testing.T) {
+	t.Parallel()
+	ch := approval.Choice{Options: []approval.Option{{Key: "a", Name: "Archive"}, {Key: "k", Name: "Keep"}}}
+	var log []string
+	ui := fakeUI{log: &log}
+	w := pausingApprover{inner: chooserFunc{choose: func(context.Context, string, approval.Choice) (int, error) {
+		log = append(log, "choose")
+		return 1, nil
+	}}, p: ui}
+	if pick, err := w.ConfirmChoosing(context.Background(), "summary", ch); err != nil || pick != 1 {
+		t.Fatalf("pick %d, err %v", pick, err)
+	}
+	if strings.Join(log, ",") != "pause,choose,resume" {
+		t.Fatalf("log = %v", log)
+	}
+
+	log = nil
+	refused := errors.New("refused")
+	w = pausingApprover{inner: approverFunc(func(context.Context, string) error {
+		log = append(log, "confirm")
+		return refused
+	}), p: ui}
+	if pick, err := w.ConfirmChoosing(context.Background(), "summary", ch); !errors.Is(err, refused) || pick != ch.Default {
+		t.Fatalf("plain approver: pick %d, err %v", pick, err)
+	}
+	if strings.Join(log, ",") != "pause,confirm,resume" {
+		t.Fatalf("plain approver: log = %v", log)
 	}
 }
 
