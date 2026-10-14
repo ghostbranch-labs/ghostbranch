@@ -2,6 +2,8 @@ package install
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -146,5 +148,129 @@ func TestInstallShDownloadBaseIsHTTPSOrLocal(t *testing.T) {
 		if r.err == nil || !strings.Contains(r.out, "GHOSTBRANCH_DOWNLOAD_BASE must") {
 			t.Errorf("%s was accepted: %v\n%s", base, r.err, r.out)
 		}
+	}
+}
+
+func hostTarget() string { return runtime.GOOS + "_" + runtime.GOARCH }
+
+// editSums rewrites v0.9.0's checksums.txt line by line.
+func editSums(f func(lines []string) []string) func(map[string][]byte) {
+	return func(files map[string][]byte) {
+		lines := strings.Split(strings.TrimSpace(string(files["v0.9.0/checksums.txt"])), "\n")
+		files["v0.9.0/checksums.txt"] = []byte(strings.Join(f(lines), "\n") + "\n")
+	}
+}
+
+// The latest install fetches only checksums.txt from latest/download; the
+// archive comes from the tag that file names, so a release published
+// between the two requests can't mix versions (R9).
+func TestInstallShLatestReadsTheVersionFromChecksums(t *testing.T) {
+	t.Parallel()
+	s := twoReleases(t, nil)
+	r := runInstallSh(t, "GHOSTBRANCH_DOWNLOAD_BASE="+s.URL, "GHOSTBRANCH_INSTALL_DIR="+t.TempDir())
+	if r.err != nil {
+		t.Fatalf("%v\n%s", r.err, r.out)
+	}
+	want := []string{
+		"/latest/download/checksums.txt",
+		"/download/v0.9.0/checksums.txt",
+		"/download/v0.9.0/" + archiveName("0.9.0", hostTarget()),
+	}
+	if got := s.requests(); strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Errorf("requests %v, want %v", got, want)
+	}
+}
+
+func TestInstallShRefusesABadVersion(t *testing.T) {
+	t.Parallel()
+	s := twoReleases(t, nil)
+	for _, v := range []string{"latest", "0.8.0/../v0.9.0", "v1.2", "1.2.3; rm -rf /"} {
+		dir := t.TempDir()
+		r := runInstallSh(t, "GHOSTBRANCH_DOWNLOAD_BASE="+s.URL, "GHOSTBRANCH_INSTALL_DIR="+dir, "GHOSTBRANCH_VERSION="+v)
+		if r.err == nil || !strings.Contains(r.out, "isn't a version") {
+			t.Errorf("%q was accepted: %v\n%s", v, r.err, r.out)
+		}
+		emptyDir(t, dir)
+	}
+	if got := s.requests(); len(got) != 0 {
+		t.Errorf("a bad version still downloaded %v", got)
+	}
+}
+
+func TestInstallShRefusesAMalformedChecksumsFile(t *testing.T) {
+	t.Parallel()
+	none := twoReleases(t, editSums(func(lines []string) []string {
+		var keep []string
+		for _, l := range lines {
+			if !strings.Contains(l, hostTarget()) {
+				keep = append(keep, l)
+			}
+		}
+		return keep
+	}))
+	dup := twoReleases(t, editSums(func(lines []string) []string {
+		for _, l := range lines {
+			if strings.Contains(l, hostTarget()) {
+				return append(lines, l)
+			}
+		}
+		return lines
+	}))
+	for _, c := range []struct {
+		s    *server
+		want string
+	}{{none, "no archive for"}, {dup, "more than one archive"}} {
+		dir := t.TempDir()
+		r := runInstallSh(t, "GHOSTBRANCH_DOWNLOAD_BASE="+c.s.URL, "GHOSTBRANCH_INSTALL_DIR="+dir)
+		if r.err == nil || !strings.Contains(r.out, c.want) {
+			t.Errorf("want %q: %v\n%s", c.want, r.err, r.out)
+		}
+		emptyDir(t, dir)
+		emptyDir(t, r.tmp)
+	}
+}
+
+// A stale staging file, even a link to somewhere else, is never written
+// through, and none is left behind.
+func TestInstallShIgnoresAStaleStagingFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("install.sh is for macOS and Linux")
+	}
+	t.Parallel()
+	s := twoReleases(t, nil)
+	dir, elsewhere := t.TempDir(), filepath.Join(t.TempDir(), "precious")
+	if err := os.WriteFile(elsewhere, []byte("precious"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(elsewhere, filepath.Join(dir, ".ghostbranch.new")); err != nil {
+		t.Fatal(err)
+	}
+	r := runInstallSh(t, "GHOSTBRANCH_DOWNLOAD_BASE="+s.URL, "GHOSTBRANCH_INSTALL_DIR="+dir)
+	if r.err != nil {
+		t.Fatalf("%v\n%s", r.err, r.out)
+	}
+	if got, _ := os.ReadFile(elsewhere); string(got) != "precious" {
+		t.Errorf("the install wrote through a stale staging link: %q", got)
+	}
+	if left, _ := filepath.Glob(filepath.Join(dir, ".ghostbranch.new*")); len(left) != 0 {
+		t.Errorf("left %v behind", left)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "ghostbranch")); !bytes.Equal(got, fakeBins["0.9.0"]) {
+		t.Errorf("not installed:\n%s", r.out)
+	}
+}
+
+func TestInstallShWarnsWhenTheBinaryCannotRun(t *testing.T) {
+	t.Parallel()
+	s := twoReleases(t, func(files map[string][]byte) {
+		name := "v0.9.0/" + archiveName("0.9.0", hostTarget())
+		old := fmt.Sprintf("%x", sha256.Sum256(files[name]))
+		files[name] = tarGzOf(t, "ghostbranch", []byte("#!/bin/sh\nexit 3\n"))
+		sum := strings.Replace(string(files["v0.9.0/checksums.txt"]), old, fmt.Sprintf("%x", sha256.Sum256(files[name])), 1)
+		files["v0.9.0/checksums.txt"] = []byte(sum)
+	})
+	r := runInstallSh(t, "GHOSTBRANCH_DOWNLOAD_BASE="+s.URL, "GHOSTBRANCH_INSTALL_DIR="+t.TempDir())
+	if !strings.Contains(r.out, "doesn't run on this machine") || strings.Contains(r.out, "Installed ") {
+		t.Errorf("a binary that can't run wasn't flagged:\n%s", r.out)
 	}
 }

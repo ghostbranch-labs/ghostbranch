@@ -7,7 +7,7 @@
 # checksums.txt from GitHub over HTTPS, refuses the archive unless its
 # SHA-256 matches, and puts the ghostbranch binary in ~/.local/bin. It never
 # uses sudo. Source: https://github.com/ghostbranch-labs/ghostbranch/blob/main/install/install.sh
-# A copy installed elsewhere is upgraded by running this again.
+# A copy installed elsewhere is upgraded by running this again with GHOSTBRANCH_INSTALL_DIR set to its folder.
 #
 # Settings (environment variables):
 #   GHOSTBRANCH_VERSION      a release tag to install, such as v0.1.0 (default: the latest release)
@@ -15,6 +15,7 @@
 # For tests only:
 #   GHOSTBRANCH_DOWNLOAD_BASE  replaces https://github.com/ghostbranch-labs/ghostbranch/releases;
 #                              must be https://, or http://127.0.0.1 or http://localhost
+#                              (for a local base, redirects may use plain http too: tests only)
 #   GHOSTBRANCH_TEST_ARCH      pretends uname -m printed this
 #
 # Everything runs from main, called on the last line, so a download cut
@@ -53,8 +54,16 @@ check_base() {
 	esac
 }
 
+check_version() { # version what
+	case "$1" in
+	*[!0-9A-Za-z.-]* | "") fail "$2 isn't a version (such as 0.1.0 or v0.1.0): $1" ;;
+	[0-9]*.[0-9]*.[0-9]*) ;;
+	*) fail "$2 isn't a version (such as 0.1.0 or v0.1.0): $1" ;;
+	esac
+}
+
 fetch() { # url file
-	curl --fail --silent --show-error --location --proto "$proto" --proto-redir "$proto" --output "$2" "$1" ||
+	curl -q --fail --silent --show-error --location --proto "$proto" --proto-redir "$proto" --output "$2" "$1" ||
 		fail "couldn't download $1"
 }
 
@@ -76,12 +85,16 @@ main() {
 	base=${base%/}
 	check_base
 	dir=${GHOSTBRANCH_INSTALL_DIR:-$HOME/.local/bin}
+	while [ "${#dir}" -gt 1 ] && [ "${dir%/}" != "$dir" ]; do dir=${dir%/}; done
+	case "$dir" in *"'"*) fail "the install folder can't hold a single quote: $dir" ;; esac
 
 	tmp=$(mktemp -d "${TMPDIR:-/tmp}/ghostbranch-install.XXXXXX")
-	trap 'rm -rf "$tmp"' EXIT
+	trap 'rm -rf "$tmp"; rm -f "$dir/.ghostbranch.new"' EXIT
 	trap 'exit 130' INT TERM
+	trap 'exit 129' HUP
 
 	if [ -n "${GHOSTBRANCH_VERSION:-}" ]; then
+		check_version "${GHOSTBRANCH_VERSION#v}" "GHOSTBRANCH_VERSION"
 		tag=v${GHOSTBRANCH_VERSION#v}
 		from="$base/download/$tag"
 	else
@@ -98,6 +111,7 @@ main() {
 "*) fail "the release lists more than one archive for ${os}_${arch}" ;; esac
 	version=${archive#ghostbranch_}
 	version=${version%"_${os}_${arch}.tar.gz"}
+	check_version "$version" "the version in $archive"
 	want=$(awk -v f="$archive" '$2 == f { print $1 }' "$tmp/checksums.txt")
 
 	fetch "$base/download/v$version/$archive" "$tmp/$archive"
@@ -113,12 +127,19 @@ main() {
 	mkdir -p "$dir"
 	# Copy next to the target, then rename over it: an earlier copy is
 	# replaced in one step, even while it is running.
+	rm -f "$dir/.ghostbranch.new"
 	cp "$tmp/x/ghostbranch" "$dir/.ghostbranch.new"
 	chmod 0755 "$dir/.ghostbranch.new"
 	mv -f "$dir/.ghostbranch.new" "$dir/ghostbranch"
 
-	installed=$(GHOSTBRANCH_NO_UPDATE_CHECK=1 "$dir/ghostbranch" version 2>&1 | head -n 1) || true
-	say "Installed $installed"
+	ran=1
+	out=$(GHOSTBRANCH_NO_UPDATE_CHECK=1 "$dir/ghostbranch" version 2>&1) || ran=0
+	installed=$(printf '%s\n' "$out" | head -n 1)
+	if [ "$ran" = 1 ]; then
+		say "Installed $installed"
+	else
+		say "Warning: $dir/ghostbranch was installed but doesn't run on this machine ($installed)."
+	fi
 	say "  at $dir/ghostbranch"
 	case ":${PATH}:" in
 	*":$dir:"*) ;;
@@ -128,7 +149,7 @@ main() {
 		case "${SHELL:-}" in
 		*/zsh) say "  echo 'export PATH=\"$dir:\$PATH\"' >> ~/.zshrc" ;;
 		*/bash) say "  echo 'export PATH=\"$dir:\$PATH\"' >> ~/.bashrc" ;;
-		*/fish) say "  fish_add_path $dir" ;;
+		*/fish) say "  fish_add_path '$dir'" ;;
 		*) say "  echo 'export PATH=\"$dir:\$PATH\"' >> ~/.profile" ;;
 		esac
 		say "then open a new terminal."
