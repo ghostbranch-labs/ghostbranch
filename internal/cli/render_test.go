@@ -296,6 +296,42 @@ func TestFreshStackApplyNamesEveryPR(t *testing.T) {
 	}
 }
 
+// A stack apply that failed partway names only the PRs it opened: a PR it
+// never opened (number 0) gets no "PR #0" line (Task 7 review I1). One that
+// failed before any PR opened prints no published line at all.
+func TestPartlyFailedStackApplyNamesOnlyOpenedPRs(t *testing.T) {
+	t.Parallel()
+	u1 := "https://github.example/acme/widget/pull/13"
+	partly := &engine.ApplyResult{PRs: []plan.StackPR{
+		{Feature: "feat-a", Base: "main", Number: 13, URL: u1}, {Feature: "feat-b", Base: "feat-a"}}}
+	got := human(partly, style.Styler{})
+	if !strings.HasPrefix(got, "Published feat-a as PR #13: "+u1+"\n") || strings.Contains(got, "#0") || strings.Contains(got, "Published  ") {
+		t.Errorf("partly failed stack apply = %q", got)
+	}
+	none := &engine.ApplyResult{PRs: []plan.StackPR{
+		{Feature: "feat-a", Base: "main"}, {Feature: "feat-b", Base: "feat-a"}}}
+	if got := human(none, style.Styler{}); strings.Contains(got, "Published") || strings.Contains(got, "#0") {
+		t.Errorf("stack apply that opened nothing = %q", got)
+	}
+	if got := human(&engine.ApplyResult{PublicBranch: "feat-x"}, style.Styler{}); strings.Contains(got, "#0") {
+		t.Errorf("one-PR apply that opened nothing = %q", got)
+	}
+}
+
+// The stack lines escape a branch name a terminal would act on, as
+// archivedLines does (Task 7 review M1).
+func TestStackApplyLinesEscapeBranchNames(t *testing.T) {
+	t.Parallel()
+	rlo := string(rune(0x202e)) // RIGHT-TO-LEFT OVERRIDE, a bidi control
+	r := &engine.ApplyResult{PublicBranch: "feat-b\x1b[2J", PublicPR: 14, PRs: []plan.StackPR{
+		{Feature: "feat-a", Base: "main", Number: 13, Update: true, Style: plan.StyleAppend},
+		{Feature: "feat-b", Base: "feat-a" + rlo, Number: 14}}}
+	got := human(r, style.Styler{})
+	if strings.ContainsAny(got, "\x1b"+rlo) || !strings.Contains(got, `feat-b\x1b[2J`) || !strings.Contains(got, `feat-a`+`\`+`u202e`) {
+		t.Errorf("stack apply lines = %q", got)
+	}
+}
+
 // A guided init on a private shadow repo says again, just before the
 // walkthrough, that gates bill Actions minutes; otherwise it says nothing.
 func TestGuidedInitSaysMinutesAreBilled(t *testing.T) {

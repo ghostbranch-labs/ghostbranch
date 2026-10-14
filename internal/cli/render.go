@@ -620,15 +620,19 @@ func archivedLines(b *strings.Builder, r *engine.ApplyResult) {
 // open one, by adding k commits (k < 0 when the count isn't at hand) or by
 // replacing its branch. A stack plan says, for each of its PRs, bottom
 // first, what happened to it (F-15: a fresh stack once named only its top).
+// A PR never opened (number 0: the apply failed first) gets no line.
 func publishedLine(r *engine.ApplyResult, k int) string {
 	if len(r.PRs) > 1 {
 		var b strings.Builder
 		for i, p := range r.PRs {
+			if p.Number == 0 {
+				continue
+			}
 			// Each PR's branch is the base of the PR above it; the top's is
 			// the result's.
-			branch := r.PublicBranch
+			branch := oneLine(r.PublicBranch)
 			if i+1 < len(r.PRs) {
-				branch = r.PRs[i+1].Base
+				branch = oneLine(r.PRs[i+1].Base)
 			}
 			switch {
 			case !p.Update:
@@ -653,6 +657,9 @@ func publishedLine(r *engine.ApplyResult, k int) string {
 			return fmt.Sprintf("Updated PR #%d (added %d commit%s): %s\n", r.PublicPR, k, s, r.PRURL)
 		}
 		return fmt.Sprintf("Replaced PR #%d's branch %s: %s\n", r.PublicPR, r.PublicBranch, r.PRURL)
+	}
+	if r.PublicPR == 0 {
+		return ""
 	}
 	return fmt.Sprintf("Published %s as PR #%d: %s\n", r.PublicBranch, r.PublicPR, r.PRURL)
 }
