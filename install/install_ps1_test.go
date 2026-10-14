@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -47,7 +48,7 @@ func runInstallPs1(t *testing.T, shell string, env ...string) psRun {
 			base = append(base, e)
 		}
 	}
-	cmd.Env = append(append(base, "TEMP="+r.tmp, "TMP="+r.tmp, "TMPDIR="+r.tmp, "GHOSTBRANCH_TEST_SKIP_PATH=1"), env...)
+	cmd.Env = append(append(base, "TEMP="+r.tmp, "TMP="+r.tmp, "TMPDIR="+r.tmp, "GHOSTBRANCH_TEST_SKIP_PATH=1", "NO_COLOR=1"), env...)
 	out, err := cmd.CombinedOutput()
 	r.out, r.err = string(out), err
 	return r
@@ -190,9 +191,41 @@ func TestInstallPs1RefusesOutsideWindows(t *testing.T) {
 	}
 	for _, shell := range powershells(t) {
 		r := runInstallPs1(t, shell, "GHOSTBRANCH_INSTALL_DIR="+t.TempDir())
-		if r.err == nil || !strings.Contains(r.out, "use install.sh") {
+		out := plainPsText(r.out)
+		if r.err == nil || !strings.Contains(out, "is for Windows") || !strings.Contains(out, "install.sh") {
 			t.Errorf("%s: %v\n%s", shell, r.err, r.out)
 		}
+	}
+}
+
+var (
+	ansiEscape = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
+	// pwsh 7 wraps a long error across lines and starts each continuation
+	// line with "| ".
+	wrapMarker = regexp.MustCompile(`(?m)^\s*\|\s?`)
+)
+
+// plainPsText strips ANSI colour codes and error-view continuation markers
+// from PowerShell output and collapses all whitespace, so a message matches
+// however pwsh coloured or wrapped it.
+func plainPsText(s string) string {
+	s = ansiEscape.ReplaceAllString(s, "")
+	s = wrapMarker.ReplaceAllString(s, " ")
+	return strings.Join(strings.Fields(s), " ")
+}
+
+func TestPlainPsTextUndoesPwshColoursAndWrapping(t *testing.T) {
+	t.Parallel()
+	// What pwsh 7 printed on Linux CI: red text, wrapped mid-sentence, the
+	// continuation marked with " | ".
+	ci := "\x1b[31;1mghostbranch install: install.ps1 is for Windows; on ma\x1b[0m\n\x1b[31;1m | \x1b[0m install.sh.\n"
+	want := "ghostbranch install: install.ps1 is for Windows; on ma install.sh."
+	if got := plainPsText(ci); got != want {
+		t.Errorf("plainPsText = %q; want %q", got, want)
+	}
+	// Plain text passes through, rewrapped lines joined.
+	if got := plainPsText("a  b\r\n  c\n"); got != "a b c" {
+		t.Errorf("plainPsText = %q", got)
 	}
 }
 
