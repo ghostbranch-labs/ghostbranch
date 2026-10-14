@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -614,10 +613,10 @@ func archivedLines(b *strings.Builder, r *engine.ApplyResult) {
 
 // publishedLine is what an apply did: published a new PR, or updated an
 // open one, by adding k commits (k < 0 when the count isn't at hand) or by
-// replacing its branch. A stack plan that updated a PR says, for each of
-// its PRs, bottom first, what happened to it.
+// replacing its branch. A stack plan says, for each of its PRs, bottom
+// first, what happened to it (F-15: a fresh stack once named only its top).
 func publishedLine(r *engine.ApplyResult, k int) string {
-	if len(r.PRs) > 1 && slices.ContainsFunc(r.PRs, func(p plan.StackPR) bool { return p.Update }) {
+	if len(r.PRs) > 1 {
 		var b strings.Builder
 		for i, p := range r.PRs {
 			// Each PR's branch is the base of the PR above it; the top's is
