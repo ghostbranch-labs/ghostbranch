@@ -127,6 +127,12 @@ func childrenOf(recs map[string]stackRecord, name string, withAbandoned bool) []
 	return out
 }
 
+// liveChildren is kids without the archived ones: a handed-off child's PR
+// is the person's, so gate readiness leaves it out (R12). Never nil.
+func liveChildren(recs map[string]stackRecord, kids []string) []string {
+	return slices.DeleteFunc(slices.Clone(kids), func(k string) bool { return recs[k].meta.Archived != nil })
+}
+
 // descendants lists every feature above name, abandoned ones included,
 // depth first in name order: each child, then the features above it, so a
 // feature always comes after its parent. A loop in the records is cut.

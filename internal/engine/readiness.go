@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"slices"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 )
@@ -78,7 +77,7 @@ func (e *Engine) readiness(ctx context.Context, pc *pairCtx, recs map[string]sta
 		if len(gt.Commits) > 1 {
 			rd.TitleFor = append(rd.TitleFor, k)
 		}
-		tree, level = gt.PublishedTree, slices.DeleteFunc(childrenOf(recs, k, false), func(c string) bool { return recs[c].meta.Archived != nil })
+		tree, level = gt.PublishedTree, liveChildren(recs, childrenOf(recs, k, false))
 	}
 }
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/config"
@@ -621,7 +620,7 @@ func (e *Engine) stackView(ctx context.Context, pc *pairCtx, res *GateResult) {
 	}
 	res.Parent, res.Children, res.Chain = parent, kids, chain
 	if res.Preview == nil && res.Checks == feature.ChecksPassed && res.Leak == feature.LeakClean {
-		live := slices.DeleteFunc(slices.Clone(kids), func(k string) bool { return recs[k].meta.Archived != nil })
+		live := liveChildren(recs, kids)
 		res.Ready = e.readiness(ctx, pc, recs, res, chain, live)
 	}
 }
