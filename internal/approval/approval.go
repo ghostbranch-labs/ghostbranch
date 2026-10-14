@@ -58,3 +58,28 @@ func Decide(grantValid, yes, approver bool) Decision {
 		return Decision{Outcome: Refuse, Reason: NoConsole}
 	}
 }
+
+// Choice is a question asked just above the confirmation code: 6.5's
+// Archive or Keep. Options[Default] is what Enter picks. An option with
+// Unavailable set is shown with its reason and can't be picked.
+type Choice struct {
+	Title   string
+	Options []Option
+	Default int
+}
+
+// Option is one answer to a Choice: Key or its number picks it.
+type Option struct {
+	Key         string
+	Name        string
+	Text        string
+	Unavailable string
+}
+
+// Chooser is an Approver that can also ask a Choice above the code. It
+// returns the chosen option's index once the person typed the code, and
+// the same refusals as Confirm.
+type Chooser interface {
+	Approver
+	ConfirmChoosing(ctx context.Context, summary string, c Choice) (int, error)
+}

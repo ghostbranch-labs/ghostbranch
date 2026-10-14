@@ -90,6 +90,18 @@ func (w pausingApprover) Confirm(ctx context.Context, summary string) error {
 	return w.inner.Confirm(ctx, summary)
 }
 
+// ConfirmChoosing pauses the spinner while apply's choice and code are
+// asked. An inner approver that can't ask a choice confirms with the
+// default.
+func (w pausingApprover) ConfirmChoosing(ctx context.Context, summary string, ch approval.Choice) (int, error) {
+	w.p.Pause()
+	defer w.p.Resume()
+	if c, ok := w.inner.(approval.Chooser); ok {
+		return c.ConfirmChoosing(ctx, summary, ch)
+	}
+	return ch.Default, w.inner.Confirm(ctx, summary)
+}
+
 // pausingAsker pauses the spinner around guided init's questions.
 type pausingAsker struct {
 	inner prompt.Asker
