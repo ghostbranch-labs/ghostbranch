@@ -98,9 +98,15 @@ func (e *Engine) readableRecords(ctx context.Context, pc *pairCtx, name, op stri
 	if len(others) == 0 {
 		return recs, nil
 	}
-	// Any of them may be a child: HAS_CHILDREN, with no child known by name.
+	return nil, unreadableChildren(name, op, others)
+}
+
+// unreadableChildren is HAS_CHILDREN for an op ("close", "fold" or
+// "archive") on name while others' records can't be read: any of them may
+// be a child, so none is known by name.
+func unreadableChildren(name, op string, others []string) error {
 	done := map[string]string{"close": "closed", "fold": "folded", "archive": "archived"}[op]
-	return nil, contract.New(contract.HasChildren,
+	return contract.New(contract.HasChildren,
 		"%s: %s corrupt, so it can't be told whether %s stacked on %s, and %s can't be %s until %s dealt with; a person closes %s at the console (%s), or %s fixed",
 		unreadableWhat(others), itOrThey(others, "it is", "they are"), itOrThey(others, "it is", "they are"), name, name, done,
 		itOrThey(others, "it is", "they are"), itOrThey(others, "it", "each"), consoleCloses(others),

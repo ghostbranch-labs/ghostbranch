@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"sort"
 	"strings"
 
@@ -110,12 +109,21 @@ type archiveTarget struct {
 
 // archiveTargets reads what archiving name would change. archiveOne pushes
 // it and previewArchive renders it, so the preview refuses exactly what the
-// run refuses (P7): no branch and no archive ref is FEATURE_NOT_FOUND
-// (R13, P20), and an archive ref the branch doesn't hold is FEATURE_MOVED
-// (R17). Errors are *archiveStepError (step push, or gate_pr for the gate
-// PR's lookup).
+// run refuses (P7): a record naming another branch is INTERNAL, no branch
+// and no archive ref is FEATURE_NOT_FOUND (R13, P20), and an archive ref
+// the branch doesn't hold is FEATURE_MOVED (R17). Errors are
+// *archiveStepError (step push, or gate_pr for the gate PR's lookup).
 func (e *Engine) archiveTargets(ctx context.Context, pc *pairCtx, name string) (*archiveTarget, error) {
 	g := pc.git
+	m, _, err := e.readMeta(ctx, pc, name)
+	if err != nil {
+		return nil, &archiveStepError{step: stepPush, err: err}
+	}
+	if m.Branch != name {
+		return nil, &archiveStepError{step: stepPush, err: contract.New(contract.Internal,
+			"feature %s's metadata names the branch %q, not %q; refusing to archive another branch", name, m.Branch, name).
+			WithDetails(map[string]any{"feature": name, "branch": m.Branch})}
+	}
 	read := func(ref string) (string, bool, error) {
 		sha, ok, err := g.Resolve(ctx, ref)
 		if err != nil {
@@ -124,7 +132,6 @@ func (e *Engine) archiveTargets(ctx context.Context, pc *pairCtx, name string) (
 		return sha, ok, nil
 	}
 	t := &archiveTarget{}
-	var err error
 	if t.head, t.hasBranch, err = read(shadowRef(name)); err != nil {
 		return nil, err
 	}
@@ -194,11 +201,6 @@ func (e *Engine) archiveOne(ctx context.Context, pc *pairCtx, name string) (*arc
 	}
 	if m.Archived != nil {
 		return &archiveDone{archived: m.Archived, moved: map[string]string{}}, nil, nil
-	}
-	if m.Branch != name {
-		return nil, nil, &archiveStepError{step: stepPush, err: contract.New(contract.Internal,
-			"feature %s's metadata names the branch %q, not %q; refusing to archive another branch", name, m.Branch, name).
-			WithDetails(map[string]any{"feature": name, "branch": m.Branch})}
 	}
 	t, err := e.archiveTargets(ctx, pc, name)
 	if err != nil {
@@ -392,13 +394,15 @@ func (e *Engine) FeatureArchive(ctx context.Context, p workspace.Pair, name stri
 	} else if !open {
 		return nil, warns, e.noOpenPRFor(ctx, pc, m, name, "feature archive")
 	}
-	recs, err := e.readableRecords(ctx, pc, name, "archive")
-	if err != nil {
+	// The same rule as apply's hand-off (R8): one source of truth.
+	kids, unreadable, err := e.archiveBlockers(ctx, pc, []string{name})
+	switch {
+	case err != nil:
 		return nil, warns, err
-	}
-	kids := slices.DeleteFunc(childrenOf(recs, name, true), func(k string) bool { return recs[k].meta.Archived != nil })
-	if len(kids) > 0 {
+	case len(kids) > 0:
 		return nil, warns, hasChildren(name, kids, "archive")
+	case len(unreadable) > 0:
+		return nil, warns, unreadableChildren(name, "archive", unreadable)
 	}
 	if e.DryRun {
 		res.Preview = preview.New(nil)

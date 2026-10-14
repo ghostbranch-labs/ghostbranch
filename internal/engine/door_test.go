@@ -260,7 +260,7 @@ func TestOnlyPromoteAndApplyReachThePublicRepo(t *testing.T) {
 	// the hand-off of a published feature whose PR is open.
 	h.publish("third")
 	baseline = h.publicRefs()
-	n = len(h.pushes)
+	n, closed = len(h.pushes), len(h.forge.ClosePRRepos)
 	h.eng.DryRun = true
 	_, _, err = h.eng.FeatureArchive(h.ctx, h.pair, "third")
 	run("feature archive --plan", err, "")
@@ -273,6 +273,14 @@ func TestOnlyPromoteAndApplyReachThePublicRepo(t *testing.T) {
 	for _, p := range h.pushes[n:] {
 		if p.remote != "shadow" {
 			t.Fatalf("%s pushed to %s: %+v", p.op, p.remote, p)
+		}
+	}
+	if len(h.forge.ClosePRRepos) == closed {
+		t.Fatal("feature archive closed no gate PR")
+	}
+	for _, repo := range h.forge.ClosePRRepos[closed:] {
+		if repo != shadowName {
+			t.Fatalf("feature archive closed a PR in %s", repo)
 		}
 	}
 
