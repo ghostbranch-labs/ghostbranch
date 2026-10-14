@@ -257,18 +257,21 @@ func (e *Engine) WaiversAdd(ctx context.Context, p workspace.Pair, opt WaiversAd
 
 // waiveSummary is what the person sees before typing the code. A secret
 // shows only its first and last four characters; a block-pattern match is
-// shown whole, because it is not a secret.
+// shown whole, because it is not a secret. Every field a contributor or an
+// agent can write (a file name, the hint, the reason) goes through visible,
+// as in the approval summary, so the terminal can't be made to show
+// something else.
 func waiveSummary(p workspace.Pair, feat string, fs []leak.Finding, ids []string, reason string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Waive %d leak finding(s) in %s for %s, so they no longer block a publish:\n", len(fs), feat, p.Public)
 	for _, f := range fs {
-		shown := f.Hint
+		shown := visible(f.Hint)
 		if f.Match != "" {
 			shown = fmt.Sprintf("%q", f.Match)
 		}
-		fmt.Fprintf(&b, "  %s  %s  %s  %s\n", f.ID, f.Rule, Location(f), shown)
+		fmt.Fprintf(&b, "  %s  %s  %s  %s\n", f.ID, visible(f.Rule), visible(Location(f)), shown)
 	}
-	fmt.Fprintf(&b, "Reason: %s\n", reason)
+	fmt.Fprintf(&b, "Reason: %s\n", visible(reason))
 	fmt.Fprintf(&b, "Each waiver covers exactly this content in this file; changed content is a new finding.\n")
 	fmt.Fprintf(&b, "Undo with: ghostbranch waivers revoke %s --repo %s", strings.Join(ids, " "), p.Public)
 	return b.String()
