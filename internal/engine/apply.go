@@ -26,6 +26,10 @@ import (
 type ApplyOptions struct {
 	Plan string // plan ID or path to a plan .json
 	Yes  bool
+	// Archive hands the published features off after the publish (6.5):
+	// the person picks Archive or Keep at the console, or, without one,
+	// Archive applies. false keeps them without asking (R3).
+	Archive bool
 	// Lookup is the pair to look in when the plan file isn't on this
 	// machine (--repo or the checkout's; nil when none resolves). A plan
 	// that is here names its own pair.
@@ -55,7 +59,23 @@ type ApplyResult struct {
 	// PublicRepo is the plan's public repo. Both are for next.
 	KeepsHistory bool   `json:"-"`
 	PublicRepo   string `json:"-"`
+	// AfterPublish is what happened to each published feature's shadow
+	// branch: archived, kept, or incomplete (ARCHIVE_INCOMPLETE). Never
+	// null. Archived lists the features archived, bottom first.
+	AfterPublish map[string]string `json:"after_publish"`
+	Archived     []string          `json:"-"`
+	// Landed: the plan's updates had already landed, so this run only
+	// recorded them and archived nothing (finishLanded, R14), though the
+	// run that died may have been asked to. For next.
+	Landed bool `json:"-"`
+	// handOff are the features to archive once the publish succeeded;
+	// moved is every shadow ref the archives created or deleted (ledger).
+	handOff []string
+	moved   map[string]string
 }
+
+// applyOpts are how apply runs: yes is --yes, archive is ApplyOptions.Archive.
+type applyOpts struct{ yes, archive bool }
 
 // Apply publishes a saved plan if the repos still match it. Every step is
 // safe to re-run, so an interrupted apply finishes on the next run.
@@ -65,12 +85,15 @@ func (e *Engine) Apply(ctx context.Context, opt ApplyOptions) (res *ApplyResult,
 	defer func() {
 		summary := ""
 		if res != nil && err == nil {
-			summary = publishSummary(res)
+			summary = publishSummary(res) + archivedSummary(res)
 		}
 		e.recordWith("apply", pair, pl.Feature, pl.ID, summary, err, func(ent *ledger.Entry) {
 			if res != nil {
 				ent.Approval = res.Approval
 				ent.Waivers = findingIDs(res.Waived)
+			}
+			if res != nil && len(res.moved) > 0 {
+				ent.Refs = res.moved
 			}
 		})
 	}()
@@ -103,7 +126,15 @@ func (e *Engine) Apply(ctx context.Context, opt ApplyOptions) (res *ApplyResult,
 		return nil, nil, err
 	}
 	defer pc.unlock()
-	return e.apply(ctx, pc, pl, opt.Yes)
+	return e.apply(ctx, pc, pl, applyOpts{yes: opt.Yes, archive: opt.Archive})
+}
+
+// archivedSummary is the ledger's note of the features an apply archived.
+func archivedSummary(res *ApplyResult) string {
+	if res == nil || len(res.Archived) == 0 {
+		return ""
+	}
+	return "; archived " + strings.Join(res.Archived, ", ")
 }
 
 // stale is the PLAN_STALE details: what moved, plus the feature, public
@@ -210,10 +241,30 @@ func (e *Engine) previewPublish(ctx context.Context, pc *pairCtx, pv *preview.Pr
 
 // apply publishes pl (applyPlan) and notes what next needs to advise the
 // merge: whether a squash would flatten the history, and the public repo.
-func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool) (*ApplyResult, []contract.Warning, error) {
-	res, warns, err := e.applyPlan(ctx, pc, pl, yes)
-	if res != nil {
-		res.KeepsHistory, res.PublicRepo = keepsHistory(pl), pl.Pair.Public
+// After a successful publish it hands the features off when the choice
+// was Archive (handOff), and reports each one's after_publish; a dry run
+// reports what would happen.
+func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, ao applyOpts) (*ApplyResult, []contract.Warning, error) {
+	res, warns, err := e.applyPlan(ctx, pc, pl, ao)
+	if res == nil {
+		return res, warns, err
+	}
+	res.KeepsHistory, res.PublicRepo = keepsHistory(pl), pl.Pair.Public
+	res.AfterPublish = map[string]string{}
+	names := []string{pl.Feature}
+	if len(pl.Chain) > 0 {
+		names = chainNames(pl)
+	}
+	for _, n := range names {
+		res.AfterPublish[n] = AfterKept
+	}
+	switch {
+	case res.Preview != nil:
+		for _, n := range res.handOff {
+			res.AfterPublish[n] = AfterArchived
+		}
+	case err == nil:
+		warns = addWarnings(warns, e.handOff(ctx, pc, res, res.handOff)...)
 	}
 	return res, warns, err
 }
@@ -238,7 +289,7 @@ func keepsHistory(pl plan.Plan) bool {
 	return false
 }
 
-func (e *Engine) applyPlan(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool) (*ApplyResult, []contract.Warning, error) {
+func (e *Engine) applyPlan(ctx context.Context, pc *pairCtx, pl plan.Plan, ao applyOpts) (*ApplyResult, []contract.Warning, error) {
 	g := pc.git
 	if pl.SchemaVersion != plan.SchemaVersion {
 		return nil, nil, contract.New(contract.PlanStale,
@@ -249,7 +300,7 @@ func (e *Engine) applyPlan(ctx context.Context, pc *pairCtx, pl plan.Plan, yes b
 		return nil, nil, contract.New(contract.NameInvalid, "plan %s would publish to the public default branch %q", pl.ID, def).WithField("plan")
 	}
 	if len(pl.Chain) > 0 {
-		return e.applyStack(ctx, pc, pl, yes)
+		return e.applyStack(ctx, pc, pl, ao)
 	}
 	cfg, O, warns, err := e.readConfig(ctx, pc)
 	if err != nil {
@@ -263,7 +314,7 @@ func (e *Engine) applyPlan(ctx context.Context, pc *pairCtx, pl plan.Plan, yes b
 		if err != nil {
 			return nil, warns, err
 		}
-		return e.finishLanded(ctx, pc, cfg, pl, yes, warns)
+		return e.finishLanded(ctx, pc, cfg, pl, ao.yes, warns) // never archives (R14)
 	}
 	head, _, _ := g.Resolve(ctx, shadowRef(m.Branch))
 	pm, err := g.MustResolve(ctx, publicRef("main"))
@@ -340,6 +391,16 @@ func (e *Engine) applyPlan(ctx context.Context, pc *pairCtx, pl plan.Plan, yes b
 		} else if err := e.previewPublish(ctx, pc, pv, pl.Feature, publishedPlan(m), branch, "main", P); err != nil {
 			return res, warns, err
 		}
+		ch, err := e.handOffChoice(ctx, pc, []string{pl.Feature}, ao.archive)
+		if err != nil {
+			return res, warns, err
+		}
+		if ch != nil && archives(ch, ch.Default) {
+			res.handOff = []string{pl.Feature}
+			if err := e.previewArchive(ctx, pc, pv, pl.Feature); err != nil {
+				return res, warns, err
+			}
+		}
 		res.Preview = pv
 		return res, warns, nil
 	}
@@ -361,8 +422,17 @@ func (e *Engine) applyPlan(ctx context.Context, pc *pairCtx, pl plan.Plan, yes b
 	if err != nil {
 		return res, warns, err
 	}
-	if res.Approval, err = e.authorize(ctx, pc.pair, pl.ID, planSummary(summary, files, authors, waived, rep.Warnings, folded), yes); err != nil {
+	ch, err := e.handOffChoice(ctx, pc, []string{pl.Feature}, ao.archive)
+	if err != nil {
 		return nil, warns, err
+	}
+	appr, pick, err := e.authorizeChoosing(ctx, pc.pair, pl.ID, planSummary(summary, files, authors, waived, rep.Warnings, folded), ao.yes, ch)
+	if err != nil {
+		return nil, warns, err
+	}
+	res.Approval = appr
+	if archives(ch, pick) {
+		res.handOff = []string{pl.Feature}
 	}
 	if pl.Publish.Update {
 		if landed {

@@ -1,0 +1,66 @@
+{
+  "schema_version": "0.15",
+  "command": "apply",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "plan_id": "20261005T120005Z-0c0d0e",
+    "public_branch": "feat-x",
+    "public_pr": 1,
+    "pr_url": "https://github.example/acme/widget/pull/1",
+    "resumed": false,
+    "approval": {
+      "kind": "grant",
+      "grant_id": "g-0a0b0c",
+      "created_by": "human:octo"
+    },
+    "waived": [],
+    "preview": null,
+    "prs": [
+      {
+        "feature": "feat-x",
+        "base": "main",
+        "number": 1,
+        "url": "https://github.example/acme/widget/pull/1"
+      }
+    ],
+    "stack_number": null,
+    "after_publish": {
+      "feat-x": "incomplete"
+    }
+  },
+  "warnings": [
+    {
+      "code": "ARCHIVE_INCOMPLETE",
+      "message": "published, but archiving feature feat-x stopped at gate_pr (close gate PR #1 of feature feat-x in acme/widget-shadow: connection reset); finish it with ghostbranch feature archive feat-x",
+      "details": {
+        "code": "FORGE_ERROR",
+        "feature": "feat-x",
+        "step": "gate_pr"
+      }
+    }
+  ],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "feature",
+        "archive",
+        "feat-x"
+      ],
+      "why": "the publish stands, but archiving feat-x stopped (warnings[].details.step); finish it: every step is safe to run again",
+      "needs_human": false,
+      "needs_input": []
+    },
+    {
+      "command": [
+        "ghostbranch",
+        "sync"
+      ],
+      "why": "a maintainer reviews and merges PR #1 on GitHub; then sync closes the feature",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
+  "error": null
+}

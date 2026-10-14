@@ -1,0 +1,77 @@
+{
+  "schema_version": "0.15",
+  "command": "promote",
+  "ok": false,
+  "exit_code": 2,
+  "data": {
+    "gate": null,
+    "plan": null,
+    "plan_path": "",
+    "findings": [],
+    "waived": [],
+    "applied": null,
+    "preview": null,
+    "prs": [],
+    "stack_number": null
+  },
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "git",
+        "fetch",
+        "origin",
+        "feat-x"
+      ],
+      "why": "feature feat-x is handed off: fix or change PR #1 on its branch feat-x. In your checkout, fetch it from the public repo (origin is its remote there)",
+      "needs_human": false,
+      "needs_input": []
+    },
+    {
+      "command": [
+        "git",
+        "switch",
+        "--detach",
+        "origin/feat-x"
+      ],
+      "why": "work on the PR's branch as GitHub has it, never on the feature's old shadow branch: the guard refuses its private commits",
+      "needs_human": false,
+      "needs_input": []
+    },
+    {
+      "command": [
+        "git",
+        "push",
+        "origin",
+        "HEAD:feat-x"
+      ],
+      "why": "after committing the fix, push it to the PR; no gate, plan or apply",
+      "needs_human": false,
+      "needs_input": []
+    },
+    {
+      "command": [
+        "ghostbranch",
+        "sync",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "when PR #1 merges, sync closes feat-x and deletes its archive",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
+  "error": {
+    "code": "FEATURE_ARCHIVED",
+    "message": "feature feat-x was handed off to the public repo: its shadow branch is archived at refs/ghostbranch/archive/feat-x; fix or change PR #1 by pushing to its branch feat-x, and ghostbranch sync closes the feature when it merges",
+    "field": "feature",
+    "retryable": false,
+    "details": {
+      "archive_ref": "refs/ghostbranch/archive/feat-x",
+      "branch": "feat-x",
+      "feature": "feat-x",
+      "pr_state": "open",
+      "public_pr": 1
+    }
+  }
+}

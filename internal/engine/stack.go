@@ -98,9 +98,15 @@ func (e *Engine) readableRecords(ctx context.Context, pc *pairCtx, name, op stri
 	if len(others) == 0 {
 		return recs, nil
 	}
-	// Any of them may be a child: HAS_CHILDREN, with no child known by name.
-	done := map[string]string{"close": "closed", "fold": "folded"}[op]
-	return nil, contract.New(contract.HasChildren,
+	return nil, unreadableChildren(name, op, others)
+}
+
+// unreadableChildren is HAS_CHILDREN for an op ("close", "fold" or
+// "archive") on name while others' records can't be read: any of them may
+// be a child, so none is known by name.
+func unreadableChildren(name, op string, others []string) error {
+	done := map[string]string{"close": "closed", "fold": "folded", "archive": "archived"}[op]
+	return contract.New(contract.HasChildren,
 		"%s: %s corrupt, so it can't be told whether %s stacked on %s, and %s can't be %s until %s dealt with; a person closes %s at the console (%s), or %s fixed",
 		unreadableWhat(others), itOrThey(others, "it is", "they are"), itOrThey(others, "it is", "they are"), name, name, done,
 		itOrThey(others, "it is", "they are"), itOrThey(others, "it", "each"), consoleCloses(others),
@@ -119,6 +125,12 @@ func childrenOf(recs map[string]stackRecord, name string, withAbandoned bool) []
 	}
 	sort.Strings(out)
 	return out
+}
+
+// liveChildren is kids without the archived ones: a handed-off child's PR
+// is the person's, so gate readiness leaves it out (R12). Never nil.
+func liveChildren(recs map[string]stackRecord, kids []string) []string {
+	return slices.DeleteFunc(slices.Clone(kids), func(k string) bool { return recs[k].meta.Archived != nil })
 }
 
 // descendants lists every feature above name, abandoned ones included,
@@ -189,12 +201,20 @@ func parentRewritten(child, parent, forkedAt, reason string) error {
 		WithDetails(map[string]any{"feature": child, "parent": parent, "forked_at": forkedAt, "reason": reason})
 }
 
-// hasChildren is HAS_CHILDREN: name can't be op'd ("abandon" or "close")
-// while kids are stacked on it.
+// hasChildren is HAS_CHILDREN: name can't be op'd ("abandon", "close" or
+// "archive") while kids are stacked on it.
 func hasChildren(name string, kids []string, op string) error {
+	d := map[string]any{"feature": name, "children": kids, "op": op}
+	if op == "archive" {
+		// Archiving deletes the branch they are built on (R8, P6).
+		return contract.New(contract.HasChildren,
+			"feature %s has %d feature(s) stacked on it (%s), so it can't be archived; first, for each of them: publish it with %s (ghostbranch promote %s <child> --plan) and archive it, move it onto main (ghostbranch feature restack <child> --onto main), or, if it is abandoned, close it (ghostbranch feature close <child>, at the console)",
+			name, len(kids), strings.Join(kids, ", "), name, name).
+			WithField("feature").WithDetails(d)
+	}
 	done := map[string]string{"abandon": "abandoned", "close": "closed"}[op]
 	return contract.New(contract.HasChildren,
 		"feature %s has %d feature(s) stacked on it (%s), so it can't be %s; first, for each of them: fold it into %s (ghostbranch feature fold <child>), %s it, or move it onto main (ghostbranch feature restack <child> --onto main)",
 		name, len(kids), strings.Join(kids, ", "), done, name, op).
-		WithField("feature").WithDetails(map[string]any{"feature": name, "children": kids, "op": op})
+		WithField("feature").WithDetails(d)
 }

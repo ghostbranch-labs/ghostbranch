@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.14",
+  "schema_version": "0.15",
   "command": "feature close",
   "ok": true,
   "exit_code": 0,
@@ -7,12 +7,11 @@
     "feature": "feat-x",
     "state": "merged",
     "deleted": {
-      "refs/ghostbranch/features/feat-x": "<SHA1>",
-      "refs/ghostbranch/plans/20261005T120005Z-0c0d0e": "<SHA2>",
-      "refs/heads/feat-x": "<SHA3>",
-      "refs/heads/ghostbranch-gate/feat-x": "<SHA4>"
+      "refs/ghostbranch/archive/feat-x": "<SHA1>",
+      "refs/ghostbranch/features/feat-x": "<SHA2>",
+      "refs/ghostbranch/plans/20261005T120005Z-0c0d0e": "<SHA3>"
     },
-    "gate_pr": 1,
+    "gate_pr": null,
     "needs_console": false,
     "approval": null,
     "reparented": [],

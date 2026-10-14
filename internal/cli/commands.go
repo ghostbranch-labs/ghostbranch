@@ -38,7 +38,7 @@ Coding agents: run "ghostbranch guide" first.`,
 		return contract.New(contract.BadFlag, "%s", err.Error())
 	})
 	feature := &cobra.Command{Use: "feature", Short: "Work with features (private branches in the shadow repo)"}
-	feature.AddCommand(a.featureStartCmd(), a.featureListCmd(), a.featureShowCmd(), a.featureAbandonCmd(), a.featureCloseCmd(), a.featureFoldCmd(), a.featureRestackCmd(), a.featurePullCmd())
+	feature.AddCommand(a.featureStartCmd(), a.featureListCmd(), a.featureShowCmd(), a.featureAbandonCmd(), a.featureCloseCmd(), a.featureFoldCmd(), a.featureRestackCmd(), a.featurePullCmd(), a.featureArchiveCmd())
 	root.AddCommand(a.initCmd(), a.syncCmd(), a.statusCmd(), a.auditCmd(), a.doctorCmd(), a.upgradeCmd(), feature, a.gateCmd(), a.waitCmd(), a.promoteCmd(), a.applyCmd(), a.agentsCmd(), a.waiversCmd(), a.explainCmd(), a.guideCmd(), a.guardCmd(), a.removeCmd(), a.logCmd(), a.loginCmd(), a.logoutCmd(), a.authCmd(), a.versionCmd(), a.referenceCmd())
 	var showVersion bool
 	root.Flags().BoolVar(&showVersion, "version", false, "print this binary's version (as ghostbranch version does)")
@@ -306,6 +306,7 @@ func (a *app) waitCmd() *cobra.Command {
 func (a *app) promoteCmd() *cobra.Command {
 	var o engine.PromoteOptions
 	var modeFor, titleFor []string
+	var keep bool
 	c := &cobra.Command{
 		Use:   "promote <feature>...",
 		Short: "Publish a gated feature, or a stack of them, to the public repo as PRs",
@@ -317,7 +318,8 @@ With --plan it stops there. Otherwise a person confirms by typing a code shown o
 Several features, bottom first (promote a b c), publish a stack: each branch's PR is based on the
 branch below (a's on main) and shows only that branch's commits, and one approval covers every PR.
 Each branch needs a fresh green gate built on the branch below. Where GitHub offers native stacked
-PRs, they are registered as one stack. --mode-for and --title-for set one branch's mode and PR title.`,
+PRs, they are registered as one stack. --mode-for and --title-for set one branch's mode and PR title.
+After publishing, a person at the console picks Archive (the default: the shadow branch is archived and the PR is fixed by pushing to it) or Keep; with --yes, Archive applies unless --keep.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			o.Features, o.Feature = args, args[0]
@@ -345,6 +347,7 @@ PRs, they are registered as one stack. --mode-for and --title-for set one branch
 				return err
 			}
 			a.noteShadowRemote(p)
+			o.Archive = !keep
 			res, w, err := e.Promote(cmd.Context(), p, o)
 			return done(a, res, w, err)
 		},
@@ -361,16 +364,19 @@ PRs, they are registered as one stack. --mode-for and --title-for set one branch
 	f.BoolVar(&o.Detach, "detach", false, "if a gate is needed, start it and return its job instead of waiting")
 	f.StringArrayVar(&modeFor, "mode-for", nil, "one branch's history mode in a stack promote: <feature>=squash or <feature>=preserve (repeatable); default --mode")
 	f.StringArrayVar(&titleFor, "title-for", nil, "one branch's PR title in a stack promote: <feature>=<title> (repeatable)")
+	f.BoolVar(&keep, "keep", false, "after publishing, keep the feature's shadow branch: fixes go through gate and promote (default: archive it, and fix the PR by pushing to its branch)")
 	return c
 }
 
 func (a *app) applyCmd() *cobra.Command {
 	var o engine.ApplyOptions
+	var keep bool
 	c := &cobra.Command{
 		Use:   "apply <plan-id|plan.json>",
 		Short: "Publish a saved plan if the repos still match it",
-		Long:  `apply publishes a plan saved by promote. It refuses with exit 6 if public main, the feature, the overlay or the gate candidate moved since the plan was made. Re-running it finishes an interrupted publish. A person confirms on the console, or --yes publishes under an agent grant.`,
-		Args:  cobra.ExactArgs(1),
+		Long: `apply publishes a plan saved by promote. It refuses with exit 6 if public main, the feature, the overlay or the gate candidate moved since the plan was made. Re-running it finishes an interrupted publish. A person confirms on the console, or --yes publishes under an agent grant.
+After publishing, a person at the console picks Archive (the default: the shadow branch is archived and the PR is fixed by pushing to it) or Keep; with --yes, Archive applies unless --keep.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			e, err := a.engine(cmd.Context())
 			if err != nil {
@@ -387,11 +393,13 @@ func (a *app) applyCmd() *cobra.Command {
 			} else if a.repo != "" {
 				o.LookupErr = err
 			}
+			o.Archive = !keep
 			res, w, err := e.Apply(cmd.Context(), o)
 			return done(a, res, w, err)
 		},
 	}
 	c.Flags().BoolVar(&o.Yes, "yes", false, "publish under an agent grant (ghostbranch agents allow); on its own it never skips the console")
+	c.Flags().BoolVar(&keep, "keep", false, "after publishing, keep the feature's shadow branch: fixes go through gate and promote (default: archive it, and fix the PR by pushing to its branch)")
 	return c
 }
 

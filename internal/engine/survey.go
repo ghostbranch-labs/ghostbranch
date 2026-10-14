@@ -31,11 +31,21 @@ type FeatureReport struct {
 	PublicPR  *int         `json:"public_pr"` // nil when never published
 	PRState   string       `json:"pr_state"`  // "", open, merged, closed, unknown
 	PlanID    string       `json:"plan_id"`
-	Moved     bool         `json:"moved"` // since publish; false when unpublished; meaningless when the branch is gone (branch_gone reads only PRState)
+	Moved     bool         `json:"moved"` // since publish; false when unpublished; for an archived feature, its archive head (and any archive ref) against the published head; otherwise meaningless when the branch is gone (branch_gone reads only PRState)
 	Abandoned bool         `json:"abandoned"`
 	// PR is how its open public PR compares with the feature; nil unless
 	// it is published, the PR is open and the feature's branch exists.
 	PR *PRSync `json:"pr,omitempty"`
+	// Archived is set once the feature was handed off (6.5): its archive
+	// ref and head.
+	Archived *feature.Archived `json:"archived,omitempty"`
+	// PublicBranch is the public branch it was published to, for next;
+	// "" when unpublished.
+	PublicBranch string `json:"-"`
+	// PartlyArchived, for next: an archive ref exists but the record
+	// isn't marked, so an archive stopped partway (feature archive
+	// finishes it).
+	PartlyArchived bool `json:"-"`
 	// Error is why the feature couldn't be surveyed; set only with state
 	// unreadable. feature show returns it as its error.
 	Error string `json:"error,omitempty"`
@@ -217,6 +227,10 @@ func (e *Engine) surveyOne(ctx context.Context, pc *pairCtx, name, pm, O string)
 	}
 	r := FeatureReport{Name: name, Branch: m.Branch, Head: head, Base: m.Base, Abandoned: m.Abandoned,
 		Drift: Drift{Status: driftNA, Files: []string{}}}
+	r.Archived = m.Archived
+	if m.Promoted != nil {
+		r.PublicBranch = publishedBranch(m)
+	}
 	r.meta, r.metaSHA = &m, metaSHA
 	r.Parent, r.Children = stackParent(m), []string{}
 	if m.Promoted != nil && m.Promoted.Stack != 0 {
@@ -242,6 +256,7 @@ func (e *Engine) surveyOne(ctx context.Context, pc *pairCtx, name, pm, O string)
 	if r.Gate != nil && stackStale {
 		r.Gate.Fresh = false
 	}
+	archiveMoved := false
 	if m.Promoted != nil {
 		n := m.Promoted.PublicPR
 		r.PublicPR, r.PlanID = &n, m.Promoted.PlanID
@@ -260,7 +275,29 @@ func (e *Engine) surveyOne(ctx context.Context, pc *pairCtx, name, pm, O string)
 			r.PRState = prOpen
 		}
 		base := e.publishedHead(m)
-		r.Moved = base == "" || head != base
+		cur := head
+		if m.Archived != nil {
+			// Handed off: the archive holds what the branch held (R9).
+			cur = m.Archived.Head
+		}
+		// A shadow branch that came back after the archive (pushed from
+		// an old checkout, or by an older binary) may hold new private
+		// commits: moved, so a person closes it (P4).
+		r.Moved = base == "" || cur != base || (m.Archived != nil && exists && head != m.Archived.Head)
+		// The archive ref a close would delete, marked in the record or
+		// left by an archive that stopped before marking it, closes
+		// unattended only when it holds the head that was published (the
+		// same base the branch is compared with, so an old record's head
+		// comes from its plan; none known counts as moved): otherwise it
+		// may hold commits never published (R9).
+		arch, hasArch, err := pc.git.Resolve(ctx, archiveRef(name))
+		if err != nil {
+			return FeatureReport{}, nil, internalErr(err, "read archive ref "+remoteArchiveRef(name))
+		}
+		r.PartlyArchived = hasArch && m.Archived == nil
+		if hasArch && (base == "" || arch != base) {
+			r.Moved, archiveMoved = true, true
+		}
 		// A branch_gone feature has nothing to compare with its PR.
 		if r.PRState == prOpen && exists {
 			var ws []contract.Warning
@@ -320,6 +357,11 @@ func (e *Engine) surveyOne(ctx context.Context, pc *pairCtx, name, pm, O string)
 	}
 	r.State = feature.StateOf(feature.StateInput{Meta: m, BranchExists: exists, Head: head, PublicMain: pm,
 		Overlay: O, PRState: r.PRState, Moved: r.Moved, ParentMoved: st.parentMoved, StackStale: stackStale, Behind: behind})
+	if r.State == feature.StateBranchGone && r.PRState == prMerged && archiveMoved {
+		// The branch lives on in an unmarked archive that moved: a person
+		// closes it.
+		r.State = feature.StateMergedMoved
+	}
 	// Only a merged branch_gone feature needs to know whether its gate is
 	// for what was published (ClosableWithoutConsole), so only it reads the
 	// gate branch.

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -60,20 +61,102 @@ type Challenger struct {
 
 func refuse(r approval.Reason) error { return &approval.Refusal{Reason: r} }
 
+// ChoicePrompt starts the question a Choice asks when more than one option
+// can be picked.
+const ChoicePrompt = "Press Enter for "
+
 // Confirm shows summary and a one-time code on the console, and returns nil
 // only when the person types the code back.
 func (c *Challenger) Confirm(ctx context.Context, summary string) error {
+	_, err := c.challenge(ctx, summary, nil)
+	return err
+}
+
+// ConfirmChoosing is Confirm with ch asked between the summary and the code
+// (R2): Enter picks ch.Default, an option's key, name or number picks it,
+// and an unavailable option asks again. With one option left, ch is shown
+// and nothing is asked. It returns the option chosen. A default that isn't
+// an option that can be picked is refused before the console opens.
+func (c *Challenger) ConfirmChoosing(ctx context.Context, summary string, ch approval.Choice) (int, error) {
+	if ch.Default < 0 || ch.Default >= len(ch.Options) || ch.Options[ch.Default].Unavailable != "" {
+		return 0, fmt.Errorf("console: choice %q has no usable default (%d of %d options)", ch.Title, ch.Default, len(ch.Options))
+	}
+	return c.challenge(ctx, summary, &ch)
+}
+
+// ChoiceText is how ch shows: its title, then one line per option, the
+// default marked ❯ and an unavailable one with its reason.
+func ChoiceText(ch approval.Choice) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s\n", ch.Title)
+	for i, o := range ch.Options {
+		mark, text := " ", o.Text
+		if i == ch.Default {
+			mark = "❯"
+		}
+		if o.Unavailable != "" {
+			text = "unavailable: " + o.Unavailable
+		}
+		fmt.Fprintf(&b, "%s %-8s — %s\n", mark, o.Name, text)
+	}
+	return b.String()
+}
+
+// choiceQuestion is the question ch asks, "" when at most one option can be
+// picked.
+func choiceQuestion(ch approval.Choice) string {
+	var others []string
+	for i, o := range ch.Options {
+		if i != ch.Default && o.Unavailable == "" {
+			others = append(others, o.Key+" for "+o.Name)
+		}
+	}
+	if len(others) == 0 || ch.Options[ch.Default].Unavailable != "" {
+		return ""
+	}
+	return ChoicePrompt + ch.Options[ch.Default].Name + ", or type " + strings.Join(others, ", ") + ": "
+}
+
+// pickOption reads an answer to ch: the option's index, or why the answer
+// can't stand ("" when it can).
+func pickOption(ch approval.Choice, line string) (int, string) {
+	ans := strings.ToLower(strings.TrimSpace(line))
+	if ans == "" {
+		return ch.Default, ""
+	}
+	var keys []string
+	for i, o := range ch.Options {
+		if ans == o.Key || ans == strings.ToLower(o.Name) || ans == strconv.Itoa(i+1) {
+			if o.Unavailable != "" {
+				return 0, o.Name + " isn't available: " + o.Unavailable + "."
+			}
+			return i, ""
+		}
+		if o.Unavailable == "" {
+			keys = append(keys, o.Key)
+		}
+	}
+	return 0, "Press Enter, or type " + strings.Join(keys, " or ") + "."
+}
+
+// challenge is Confirm, with ch asked first when it is set. pick is
+// ch.Default on a refusal.
+func (c *Challenger) challenge(ctx context.Context, summary string, ch *approval.Choice) (int, error) {
+	pick := 0
+	if ch != nil {
+		pick = ch.Default
+	}
 	dev, err := c.Open()
 	if err != nil {
-		return refuse(approval.NoConsole)
+		return pick, refuse(approval.NoConsole)
 	}
 	// On Windows a pending console read blocks Close until the person types
-	// another line, so Confirm never waits for the close. The reader goroutine
-	// and the handle are released when the process exits.
+	// another line, so the close never waits. The reader goroutine and the
+	// handle are released when the process exits.
 	defer func() { go func() { _ = dev.Close() }() }()
 	code, err := NewCode(c.Rand)
 	if err != nil {
-		return err
+		return pick, err
 	}
 	timeout, attempts, after := c.Timeout, c.Attempts, c.After
 	if timeout <= 0 {
@@ -85,11 +168,9 @@ func (c *Challenger) Confirm(ctx context.Context, summary string) error {
 	if after == nil {
 		after = time.After
 	}
-	// Anything typed before the code appears (an Enter during a long gate)
-	// must not count as an answer.
+	// Anything typed before the question appears (an Enter during a long
+	// gate) must not count as an answer.
 	flush(dev)
-	_, _ = fmt.Fprintf(dev, "%s\n\nTo confirm, type this code and press Enter: %s\nLeave it empty, or type n, to cancel.\n", summary, code)
-
 	// The reader goroutine closes lines at EOF, so a closed channel means
 	// "nothing more will be typed". After a decision, timeout or cancel it may
 	// stay blocked in Read until the process exits.
@@ -102,32 +183,64 @@ func (c *Challenger) Confirm(ctx context.Context, summary string) error {
 		}
 	}()
 	deadline := after(timeout)
-	for left := attempts; ; {
-		_, _ = fmt.Fprint(dev, "> ")
+	next := func() (string, error) {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return "", ctx.Err()
 		case <-deadline:
 			_, _ = fmt.Fprintln(dev, "\nNo answer in time; nothing was confirmed.")
-			return refuse(approval.Timeout)
+			return "", refuse(approval.Timeout)
 		case line, ok := <-lines:
 			if !ok {
-				return refuse(approval.NotConfirmed)
+				return "", refuse(approval.NotConfirmed)
 			}
-			switch ans := strings.ToUpper(strings.TrimSpace(line)); ans {
-			case "", "N", "NO":
-				_, _ = fmt.Fprintln(dev, "Cancelled.")
-				return refuse(approval.NotConfirmed)
-			case code:
-				return nil
-			}
-			left--
-			if left == 0 {
-				_, _ = fmt.Fprintln(dev, "That code doesn't match. Too many tries; nothing was confirmed.")
-				return refuse(approval.TooManyAttempts)
-			}
-			_, _ = fmt.Fprintf(dev, "That code doesn't match; %d tries left.\n", left)
+			return line, nil
 		}
+	}
+	_, _ = fmt.Fprintf(dev, "%s\n\n", summary)
+	if ch != nil {
+		_, _ = fmt.Fprint(dev, ChoiceText(*ch))
+		if q := choiceQuestion(*ch); q != "" {
+			for left := attempts; ; {
+				_, _ = fmt.Fprint(dev, q)
+				line, err := next()
+				if err != nil {
+					return pick, err
+				}
+				i, why := pickOption(*ch, line)
+				if why == "" {
+					pick = i
+					break
+				}
+				if left--; left == 0 {
+					_, _ = fmt.Fprintln(dev, why+" Too many tries; nothing was confirmed.")
+					return ch.Default, refuse(approval.TooManyAttempts)
+				}
+				_, _ = fmt.Fprintln(dev, why)
+			}
+		}
+		_, _ = fmt.Fprintln(dev)
+	}
+	_, _ = fmt.Fprintf(dev, "To confirm, type this code and press Enter: %s\nLeave it empty, or type n, to cancel.\n", code)
+	for left := attempts; ; {
+		_, _ = fmt.Fprint(dev, "> ")
+		line, err := next()
+		if err != nil {
+			return pick, err
+		}
+		switch ans := strings.ToUpper(strings.TrimSpace(line)); ans {
+		case "", "N", "NO":
+			_, _ = fmt.Fprintln(dev, "Cancelled.")
+			return pick, refuse(approval.NotConfirmed)
+		case code:
+			return pick, nil
+		}
+		left--
+		if left == 0 {
+			_, _ = fmt.Fprintln(dev, "That code doesn't match. Too many tries; nothing was confirmed.")
+			return pick, refuse(approval.TooManyAttempts)
+		}
+		_, _ = fmt.Fprintf(dev, "That code doesn't match; %d tries left.\n", left)
 	}
 }
 

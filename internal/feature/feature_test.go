@@ -276,3 +276,63 @@ func TestStateOfPRBehind(t *testing.T) {
 		}
 	}
 }
+
+// An archived feature (6.5) has no shadow branch: archived comes before
+// branch_gone. Its PR's state still decides: merged and unmoved closes as
+// today, a merge after unpublished commits is merged_moved, a closed PR is
+// pr_closed, and anything else (open, or unknown) is archived.
+func TestStateOfArchived(t *testing.T) {
+	t.Parallel()
+	arch := feature.Meta{Promoted: &feature.Promoted{PublicPR: 3, FeatureHead: "h"},
+		Archived: &feature.Archived{Ref: feature.ArchiveRef("x"), Head: "h"}}
+	for _, c := range []struct {
+		pr    string
+		moved bool
+		want  feature.State
+	}{
+		{"open", false, feature.StateArchived},
+		{"unknown", false, feature.StateArchived},
+		{"", false, feature.StateArchived},
+		{"merged", false, feature.StateMerged},
+		{"merged", true, feature.StateMergedMoved},
+		{"closed", false, feature.StatePRClosed},
+	} {
+		got := feature.StateOf(feature.StateInput{Meta: arch, BranchExists: false, PRState: c.pr, Moved: c.moved})
+		if got != c.want {
+			t.Errorf("PR %q, moved %v: %s, want %s", c.pr, c.moved, got, c.want)
+		}
+	}
+	// Abandoned still wins, and a record without archived is unchanged.
+	ab := arch
+	ab.Abandoned = true
+	if got := feature.StateOf(feature.StateInput{Meta: ab, PRState: "open"}); got != feature.StateAbandoned {
+		t.Errorf("abandoned archived: %s", got)
+	}
+	plain := feature.Meta{Promoted: &feature.Promoted{PublicPR: 3}}
+	if got := feature.StateOf(feature.StateInput{Meta: plain, PRState: "open"}); got != feature.StateBranchGone {
+		t.Errorf("published, branch gone, not archived: %s", got)
+	}
+	if feature.StateArchived != "archived" || feature.ArchiveRef("a/b") != "refs/ghostbranch/archive/a/b" {
+		t.Fatal("names")
+	}
+}
+
+// archived is optional: a record without it decodes with nil, and one
+// with it round-trips at the same schema version.
+func TestArchivedRoundTrips(t *testing.T) {
+	t.Parallel()
+	at := time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)
+	m := feature.Meta{SchemaVersion: feature.SchemaVersion, Name: "x", Branch: "x", CreatedBy: "human:octo", CreatedAt: at, Base: "b",
+		Promoted: &feature.Promoted{PublicPR: 7, PlanID: "id"},
+		Archived: &feature.Archived{At: at, Ref: feature.ArchiveRef("x"), Head: "h"}}
+	got, err := feature.Decode(feature.Encode(m))
+	if err != nil || !reflect.DeepEqual(got, m) {
+		t.Fatalf("round trip: %+v %v", got, err)
+	}
+	if strings.Contains(string(feature.Encode(feature.Meta{Name: "y"})), "archived") {
+		t.Fatal("a record that isn't archived must not carry the field")
+	}
+	if feature.SchemaVersion != "0.12" {
+		t.Fatalf("records stay at 0.12, got %s", feature.SchemaVersion)
+	}
+}

@@ -324,7 +324,7 @@ func (e *Engine) finishLanded(ctx context.Context, pc *pairCtx, cfg config.Confi
 		levels[0].PRs = []plan.StackPR{pl.PRs[0]}
 	}
 	top := levels[len(levels)-1]
-	res := &ApplyResult{PlanID: pl.ID, PublicBranch: top.Publish.TargetBranch, Resumed: true, Waived: []WaivedFinding{},
+	res := &ApplyResult{PlanID: pl.ID, PublicBranch: top.Publish.TargetBranch, Resumed: true, Landed: true, Waived: []WaivedFinding{},
 		PRs: append([]plan.StackPR(nil), pl.PRs...)}
 	if e.DryRun {
 		res.Preview = preview.New(nil)

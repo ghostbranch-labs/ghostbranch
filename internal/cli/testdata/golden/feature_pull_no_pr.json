@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.14",
+  "schema_version": "0.15",
   "command": "feature pull",
   "ok": false,
   "exit_code": 2,
@@ -22,7 +22,7 @@
   ],
   "error": {
     "code": "NO_OPEN_PR",
-    "message": "feature pull brings in commits from a feature's open public PR, and feat-x has none: it was never published",
+    "message": "feature pull needs a feature's open public PR, and feat-x has none: it was never published",
     "field": "feature",
     "retryable": false,
     "details": {

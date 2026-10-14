@@ -96,6 +96,11 @@ func (e *Engine) refreshPublished(ctx context.Context, pc *pairCtx, rs []Feature
 			continue
 		}
 		if len(foreign) > 0 {
+			if m.Archived != nil {
+				// Handed off (6.5): pushes to its PR are expected; nothing
+				// to flag, and nothing to adopt.
+				continue
+			}
 			r.flagged = true
 			warns = append(warns, contract.Warning{Code: contract.PublicBranchChanged,
 				Message: fmt.Sprintf("public branch %s of feature %s is at %s, not %s as published, and holds changes Ghostbranch didn't publish; they were not adopted: a person looks at PR #%d",

@@ -3,6 +3,7 @@ package cli
 import (
 	"cmp"
 	"context"
+	"fmt"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -244,8 +245,11 @@ func (a *app) steps(err error) []contract.Next {
 		case contract.FeatureMoved:
 			if f, _ := ce.Details["feature"].(string); f != "" {
 				why := "the feature changed while it was being closed and nothing was deleted; look at it again before closing it"
-				if a.command == "feature fold" {
+				switch a.command {
+				case "feature fold":
 					why = "the feature or its parent changed while it was being folded, and nothing changed; look at it again before folding it"
+				case "feature archive":
+					why = "the branch moved while it was being archived (or no longer holds its archive), and nothing changed; look at it, then run feature archive again"
 				}
 				return []contract.Next{{Command: a.scoped("feature", "show", f), Why: why}}
 			}
@@ -352,6 +356,22 @@ func (a *app) steps(err error) []contract.Next {
 			}
 			kids, _ := ce.Details["children"].([]string)
 			op, _ := ce.Details["op"].(string)
+			// Archive (P6): folding a child into a published parent would
+			// add unpublished commits to it, and feature archive on an
+			// unpublished child is NO_OPEN_PR.
+			if f, _ := ce.Details["feature"].(string); op == "archive" && f != "" {
+				var out []contract.Next
+				for _, k := range kids {
+					out = append(out,
+						contract.Next{Command: a.scoped("promote", f, k, "--plan"),
+							Why: "publish " + k + " with " + f + " (a stack plan), then archive " + k + " and then " + f},
+						contract.Next{Command: a.scoped("feature", "restack", k, "--onto", "main"),
+							Why: "or move " + k + " onto main, dropping " + f + "'s commits"},
+						contract.Next{Command: a.scoped("feature", "close", k), NeedsHuman: true,
+							Why: "or, if " + k + " is abandoned, a person closes it at the console"})
+				}
+				return out
+			}
 			var out []contract.Next
 			for _, k := range kids {
 				out = append(out,
@@ -533,6 +553,24 @@ func (a *app) steps(err error) []contract.Next {
 					Why: "pass --repo <owner/repo> to see that pair's features, then plan the one you meant again with promote <feature> --plan; apply <plan> --repo <owner/repo> looks the plan up in that pair's shadow repo"}}
 			}
 			return []contract.Next{{Command: onPair("status"), Why: "see the features, then plan the one you meant again with promote <feature> --plan"}}
+		case contract.FeatureArchived:
+			f, _ := ce.Details["feature"].(string)
+			branch, _ := ce.Details["branch"].(string)
+			pr := 0
+			switch n := ce.Details["public_pr"].(type) {
+			case int:
+				pr = n
+			case float64:
+				pr = int(n)
+			}
+			if f == "" || branch == "" {
+				break
+			}
+			state, _ := ce.Details["pr_state"].(string)
+			if n := a.handedOffPRDone(f, pr, state); n != nil {
+				return n
+			}
+			return a.handOffNexts(f, pr, branch)
 		case contract.NoOpenPR:
 			f, _ := ce.Details["feature"].(string)
 			if f == "" {
@@ -607,7 +645,9 @@ func (a *app) steps(err error) []contract.Next {
 			case rd.GateFirst != "":
 				out = append(out, contract.Next{Command: a.scoped("gate", rd.GateFirst),
 					Why: rd.GateFirst + " below has no fresh gate; gate it first, then the branches above it"})
-			case len(r.Children) > 0 || len(r.Chain) > 1:
+			case len(rd.Live) > 0 || len(r.Chain) > 1:
+				// Archived children are left out: their PRs are handed
+				// off (R12).
 				for _, c := range rd.StaleAbove {
 					out = append(out, contract.Next{Command: a.scoped("gate", c),
 						Why: "the gate passed; gate " + c + " next: it is stacked on this one, and its gate builds on this gate"})
@@ -628,7 +668,7 @@ func (a *app) steps(err error) []contract.Next {
 					// line on it is fresh. One plan publishes one line, so
 					// publish this feature on its own first; next never ends
 					// empty after a passing gate.
-					promoteOne("the gate passed, and the stack forks above " + r.Feature + " (" + strings.Join(r.Children, ", ") +
+					promoteOne("the gate passed, and the stack forks above " + r.Feature + " (" + strings.Join(rd.Live, ", ") +
 						"); plan the publish of " + r.Feature + " on its own, then promote each line above it")
 				}
 			default:
@@ -646,7 +686,7 @@ func (a *app) steps(err error) []contract.Next {
 			out = append(out, a.waitNext(*r.Gate.Job),
 				contract.Next{Command: withoutSwitch(a.again(false), "--detach"), Why: "once the job has passed, promote again; it reuses the green gate"})
 		case r.Applied != nil && r.Applied.Preview == nil:
-			out = append(out, a.mergedThenSync(r.Applied))
+			out = append(out, a.afterApplyNexts(r.Applied)...)
 		}
 	case *engine.ApplyResult:
 		for _, w := range a.warnings {
@@ -658,7 +698,15 @@ func (a *app) steps(err error) []contract.Next {
 			}
 		}
 		if r.Preview == nil && r.PublicPR != 0 {
-			out = append(out, a.mergedThenSync(r))
+			out = append(out, a.afterApplyNexts(r)...)
+		}
+	case *engine.FeatureArchiveResult:
+		if r.Preview != nil {
+			out = append(out, contract.Next{Command: a.scoped("feature", "archive", r.Feature), Why: "the preview lists what archiving changes; run it to archive"})
+		} else if n := a.handedOffPRDone(r.Feature, r.PublicPR, r.PRState); n != nil {
+			out = append(out, n...)
+		} else {
+			out = append(out, a.handOffNexts(r.Feature, r.PublicPR, r.Branch)...)
 		}
 	case *engine.FoldResult:
 		if r.Preview != nil {
@@ -742,6 +790,117 @@ func (a *app) steps(err error) []contract.Next {
 		}
 	}
 	return append(out, a.upgradeNext()...)
+}
+
+// handOffNexts is how a handed-off PR is fixed (6.5): fetch its branch,
+// work on it as GitHub has it (never on the feature's old shadow branch,
+// whose private commits the guard refuses), push to it; when it merges,
+// sync closes the feature.
+func (a *app) handOffNexts(name string, pr int, branch string) []contract.Next {
+	return []contract.Next{
+		{Command: []string{"git", "fetch", "origin", branch},
+			Why: fmt.Sprintf("feature %s is handed off: fix or change PR #%d on its branch %s. In your checkout, fetch it from the public repo (origin is its remote there)", name, pr, branch)},
+		{Command: []string{"git", "switch", "--detach", "origin/" + branch},
+			Why: "work on the PR's branch as GitHub has it, never on the feature's old shadow branch: the guard refuses its private commits"},
+		{Command: []string{"git", "push", "origin", "HEAD:" + branch},
+			Why: "after committing the fix, push it to the PR; no gate, plan or apply"},
+		{Command: a.scoped("sync"), Why: fmt.Sprintf("when PR #%d merges, sync closes %s and deletes its archive", pr, name)},
+	}
+}
+
+// handedOffPRDone is the next step for a handed-off feature whose PR
+// merged (sync closes it, or says a person does when its archive holds
+// commits never published, P17) or was closed without merging (a person
+// closes it); nil while the PR may still take pushes.
+func (a *app) handedOffPRDone(name string, pr int, state string) []contract.Next {
+	switch state {
+	case "merged":
+		return []contract.Next{{Command: a.scoped("sync"),
+			Why: fmt.Sprintf("PR #%d merged, so it takes no more pushes; sync closes %s and deletes its archive (when the archive holds commits never published, sync leaves it for a person to close at the console)", pr, name)}}
+	case "closed":
+		return []contract.Next{{Command: a.scoped("feature", "close", name), NeedsHuman: true,
+			Why: fmt.Sprintf("PR #%d was closed without merging; a person closes %s at the console", pr, name)}}
+	}
+	return nil
+}
+
+// prBranch is the public branch of r's PR i: each PR's branch is the base
+// of the PR above it; the top's is the result's.
+func prBranch(r *engine.ApplyResult, i int) string {
+	if i+1 < len(r.PRs) {
+		return r.PRs[i+1].Base
+	}
+	return r.PublicBranch
+}
+
+// afterApplyNexts is what follows a publish: feature archive for each
+// archive that stopped (ARCHIVE_INCOMPLETE) first, then for each level a
+// stopped stack hand-off kept below it, then the merge and sync, then, for
+// one feature handed off, how to fix its PR. A handed-off stack adds one
+// sentence to the merge step instead, naming the archived levels only. A
+// resumed update that had already landed archived nothing (R14), though
+// the run that died may have been asked to: its kept isn't final, so
+// feature archive is offered for each kept feature, top first.
+func (a *app) afterApplyNexts(r *engine.ApplyResult) []contract.Next {
+	var out []contract.Next
+	failed := -1 // the lowest level whose archive stopped
+	for _, w := range a.warnings {
+		if f, _ := w.Details["feature"].(string); w.Code == contract.ArchiveIncomplete && f != "" {
+			out = append(out, contract.Next{Command: a.scoped("feature", "archive", f),
+				Why: "the publish stands, but archiving " + f + " stopped (warnings[].details.step); finish it: every step is safe to run again"})
+			if i := slices.IndexFunc(r.PRs, func(p plan.StackPR) bool { return p.Feature == f }); i >= 0 {
+				if failed < 0 || i < failed {
+					failed = i
+				}
+			}
+		}
+	}
+	// The hand-off runs top first and stops at the first failure (P5), so
+	// the levels below the failed one were kept although Archive was
+	// chosen for them too.
+	if failed > 0 {
+		out = append(out, a.keptArchiveNexts(r, failed, func(f string) string {
+			return "the hand-off stopped above " + f + ", so it was kept: archive it once the level above is finished (top first, or it is refused as HAS_CHILDREN), " +
+				"or leave it to keep fixing it through gate and promote"
+		})...)
+	}
+	merge := a.mergedThenSync(r)
+	switch {
+	case len(r.Archived) == 1 && len(r.PRs) == 1:
+		out = append(out, merge)
+		out = append(out, a.handOffNexts(r.Archived[0], r.PublicPR, r.PublicBranch)[:3]...)
+	case len(r.Archived) > 0:
+		var handed []string
+		for i, p := range r.PRs {
+			if r.AfterPublish[p.Feature] == engine.AfterArchived {
+				handed = append(handed, p.Feature+" (branch "+prBranch(r, i)+")")
+			}
+		}
+		merge.Why += " Handed off: " + strings.Join(handed, ", ") +
+			"; fix one by pushing to its branch (git fetch origin <branch>, commit on origin/<branch>, git push origin HEAD:<branch>)."
+		out = append(out, merge)
+	default:
+		out = append(out, merge)
+	}
+	if r.Landed && failed < 0 {
+		out = append(out, a.keptArchiveNexts(r, len(r.PRs), func(f string) string {
+			return "this run only recorded an update that had already landed, so " + f + "'s shadow branch was kept whatever was chosen before (R14): " +
+				"archive it to hand it off (fix its PR by pushing to it directly), or leave it to keep fixing it through gate and promote"
+		})...)
+	}
+	return out
+}
+
+// keptArchiveNexts offers feature archive for each kept level of r below
+// level below, top first: a parent is archived only after its child.
+func (a *app) keptArchiveNexts(r *engine.ApplyResult, below int, why func(f string) string) []contract.Next {
+	var out []contract.Next
+	for i := below - 1; i >= 0; i-- {
+		if f := r.PRs[i].Feature; r.AfterPublish[f] == engine.AfterKept {
+			out = append(out, contract.Next{Command: a.scoped("feature", "archive", f), Why: why(f)})
+		}
+	}
+	return out
 }
 
 // mergedThenSync is the step after a publish or an update: a maintainer
@@ -861,6 +1020,7 @@ func (a *app) syncNext() []contract.Next {
 func (a *app) featureNexts(out []contract.Next, rs []engine.FeatureReport) []contract.Next {
 	newer, intoParent := a.newerRecords(), a.mergedIntoParent()
 	var merged []string
+	var handed []engine.FeatureReport
 	var rest []contract.Next
 	restacks := map[string]bool{}
 	for _, r := range rs {
@@ -889,9 +1049,24 @@ func (a *app) featureNexts(out []contract.Next, rs []engine.FeatureReport) []con
 			rest = append(rest, contract.Next{Command: closeCmd, NeedsHuman: true,
 				Why: "its record couldn't be read; run feature show " + r.Name + " for the error: run the command again if it was a passing failure, and if the record is corrupt a person closes it at the console"})
 		case feature.StateBranchGone:
+			if r.PartlyArchived && r.PRState == "open" {
+				// Its branch is in its archive ref: the archive stopped
+				// before marking the record.
+				rest = append(rest, contract.Next{Command: a.scoped("feature", "archive", r.Name),
+					Why: "archiving it stopped partway (its branch is in its archive ref, its record isn't marked); finish it: every step is safe to run again"})
+				continue
+			}
 			rest = append(rest, contract.Next{Command: closeCmd, NeedsHuman: true,
 				Why: "its branch was deleted; a person closes it at the console"})
+		case feature.StateArchived:
+			handed = append(handed, r)
 		case feature.StateMergedMoved:
+			if r.Archived != nil {
+				// An archived feature can't be promoted (FEATURE_ARCHIVED, P17).
+				rest = append(rest, contract.Next{Command: closeCmd, NeedsHuman: true,
+					Why: "its PR merged, but its archive holds commits never published; a person closes it at the console"})
+				continue
+			}
 			rest = append(rest, contract.Next{Command: closeCmd, NeedsHuman: true,
 				Why: "its PR merged but there are newer commits; promote them or a person closes it"})
 			if r.Gate != nil && r.Gate.Job != nil {
@@ -938,19 +1113,37 @@ func (a *app) featureNexts(out []contract.Next, rs []engine.FeatureReport) []con
 			}
 		}
 	}
+	if len(handed) > 0 {
+		var parts []string
+		for _, r := range handed {
+			pr := 0
+			if r.PublicPR != nil {
+				pr = *r.PublicPR
+			}
+			parts = append(parts, fmt.Sprintf("PR #%d (%s, branch %s)", pr, r.Name, r.PublicBranch))
+		}
+		why := "handed off to the public repo: fix or change " + strings.Join(parts, ", ") +
+			" by pushing to the PR's branch (git fetch origin <branch>, commit on origin/<branch>, git push origin HEAD:<branch>); when a PR merges, sync closes its feature"
+		out = a.addSyncWhy(out, why)
+	}
 	if len(merged) > 0 {
 		closes := make([]string, len(merged))
 		for i, n := range merged {
 			closes[i] = "`" + shellJoin(a.scoped("feature", "close", n)) + "`"
 		}
-		why := "sync closes merged features; or run " + strings.Join(closes, ", ")
-		if sync := a.scoped("sync"); len(out) > 0 && slices.Equal(out[0].Command, sync) {
-			out[0].Why += "; " + why
-		} else {
-			out = append(out, contract.Next{Command: sync, Why: why})
-		}
+		out = a.addSyncWhy(out, "sync closes merged features; or run "+strings.Join(closes, ", "))
 	}
 	return append(out, rest...)
+}
+
+// addSyncWhy folds why into out's leading sync step, or appends a sync
+// step with it when out has none.
+func (a *app) addSyncWhy(out []contract.Next, why string) []contract.Next {
+	if sync := a.scoped("sync"); len(out) > 0 && slices.Equal(out[0].Command, sync) {
+		out[0].Why += "; " + why
+		return out
+	}
+	return append(out, contract.Next{Command: a.scoped("sync"), Why: why})
 }
 
 // newerRecords names the features whose record a newer Ghostbranch wrote:

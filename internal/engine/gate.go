@@ -256,6 +256,9 @@ func (e *Engine) build(ctx context.Context, pc *pairCtx, name, mode string, waiv
 	if err != nil {
 		return nil, warns, err
 	}
+	if err := e.archivedRefusal(ctx, pc, name, m); err != nil {
+		return nil, warns, err
+	}
 	head, ok, err := g.Resolve(ctx, shadowRef(m.Branch))
 	if err != nil {
 		return nil, warns, internalErr(err, "read the feature branch")
@@ -617,7 +620,9 @@ func (e *Engine) stackView(ctx context.Context, pc *pairCtx, res *GateResult) {
 	}
 	res.Parent, res.Children, res.Chain = parent, kids, chain
 	if res.Preview == nil && res.Checks == feature.ChecksPassed && res.Leak == feature.LeakClean {
-		res.Ready = e.readiness(ctx, pc, recs, res, chain, kids)
+		live := liveChildren(recs, kids)
+		res.Ready = e.readiness(ctx, pc, recs, res, chain, live)
+		res.Ready.Live = live
 	}
 }
 

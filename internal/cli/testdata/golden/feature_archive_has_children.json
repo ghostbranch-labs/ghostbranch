@@ -1,0 +1,65 @@
+{
+  "schema_version": "0.15",
+  "command": "feature archive",
+  "ok": false,
+  "exit_code": 4,
+  "data": {},
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "promote",
+        "feat-x",
+        "feat-y",
+        "--plan",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "publish feat-y with feat-x (a stack plan), then archive feat-y and then feat-x",
+      "needs_human": false,
+      "needs_input": []
+    },
+    {
+      "command": [
+        "ghostbranch",
+        "feature",
+        "restack",
+        "feat-y",
+        "--onto",
+        "main",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "or move feat-y onto main, dropping feat-x's commits",
+      "needs_human": false,
+      "needs_input": []
+    },
+    {
+      "command": [
+        "ghostbranch",
+        "feature",
+        "close",
+        "feat-y",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "or, if feat-y is abandoned, a person closes it at the console",
+      "needs_human": true,
+      "needs_input": []
+    }
+  ],
+  "error": {
+    "code": "HAS_CHILDREN",
+    "message": "feature feat-x has 1 feature(s) stacked on it (feat-y), so it can't be archived; first, for each of them: publish it with feat-x (ghostbranch promote feat-x <child> --plan) and archive it, move it onto main (ghostbranch feature restack <child> --onto main), or, if it is abandoned, close it (ghostbranch feature close <child>, at the console)",
+    "field": "feature",
+    "retryable": false,
+    "details": {
+      "children": [
+        "feat-y"
+      ],
+      "feature": "feat-x",
+      "op": "archive"
+    }
+  }
+}

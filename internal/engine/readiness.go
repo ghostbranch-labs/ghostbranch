@@ -25,6 +25,9 @@ type StackReadiness struct {
 	// TitleFor are the levels with more than one gate commit: their PRs
 	// need --title-for.
 	TitleFor []string
+	// Live are the features stacked directly on this one that aren't
+	// archived: a handed-off child's PR is the person's (R12).
+	Live []string
 }
 
 // readiness works out res.Ready. chain is the unpublished stack from its
@@ -77,7 +80,7 @@ func (e *Engine) readiness(ctx context.Context, pc *pairCtx, recs map[string]sta
 		if len(gt.Commits) > 1 {
 			rd.TitleFor = append(rd.TitleFor, k)
 		}
-		tree, level = gt.PublishedTree, childrenOf(recs, k, false)
+		tree, level = gt.PublishedTree, liveChildren(recs, childrenOf(recs, k, false))
 	}
 }
 

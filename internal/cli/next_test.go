@@ -637,13 +637,16 @@ func TestNextAdoptStepsKeepTheWorkspace(t *testing.T) {
 }
 
 // publishFeature starts, commits, gates and publishes name under an agent
-// grant, and returns its public PR number.
-func publishFeature(te *testEnv, name string) int {
+// grant, and returns its public PR number. extra goes on the promote:
+// "--keep" for a setup that later works on the shadow branch (Archive is
+// the CLI's default, 6.5).
+func publishFeature(te *testEnv, name string, extra ...string) int {
 	te.t.Helper()
 	te.mustRun("feature", "start", name)
 	te.shadowCommit(name, map[string]string{name + ".txt": name + "\n"})
 	te.mustRun("gate", name)
-	code, env := te.runJSON("promote", name, "--mode", "squash", "-m", "Add "+name, "--yes")
+	args := append([]string{"promote", name, "--mode", "squash", "-m", "Add " + name, "--yes"}, extra...)
+	code, env := te.runJSON(args...)
 	data, _ := env["data"].(map[string]any)
 	applied, _ := data["applied"].(map[string]any)
 	pr, ok := applied["public_pr"].(float64)
@@ -676,7 +679,7 @@ func TestNextForLifecycleStates(t *testing.T) {
 	initOnly(te)
 	grantAgents(te)
 	te.forge.SetPRMerged("acme/widget", publishFeature(te, "feat-a"))
-	te.forge.SetPRMerged("acme/widget", publishFeature(te, "feat-b"))
+	te.forge.SetPRMerged("acme/widget", publishFeature(te, "feat-b", "--keep"))
 	te.shadowCommit("feat-b", map[string]string{"later.txt": "later\n"})
 	te.forge.ClosePR("acme/widget", publishFeature(te, "feat-c"))
 	te.mustRun("feature", "start", "feat-d") // draft, clean: nothing to do
@@ -720,7 +723,7 @@ func TestNextForSyncAttention(t *testing.T) {
 	grantAgents(te)
 	prA := publishFeature(te, "feat-a")
 	te.forge.SetPRMerged("acme/widget", prA)
-	te.forge.SetPRMerged("acme/widget", publishFeature(te, "feat-b"))
+	te.forge.SetPRMerged("acme/widget", publishFeature(te, "feat-b", "--keep"))
 	te.shadowCommit("feat-b", map[string]string{"later.txt": "later\n"})
 	te.forge.ClosePR("acme/widget", publishFeature(te, "feat-c"))
 	want := []struct {
@@ -816,8 +819,8 @@ func TestNextForLifecycleBranchGone(t *testing.T) {
 	te := newTestEnv(t)
 	initOnly(te)
 	grantAgents(te)
-	te.forge.SetPRMerged("acme/widget", publishFeature(te, "feat-a"))
-	publishFeature(te, "feat-b")
+	te.forge.SetPRMerged("acme/widget", publishFeature(te, "feat-a", "--keep"))
+	publishFeature(te, "feat-b", "--keep")
 	sh := gitx.New(te.forge.RepoDir("acme/widget-shadow"))
 	for _, b := range []string{"feat-a", "feat-b"} {
 		if err := sh.DeleteRef(t.Context(), "refs/heads/"+b); err != nil {
@@ -909,7 +912,7 @@ func TestNextForFeatureClose(t *testing.T) {
 		t.Fatalf("no console: exit %d, next = %v", code, n)
 	}
 
-	te.forge.SetPRMerged("acme/widget", publishFeature(te, "feat-a"))
+	te.forge.SetPRMerged("acme/widget", publishFeature(te, "feat-a", "--keep"))
 	raced := false
 	te.env.OnPush = func(op, _ string, _ []string) {
 		if op == "feature close" && !raced {
@@ -925,7 +928,7 @@ func TestNextForFeatureClose(t *testing.T) {
 		t.Fatalf("moved: exit %d, next = %v", code, n)
 	}
 
-	te.forge.SetPRMerged("acme/widget", publishFeature(te, "feat-c"))
+	te.forge.SetPRMerged("acme/widget", publishFeature(te, "feat-c", "--keep"))
 	te.forge.ClosePRErr = errors.New("boom")
 	code, env = te.runJSON("feature", "close", "feat-c")
 	te.forge.ClosePRErr = nil
@@ -1137,7 +1140,7 @@ func TestNextForAPendingGateOnAMergedMovedFeature(t *testing.T) {
 	te := newTestEnv(t)
 	initOnly(te)
 	grantAgents(te)
-	te.forge.SetPRMerged("acme/widget", publishFeature(te, "feat-b"))
+	te.forge.SetPRMerged("acme/widget", publishFeature(te, "feat-b", "--keep"))
 	te.shadowCommit("feat-b", map[string]string{"later.txt": "later\n"})
 	te.mustRun("gate", "feat-b", "--detach")
 	job := te.job("feat-b")

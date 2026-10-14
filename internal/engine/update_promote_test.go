@@ -331,7 +331,7 @@ func TestApplyResumesAnUpdateWhosePushLanded(t *testing.T) {
 	h.pushes = nil
 	for range 2 {
 		ar, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: id, Yes: true})
-		if err != nil || !ar.Resumed || ar.PublicPR != pr {
+		if err != nil || !ar.Resumed || !ar.Landed || ar.PublicPR != pr {
 			t.Fatalf("resume = %+v %v", ar, err)
 		}
 	}

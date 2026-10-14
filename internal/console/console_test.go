@@ -197,3 +197,132 @@ func TestWidthOfAFileIsZero(t *testing.T) {
 		t.Fatal("a file has no terminal width")
 	}
 }
+
+// handOff is the choice apply asks (6.5), Archive first.
+func handOff(unavailable string) approval.Choice {
+	ch := approval.Choice{Title: "After publishing, this feature:", Options: []approval.Option{
+		{Key: "a", Name: "Archive", Text: "the private branch is archived; make fixes or changes to this PR by pushing to it directly", Unavailable: unavailable},
+		{Key: "k", Name: "Keep", Text: "the private branch stays; make fixes or changes to this PR through gate and promote, as today"}}}
+	if unavailable != "" {
+		ch.Default = 1
+	}
+	return ch
+}
+
+// The choice sits between the summary and the code; the code is still the
+// last thing typed (Review Focus 4).
+func TestChoosingAnswers(t *testing.T) {
+	t.Parallel()
+	for in, want := range map[string]int{
+		"\nABCDEF\n":        0, // Enter keeps the default, Archive
+		"k\nABCDEF\n":       1,
+		"K\nABCDEF\n":       1,
+		" keep \nABCDEF\n":  1,
+		"2\nABCDEF\n":       1,
+		"a\nABCDEF\n":       0,
+		"archive\nABCDEF\n": 0,
+		"x\nk\nABCDEF\n":    1, // a typo asks again
+	} {
+		d := &device{in: strings.NewReader(in)}
+		got, err := challenger(d).ConfirmChoosing(context.Background(), "About to publish", handOff(""))
+		if err != nil || got != want {
+			t.Errorf("input %q: %d %v, want %d", in, got, err, want)
+		}
+		out := d.out.String()
+		sum, ask, code := strings.Index(out, "About to publish"), strings.Index(out, "After publishing, this feature:"), strings.Index(out, "ABCDEF")
+		if sum < 0 || ask < sum || code < ask || !strings.Contains(out, "❯ Archive  — the private branch is archived") ||
+			!strings.Contains(out, "  Keep     — the private branch stays") || !strings.Contains(out, "Press Enter for Archive, or type k for Keep: ") {
+			t.Errorf("input %q: the summary, then the choice, then the code:\n%s", in, out)
+		}
+	}
+}
+
+// Archive unavailable: shown with its reason, Keep is the default, nothing
+// is asked, and typing a for it is impossible because no question comes.
+func TestChoosingWithArchiveUnavailable(t *testing.T) {
+	t.Parallel()
+	d := &device{in: strings.NewReader("ABCDEF\n")}
+	got, err := challenger(d).ConfirmChoosing(context.Background(), "s", handOff("feat-y is built on this feature; publish or restack it first"))
+	if err != nil || got != 1 {
+		t.Fatalf("got %d %v", got, err)
+	}
+	out := d.out.String()
+	if !strings.Contains(out, "  Archive  — unavailable: feat-y is built on this feature; publish or restack it first") ||
+		!strings.Contains(out, "❯ Keep") || strings.Contains(out, console.ChoicePrompt) {
+		t.Fatalf("output:\n%s", out)
+	}
+}
+
+// Picking the unavailable option asks again; three bad answers refuse.
+func TestChoosingRefusesTheUnavailableOption(t *testing.T) {
+	t.Parallel()
+	ch := handOff("")
+	ch.Options = append(ch.Options, approval.Option{Key: "x", Name: "Other", Text: "t", Unavailable: "not now"})
+	d := &device{in: strings.NewReader("x\nx\nx\n")}
+	_, err := challenger(d).ConfirmChoosing(context.Background(), "s", ch)
+	if reason(err) != approval.TooManyAttempts || !strings.Contains(d.out.String(), "Other isn't available: not now.") {
+		t.Fatalf("err %v, output:\n%s", err, d.out.String())
+	}
+}
+
+// No answer, a closed console or Ctrl-C at the choice publishes nothing.
+func TestChoosingTimesOutAndPublishesNothing(t *testing.T) {
+	t.Parallel()
+	never := make(chan time.Time)
+	fire := make(chan time.Time, 1)
+	fire <- time.Now()
+	pr, _ := io.Pipe()
+	c := challenger(&device{in: pr})
+	c.After = func(time.Duration) <-chan time.Time { return fire }
+	if _, err := c.ConfirmChoosing(context.Background(), "s", handOff("")); reason(err) != approval.Timeout {
+		t.Fatalf("timeout: %v", err)
+	}
+	if _, err := challenger(&device{in: strings.NewReader("")}).ConfirmChoosing(context.Background(), "s", handOff("")); reason(err) != approval.NotConfirmed {
+		t.Fatalf("EOF: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	pr2, _ := io.Pipe()
+	c2 := challenger(&device{in: pr2})
+	c2.After = func(time.Duration) <-chan time.Time { return never }
+	if _, err := c2.ConfirmChoosing(ctx, "s", handOff("")); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancel: %v", err)
+	}
+}
+
+// Confirm without a choice prints exactly what it printed before 6.5.
+func TestConfirmIsUnchanged(t *testing.T) {
+	t.Parallel()
+	d := &device{in: strings.NewReader("ABCDEF\n")}
+	if err := challenger(d).Confirm(context.Background(), "S"); err != nil {
+		t.Fatal(err)
+	}
+	if want := "S\n\nTo confirm, type this code and press Enter: ABCDEF\nLeave it empty, or type n, to cancel.\n> "; d.out.String() != want {
+		t.Fatalf("output %q, want %q", d.out.String(), want)
+	}
+}
+
+// A choice whose default isn't one of its options, or can't be picked,
+// is refused before the console opens: nothing is asked or confirmed
+// (review M8).
+func TestChoosingRefusesABadDefault(t *testing.T) {
+	t.Parallel()
+	bad := handOff("")
+	bad.Default = 2
+	negative := handOff("")
+	negative.Default = -1
+	unavailable := handOff("not now")
+	unavailable.Default = 0
+	for name, ch := range map[string]approval.Choice{"past the end": bad, "negative": negative, "unavailable": unavailable,
+		"no options": {Title: "t"}} {
+		opened := false
+		c := &console.Challenger{Open: func() (io.ReadWriteCloser, error) {
+			opened = true
+			return &device{in: strings.NewReader("ABCDEF\n")}, nil
+		},
+			Rand: &testutil.SeqReader{}}
+		if _, err := c.ConfirmChoosing(context.Background(), "s", ch); err == nil || opened {
+			t.Errorf("%s: err %v, console opened %v", name, err, opened)
+		}
+	}
+}

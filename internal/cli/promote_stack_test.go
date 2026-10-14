@@ -41,7 +41,7 @@ func TestPromoteOnAParentPublishedBeforeMainMovedNextPromotesTheParent(t *testin
 	te.shadowCommit("feat-a", map[string]string{"a.txt": "a\n"})
 	te.mustRun("gate", "feat-a")
 	grantAgents(te)
-	te.mustRun("promote", "feat-a", "--mode", "squash", "-m", "Add a", "--yes")
+	te.mustRun("promote", "feat-a", "--mode", "squash", "-m", "Add a", "--yes", "--keep")
 	te.mustRun("feature", "start", "feat-b", "--from", "feat-a")
 	te.shadowCommit("feat-b", map[string]string{"b.txt": "b\n"})
 	te.mustRun("gate", "feat-b")

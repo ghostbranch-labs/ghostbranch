@@ -1,0 +1,84 @@
+{
+  "schema_version": "0.15",
+  "command": "feature show",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "feature": {
+      "name": "feat-x",
+      "state": "archived",
+      "branch": "feat-x",
+      "head": "",
+      "base": "<SHA1>",
+      "parent": "main",
+      "children": [],
+      "stack": null,
+      "drift": {
+        "status": "n/a",
+        "files": []
+      },
+      "gate": {
+        "checks": "passed",
+        "leak": "clean",
+        "scanned_as": "preserve",
+        "fresh": false,
+        "at": "2026-10-05T12:00:05Z",
+        "job": null
+      },
+      "public_pr": 1,
+      "pr_state": "open",
+      "plan_id": "20261005T120005Z-0c0d0e",
+      "moved": false,
+      "abandoned": false,
+      "archived": {
+        "at": "2026-10-05T12:00:05Z",
+        "ref": "refs/ghostbranch/archive/feat-x",
+        "head": "<SHA2>"
+      }
+    },
+    "commits": [],
+    "ledger": [
+      {
+        "ts": "2026-10-05T12:00:00Z",
+        "actor": "human:octo",
+        "op": "feature start",
+        "pair": "acme/widget",
+        "feature": "feat-x",
+        "exit_code": 0,
+        "summary": ""
+      },
+      {
+        "ts": "2026-10-05T12:00:05Z",
+        "actor": "human:octo",
+        "op": "gate",
+        "pair": "acme/widget",
+        "feature": "feat-x",
+        "exit_code": 0,
+        "summary": "checks passed, leak clean, candidate <SHA3:12>"
+      },
+      {
+        "ts": "2026-10-05T12:00:05Z",
+        "actor": "human:octo",
+        "op": "promote",
+        "pair": "acme/widget",
+        "feature": "feat-x",
+        "plan_id": "20261005T120005Z-0c0d0e",
+        "exit_code": 0,
+        "approval": {
+          "kind": "grant",
+          "grant_id": "g-0a0b0c",
+          "created_by": "human:octo"
+        },
+        "refs": {
+          "refs/ghostbranch/archive/feat-x": "<SHA2>",
+          "refs/heads/feat-x": "<SHA2>",
+          "refs/heads/ghostbranch-gate/feat-x": "<SHA3>"
+        },
+        "summary": "published feat-x as PR #1; archived feat-x"
+      }
+    ]
+  },
+  "warnings": [],
+  "next": [],
+  "error": null
+}

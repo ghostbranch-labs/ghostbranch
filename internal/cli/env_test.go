@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/cli"
+	"github.com/ghostbranch-labs/ghostbranch/internal/console"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge/fake"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
@@ -175,23 +176,31 @@ func withLeakyFeature(te *testEnv) {
 var codeLine = regexp.MustCompile(`press Enter: ([A-Z0-9]{6})`)
 
 // typist is a fake console with a person at it: it reads the code it is
-// shown and types back answer(code).
+// shown and types back answer(code). Asked apply's Archive or Keep question
+// first, it types choose.
 type typist struct {
 	pr       *io.PipeReader
 	pw       *io.PipeWriter
 	answer   func(code string) string
+	choose   string // typed at the Archive/Keep question; "\n" keeps the default
+	chose    bool
 	seen     strings.Builder
 	answered bool
 }
 
 func newTypist(answer func(code string) string) *typist {
 	pr, pw := io.Pipe()
-	return &typist{pr: pr, pw: pw, answer: answer}
+	return &typist{pr: pr, pw: pw, answer: answer, choose: "\n"}
 }
 
 func (c *typist) Read(p []byte) (int, error) { return c.pr.Read(p) }
 func (c *typist) Write(p []byte) (int, error) {
 	c.seen.Write(p)
+	if !c.chose && strings.Contains(c.seen.String(), console.ChoicePrompt) {
+		c.chose = true
+		line := c.choose
+		go func() { _, _ = c.pw.Write([]byte(line)) }()
+	}
 	if m := codeLine.FindStringSubmatch(c.seen.String()); m != nil && !c.answered {
 		c.answered = true
 		line := c.answer(m[1])
@@ -206,6 +215,14 @@ func atConsole(te *testEnv, answer func(code string) string) *typist {
 	ty := newTypist(answer)
 	te.env.ConsoleUsable = true
 	te.env.OpenConsole = func() (io.ReadWriteCloser, error) { return ty, nil }
+	return ty
+}
+
+// atConsoleChoosing is atConsole whose person types choose at the Archive
+// or Keep question.
+func atConsoleChoosing(te *testEnv, choose string, answer func(code string) string) *typist {
+	ty := atConsole(te, answer)
+	ty.choose = choose
 	return ty
 }
 

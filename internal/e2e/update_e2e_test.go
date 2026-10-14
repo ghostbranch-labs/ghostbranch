@@ -52,7 +52,8 @@ func TestSandboxUpdateAppends(t *testing.T) {
 	commit(f, map[string]string{"update-1.txt": "one for " + runID + "\n"})
 	run(0, "gate", f)
 	pl := run(0, "promote", f, "--mode", "preserve", "--plan")["data"].(map[string]any)["plan"].(map[string]any)
-	first := run(0, "apply", pl["id"].(string), "--yes")["data"].(map[string]any)
+	// --keep: the update below gates and promotes f again (Archive is the CLI's default).
+	first := run(0, "apply", pl["id"].(string), "--yes", "--keep")["data"].(map[string]any)
 	pr := int(first["public_pr"].(float64))
 
 	ghc, err := gh.NewClient(gh.WithAuthToken(tok))

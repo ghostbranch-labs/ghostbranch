@@ -283,6 +283,7 @@ func human(r any, st style.Styler) string {
 				k = len(v.Plan.Publish.Commits)
 			}
 			b.WriteString(publishedLine(v.Applied, k))
+			archivedLines(&b, v.Applied)
 		case v.Plan != nil && v.PlanPath != "":
 			fmt.Fprintf(&b, "Plan %s saved to %s.\n", v.Plan.ID, v.PlanPath)
 			fmt.Fprintf(&b, "  %s: %d public commit(s)", v.Plan.Mode, len(v.Plan.Publish.Commits))
@@ -302,6 +303,7 @@ func human(r any, st style.Styler) string {
 			break
 		}
 		b.WriteString(publishedLine(v, -1))
+		archivedLines(&b, v)
 		waivedLines(&b, v.Waived)
 	case *engine.AgentsAllowResult:
 		if v.Preview != nil {
@@ -445,6 +447,27 @@ func human(r any, st style.Styler) string {
 					oneLine(v.Feature), short(v.From), short(v.To), oneLine(v.Feature))
 			}
 		}
+	case *engine.FeatureArchiveResult:
+		ref, head := "", ""
+		if v.Archived != nil {
+			ref, head = v.Archived.Ref, v.Archived.Head
+		}
+		switch {
+		case v.Preview != nil:
+			previewText(&b, v.Preview)
+		case !v.Changed && v.PRState == "merged":
+			fmt.Fprintf(&b, "%s is already archived at %s, and PR #%d merged; sync closes it.\n",
+				oneLine(v.Feature), oneLine(ref), v.PublicPR)
+		case !v.Changed && v.PRState == "closed":
+			fmt.Fprintf(&b, "%s is already archived at %s, and PR #%d was closed without merging; a person closes it at the console.\n",
+				oneLine(v.Feature), oneLine(ref), v.PublicPR)
+		case !v.Changed:
+			fmt.Fprintf(&b, "%s is already archived at %s; fix PR #%d by pushing to %s.\n",
+				oneLine(v.Feature), oneLine(ref), v.PublicPR, oneLine(v.Branch))
+		default:
+			fmt.Fprintf(&b, "Archived %s at %s (%s); PR #%d is handed off: push fixes to %s.\n",
+				oneLine(v.Feature), oneLine(ref), short(head), v.PublicPR, oneLine(v.Branch))
+		}
 	case *engine.FeatureCloseResult:
 		if v.Preview != nil {
 			previewText(&b, v.Preview)
@@ -550,6 +573,17 @@ func human(r any, st style.Styler) string {
 		}
 	}
 	return b.String()
+}
+
+// archivedLines says which features were handed off, and where their
+// PRs are fixed now.
+func archivedLines(b *strings.Builder, r *engine.ApplyResult) {
+	for i, p := range r.PRs {
+		if r.AfterPublish[p.Feature] == engine.AfterArchived {
+			fmt.Fprintf(b, "Archived %s's shadow branch at refs/ghostbranch/archive/%s: fix PR #%d by pushing to %s.\n",
+				oneLine(p.Feature), oneLine(p.Feature), p.Number, oneLine(prBranch(r, i)))
+		}
+	}
 }
 
 // publishedLine is what an apply did: published a new PR, or updated an
@@ -784,9 +818,12 @@ func prCell(r engine.FeatureReport) string {
 func featureShowText(b *strings.Builder, v *engine.FeatureShowResult) {
 	r := v.Feature
 	fmt.Fprintf(b, "Feature %s: %s\n", oneLine(r.Name), r.State)
-	if r.Head == "" {
+	switch {
+	case r.Archived != nil:
+		fmt.Fprintf(b, "  branch: %s (archived at %s, %s), based on %s\n", oneLine(r.Branch), oneLine(r.Archived.Ref), short(r.Archived.Head), short(r.Base))
+	case r.Head == "":
 		fmt.Fprintf(b, "  branch: %s (deleted), based on %s\n", oneLine(r.Branch), short(r.Base))
-	} else {
+	default:
 		fmt.Fprintf(b, "  branch: %s at %s, based on %s\n", oneLine(r.Branch), short(r.Head), short(r.Base))
 	}
 	if (r.Parent != "" && r.Parent != feature.MainParent) || len(r.Children) > 0 {

@@ -1,0 +1,72 @@
+{
+  "schema_version": "0.15",
+  "command": "feature archive",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "feature": "feat-x",
+    "changed": true,
+    "archived": {
+      "at": "2026-10-05T12:00:05Z",
+      "ref": "refs/ghostbranch/archive/feat-x",
+      "head": "<SHA1>"
+    },
+    "moved": {
+      "refs/ghostbranch/archive/feat-x": "<SHA1>",
+      "refs/heads/feat-x": "<SHA1>",
+      "refs/heads/ghostbranch-gate/feat-x": "<SHA2>"
+    },
+    "gate_pr": 1,
+    "public_pr": 1,
+    "branch": "feat-x",
+    "preview": null
+  },
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "git",
+        "fetch",
+        "origin",
+        "feat-x"
+      ],
+      "why": "feature feat-x is handed off: fix or change PR #1 on its branch feat-x. In your checkout, fetch it from the public repo (origin is its remote there)",
+      "needs_human": false,
+      "needs_input": []
+    },
+    {
+      "command": [
+        "git",
+        "switch",
+        "--detach",
+        "origin/feat-x"
+      ],
+      "why": "work on the PR's branch as GitHub has it, never on the feature's old shadow branch: the guard refuses its private commits",
+      "needs_human": false,
+      "needs_input": []
+    },
+    {
+      "command": [
+        "git",
+        "push",
+        "origin",
+        "HEAD:feat-x"
+      ],
+      "why": "after committing the fix, push it to the PR; no gate, plan or apply",
+      "needs_human": false,
+      "needs_input": []
+    },
+    {
+      "command": [
+        "ghostbranch",
+        "sync",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "when PR #1 merges, sync closes feat-x and deletes its archive",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
+  "error": null
+}

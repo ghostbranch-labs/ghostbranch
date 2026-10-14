@@ -6,7 +6,7 @@
   "required": ["name", "state", "branch", "head", "base", "drift", "gate", "public_pr", "pr_state", "plan_id", "moved", "abandoned", "parent", "children", "stack"],
   "properties": {
     "name": { "type": "string" },
-    "state": { "enum": ["draft", "in_review", "gate_passed", "published", "merged", "merged_moved", "pr_closed", "branch_gone", "abandoned", "unreadable", "parent_stale", "public_pr_needs_update", "pr_behind"] },
+    "state": { "enum": ["draft", "in_review", "gate_passed", "published", "merged", "merged_moved", "pr_closed", "branch_gone", "abandoned", "unreadable", "parent_stale", "public_pr_needs_update", "pr_behind", "archived"] },
     "branch": { "type": "string" },
     "head": { "description": "the feature branch's head; empty when the branch is gone", "$ref": "common.schema.json#/$defs/shaOrEmpty" },
     "base": { "description": "empty when the record couldn't be read", "$ref": "common.schema.json#/$defs/shaOrEmpty" },
@@ -51,11 +51,12 @@
       "description": "the plan the feature was published from; empty when never published",
       "oneOf": [{ "const": "" }, { "$ref": "common.schema.json#/$defs/planId" }]
     },
-    "moved": { "description": "the branch moved since it was published; false when unpublished", "type": "boolean" },
+    "moved": { "description": "the branch moved since it was published; false when unpublished; for an archived feature, whether its archive holds anything other than what was published", "type": "boolean" },
     "abandoned": { "type": "boolean" },
     "parent": { "description": "the feature this one is stacked on, or main; empty when the record couldn't be read", "type": "string" },
     "children": { "description": "the live features stacked directly on this one", "type": "array", "items": { "type": "string" } },
     "stack": { "description": "the native GitHub stack its public PR is in", "$ref": "common.schema.json#/$defs/stackNumber" },
+    "archived": { "description": "set once the feature was handed off to the public repo (6.5)", "$ref": "common.schema.json#/$defs/archived" },
     "pr": {
       "description": "how the open public PR compares with the feature; only for a published feature whose PR is open",
       "type": "object", "additionalProperties": false,
