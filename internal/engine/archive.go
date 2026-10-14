@@ -454,6 +454,28 @@ func archivedErr(name string, m feature.Meta, prState string) error {
 		WithDetails(map[string]any{"feature": name, "public_pr": pr, "branch": branch, "archive_ref": m.Archived.Ref, "pr_state": prState})
 }
 
+// stackOnArchivedRefusal is archivedRefusal for a command that would build
+// on name: feature start --from (field "from") and feature restack --onto
+// (field "onto"). The message adds what to do instead (P25). nil when m
+// isn't archived.
+func (e *Engine) stackOnArchivedRefusal(ctx context.Context, pc *pairCtx, name string, m feature.Meta, field string) error {
+	err := e.archivedRefusal(ctx, pc, name, m)
+	ce := contract.From(err)
+	if ce == nil {
+		return nil
+	}
+	pr, _ := ce.Details["public_pr"].(int)
+	instead := fmt.Sprintf("start from main, or wait until PR #%d merges and run ghostbranch sync", pr)
+	switch ce.Details["pr_state"] {
+	case prMerged:
+		instead = "run ghostbranch sync, then start from main"
+	case prClosed:
+		instead = "start from main"
+	}
+	ce.Message += "; nothing can be stacked on a handed-off feature: " + instead
+	return ce.WithField(field)
+}
+
 // archivedRefusal is archivedErr with m's public PR state read, nil when m
 // isn't archived (so an unarchived feature costs no PR read).
 func (e *Engine) archivedRefusal(ctx context.Context, pc *pairCtx, name string, m feature.Meta) error {

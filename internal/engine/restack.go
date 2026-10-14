@@ -106,6 +106,13 @@ func (e *Engine) FeatureRestack(ctx context.Context, p workspace.Pair, opt Resta
 	above := descendants(recs, name)
 	order := above
 	if opt.Onto != "" {
+		// An archived target is refused before checkOnto, which would call
+		// its gone branch FEATURE_NOT_FOUND (P25).
+		if t, ok := recs[opt.Onto]; ok && opt.Onto != name {
+			if err := e.stackOnArchivedRefusal(ctx, pc, opt.Onto, t.meta, "onto"); err != nil {
+				return nil, warns, err
+			}
+		}
 		if err := checkOnto(recs, self, above, opt.Onto); err != nil {
 			return nil, warns, err
 		}

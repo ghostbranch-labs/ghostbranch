@@ -146,8 +146,9 @@ func (e *Engine) FeatureStart(ctx context.Context, p workspace.Pair, name string
 
 // parentTip is the shadow tip of from, the feature a new one stacks on. It
 // refuses a parent that isn't an open feature: unknown or closed
-// (FEATURE_NOT_FOUND), abandoned or without its branch (BAD_FLAG), from a
-// newer Ghostbranch (UPGRADE_NEEDED), or unreadable (INTERNAL). Each
+// (FEATURE_NOT_FOUND), abandoned or without its branch (BAD_FLAG), archived
+// (FEATURE_ARCHIVED), from a newer Ghostbranch (UPGRADE_NEEDED), or
+// unreadable (INTERNAL). Each
 // refusal names the from field. The parent's record is only read.
 func (e *Engine) parentTip(ctx context.Context, pc *pairCtx, from string) (string, error) {
 	m, _, newer, err := e.readMetaAny(ctx, pc, from)
@@ -163,6 +164,10 @@ func (e *Engine) parentTip(ctx context.Context, pc *pairCtx, from string) (strin
 	case m.Abandoned:
 		return "", contract.New(contract.BadFlag,
 			"feature %q is abandoned, so nothing can be started from it; start from main or another feature", from).WithField("from")
+	case m.Archived != nil:
+		// Before the branch lookup: an archived feature's branch is gone
+		// on purpose (P25).
+		return "", e.stackOnArchivedRefusal(ctx, pc, from, m, "from")
 	}
 	tip, ok, err := pc.git.Resolve(ctx, shadowRef(m.Branch))
 	if err != nil {

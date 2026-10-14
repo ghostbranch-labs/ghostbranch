@@ -752,3 +752,17 @@ func TestSubProject65CodesAreRegistered(t *testing.T) {
 		t.Fatalf("NO_OPEN_PR summary = %q", es[0].Summary)
 	}
 }
+
+// P25 (6.6): FEATURE_ARCHIVED also covers building on an archived feature,
+// and its exit code stays 2, so the contract stays 0.15.
+func TestFeatureArchivedNamesTheStackingCommands(t *testing.T) {
+	t.Parallel()
+	es, err := contract.Explain("FEATURE_ARCHIVED")
+	if err != nil || len(es) != 1 || *es[0].ExitCode != contract.ExitUsage ||
+		!strings.Contains(es[0].Summary, "feature start --from and feature restack --onto can't build on it") {
+		t.Fatalf("FEATURE_ARCHIVED = %+v %v", es, err)
+	}
+	if contract.SchemaVersion != "0.15" {
+		t.Fatalf("SchemaVersion = %s, want 0.15", contract.SchemaVersion)
+	}
+}
