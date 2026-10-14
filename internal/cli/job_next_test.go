@@ -599,8 +599,9 @@ func TestNextForUpdates(t *testing.T) {
 	}
 }
 
-// F-16/F-31 (R11): after a stack publish, next says how a maintainer
-// merges the stack (the bottom PR's page, or merge-async on the top PR)
+// F-16/F-31: after a stack publish, next says how a maintainer merges the
+// stack (the top PR's page, or merge-async on the top PR; observed on a real
+// merge, 2026-10-14)
 // and, for a history worth keeping, not to squash it. A single PR's text
 // is unchanged (decision 5).
 func TestNextAfterAStackPublish(t *testing.T) {
@@ -618,14 +619,16 @@ func TestNextAfterAStackPublish(t *testing.T) {
 		return next[0].Why
 	}
 	w := whyFor(&engine.ApplyResult{PublicPR: 7, StackNumber: &stack, PRs: prs, KeepsHistory: true, PublicRepo: "acme/widget"})
-	for _, s := range []string{"on the bottom PR's page (#6), the merge button merges the whole stack", `Choose "Create a merge commit"`,
-		"`gh api -X PUT repos/acme/widget/pulls/7/merge-async -f merge_method=merge`", "Then sync closes the merged features"} {
+	for _, s := range []string{"on the top PR's page (#7), the merge button merges that PR and every PR below it",
+		"Merging a lower PR lands only part of the stack.", `Choose "Create a merge commit"`,
+		"`gh pr merge` refuses a stacked PR; use merge-async on the top PR: `gh api -X PUT repos/acme/widget/pulls/7/merge-async -f merge_method=merge`",
+		"Then sync closes the merged features"} {
 		if !strings.Contains(w, s) {
 			t.Errorf("native preserve stack: %q lacks %q", w, s)
 		}
 	}
-	if strings.Contains(w, "top PR's page") || strings.Contains(w, "merges them all") {
-		t.Errorf("native preserve stack: %q claims the top PR's page", w)
+	if strings.Contains(w, "bottom PR's page") || strings.Contains(w, "#6") {
+		t.Errorf("native preserve stack: %q points at the bottom PR", w)
 	}
 	// An all-squash stack loses nothing to a squash.
 	if w = whyFor(&engine.ApplyResult{PublicPR: 7, StackNumber: &stack, PRs: prs, PublicRepo: "acme/widget"}); strings.Contains(w, "Create a merge commit") || !strings.Contains(w, "merge-async") {

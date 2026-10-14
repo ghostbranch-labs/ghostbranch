@@ -746,20 +746,22 @@ func (a *app) steps(err error) []contract.Next {
 
 // mergedThenSync is the step after a publish or an update: a maintainer
 // merges on GitHub, then sync closes what merged. A native stack merges
-// whole, from its bottom PR's page (as observed, R11) or through
-// merge-async on its top PR; plain chained PRs merge one by one, bottom
-// first. A history worth keeping must not be squashed (F-31); a single
+// whole from its top PR, whose merge button (or merge-async) merges it and
+// every PR below it; merging a lower PR lands only part of the stack
+// (observed on a real merge, 2026-10-14). Plain chained PRs merge one by
+// one, bottom first. A history worth keeping must not be squashed (F-31); a single
 // PR's text is unchanged (decision 5).
 func (a *app) mergedThenSync(r *engine.ApplyResult) contract.Next {
 	why := "a maintainer reviews and merges PR #" + strconv.Itoa(r.PublicPR) + " on GitHub; then sync closes the feature"
 	switch {
 	case len(r.PRs) > 1 && r.StackNumber != nil:
-		why = "A maintainer merges the stack on GitHub: on the bottom PR's page (#" + strconv.Itoa(r.PRs[0].Number) + "), the merge button merges the whole stack."
+		why = "A maintainer merges the stack on GitHub: on the top PR's page (#" + strconv.Itoa(r.PublicPR) + "), the merge button merges that PR and every PR below it." +
+			" Merging a lower PR lands only part of the stack."
 		if r.KeepsHistory {
 			why += ` Choose "Create a merge commit": "Squash and merge" turns each PR into one commit and drops the history this stack was published with.`
 		}
 		pub := cmp.Or(r.PublicRepo, a.pairFull.Public)
-		why += " From a terminal, `gh pr merge` can't merge a stack; the API route is merge-async on the top PR: `gh api -X PUT repos/" + pub + "/pulls/" +
+		why += " From a terminal, `gh pr merge` refuses a stacked PR; use merge-async on the top PR: `gh api -X PUT repos/" + pub + "/pulls/" +
 			strconv.Itoa(r.PublicPR) + "/merge-async -f merge_method=merge`. Then sync closes the merged features and moves any branch above onto main."
 	case len(r.PRs) > 1:
 		how := ""
