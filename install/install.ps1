@@ -24,6 +24,7 @@
 # download cut short runs nothing.
 
 function Install-Ghostbranch {
+    Set-StrictMode -Off # a caller's strict mode (under iex) must not break the script
     $ErrorActionPreference = 'Stop'
     $ProgressPreference = 'SilentlyContinue' # Invoke-WebRequest is far slower with the progress bar on 5.1
     $supported = 'windows_amd64 (Windows on ARM: set GHOSTBRANCH_ARCH=amd64 to run it under emulation)'
@@ -65,10 +66,11 @@ function Install-Ghostbranch {
     if ($base.Contains('@') -or -not ($base -match '^https://' -or $base -match '^http://(127\.0\.0\.1|localhost)(:[0-9]+)?(/|$)')) {
         throw "ghostbranch install: GHOSTBRANCH_DOWNLOAD_BASE must be https://, or http://127.0.0.1 or http://localhost: $base"
     }
-    $local = $base.StartsWith('http://')
+    $local = $base -match '^http://'
 
     $dir = $env:GHOSTBRANCH_INSTALL_DIR
     if (-not $dir) { $dir = Join-Path $env:LOCALAPPDATA 'Programs\ghostbranch' }
+    $dir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($dir).TrimEnd('\')
 
     try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
     $new = $null
@@ -81,7 +83,7 @@ function Install-Ghostbranch {
                 $r = Invoke-WebRequest -Uri $url -OutFile $file -UseBasicParsing -PassThru -MaximumRedirection 5
                 $final = $r.BaseResponse.ResponseUri
                 if ($null -eq $final) { $final = $r.BaseResponse.RequestMessage.RequestUri }
-                if ($null -ne $final -and $final.Scheme -ne 'https' -and -not $local) {
+                if (-not $local -and ($null -eq $final -or $final.Scheme -ne 'https')) {
                     throw "redirected to $final"
                 }
             } catch {
@@ -160,16 +162,51 @@ function Install-Ghostbranch {
         }
         Write-Host "  at $exe"
 
-        $norm = { param($p) $p.TrimEnd('\').ToLowerInvariant() }
-        $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-        $entries = @(if ($userPath) { $userPath -split ';' | Where-Object { $_ } })
-        if (-not ($entries | Where-Object { (& $norm $_) -eq (& $norm $dir) })) {
-            if ($env:GHOSTBRANCH_TEST_SKIP_PATH -eq '1') {
-                Write-Host "Would add $dir to the user PATH."
-            } else {
-                [Environment]::SetEnvironmentVariable('Path', (@($entries) + $dir) -join ';', 'User')
-                $env:Path = "$env:Path;$dir"
-                Write-Host "Added $dir to your user PATH. Open a new terminal to use ghostbranch."
+        # The user PATH is edited raw: %VAR% entries, empty segments and the
+        # value's kind (REG_EXPAND_SZ by default) stay as they are.
+        $keyPath = 'Environment'
+        $testKey = $false
+        if ($env:GHOSTBRANCH_TEST_PATH_KEY) {
+            if ($env:GHOSTBRANCH_TEST_PATH_KEY -notlike 'Software\ghostbranch-test-*') {
+                throw 'ghostbranch install: GHOSTBRANCH_TEST_PATH_KEY must start with Software\ghostbranch-test-'
+            }
+            $keyPath = $env:GHOSTBRANCH_TEST_PATH_KEY
+            $testKey = $true
+        }
+        if ($env:GHOSTBRANCH_TEST_SKIP_PATH -eq '1' -and -not $testKey) {
+            Write-Host "Would add $dir to the user PATH."
+        } else {
+            $norm = { param($p) [Environment]::ExpandEnvironmentVariables($p).Trim().TrimEnd('\').ToLowerInvariant() }
+            $key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($keyPath)
+            try {
+                $exists = @($key.GetValueNames()) -contains 'Path'
+                $raw = ''
+                $kind = [Microsoft.Win32.RegistryValueKind]::ExpandString
+                if ($exists) {
+                    $raw = [string]$key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+                    $kind = $key.GetValueKind('Path')
+                }
+                $found = $false
+                foreach ($e in ($raw -split ';')) {
+                    if ($e.Trim() -and (& $norm $e) -eq (& $norm $dir)) { $found = $true }
+                }
+                if (-not $found) {
+                    if (-not $raw.Trim()) { $new2 = $dir } elseif ($raw.EndsWith(';')) { $new2 = $raw + $dir } else { $new2 = "$raw;$dir" }
+                    $key.SetValue('Path', $new2, $kind)
+                    $env:Path = "$env:Path;$dir"
+                    if (-not $testKey) {
+                        try {
+                            if (-not ('Ghostbranch.NativeMethods' -as [type])) {
+                                Add-Type -Namespace Ghostbranch -Name NativeMethods -MemberDefinition '[System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true, CharSet = System.Runtime.InteropServices.CharSet.Auto)] public static extern System.IntPtr SendMessageTimeout(System.IntPtr hWnd, uint Msg, System.UIntPtr wParam, string lParam, uint fuFlags, uint uTimeout, out System.UIntPtr lpdwResult);'
+                            }
+                            $res = [UIntPtr]::Zero
+                            [void][Ghostbranch.NativeMethods]::SendMessageTimeout([IntPtr]0xffff, 0x1A, [UIntPtr]::Zero, 'Environment', 2, 5000, [ref]$res)
+                        } catch { }
+                    }
+                    Write-Host "Added $dir to your user PATH. Open a new terminal to use ghostbranch."
+                }
+            } finally {
+                $key.Dispose()
             }
         }
         Write-Host ''

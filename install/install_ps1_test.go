@@ -281,3 +281,137 @@ func TestInstallPs1WarnsWhenTheBinaryCannotRun(t *testing.T) {
 		}
 	}
 }
+
+// pathKey is a throwaway registry key under HKCU standing in for HKCU\Environment
+// (GHOSTBRANCH_TEST_PATH_KEY). setRaw, when set, seeds its Path value with
+// that kind. The key is deleted when the test ends.
+type pathKey struct {
+	shell, sub string
+}
+
+func newPathKey(t *testing.T, shell, kind, setRaw string) pathKey {
+	t.Helper()
+	k := pathKey{shell, `Software\ghostbranch-test-` + strings.ReplaceAll(t.Name(), "/", "_") + fmt.Sprint(os.Getpid(), "-", len(t.TempDir()), "-", filepath.Base(t.TempDir()))}
+	t.Cleanup(func() {
+		exec.Command(shell, "-NoProfile", "-NonInteractive", "-Command", `Remove-Item -Recurse -Force -ErrorAction SilentlyContinue 'HKCU:\`+k.sub+`'`).Run()
+	})
+	script := `New-Item -Force 'HKCU:\` + k.sub + `' | Out-Null`
+	if kind != "" {
+		script += `; $k = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('` + k.sub + `', $true); $k.SetValue('Path', '` + setRaw + `', [Microsoft.Win32.RegistryValueKind]::` + kind + `); $k.Dispose()`
+	}
+	if out, err := exec.Command(shell, "-NoProfile", "-NonInteractive", "-Command", script).CombinedOutput(); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	return k
+}
+
+// read returns the key's Path value, unexpanded, and its kind ("" if missing).
+func (k pathKey) read(t *testing.T) (kind, raw string) {
+	t.Helper()
+	script := `$k = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('` + k.sub + `'); if (@($k.GetValueNames()) -contains 'Path') { $k.GetValueKind('Path').ToString() + '|' + $k.GetValue('Path', '', 'DoNotExpandEnvironmentNames') }; $k.Dispose()`
+	out, err := exec.Command(k.shell, "-NoProfile", "-NonInteractive", "-Command", script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	kind, raw, _ = strings.Cut(strings.TrimSpace(string(out)), "|")
+	return kind, raw
+}
+
+func TestInstallPs1EditsTheUserPathRaw(t *testing.T) {
+	t.Parallel()
+	windowsOnly(t)
+	s := twoReleases(t, nil)
+	for _, shell := range powershells(t) {
+		dir := t.TempDir()
+		k := newPathKey(t, shell, "ExpandString", `%USERPROFILE%\x;;C:\y`)
+		r := runInstallPs1(t, shell, "GHOSTBRANCH_DOWNLOAD_BASE="+s.URL, "GHOSTBRANCH_INSTALL_DIR="+dir, "GHOSTBRANCH_TEST_SKIP_PATH=", "GHOSTBRANCH_TEST_PATH_KEY="+k.sub)
+		if r.err != nil {
+			t.Fatalf("%s: %v\n%s", shell, r.err, r.out)
+		}
+		if kind, raw := k.read(t); kind != "ExpandString" || raw != `%USERPROFILE%\x;;C:\y;`+dir {
+			t.Errorf("%s: Path is %s %q\n%s", shell, kind, raw, r.out)
+		}
+	}
+}
+
+func TestInstallPs1DoesNotDuplicateAPathEntry(t *testing.T) {
+	t.Parallel()
+	windowsOnly(t)
+	s := twoReleases(t, nil)
+	for _, shell := range powershells(t) {
+		dir := t.TempDir()
+		before := `C:\a;` + strings.ToUpper(dir) + `\;C:\b`
+		k := newPathKey(t, shell, "String", before)
+		r := runInstallPs1(t, shell, "GHOSTBRANCH_DOWNLOAD_BASE="+s.URL, "GHOSTBRANCH_INSTALL_DIR="+dir, "GHOSTBRANCH_TEST_SKIP_PATH=", "GHOSTBRANCH_TEST_PATH_KEY="+k.sub)
+		if r.err != nil {
+			t.Fatalf("%s: %v\n%s", shell, r.err, r.out)
+		}
+		if kind, raw := k.read(t); kind != "String" || raw != before {
+			t.Errorf("%s: Path is %s %q, want it unchanged\n%s", shell, kind, raw, r.out)
+		}
+	}
+}
+
+func TestInstallPs1CreatesAMissingUserPath(t *testing.T) {
+	t.Parallel()
+	windowsOnly(t)
+	s := twoReleases(t, nil)
+	for _, shell := range powershells(t) {
+		dir := t.TempDir()
+		k := newPathKey(t, shell, "", "")
+		r := runInstallPs1(t, shell, "GHOSTBRANCH_DOWNLOAD_BASE="+s.URL, "GHOSTBRANCH_INSTALL_DIR="+dir, "GHOSTBRANCH_TEST_SKIP_PATH=", "GHOSTBRANCH_TEST_PATH_KEY="+k.sub)
+		if r.err != nil {
+			t.Fatalf("%s: %v\n%s", shell, r.err, r.out)
+		}
+		if kind, raw := k.read(t); kind != "ExpandString" || raw != dir {
+			t.Errorf("%s: Path is %s %q, want ExpandString %q\n%s", shell, kind, raw, dir, r.out)
+		}
+	}
+}
+
+func TestInstallPs1TestPathKeyMustBeAThrowawayKey(t *testing.T) {
+	t.Parallel()
+	windowsOnly(t)
+	for _, shell := range powershells(t) {
+		r := runInstallPs1(t, shell, "GHOSTBRANCH_TEST_PATH_KEY=Environment", "GHOSTBRANCH_INSTALL_DIR="+t.TempDir())
+		if r.err == nil {
+			t.Errorf("%s: accepted HKCU Environment as the test key\n%s", shell, r.out)
+		}
+	}
+}
+
+func TestInstallPs1RefusesAMalformedChecksumsFile(t *testing.T) {
+	t.Parallel()
+	windowsOnly(t)
+	none := twoReleases(t, editSums(func(lines []string) []string {
+		var keep []string
+		for _, l := range lines {
+			if !strings.Contains(l, hostTarget()) {
+				keep = append(keep, l)
+			}
+		}
+		return keep
+	}))
+	dup := twoReleases(t, editSums(func(lines []string) []string {
+		for _, l := range lines {
+			if strings.Contains(l, hostTarget()) {
+				return append(lines, l)
+			}
+		}
+		return lines
+	}))
+	for _, shell := range powershells(t) {
+		for _, c := range []struct {
+			s    *server
+			want string
+		}{{none, "lists 0 archives"}, {dup, "lists 2 archives"}} {
+			dir := t.TempDir()
+			r := runInstallPs1(t, shell, "GHOSTBRANCH_DOWNLOAD_BASE="+c.s.URL, "GHOSTBRANCH_INSTALL_DIR="+dir)
+			if r.err == nil || !strings.Contains(r.out, c.want) {
+				t.Errorf("%s: want %q: %v\n%s", shell, c.want, r.err, r.out)
+			}
+			emptyDir(t, dir)
+			emptyDir(t, r.tmp)
+		}
+	}
+}
