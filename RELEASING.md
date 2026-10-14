@@ -25,10 +25,6 @@ Windows on ARM runs the amd64 build.
 
 1. On an up-to-date `main`: `git tag v0.2.0-rc.1 && git push origin v0.2.0-rc.1`.
 2. Wait for the `release` workflow. It leaves a draft pre-release.
-   Publishing a test build as a pre-release also runs the `publish`
-   workflow. Before the first stable release it updates every route (the
-   quiet window); after that it goes to npm under the `next` tag only, never
-   to Homebrew or Scoop.
 3. Download it: `gh release download v0.2.0-rc.1 --repo ghostbranch-labs/ghostbranch --dir rc`.
 4. Check it (below) and try the binary on each machine you have.
 5. Delete the draft and the tag when you are done. `--cleanup-tag` deletes
@@ -36,6 +32,12 @@ Windows on ARM runs the amd64 build.
    `git push --tags` can't push it again:
    `gh release delete v0.2.0-rc.1 --repo ghostbranch-labs/ghostbranch --cleanup-tag`,
    then `git tag -d v0.2.0-rc.1`.
+
+If you publish a test build instead of deleting it, the `publish` workflow
+runs. Before the first stable release it updates every route (the quiet
+window); after that it goes to npm under the `next` tag only, never to
+Homebrew or Scoop. A published rc on npm can't be taken back, so delete
+test builds unless you mean it.
 
 ## Cut a release
 
@@ -117,6 +119,7 @@ gate as a GitHub Actions workflow as 8.2.
 
 ### When a publish run fails
 
+- **The download step failed:** re-run the failed job.
 - **The check failed:** don't re-run it. Find out why the files or the
   signature don't match, delete the release, and cut a new tag.
 - **The tap or bucket push failed:** fix the cause (usually the App, below),
@@ -133,13 +136,13 @@ person, so any maintainer with the right role can run, rotate or rebuild it.
 
 | Piece | What it is for | How to rotate or recreate it | If it's missing |
 |---|---|---|---|
-| GitHub App `ghostbranch-release` (org-owned) | Lets `publish.yml` push to the tap and the bucket. Repository permission **Contents: read and write**, nothing else; no webhook. Install it with **Only select repositories** set to `homebrew-tap` and `scoop-bucket`. The workflow asks for a push token scoped to those two repositories, and uses a second, read-only token to list the installation's repositories; it fails if the list is anything other than exactly those two. Not the `ghostbranch-cli` App, which is the one people log in with. | Org settings → Developer settings → GitHub Apps → `ghostbranch-release` → Private keys → **Generate a private key**; put it in the `release` environment's `RELEASE_APP_PRIVATE_KEY`, run a test build, then delete the old key. To recreate: a new App with the same permissions and installs, then update both values below. | The token step fails; nothing is pushed. |
-| Environment `release` | The release jobs' secrets. **Deployment branches and tags:** tags `v*` only. Holds variable `RELEASE_APP_CLIENT_ID` (the App's Client ID) and secret `RELEASE_APP_PRIVATE_KEY`. | Repo → Settings → Environments → `release`. | GitHub recreates it empty on the next run, with no tag policy and no secrets. The token step then fails. Restore the `v*` tag policy, the variable and the secret before the next tag. |
+| GitHub App `ghostbranch-release` (org-owned) | Lets `publish.yml` push to the tap and the bucket. Repository permission **Contents: read and write**, nothing else; no webhook. Install it with **Only select repositories** set to `homebrew-tap` and `scoop-bucket`. The workflow asks for a push token scoped to those two repositories, and uses a second, read-only token to list the installation's repositories; it fails if the list is anything other than exactly those two. Not the `ghostbranch-cli` App, which is the one people log in with. | Org settings → GitHub Apps → `ghostbranch-release` → Edit → Private keys → **Generate a private key**; put it in the `release` environment's `RELEASE_APP_PRIVATE_KEY`, then re-run the latest stable release's publish run (or publish a test build, which goes to npm `next`) and check the access step passes, then delete the old key. To recreate: a new App with the same permissions and installs, then update both values below. | The token step fails; nothing is pushed. |
+| Environment `release` | The `publish` job's App credentials; `release.yml` uses the environment only for its tag restriction. **Deployment branches and tags:** tags `v*` only. Holds variable `RELEASE_APP_CLIENT_ID` (the App's Client ID) and secret `RELEASE_APP_PRIVATE_KEY`. | Repo → Settings → Environments → `release`. | GitHub recreates it empty on the next run, with no tag policy and no secrets. The token step then fails. Restore the `v*` tag policy, the variable and the secret before the next tag. |
 | Environment `e2e` | The sandbox E2E token. Required reviewer: a maintainer. Secret `GHOSTBRANCH_E2E_TOKEN`. | Same page; a new fine-grained token limited to the sandbox repos. | The E2E workflow can't run. |
 | Ruleset `release-tags` | Only maintainers may create, move or delete `v*` tags. | Repo → Settings → Rules → Rulesets. | Anyone with write access could start a release. |
 | Allowed Actions | Only GitHub's own Actions and the listed ones run: `golangci/golangci-lint-action`, `goreleaser/goreleaser-action`, `sigstore/cosign-installer`, `anchore/sbom-action/download-syft`. (`actions/create-github-app-token` and `actions/setup-node` are GitHub's.) Every `uses:` is pinned to a commit. | Repo → Settings → Actions → General. | A workflow using another Action fails. |
-| `ghostbranch-labs/homebrew-tap` | `brew install ghostbranch-labs/tap/ghostbranch`. Holds only `Formula/ghostbranch.rb`, written by `publish.yml`. | Recreate the repo with the same name and run `publish.yml` again for the latest release (Actions → publish → the latest run → Re-run). | `brew install` and `brew upgrade` fail. |
-| `ghostbranch-labs/scoop-bucket` | `scoop bucket add ghostbranch https://github.com/ghostbranch-labs/scoop-bucket` then `scoop install ghostbranch`. Holds only `bucket/ghostbranch.json`. | Same as the tap. | `scoop install` and `scoop update` fail. |
+| `ghostbranch-labs/homebrew-tap` | `brew install ghostbranch-labs/tap/ghostbranch`. `publish.yml` writes only `Formula/ghostbranch.rb`. | Recreate the repo with the same name. Add it back to the `ghostbranch-release` installation (Org settings → GitHub Apps → `ghostbranch-release` → Configure → Repository access, **Only select repositories**); a deleted repo drops out of the list and a new one with the same name is not added back, and `publish.yml` fails its access check until it is. Then run `publish.yml` again for the latest **stable** release: Actions → publish → that release's run → Re-run. If that run is over 30 days old there is no Re-run button (`publish.yml` has no manual trigger); edit the release back to a draft and publish it again, which starts `publish.yml` afresh. Packages already on npm are skipped. | `brew install` and `brew upgrade` fail. |
+| `ghostbranch-labs/scoop-bucket` | `scoop bucket add ghostbranch https://github.com/ghostbranch-labs/scoop-bucket` then `scoop install ghostbranch`. `publish.yml` writes only `bucket/ghostbranch.json`. | Same as the tap. | `scoop install` and `scoop update` fail. |
 | npm org `ghostbranch` | Owns `ghostbranch` and the five `@ghostbranch/cli-*` packages. The packages require two-factor authentication and refuse tokens (`mfa=publish`). | npmjs.com → the org → Members. | Nobody can publish. |
 | npm trusted publishing, on each of the six packages | Lets `publish.yml` publish without a token, with provenance (the workflow pins npm to 11.21.0). On npmjs.com → the package → Settings → **Trusted publishing**: GitHub Actions, organization `ghostbranch-labs`, repository `ghostbranch`, workflow `publish.yml`, environment `release`. | Delete and add the entry again on that page (entries can't be edited). A new platform package needs a first publish by hand (`npm publish --access public`, with 2FA), then this entry. | That package's publish fails with an authentication error. |
 | Site redirects (`ghostbranch-labs/ghostbranch-site`, `public/_redirects`) | `ghostbranch.site/install.sh` and `/install.ps1` → `https://github.com/ghostbranch-labs/ghostbranch/releases/latest/download/<script>` (302). | Edit the file in the site repo. | The one-line install commands fail; the scripts still work from a release page. |
@@ -150,4 +153,4 @@ person, so any maintainer with the right role can run, rotate or rebuild it.
 2. The `release-tags` ruleset's bypass list, so they can push tags.
 3. The `e2e` environment's required reviewers.
 4. The npm org `ghostbranch`, as a member of a team with write access to the six packages. They need two-factor authentication on npm.
-5. Org settings → GitHub Apps → `ghostbranch-release`: owners of the org can manage it; nobody else needs access.
+5. Org settings → GitHub Apps → `ghostbranch-release` → Edit: owners of the org can manage it; nobody else needs access.
