@@ -301,3 +301,28 @@ func TestConfirmIsUnchanged(t *testing.T) {
 		t.Fatalf("output %q, want %q", d.out.String(), want)
 	}
 }
+
+// A choice whose default isn't one of its options, or can't be picked,
+// is refused before the console opens: nothing is asked or confirmed
+// (review M8).
+func TestChoosingRefusesABadDefault(t *testing.T) {
+	t.Parallel()
+	bad := handOff("")
+	bad.Default = 2
+	negative := handOff("")
+	negative.Default = -1
+	unavailable := handOff("not now")
+	unavailable.Default = 0
+	for name, ch := range map[string]approval.Choice{"past the end": bad, "negative": negative, "unavailable": unavailable,
+		"no options": {Title: "t"}} {
+		opened := false
+		c := &console.Challenger{Open: func() (io.ReadWriteCloser, error) {
+			opened = true
+			return &device{in: strings.NewReader("ABCDEF\n")}, nil
+		},
+			Rand: &testutil.SeqReader{}}
+		if _, err := c.ConfirmChoosing(context.Background(), "s", ch); err == nil || opened {
+			t.Errorf("%s: err %v, console opened %v", name, err, opened)
+		}
+	}
+}

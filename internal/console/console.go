@@ -75,8 +75,12 @@ func (c *Challenger) Confirm(ctx context.Context, summary string) error {
 // ConfirmChoosing is Confirm with ch asked between the summary and the code
 // (R2): Enter picks ch.Default, an option's key, name or number picks it,
 // and an unavailable option asks again. With one option left, ch is shown
-// and nothing is asked. It returns the option chosen.
+// and nothing is asked. It returns the option chosen. A default that isn't
+// an option that can be picked is refused before the console opens.
 func (c *Challenger) ConfirmChoosing(ctx context.Context, summary string, ch approval.Choice) (int, error) {
+	if ch.Default < 0 || ch.Default >= len(ch.Options) || ch.Options[ch.Default].Unavailable != "" {
+		return 0, fmt.Errorf("console: choice %q has no usable default (%d of %d options)", ch.Title, ch.Default, len(ch.Options))
+	}
 	return c.challenge(ctx, summary, &ch)
 }
 
