@@ -13,7 +13,7 @@ import (
 
 // SchemaVersion versions the envelope and every result and event schema. It
 // stays 0.x until launch, and 0.x versions may break.
-const SchemaVersion = "0.14"
+const SchemaVersion = "0.15"
 
 // RecordVersion versions what Ghostbranch stores: feature records, plans,
 // grants, waivers, workspace.json and the stored login. It moves only when a
@@ -170,6 +170,11 @@ const (
 	// machine. details: plan, reason (other_machine, unknown), public and
 	// feature when known.
 	PlanNotFound Code = "PLAN_NOT_FOUND"
+	// FeatureArchived means promote, gate, feature pull or waivers add was
+	// asked to work on a feature handed off to the public repo (6.5): its shadow branch is
+	// archived, and its PR is fixed by pushing to the PR's branch. details:
+	// feature, public_pr, branch (the public branch), archive_ref.
+	FeatureArchived Code = "FEATURE_ARCHIVED"
 )
 
 var exitCodes = map[Code]int{
@@ -205,6 +210,7 @@ var exitCodes = map[Code]int{
 	PairNotFound:           ExitUsage,
 	NoOpenPR:               ExitUsage,
 	PlanNotFound:           ExitUsage,
+	FeatureArchived:        ExitUsage,
 }
 
 // Exit is the process exit code for c.
@@ -361,6 +367,10 @@ const (
 	// current, latest, url, security, advisories, upgrade. It never changes
 	// ok or exit_code.
 	UpdateAvailable WarningCode = "UPDATE_AVAILABLE"
+	// ArchiveIncomplete means a publish succeeded but handing a feature off
+	// stopped partway. details: feature, step (push, gate_pr, record), code.
+	// It never changes ok or exit_code; feature archive <feature> finishes it.
+	ArchiveIncomplete WarningCode = "ARCHIVE_INCOMPLETE"
 )
 
 var warningCodes = []WarningCode{ConfigKeyIgnored, PublicNotPublic, GateNotRecorded, ChecksLimited, ActorUnknown,
@@ -368,7 +378,7 @@ var warningCodes = []WarningCode{ConfigKeyIgnored, PublicNotPublic, GateNotRecor
 	OverlayOutdated, RepoGuard, RepoGuardUnrewritable, SecretsUnlisted, SecretsMissing, PushTriggersOnSync,
 	ActionsMinutesBilled, ShadowBehind, AuditIncomplete, CINotCancelled, PRStateUnknown, DriftUnknown, FeatureNotClosed,
 	MirrorNotUpdated, RecordNewer, RecordUnreadable, LedgerNotWritten, SyncPushFailed, PlanFileUnreadable, AgentOnPersonLogin,
-	PublicBranchChanged, PRTextNotSet, UpdateAvailable}
+	PublicBranchChanged, PRTextNotSet, UpdateAvailable, ArchiveIncomplete}
 
 // AllWarnings lists every warning code, sorted.
 func AllWarnings() []WarningCode {

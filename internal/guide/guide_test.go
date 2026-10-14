@@ -51,7 +51,8 @@ func TestRenderListsEveryCodeFromTheRegistry(t *testing.T) {
 	// 443: the Updates section and the stderr line (6.4a).
 	// 446: the three 6.3b error rows (PAIR_NOT_FOUND, NO_OPEN_PR, PLAN_NOT_FOUND).
 	// 452: how a native stack merges and what a squash loses (6.3b, F-16/F-31).
-	if n := strings.Count(out, "\n"); n > 452 {
+	// 453: the FEATURE_ARCHIVED error row (6.5).
+	if n := strings.Count(out, "\n"); n > 453 {
 		t.Errorf("the guide is %d lines; keep it short (spec: about 150 plus the tables)", n)
 	}
 }

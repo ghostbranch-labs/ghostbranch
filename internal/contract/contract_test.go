@@ -18,7 +18,7 @@ func TestEveryCodeHasItsExitCode(t *testing.T) {
 		contract.NotAPairCheckout: 2,
 		contract.BadFlag:          2, contract.MissingInput: 2, contract.PairAmbiguous: 2,
 		contract.NameInvalid: 2, contract.FeatureNotFound: 2,
-		contract.PairNotFound: 2, contract.NoOpenPR: 2, contract.PlanNotFound: 2,
+		contract.PairNotFound: 2, contract.NoOpenPR: 2, contract.PlanNotFound: 2, contract.FeatureArchived: 2,
 		contract.ChecksFailed: 3, contract.NoCI: 3, contract.CITimeout: 3, contract.LeakFound: 3,
 		contract.RebaseConflict: 4, contract.SyncDiverged: 4, contract.BranchExists: 4,
 		contract.OverlayCollision: 4, contract.ShadowNotEmpty: 4, contract.RefMoved: 4,
@@ -67,7 +67,7 @@ func TestSuccessEnvelopeShape(t *testing.T) {
 	if err := json.Unmarshal(b, &m); err != nil {
 		t.Fatal(err)
 	}
-	if m["schema_version"] != "0.14" || m["ok"] != true || m["exit_code"] != float64(0) ||
+	if m["schema_version"] != "0.15" || m["ok"] != true || m["exit_code"] != float64(0) ||
 		m["command"] != "sync" || m["error"] != nil {
 		t.Fatalf("bad envelope: %s", b)
 	}
@@ -138,7 +138,7 @@ func TestSubProject4CodesAreRegistered(t *testing.T) {
 	if err != nil || !es[0].NeedsHuman || !strings.Contains(es[0].WhatToDo, "--adopt") {
 		t.Fatalf("SHADOW_CREATE_DENIED doc: %+v %v", es, err)
 	}
-	if contract.SchemaVersion != "0.14" {
+	if contract.SchemaVersion != "0.15" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 }
@@ -161,7 +161,7 @@ func TestSubProject5aCodesAreRegistered(t *testing.T) {
 	if es, _ := contract.Explain("AUTHOR_UNMAPPED"); !es[0].NeedsHuman {
 		t.Fatal("AUTHOR_UNMAPPED needs a person: only they may edit the overlay config's author_map")
 	}
-	if contract.SchemaVersion != "0.14" {
+	if contract.SchemaVersion != "0.15" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 }
@@ -177,7 +177,7 @@ func TestSubProject5bCodesAreRegistered(t *testing.T) {
 			t.Fatalf("%s is not documented: %+v %v", c, es, err)
 		}
 	}
-	if contract.SchemaVersion != "0.14" {
+	if contract.SchemaVersion != "0.15" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 }
@@ -286,7 +286,7 @@ func TestSubProject5cCodesAreRegistered(t *testing.T) {
 			t.Fatalf("%s is not documented: %+v %v", c, es, err)
 		}
 	}
-	if contract.SchemaVersion != "0.14" {
+	if contract.SchemaVersion != "0.15" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 }
@@ -302,7 +302,7 @@ func TestSubProject5d1CodesAreRegistered(t *testing.T) {
 			t.Fatalf("%s is not documented: %+v %v", w, es, err)
 		}
 	}
-	if contract.SchemaVersion != "0.14" {
+	if contract.SchemaVersion != "0.15" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 	if es, _ := contract.Explain(string(contract.Locked)); !strings.Contains(es[0].WhatToDo, "nothing to delete") ||
@@ -348,7 +348,7 @@ func TestNewer(t *testing.T) {
 // and the user docs are generated from them, and agents act on them.
 func TestSubProject61Contract(t *testing.T) {
 	t.Parallel()
-	if contract.SchemaVersion != "0.14" {
+	if contract.SchemaVersion != "0.15" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 	for c, s := range map[contract.Code]string{contract.LoginExpired: "LOGIN_EXPIRED", contract.LoginUnavailable: "LOGIN_UNAVAILABLE",
@@ -440,7 +440,7 @@ func TestNewerRecord(t *testing.T) {
 
 func TestSubProject5d2Contract(t *testing.T) {
 	t.Parallel()
-	if contract.SchemaVersion != "0.14" {
+	if contract.SchemaVersion != "0.15" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 	for _, c := range []contract.WarningCode{contract.LedgerNotWritten, contract.SyncPushFailed, contract.PlanFileUnreadable} {
@@ -504,7 +504,7 @@ func TestGuardUnsupportedAndWaiverUnknownTexts(t *testing.T) {
 // is generated from them, and agents act on them.
 func TestSubProject61aContract(t *testing.T) {
 	t.Parallel()
-	if contract.SchemaVersion != "0.14" {
+	if contract.SchemaVersion != "0.15" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 	for c, want := range map[contract.Code]struct {
@@ -578,7 +578,7 @@ func TestSubProject61aContract(t *testing.T) {
 // first.
 func TestSubProject61a2Contract(t *testing.T) {
 	t.Parallel()
-	if contract.SchemaVersion != "0.14" {
+	if contract.SchemaVersion != "0.15" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 	if string(contract.PRChangedOnGitHub) != "PUBLIC_BRANCH_CHANGED" || string(contract.PublicBranchChanged) != "PUBLIC_BRANCH_CHANGED" ||
@@ -631,7 +631,7 @@ func TestSubProject61a2Contract(t *testing.T) {
 // later Ghostbranch whose record format this binary doesn't know.
 func TestContractKeepsRecordsAt012(t *testing.T) {
 	t.Parallel()
-	if contract.SchemaVersion != "0.14" || contract.RecordVersion != "0.12" {
+	if contract.SchemaVersion != "0.15" || contract.RecordVersion != "0.12" {
 		t.Fatalf("SchemaVersion %s, RecordVersion %s", contract.SchemaVersion, contract.RecordVersion)
 	}
 	if contract.Newer("0.12") || !contract.Newer("0.13") {
@@ -656,7 +656,7 @@ func TestContractKeepsRecordsAt012(t *testing.T) {
 // 0.12. PAIR_AMBIGUOUS no longer sends an agent to init.
 func TestSubProject63bCodesAreRegistered(t *testing.T) {
 	t.Parallel()
-	if contract.SchemaVersion != "0.14" || contract.RecordVersion != "0.12" {
+	if contract.SchemaVersion != "0.15" || contract.RecordVersion != "0.12" {
 		t.Fatalf("SchemaVersion %s, RecordVersion %s", contract.SchemaVersion, contract.RecordVersion)
 	}
 	for code, name := range map[contract.Code]string{
@@ -717,5 +717,38 @@ func TestSubProject63bDetailsAreDocumented(t *testing.T) {
 	es, _ := contract.Explain("PLAN_NOT_FOUND")
 	if !strings.Contains(es[0].Causes[0], "another workspace or GHOSTBRANCH_HOME") || strings.Contains(es[0].Causes[1], "another workspace") {
 		t.Errorf("PLAN_NOT_FOUND causes = %q", es[0].Causes)
+	}
+}
+
+// 6.5's code and warning: FEATURE_ARCHIVED is a usage error (exit 2), and
+// ARCHIVE_INCOMPLETE never changes the exit code. The contract moves to
+// 0.15; records stay 0.12 (archived is an optional field).
+func TestSubProject65CodesAreRegistered(t *testing.T) {
+	t.Parallel()
+	if contract.SchemaVersion != "0.15" || contract.RecordVersion != "0.12" {
+		t.Fatalf("SchemaVersion %s, RecordVersion %s", contract.SchemaVersion, contract.RecordVersion)
+	}
+	if contract.FeatureArchived != "FEATURE_ARCHIVED" || contract.FeatureArchived.Exit() != contract.ExitUsage ||
+		!slices.Contains(contract.AllCodes(), contract.FeatureArchived) {
+		t.Fatalf("FEATURE_ARCHIVED = %q, exit %d", contract.FeatureArchived, contract.FeatureArchived.Exit())
+	}
+	if contract.ArchiveIncomplete != "ARCHIVE_INCOMPLETE" || !slices.Contains(contract.AllWarnings(), contract.ArchiveIncomplete) {
+		t.Fatalf("ARCHIVE_INCOMPLETE = %q", contract.ArchiveIncomplete)
+	}
+	es, err := contract.Explain("FEATURE_ARCHIVED")
+	if err != nil || len(es) != 1 || es[0].NeedsHuman || len(es[0].Causes) != 2 ||
+		!strings.Contains(es[0].Summary, "promote, gate, feature pull and waivers add") || // P25
+		!strings.Contains(es[0].WhatToDo, "git push origin HEAD:<error.details.branch>") ||
+		!strings.Contains(es[0].WhatToDo, "ghostbranch sync closes the feature") {
+		t.Fatalf("FEATURE_ARCHIVED doc = %+v %v", es, err)
+	}
+	es, err = contract.Explain("ARCHIVE_INCOMPLETE")
+	if err != nil || len(es) != 1 || es[0].Kind != contract.KindWarning ||
+		!strings.Contains(es[0].WhatToDo, "ghostbranch feature archive <details.feature>") {
+		t.Fatalf("ARCHIVE_INCOMPLETE doc = %+v %v", es, err)
+	}
+	es, _ = contract.Explain("NO_OPEN_PR")
+	if !strings.HasPrefix(es[0].Summary, "feature pull and feature archive need a feature's open public PR") {
+		t.Fatalf("NO_OPEN_PR summary = %q", es[0].Summary)
 	}
 }
