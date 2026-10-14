@@ -11,12 +11,59 @@ import (
 
 // publishStep is the part of a publish.yml step these tests read.
 type publishStep struct {
-	Name string            `yaml:"name"`
-	ID   string            `yaml:"id"`
-	If   string            `yaml:"if"`
-	Uses string            `yaml:"uses"`
-	Run  string            `yaml:"run"`
-	With map[string]string `yaml:"with"`
+	Name            string            `yaml:"name"`
+	ID              string            `yaml:"id"`
+	If              string            `yaml:"if"`
+	Uses            string            `yaml:"uses"`
+	Run             string            `yaml:"run"`
+	With            map[string]string `yaml:"with"`
+	Env             map[string]string `yaml:"env"`
+	ContinueOnError string            `yaml:"continue-on-error"`
+}
+
+// publishWorkflow is the part of publish.yml these tests read.
+type publishWorkflow struct {
+	On          map[string]yaml.Node `yaml:"on"`
+	Permissions map[string]string    `yaml:"permissions"`
+	Concurrency struct {
+		Group            string `yaml:"group"`
+		CancelInProgress string `yaml:"cancel-in-progress"`
+	} `yaml:"concurrency"`
+	Jobs map[string]publishJobDef `yaml:"jobs"`
+}
+
+// publishJobDef is the part of a publish.yml job these tests read.
+type publishJobDef struct {
+	If              string            `yaml:"if"`
+	Environment     string            `yaml:"environment"`
+	ContinueOnError string            `yaml:"continue-on-error"`
+	Permissions     map[string]string `yaml:"permissions"`
+	Defaults        struct {
+		Run struct {
+			Shell string `yaml:"shell"`
+		} `yaml:"run"`
+	} `yaml:"defaults"`
+	Steps []publishStep `yaml:"steps"`
+}
+
+// readPublish reads .github/workflows/publish.yml.
+func readPublish(t *testing.T) publishWorkflow {
+	t.Helper()
+	raw, err := os.ReadFile("../../.github/workflows/publish.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wf publishWorkflow
+	if err := yaml.Unmarshal(raw, &wf); err != nil {
+		t.Fatal(err)
+	}
+	if len(wf.Jobs) != 1 {
+		t.Fatalf("publish.yml has %d jobs; the checks below assume one", len(wf.Jobs))
+	}
+	if _, ok := wf.Jobs["publish"]; !ok {
+		t.Fatal("publish.yml has no publish job")
+	}
+	return wf
 }
 
 func (s publishStep) label() string {
@@ -26,35 +73,64 @@ func (s publishStep) label() string {
 	return s.Uses
 }
 
-// publishJob reads .github/workflows/publish.yml's one job.
-func publishJob(t *testing.T) (job struct {
-	If       string `yaml:"if"`
-	Defaults struct {
-		Run struct {
-			Shell string `yaml:"shell"`
-		} `yaml:"run"`
-	} `yaml:"defaults"`
-	Steps []publishStep `yaml:"steps"`
-}) {
+// publishJob reads publish.yml's one job.
+func publishJob(t *testing.T) publishJobDef {
 	t.Helper()
-	raw, err := os.ReadFile("../../.github/workflows/publish.yml")
-	if err != nil {
-		t.Fatal(err)
+	return readPublish(t).Jobs["publish"]
+}
+
+// TestPublishTriggerPermissionsAndConcurrency: only a published release
+// starts it, with read-only contents and an OIDC token, in the release
+// environment, and one release never cancels another's run.
+func TestPublishTriggerPermissionsAndConcurrency(t *testing.T) {
+	wf := readPublish(t)
+	var types []string
+	if rel, ok := wf.On["release"]; !ok || len(wf.On) != 1 {
+		t.Errorf("on: has %d triggers; want release only", len(wf.On))
+	} else if err := rel.Decode(&struct {
+		Types *[]string `yaml:"types"`
+	}{&types}); err != nil || strings.Join(types, ",") != "published" {
+		t.Errorf("on.release.types = %v (%v); want [published]", types, err)
 	}
-	var wf struct {
-		Jobs map[string]yaml.Node `yaml:"jobs"`
+	if len(wf.Permissions) != 1 || wf.Permissions["contents"] != "read" {
+		t.Errorf("workflow permissions = %v; want contents: read", wf.Permissions)
 	}
-	if err := yaml.Unmarshal(raw, &wf); err != nil {
-		t.Fatal(err)
+	job := wf.Jobs["publish"]
+	if p := job.Permissions; len(p) != 2 || p["contents"] != "read" || p["id-token"] != "write" {
+		t.Errorf("job permissions = %v; want exactly contents: read and id-token: write", p)
 	}
-	if len(wf.Jobs) != 1 {
-		t.Fatalf("publish.yml has %d jobs; the checks below assume one", len(wf.Jobs))
+	if job.Environment != "release" {
+		t.Errorf("environment = %q; want release", job.Environment)
 	}
-	node := wf.Jobs["publish"]
-	if err := node.Decode(&job); err != nil {
-		t.Fatal(err)
+	if wf.Concurrency.Group != "publish-${{ github.event.release.tag_name }}" || wf.Concurrency.CancelInProgress != "false" {
+		t.Errorf("concurrency = %+v; want one group per tag, never cancelling", wf.Concurrency)
 	}
-	return job
+}
+
+// TestPublishFailsClosed: nothing can let a failed check carry on. No step
+// or job continues on error, no if: runs after a failure, and the verify
+// and access steps run unconditionally and never swallow an exit code.
+func TestPublishFailsClosed(t *testing.T) {
+	job := publishJob(t)
+	if job.ContinueOnError != "" {
+		t.Errorf("the job has continue-on-error: %s", job.ContinueOnError)
+	}
+	risky := regexp.MustCompile(`always\(\)|failure\(\)|cancelled\(\)`)
+	swallow := regexp.MustCompile(`\|\|\s*(true|:)|set \+e|set \+o pipefail`)
+	for _, s := range job.Steps {
+		if s.ContinueOnError != "" {
+			t.Errorf("step %q has continue-on-error: %s", s.label(), s.ContinueOnError)
+		}
+		if risky.MatchString(s.If) {
+			t.Errorf("step %q runs after a failure: if: %s", s.label(), s.If)
+		}
+		if swallow.MatchString(s.Run) {
+			t.Errorf("step %q swallows a failure: %s", s.label(), swallow.FindString(s.Run))
+		}
+		if (s.Name == "verify before distributing" || strings.Contains(s.Run, "installation/repositories")) && s.If != "" {
+			t.Errorf("step %q is conditional: if: %s", s.label(), s.If)
+		}
+	}
 }
 
 // TestPublishJobGuardAndShell: the job never runs outside the real repo, and
@@ -88,7 +164,13 @@ func TestPublishVerifiesBeforeAnythingElse(t *testing.T) {
 		t.Fatal("no verify before distributing step")
 	}
 	v := job.Steps[verify].Run
-	for _, want := range []string{"sha256sum --strict -c checksums.txt", "cosign verify-blob", `--certificate-identity "$IDENTITY"`} {
+	for _, want := range []string{
+		"sha256sum --strict -c checksums.txt",
+		"cosign verify-blob",
+		`--certificate-identity "$IDENTITY" \`,
+		`--certificate-oidc-issuer https://token.actions.githubusercontent.com \`,
+		`--certificate-github-workflow-sha "$(git rev-parse HEAD)" \`,
+	} {
 		if !strings.Contains(v, want) {
 			t.Errorf("the verify step lacks %q", want)
 		}
@@ -96,7 +178,14 @@ func TestPublishVerifiesBeforeAnythingElse(t *testing.T) {
 	if strings.Contains(v, "regexp") {
 		t.Error("the verify step uses a regexp identity; it must be exact")
 	}
+	const identity = "https://github.com/${{ github.repository }}/.github/workflows/release.yml@refs/tags/${{ github.event.release.tag_name }}"
+	if got := job.Steps[verify].Env["IDENTITY"]; got != identity {
+		t.Errorf("IDENTITY = %q; want %q", got, identity)
+	}
 	for _, s := range job.Steps[:verify] {
+		if ref, ok := s.With["ref"]; ok && !strings.HasPrefix(ref, "refs/tags/") {
+			t.Errorf("step %q checks out ref %q, which may resolve to a branch", s.label(), ref)
+		}
 		switch {
 		case strings.HasPrefix(s.Uses, "actions/checkout@"),
 			strings.HasPrefix(s.Uses, "actions/setup-go@"),
@@ -221,5 +310,31 @@ func TestPublishPinsEveryAction(t *testing.T) {
 		if strings.Contains(line, "uses:") && !pinned.MatchString(strings.TrimRight(line, "\r")) {
 			t.Errorf("not pinned: %s", line)
 		}
+	}
+}
+
+// TestPublishNPMWithProvenance: npm publishes only from a public repo, with
+// provenance, under the routed dist-tag, using an exact npm 11.x.
+func TestPublishNPMWithProvenance(t *testing.T) {
+	job := publishJob(t)
+	var publish string
+	for _, s := range job.Steps {
+		if strings.Contains(s.Run, "npm publish") || strings.HasPrefix(s.Uses, "actions/setup-node@") {
+			if s.If != "${{ !github.event.repository.private }}" {
+				t.Errorf("step %q if = %q; want the public-repo check only", s.label(), s.If)
+			}
+		}
+		if strings.Contains(s.Run, "npm publish") {
+			publish = s.Run
+		}
+	}
+	line := regexp.MustCompile(`(?m)^\s*npm publish .*$`).FindString(publish)
+	for _, want := range []string{"--provenance", `--tag "$NPM_TAG"`, "--access public"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("npm publish lacks %s: %q", want, line)
+		}
+	}
+	if !regexp.MustCompile(`npm install -g npm@11\.\d+\.\d+\n`).MatchString(publish) {
+		t.Error("npm isn't pinned to an exact 11.x")
 	}
 }
