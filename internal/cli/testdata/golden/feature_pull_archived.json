@@ -60,6 +60,7 @@
       "archive_ref": "refs/ghostbranch/archive/feat-x",
       "branch": "feat-x",
       "feature": "feat-x",
+      "pr_state": "open",
       "public_pr": 1
     }
   }

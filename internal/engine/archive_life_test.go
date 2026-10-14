@@ -284,7 +284,7 @@ func TestArchivedFeatureRefusals(t *testing.T) {
 		t.Helper()
 		ce := wantCode(t, err, contract.FeatureArchived)
 		if ce.Field != "feature" || ce.Details["feature"] != "feat-x" || ce.Details["public_pr"] != pr ||
-			ce.Details["branch"] != "feat-x" || ce.Details["archive_ref"] != archiveRefX {
+			ce.Details["branch"] != "feat-x" || ce.Details["archive_ref"] != archiveRefX || ce.Details["pr_state"] != "open" {
 			t.Errorf("%s: %+v", what, ce)
 		}
 	}
@@ -341,5 +341,30 @@ func TestAnArchiveOfARecordWithoutItsHeadUsesThePlan(t *testing.T) {
 	h.forge.SetPRMerged(publicName, pr)
 	if r := h.report("feat-x"); r.State != feature.StateMerged || r.Moved || !engine.ClosableWithoutConsole(r) {
 		t.Fatalf("report = %+v", r)
+	}
+}
+
+// FEATURE_ARCHIVED names the public PR's state (details.pr_state), and its
+// message stops offering a push once the PR merged or was closed.
+func TestArchivedFeatureRefusalsNameThePRState(t *testing.T) {
+	t.Parallel()
+	for _, state := range []string{"merged", "closed"} {
+		h := newHarness(t)
+		h.init()
+		pr := h.archived("feat-x")
+		if state == "merged" {
+			h.forge.SetPRMerged(publicName, pr)
+		} else {
+			h.forge.ClosePR(publicName, pr)
+		}
+		_, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
+		ce := wantCode(t, err, contract.FeatureArchived)
+		if ce.Details["pr_state"] != state || strings.Contains(ce.Message, "by pushing") {
+			t.Errorf("%s: %+v", state, ce)
+		}
+		res, _, err := h.eng.FeatureArchive(h.ctx, h.pair, "feat-x")
+		if err != nil || res.Changed || res.PRState != state {
+			t.Errorf("%s: feature archive = %+v %v", state, res, err)
+		}
 	}
 }

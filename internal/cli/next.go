@@ -566,6 +566,10 @@ func (a *app) steps(err error) []contract.Next {
 			if f == "" || branch == "" {
 				break
 			}
+			state, _ := ce.Details["pr_state"].(string)
+			if n := a.handedOffPRDone(f, pr, state); n != nil {
+				return n
+			}
 			return a.handOffNexts(f, pr, branch)
 		case contract.NoOpenPR:
 			f, _ := ce.Details["feature"].(string)
@@ -699,6 +703,8 @@ func (a *app) steps(err error) []contract.Next {
 	case *engine.FeatureArchiveResult:
 		if r.Preview != nil {
 			out = append(out, contract.Next{Command: a.scoped("feature", "archive", r.Feature), Why: "the preview lists what archiving changes; run it to archive"})
+		} else if n := a.handedOffPRDone(r.Feature, r.PublicPR, r.PRState); n != nil {
+			out = append(out, n...)
 		} else {
 			out = append(out, a.handOffNexts(r.Feature, r.PublicPR, r.Branch)...)
 		}
@@ -800,6 +806,22 @@ func (a *app) handOffNexts(name string, pr int, branch string) []contract.Next {
 			Why: "after committing the fix, push it to the PR; no gate, plan or apply"},
 		{Command: a.scoped("sync"), Why: fmt.Sprintf("when PR #%d merges, sync closes %s and deletes its archive", pr, name)},
 	}
+}
+
+// handedOffPRDone is the next step for a handed-off feature whose PR
+// merged (sync closes it, or says a person does when its archive holds
+// commits never published, P17) or was closed without merging (a person
+// closes it); nil while the PR may still take pushes.
+func (a *app) handedOffPRDone(name string, pr int, state string) []contract.Next {
+	switch state {
+	case "merged":
+		return []contract.Next{{Command: a.scoped("sync"),
+			Why: fmt.Sprintf("PR #%d merged, so it takes no more pushes; sync closes %s and deletes its archive (when the archive holds commits never published, sync leaves it for a person to close at the console)", pr, name)}}
+	case "closed":
+		return []contract.Next{{Command: a.scoped("feature", "close", name), NeedsHuman: true,
+			Why: fmt.Sprintf("PR #%d was closed without merging; a person closes %s at the console", pr, name)}}
+	}
+	return nil
 }
 
 // prBranch is the public branch of r's PR i: each PR's branch is the base

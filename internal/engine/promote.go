@@ -132,7 +132,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	// before any stack logic reads its branch.
 	for _, n := range opt.Features {
 		if m, _, _, err := e.readMetaAny(ctx, pc, n); err == nil {
-			if err := archivedErr(n, m); err != nil {
+			if err := e.archivedRefusal(ctx, pc, n, m); err != nil {
 				return res, warns, err
 			}
 		}

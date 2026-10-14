@@ -50,6 +50,10 @@ type FeatureArchiveResult struct {
 	PublicPR int              `json:"public_pr"`
 	Branch   string           `json:"branch"`
 	Preview  *preview.Preview `json:"preview"`
+	// PRState is the public PR's state when the feature was already
+	// archived (open, merged, closed or unknown), for next: a merged or
+	// closed PR takes no more pushes. "" otherwise.
+	PRState string `json:"-"`
 }
 
 // archiveDone is what archiveOne did.
@@ -388,6 +392,7 @@ func (e *Engine) FeatureArchive(ctx context.Context, p workspace.Pair, name stri
 		res.PublicPR, res.Branch = m.Promoted.PublicPR, publishedBranch(m)
 	}
 	if m.Archived != nil {
+		res.PRState = e.publicPRState(ctx, pc, m)
 		return res, warns, nil
 	}
 	if open, err := e.publicPROpen(ctx, pc, m); err != nil {
@@ -426,8 +431,11 @@ func (e *Engine) FeatureArchive(ctx context.Context, p workspace.Pair, name stri
 }
 
 // archivedErr is FEATURE_ARCHIVED for a feature handed off to the public
-// repo, nil otherwise. Its next is the push hint (Task 10).
-func archivedErr(name string, m feature.Meta) error {
+// repo, nil otherwise; prState is its public PR's state (open, merged,
+// closed or unknown), in details.pr_state. Its next is the push hint while
+// the PR may be open, sync once it merged, and a person's close once it was
+// closed (Task 10).
+func archivedErr(name string, m feature.Meta, prState string) error {
 	if m.Archived == nil {
 		return nil
 	}
@@ -435,10 +443,42 @@ func archivedErr(name string, m feature.Meta) error {
 	if m.Promoted != nil {
 		pr, branch = m.Promoted.PublicPR, publishedBranch(m)
 	}
-	return contract.New(contract.FeatureArchived,
-		"feature %s was handed off to the public repo: its shadow branch is archived at %s; fix or change PR #%d by pushing to its branch %s, and ghostbranch sync closes the feature when it merges",
-		name, m.Archived.Ref, pr, branch).WithField("feature").
-		WithDetails(map[string]any{"feature": name, "public_pr": pr, "branch": branch, "archive_ref": m.Archived.Ref})
+	format := "feature %s was handed off to the public repo: its shadow branch is archived at %s; fix or change PR #%d by pushing to its branch %s, and ghostbranch sync closes the feature when it merges"
+	switch prState {
+	case prMerged:
+		format = "feature %s was handed off to the public repo (its shadow branch is archived at %s), and PR #%d (branch %s) merged: ghostbranch sync closes the feature"
+	case prClosed:
+		format = "feature %s was handed off to the public repo (its shadow branch is archived at %s), and PR #%d (branch %s) was closed without merging: a person closes the feature at the console"
+	}
+	return contract.New(contract.FeatureArchived, format, name, m.Archived.Ref, pr, branch).WithField("feature").
+		WithDetails(map[string]any{"feature": name, "public_pr": pr, "branch": branch, "archive_ref": m.Archived.Ref, "pr_state": prState})
+}
+
+// archivedRefusal is archivedErr with m's public PR state read, nil when m
+// isn't archived (so an unarchived feature costs no PR read).
+func (e *Engine) archivedRefusal(ctx context.Context, pc *pairCtx, name string, m feature.Meta) error {
+	if m.Archived == nil {
+		return nil
+	}
+	return archivedErr(name, m, e.publicPRState(ctx, pc, m))
+}
+
+// publicPRState is m's public PR state: open, merged or closed, or unknown
+// when it can't be read or nothing was published.
+func (e *Engine) publicPRState(ctx context.Context, pc *pairCtx, m feature.Meta) string {
+	if m.Promoted == nil || m.Promoted.PublicPR == 0 {
+		return prUnknown
+	}
+	pr, err := e.Forge.GetPR(ctx, pc.pair.Public, m.Promoted.PublicPR)
+	switch {
+	case err != nil:
+		return prUnknown
+	case pr.Merged:
+		return prMerged
+	case pr.State == prClosed:
+		return prClosed
+	}
+	return prOpen
 }
 
 // handOffChoice is the Archive or Keep choice for names (one plan), nil

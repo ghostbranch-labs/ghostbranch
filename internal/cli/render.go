@@ -455,6 +455,12 @@ func human(r any, st style.Styler) string {
 		switch {
 		case v.Preview != nil:
 			previewText(&b, v.Preview)
+		case !v.Changed && v.PRState == "merged":
+			fmt.Fprintf(&b, "%s is already archived at %s, and PR #%d merged; sync closes it.\n",
+				oneLine(v.Feature), oneLine(ref), v.PublicPR)
+		case !v.Changed && v.PRState == "closed":
+			fmt.Fprintf(&b, "%s is already archived at %s, and PR #%d was closed without merging; a person closes it at the console.\n",
+				oneLine(v.Feature), oneLine(ref), v.PublicPR)
 		case !v.Changed:
 			fmt.Fprintf(&b, "%s is already archived at %s; fix PR #%d by pushing to %s.\n",
 				oneLine(v.Feature), oneLine(ref), v.PublicPR, oneLine(v.Branch))

@@ -125,3 +125,29 @@ func TestNextAfterTheGateOfAParentWithAnArchivedChild(t *testing.T) {
 		t.Fatalf("the gate's next names the handed-off child: %s", why)
 	}
 }
+
+// Once an archived feature's PR merged or was closed, FEATURE_ARCHIVED and
+// feature archive no longer send an agent to push to it: a merged one is
+// sync's, a closed one a person's close (review M9, Task 10 minor 1).
+func TestNextForAnArchivedFeatureWhosePRIsDone(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ state, want string }{
+		{"merged", "ghostbranch sync"},
+		{"closed", "ghostbranch feature close feat-x"},
+	} {
+		te := newTestEnv(t)
+		archivedFeature(te)
+		pr := te.forge.PRs("acme/widget")[0].Number
+		if tc.state == "merged" {
+			te.forge.SetPRMerged("acme/widget", pr)
+		} else {
+			te.forge.ClosePR("acme/widget", pr)
+		}
+		for _, args := range [][]string{{"gate", "feat-x"}, {"feature", "archive", "feat-x"}} {
+			_, env := te.runJSON(args...)
+			if cmds := nextCommands(env); len(cmds) != 1 || !strings.HasPrefix(cmds[0], tc.want) || hasNext(env, "git push origin") {
+				t.Errorf("%s, %v: next = %v", tc.state, args, cmds)
+			}
+		}
+	}
+}
