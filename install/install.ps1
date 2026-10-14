@@ -68,6 +68,18 @@ function Install-Ghostbranch {
     }
     $local = $base -match '^http://'
 
+    # The test hook for the user PATH may only name a throwaway key, and is
+    # checked before anything is downloaded.
+    $keyPath = 'Environment'
+    $testKey = $false
+    if ($env:GHOSTBRANCH_TEST_PATH_KEY) {
+        if ($env:GHOSTBRANCH_TEST_PATH_KEY -notlike 'Software\ghostbranch-test-*') {
+            throw 'ghostbranch install: GHOSTBRANCH_TEST_PATH_KEY must start with Software\ghostbranch-test-'
+        }
+        $keyPath = $env:GHOSTBRANCH_TEST_PATH_KEY
+        $testKey = $true
+    }
+
     $dir = $env:GHOSTBRANCH_INSTALL_DIR
     if (-not $dir) { $dir = Join-Path $env:LOCALAPPDATA 'Programs\ghostbranch' }
     $dir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($dir).TrimEnd('\')
@@ -164,15 +176,6 @@ function Install-Ghostbranch {
 
         # The user PATH is edited raw: %VAR% entries, empty segments and the
         # value's kind (REG_EXPAND_SZ by default) stay as they are.
-        $keyPath = 'Environment'
-        $testKey = $false
-        if ($env:GHOSTBRANCH_TEST_PATH_KEY) {
-            if ($env:GHOSTBRANCH_TEST_PATH_KEY -notlike 'Software\ghostbranch-test-*') {
-                throw 'ghostbranch install: GHOSTBRANCH_TEST_PATH_KEY must start with Software\ghostbranch-test-'
-            }
-            $keyPath = $env:GHOSTBRANCH_TEST_PATH_KEY
-            $testKey = $true
-        }
         if ($env:GHOSTBRANCH_TEST_SKIP_PATH -eq '1' -and -not $testKey) {
             Write-Host "Would add $dir to the user PATH."
         } else {

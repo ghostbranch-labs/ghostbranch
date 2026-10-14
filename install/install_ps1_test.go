@@ -373,9 +373,15 @@ func TestInstallPs1TestPathKeyMustBeAThrowawayKey(t *testing.T) {
 	t.Parallel()
 	windowsOnly(t)
 	for _, shell := range powershells(t) {
-		r := runInstallPs1(t, shell, "GHOSTBRANCH_TEST_PATH_KEY=Environment", "GHOSTBRANCH_INSTALL_DIR="+t.TempDir())
-		if r.err == nil {
-			t.Errorf("%s: accepted HKCU Environment as the test key\n%s", shell, r.out)
+		// The key is refused up front, before any download: the base is a
+		// closed local port, so a guard that ran later would fail on the
+		// download instead, with a different message.
+		r := runInstallPs1(t, shell, "GHOSTBRANCH_TEST_PATH_KEY=Environment", "GHOSTBRANCH_DOWNLOAD_BASE=http://127.0.0.1:1", "GHOSTBRANCH_INSTALL_DIR="+t.TempDir())
+		if r.err == nil || !strings.Contains(r.out, `must start with Software\ghostbranch-test-`) {
+			t.Errorf("%s: accepted HKCU Environment as the test key: %v\n%s", shell, r.err, r.out)
+		}
+		if strings.Contains(r.out, "couldn't download") {
+			t.Errorf("%s: downloaded before refusing the test key\n%s", shell, r.out)
 		}
 	}
 }
