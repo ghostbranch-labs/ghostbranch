@@ -57,6 +57,36 @@ func TestGateReportsItsStepsInOrder(t *testing.T) {
 	}
 }
 
+// Opening the pair shows the mirror update as its own step, after the
+// GitHub reads, for a command that locks the pair and one that only reads:
+// the fetch is the slow part, and it used to run under the "Reading" line.
+func TestOpenShowsTheMirrorUpdate(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.startFeature("feat-x", map[string]string{"feature.txt": "new\n"})
+	want := []string{
+		"Reading " + publicName + " and " + shadowName + " from GitHub",
+		"Updating the local copy of " + publicName + " and " + shadowName,
+	}
+	rec := &progress.Recorder{}
+	h.eng.Progress = rec
+	if _, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x"); err != nil {
+		t.Fatal(err)
+	}
+	if !inOrder(rec.Steps(), append(want, "Replaying feat-x onto public main")) {
+		t.Fatalf("gate steps:\n%s", rec.String())
+	}
+	rec = &progress.Recorder{}
+	h.eng.Progress = rec
+	if _, _, err := h.eng.Status(h.ctx, h.pair); err != nil {
+		t.Fatal(err)
+	}
+	if !inOrder(rec.Steps(), want) || rec.Running() {
+		t.Fatalf("status steps:\n%s", rec.String())
+	}
+}
+
 // The CI step counts finished checks from each poll.
 func TestCIWaitCountsChecksInTheStep(t *testing.T) {
 	t.Parallel()
