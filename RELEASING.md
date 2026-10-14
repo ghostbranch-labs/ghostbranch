@@ -39,6 +39,19 @@ window); after that it goes to npm under the `next` tag only, never to
 Homebrew or Scoop. A published rc on npm can't be taken back, so delete
 test builds unless you mean it.
 
+GitHub's "latest release" skips pre-releases, so until the first stable
+release exists, `ghostbranch.site/install.sh` and `install.ps1` and both
+scripts' default install return 404. To try the install scripts on a test
+build, take the script from the build itself and name its version:
+
+```sh
+curl -fsSL https://github.com/ghostbranch-labs/ghostbranch/releases/download/v0.1.0-rc.1/install.sh | GHOSTBRANCH_VERSION=v0.1.0-rc.1 sh
+```
+
+```powershell
+$env:GHOSTBRANCH_VERSION = 'v0.1.0-rc.1'; irm https://github.com/ghostbranch-labs/ghostbranch/releases/download/v0.1.0-rc.1/install.ps1 | iex
+```
+
 ## Cut a release
 
 1. On an up-to-date `main`, with CI green: `git tag v0.2.0 && git push origin v0.2.0`.
