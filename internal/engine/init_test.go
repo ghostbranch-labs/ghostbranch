@@ -4,7 +4,9 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -287,10 +289,27 @@ func TestAdoptRefusesAShadowTagNotInPublic(t *testing.T) {
 	}
 }
 
+// gitAtLeast reports whether the git on PATH is major.minor or newer. It
+// fails the test when the version can't be read.
+func gitAtLeast(t *testing.T, major, minor int) bool {
+	t.Helper()
+	v, err := gitx.Version(t.Context())
+	m := regexp.MustCompile(`git version (\d+)\.(\d+)`).FindStringSubmatch(v)
+	if err != nil || m == nil {
+		t.Fatalf("git version = %q, %v", v, err)
+	}
+	gotMajor, _ := strconv.Atoi(m[1])
+	gotMinor, _ := strconv.Atoi(m[2])
+	return gotMajor > major || gotMajor == major && gotMinor >= minor
+}
+
 // A git failure while comparing a shadow branch with public is INTERNAL,
 // not a verdict on the repo's content.
 func TestAdoptAncestryFailureIsInternal(t *testing.T) {
 	t.Parallel()
+	if !gitAtLeast(t, 2, 45) {
+		t.Skip("needs git 2.45 or later: older git's merge-base --is-ancestor exits 1 on the missing parent, which reads as a verdict, not a failure")
+	}
 	h := newHarness(t)
 	old, _ := h.pubGit.MustResolve(h.ctx, "refs/heads/main")
 	pubMain := testutil.Commit(t, h.pubGit, "main", "second", map[string]string{"two.txt": "2"})
