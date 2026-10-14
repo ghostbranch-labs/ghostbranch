@@ -188,14 +188,19 @@ main, green CI, and a leak scan of exactly what will be published.
   `--keep`. `data.after_publish` says, per feature: `archived`, `kept` or `incomplete`.
 - Archive hands the PR off: the shadow branch moves to `refs/ghostbranch/archive/<name>` (nothing is
   lost) and the feature's state is `archived`. Fix or change its PR on the PR's branch (`<branch>` is
-  `error.details.branch` of `FEATURE_ARCHIVED`, or in its `next`): `git fetch origin && git switch --detach origin/<branch>`,
-  commit there (never on the old shadow branch: the guard refuses its private commits; a plain
-  `git switch <branch>` lands on it), then `git push origin HEAD:<branch>`. No gate, no plan, no apply.
-- `promote`, `gate` and `feature pull` refuse an archived feature (`FEATURE_ARCHIVED`). When its PR merges,
-  `sync` closes it and deletes the archive (unless it reads `merged_moved`: a person closes it).
-- Archive is unavailable while another feature is built on this one: publish it with this one, restack it onto main, or close an abandoned one first,
-  then `ghostbranch feature archive <name> --repo <public> --json`. `ARCHIVE_INCOMPLETE`: the publish stands;
-  run `ghostbranch feature archive <name> --repo <public> --json` to finish. An older Ghostbranch shows an archived feature as `branch_gone`: update it.
+  `error.details.branch` of `FEATURE_ARCHIVED`, or in its `next`):
+  `git fetch origin && git switch --detach origin/<branch>`, commit there (never on the old shadow
+  branch: the guard refuses its private commits; a plain `git switch <branch>` lands on it), then
+  `git push origin HEAD:<branch>`. No gate, no plan, no apply.
+- `promote`, `gate`, `feature pull` and `waivers add` refuse an archived feature (`FEATURE_ARCHIVED`),
+  and nothing can be started from it (`feature start --from`) or restacked onto it
+  (`feature restack --onto`). When its PR merges, `sync` closes it and deletes the archive (unless it
+  reads `merged_moved`: a person closes it).
+- Archive is unavailable while another feature is built on this one: publish it with this one,
+  restack it onto main, or close an abandoned one first, then
+  `ghostbranch feature archive <name> --repo <public> --json`. `ARCHIVE_INCOMPLETE`: the publish
+  stands; run `ghostbranch feature archive <name> --repo <public> --json` to finish. An older
+  Ghostbranch shows an archived feature as `branch_gone`: update it.
 - Keep is the loop above: fixes go through the shadow branch, `gate` and `promote`.
 
 ## Keeping up with public

@@ -57,8 +57,8 @@ func TestRenderListsEveryCodeFromTheRegistry(t *testing.T) {
 	// 453: the FEATURE_ARCHIVED error row (6.5).
 	// 472: the After publishing section, the archived state, the Never exception and the guard's archived-branch sentence (6.5).
 	// 473: the hand-off follow-ups: how to reach the PR branch, merged_moved, the three archive-blocked cases (6.5 Task 11 review).
-	// 475: all 14 states in the Lifecycle list, its long lines rewrapped (6.6).
-	if n := strings.Count(out, "\n"); n > 475 {
+	// 480: all 14 states in the Lifecycle list, and in After publishing waivers add, the two stacking refusals and the long lines rewrapped (6.6).
+	if n := strings.Count(out, "\n"); n > 480 {
 		t.Errorf("the guide is %d lines; keep it short (spec: about 150 plus the tables)", n)
 	}
 }
@@ -482,7 +482,8 @@ func TestGuideTeachesHandOff(t *testing.T) {
 		"the shadow branch moves to `refs/ghostbranch/archive/<name>` (nothing is lost)",
 		"`git push origin HEAD:<branch>`. No gate, no plan, no apply.",
 		"never on the old shadow branch: the guard refuses its private commits",
-		"`promote`, `gate` and `feature pull` refuse an archived feature (`FEATURE_ARCHIVED`)",
+		"`promote`, `gate`, `feature pull` and `waivers add` refuse an archived feature (`FEATURE_ARCHIVED`)",
+		"nothing can be started from it (`feature start --from`) or restacked onto it (`feature restack --onto`)",
 		"`ghostbranch feature archive <name> --repo <public> --json`",
 		"feature's own PR branch (see *After publishing*)",              // the Never bullet
 		"deletes their shadow branches (and an archived one's archive)", // the sync bullet
