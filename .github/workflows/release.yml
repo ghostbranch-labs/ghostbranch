@@ -29,7 +29,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # Limited to v* tags in the repo settings: only a tag run reaches its
-    # secrets (none yet; 6.4b-2 adds the tap, bucket and npm ones).
+    # secrets (none; publish.yml reads the ghostbranch-release App's key from
+    # this environment).
     environment: release
     permissions:
       contents: write      # create the draft release
