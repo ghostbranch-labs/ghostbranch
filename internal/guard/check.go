@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 )
 
@@ -38,12 +39,17 @@ type Facts struct {
 	Heads      map[string]string // feature -> shadow head, for features with commits not in public main
 	Commits    map[string]string // unpublished feature commit -> its feature
 	PublicMain string            // public main in the mirror, if known
+	// Archived maps the public branch of each feature handed off to the
+	// public repo (6.5) to that feature: a push to that branch isn't
+	// refused for the feature's name or head. The archive's private
+	// commits stay in Commits (R7).
+	Archived map[string]string
 }
 
 // LoadFacts reads features from the engine's mirror, offline. Any git error
 // is returned, so the check fails closed.
 func LoadFacts(ctx context.Context, mirror *gitx.Git) (Facts, error) {
-	f := Facts{Names: map[string]bool{}, Heads: map[string]string{}, Commits: map[string]string{}}
+	f := Facts{Names: map[string]bool{}, Heads: map[string]string{}, Commits: map[string]string{}, Archived: map[string]string{}}
 	metas, err := mirror.Refs(ctx, "refs/shadow-meta/features")
 	if err != nil {
 		return f, err
@@ -64,6 +70,9 @@ func LoadFacts(ctx context.Context, mirror *gitx.Git) (Facts, error) {
 	sort.Strings(all)
 	for _, name := range all {
 		f.Names[name] = true
+		if err := loadArchive(ctx, mirror, &f, name, pm, hasPM); err != nil {
+			return f, err
+		}
 		head, ok, err := mirror.Resolve(ctx, "refs/remotes/shadow/"+name)
 		if err != nil {
 			return f, err
@@ -98,6 +107,46 @@ func LoadFacts(ctx context.Context, mirror *gitx.Git) (Facts, error) {
 	return f, nil
 }
 
+// loadArchive reads name's record. A feature handed off to the public repo
+// maps its public branch to name, and its archive's commits that aren't in
+// public main join f.Commits under name (R7), never f.Heads: a head
+// already on its PR's branch would refuse every fix. A record that can't
+// be read changes nothing, so the name stays refused (fail closed); a git
+// failure is an error.
+func loadArchive(ctx context.Context, mirror *gitx.Git, f *Facts, name, pm string, hasPM bool) error {
+	raw, ok, err := mirror.ShowFile(ctx, "refs/shadow-meta/features/"+name, feature.MetaFile)
+	if err != nil || !ok {
+		return err
+	}
+	m, err := feature.Decode(raw)
+	if err != nil || m.Archived == nil || m.Promoted == nil {
+		return nil
+	}
+	branch := m.Promoted.Branch
+	if branch == "" {
+		branch = name
+	}
+	f.Archived[branch] = name
+	arch, ok, err := mirror.Resolve(ctx, "refs/shadow-meta/archive/"+name)
+	if err != nil || !ok {
+		return err
+	}
+	args := []string{"rev-list", arch}
+	if hasPM {
+		args = append(args, "^"+pm)
+	}
+	out, err := mirror.Run(ctx, args...)
+	if err != nil {
+		return err
+	}
+	for _, c := range strings.Fields(out) {
+		if _, ok := f.Commits[c]; !ok {
+			f.Commits[c] = name
+		}
+	}
+	return nil
+}
+
 // Block is a refused ref and why.
 type Block struct {
 	Ref    string `json:"ref"`
@@ -109,7 +158,10 @@ type CheckResult struct {
 	Checked int `json:"checked"`
 }
 
-func reserved(ref string, f Facts) string {
+// reserved says why ref may never be pushed; own is the archived feature
+// whose public branch the line pushes to ("" when none): its own name is
+// allowed there (6.5).
+func reserved(ref string, f Facts, own string) string {
 	b, ok := strings.CutPrefix(ref, "refs/heads/")
 	switch {
 	case !ok:
@@ -118,10 +170,19 @@ func reserved(ref string, f Facts) string {
 		return "it is the ghostbranch overlay branch, which never leaves the shadow repo"
 	case strings.HasPrefix(b, "ghostbranch-gate/"):
 		return "it is a ghostbranch gate branch, which never leaves the shadow repo"
-	case f.Names[b]:
+	case f.Names[b] && b != own:
 		return fmt.Sprintf("%q is a Ghostbranch feature", b)
 	}
 	return ""
+}
+
+// archivedOwner is the archived feature whose public branch ref is, or "".
+func archivedOwner(ref string, f Facts) string {
+	b, ok := strings.CutPrefix(ref, "refs/heads/")
+	if !ok {
+		return ""
+	}
+	return f.Archived[b]
 }
 
 // Objects reads commits from a repository.
@@ -172,7 +233,9 @@ func (c *Checkout) RevList(ctx context.Context, args ...string) ([]string, error
 // Any git error fails the check: a guard that waves pushes through when git
 // breaks is worse than none. Commits force-pushed out of the mirror can't be
 // recognized by content; the name check still applies. The content check
-// lists the whole push's commits with one rev-list (carried).
+// lists the whole push's commits with one rev-list (carried). A push to an
+// archived feature's own public branch passes the name and head checks for
+// that feature, but still fails on its archive's private commits (6.5, R7).
 func Check(ctx context.Context, checkout Objects, lines []Line, f Facts) ([]Block, error) {
 	names := make([]string, 0, len(f.Heads))
 	for n := range f.Heads {
@@ -185,9 +248,10 @@ func Check(ctx context.Context, checkout Objects, lines []Line, f Facts) ([]Bloc
 		if strings.Trim(l.LocalSHA, "0") == "" {
 			continue // a deletion publishes nothing
 		}
-		w := reserved(l.RemoteRef, f)
+		own := archivedOwner(l.RemoteRef, f)
+		w := reserved(l.RemoteRef, f, own)
 		if w == "" {
-			w = reserved(l.LocalRef, f)
+			w = reserved(l.LocalRef, f, own)
 		}
 		if w == "" && len(f.Commits) > 0 {
 			// A tree or blob lists no commits, so it would pass the content
@@ -204,6 +268,9 @@ func Check(ctx context.Context, checkout Objects, lines []Line, f Facts) ([]Bloc
 		for _, n := range names {
 			if w != "" {
 				break
+			}
+			if n == own {
+				continue // its commits on the PR are public; carried refuses its private ones (R7)
 			}
 			head := f.Heads[n]
 			_, ok, err := checkout.Resolve(ctx, head)

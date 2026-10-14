@@ -8,7 +8,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/guard"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
@@ -413,5 +415,149 @@ func TestParseInput(t *testing.T) {
 	}
 	if _, err := guard.ParseInput(strings.NewReader("garbage\n")); err == nil {
 		t.Fatal("a malformed line must be an error")
+	}
+}
+
+// writeRecord commits m as feature.json on refs/shadow-meta/features/<name>,
+// as the engine's mirror holds a record.
+func writeRecord(t *testing.T, g *gitx.Git, name string, m feature.Meta) {
+	t.Helper()
+	writeRaw(t, g, name, feature.Encode(m))
+}
+
+// writeRaw commits raw as feature.json on refs/shadow-meta/features/<name>:
+// a record that may not parse.
+func writeRaw(t *testing.T, g *gitx.Git, name string, raw []byte) {
+	t.Helper()
+	ctx := context.Background()
+	blob, err := g.HashObject(ctx, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree, err := g.MakeTree(ctx, []gitx.TreeEntry{{Mode: "100644", Type: "blob", SHA: blob, Path: feature.MetaFile}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	who := gitx.Identity{Name: "bot", Email: "bot@example.com", When: time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)}
+	sha, err := g.CommitTree(ctx, tree, nil, "record", who, who)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := g.UpdateRef(ctx, "refs/shadow-meta/features/"+name, sha); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// archivedMirror is mirror(t) plus feature arch, handed off: its PR's
+// branch arch is at pub (published), its archive ref at priv (a private
+// commit never published), and no shadow branch. Feature arch-b is
+// archived too, but published under the name of live feature feat-x.
+// Feature broken's record is corrupt JSON that claims arch's branch (P12).
+func archivedMirror(t *testing.T) (g *gitx.Git, main, feat, pub, priv string) {
+	t.Helper()
+	ctx := context.Background()
+	g, main, feat = mirror(t)
+	for _, r := range []string{"refs/heads/arch", "refs/heads/arch-private"} {
+		if err := g.UpdateRef(ctx, r, main); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pub = testutil.Commit(t, g, "arch", "add arch", map[string]string{"arch.txt": "public\n"})
+	priv = testutil.Commit(t, g, "arch-private", "add arch, with notes", map[string]string{"arch.txt": "public\n", "notes.md": "internal\n"})
+	if err := g.UpdateRef(ctx, "refs/shadow-meta/archive/arch", priv); err != nil {
+		t.Fatal(err)
+	}
+	writeRecord(t, g, "arch", feature.Meta{Name: "arch", Branch: "arch",
+		Promoted: &feature.Promoted{PublicPR: 7, Branch: "arch"},
+		Archived: &feature.Archived{Ref: "refs/ghostbranch/archive/arch", Head: priv}})
+	writeRecord(t, g, "arch-b", feature.Meta{Name: "arch-b", Branch: "arch-b",
+		Promoted: &feature.Promoted{PublicPR: 8, Branch: "feat-x"},
+		Archived: &feature.Archived{Ref: "refs/ghostbranch/archive/arch-b", Head: main}})
+	writeRaw(t, g, "broken", []byte(`{"name":"broken","branch":"broken","promoted":{"public_pr":9,"branch":"arch"},"archived":{"ref":"refs/ghostbranch/archive/broken"`))
+	return g, main, feat, pub, priv
+}
+
+func TestLoadFactsArchived(t *testing.T) {
+	t.Parallel()
+	g, _, _, _, priv := archivedMirror(t)
+	f, err := guard.LoadFacts(context.Background(), g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(f.Archived, map[string]string{"arch": "arch", "feat-x": "arch-b"}) {
+		t.Fatalf("archived = %v", f.Archived)
+	}
+	// R7: the archive's private commit stays refused; it is no head.
+	if f.Commits[priv] != "arch" {
+		t.Fatalf("the archive's commit %s must stay in Commits: %v", priv[:12], f.Commits)
+	}
+	if _, ok := f.Heads["arch"]; ok {
+		t.Fatal("an archived feature has no head to refuse by ancestry")
+	}
+	// Review Focus 5: done's record can't be read (its meta ref is a plain
+	// commit), so it stays refused by name and is never archived.
+	if !f.Names["done"] || f.Archived["done"] != "" {
+		t.Fatalf("done: names %v, archived %v", f.Names, f.Archived)
+	}
+	// P12: broken's record fails to parse, so loadArchive changes nothing:
+	// arch's branch still maps to arch (the exact map above), and no
+	// branch maps to broken. A fail-open loadArchive fails here.
+	for b, n := range f.Archived {
+		if n == "broken" {
+			t.Fatalf("a record that can't be read archived %s: %v", b, f.Archived)
+		}
+	}
+	if !f.Names["broken"] {
+		t.Fatal("broken must stay refused by name")
+	}
+}
+
+func TestCheckArchivedBranch(t *testing.T) {
+	t.Parallel()
+	g, main, feat, pub, priv := archivedMirror(t)
+	ctx := context.Background()
+	f, err := guard.LoadFacts(ctx, g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := g.UpdateRef(ctx, "refs/heads/fix", pub); err != nil {
+		t.Fatal(err)
+	}
+	fix := testutil.Commit(t, g, "fix", "review fix", map[string]string{"fix.txt": "fix\n"})
+	if err := g.UpdateRef(ctx, "refs/heads/leak", priv); err != nil {
+		t.Fatal(err)
+	}
+	leak := testutil.Commit(t, g, "leak", "fix on the old shadow branch", map[string]string{"fix.txt": "fix\n"})
+	if err := g.UpdateRef(ctx, "refs/heads/carry", feat); err != nil {
+		t.Fatal(err)
+	}
+	carry := testutil.Commit(t, g, "carry", "fix on another feature", map[string]string{"fix.txt": "fix\n"})
+	line := func(local, sha, remote, remoteSHA string) guard.Line {
+		return guard.Line{LocalRef: local, LocalSHA: sha, RemoteRef: remote, RemoteSHA: remoteSHA}
+	}
+	for _, c := range []struct {
+		name    string
+		line    guard.Line
+		blocked bool
+	}{
+		{"a fix on the PR's branch", line("refs/heads/arch", fix, "refs/heads/arch", pub), false},
+		{"HEAD:arch", line("HEAD", fix, "refs/heads/arch", pub), false},
+		{"the archive's private commit", line("HEAD", leak, "refs/heads/arch", pub), true},
+		{"a merge carrying another feature's commit", line("HEAD", carry, "refs/heads/arch", pub), true},
+		{"a gate branch", line("HEAD", fix, "refs/heads/ghostbranch-gate/arch", zero), true},
+		{"the overlay branch", line("HEAD", main, "refs/heads/ghostbranch", zero), true},
+		{"a branch named like a live feature", line("HEAD", fix, "refs/heads/feat-x", zero), true},
+		{"another feature's local branch to the archived branch", line("refs/heads/feat-x", fix, "refs/heads/arch", pub), true},
+		// P12: features whose records can't be read stay refused by name.
+		{"a feature whose record can't be read (done)", line("HEAD", fix, "refs/heads/done", zero), true},
+		{"a feature whose record is corrupt (broken)", line("HEAD", fix, "refs/heads/broken", zero), true},
+	} {
+		blocks, err := guard.Check(ctx, objects{g}, []guard.Line{c.line}, f)
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if (len(blocks) > 0) != c.blocked {
+			t.Errorf("%s: blocks %+v, want blocked %v", c.name, blocks, c.blocked)
+		}
 	}
 }
