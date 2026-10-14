@@ -151,3 +151,43 @@ func TestNextForAnArchivedFeatureWhosePRIsDone(t *testing.T) {
 		}
 	}
 }
+
+// FEATURE_ARCHIVED from feature start --from or feature restack --onto
+// sends the run to main, never to the archived feature's PR: start from
+// main, or restack onto main, with sync first once that PR merged (final
+// review I1). Exit 2 and details stay archivedErr's.
+func TestNextForStackingOnAnArchivedFeature(t *testing.T) {
+	t.Parallel()
+	for _, state := range []string{"open", "merged", "closed"} {
+		te := newTestEnv(t)
+		archivedFeature(te)
+		te.mustRun("feature", "start", "feat-a")
+		te.shadowCommit("feat-a", map[string]string{"a.txt": "a\n"})
+		pr := te.forge.PRs("acme/widget")[0].Number
+		switch state {
+		case "merged":
+			te.forge.SetPRMerged("acme/widget", pr)
+		case "closed":
+			te.forge.ClosePR("acme/widget", pr)
+		}
+		for _, tc := range []struct {
+			args []string
+			want string
+		}{
+			{[]string{"feature", "start", "feat-y", "--from", "feat-x"}, "ghostbranch feature start feat-y --json --repo acme/widget"},
+			{[]string{"feature", "restack", "feat-a", "--onto", "feat-x"}, "ghostbranch feature restack feat-a --json --onto main --repo acme/widget"},
+		} {
+			code, env := te.runJSON(tc.args...)
+			want := []string{tc.want}
+			if state == "merged" {
+				want = []string{"ghostbranch sync --repo acme/widget", tc.want}
+			}
+			errObj, _ := env["error"].(map[string]any)
+			details, _ := errObj["details"].(map[string]any)
+			if cmds := nextCommands(env); code != 2 || errObj["code"] != "FEATURE_ARCHIVED" ||
+				details["feature"] != "feat-x" || details["pr_state"] != state || !reflect.DeepEqual(cmds, want) {
+				t.Errorf("%s, %v: exit %d, error %v, next = %v, want %v", state, tc.args, code, errObj, cmds, want)
+			}
+		}
+	}
+}
