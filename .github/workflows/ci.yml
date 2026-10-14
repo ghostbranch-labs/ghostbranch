@@ -19,6 +19,9 @@ on:
     paths-ignore:
       - '**/*.md'
   workflow_dispatch:
+  # release.yml calls this before a release: Markdown-only commits on main
+  # skip CI on push, so the tagged commit is always tested here.
+  workflow_call:
 
 permissions:
   contents: read
@@ -28,15 +31,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: go.mod
       - name: gofmt
         run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
       - run: go vet ./...
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v8
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.14.0
 
@@ -44,8 +47,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: go.mod
           # Every job's setup-go cache shares one key, and the first job to
@@ -53,7 +56,7 @@ jobs:
           # nothing, which leaves the key to a job whose build cache helps.
           cache: false
       - name: govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 
   test:
     name: test (${{ matrix.shard }})
@@ -68,8 +71,8 @@ jobs:
           - { shard: engine-s-z, pkg: ./internal/engine, run: '^Test[S-Z]' }
           - { shard: other, pkg: ./..., run: '' }
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: go.mod
       - name: go test
@@ -82,3 +85,81 @@ jobs:
           else
             go test $(go list ./... | grep -v '/internal/engine$')
           fi
+
+  # linux/arm64 ships, and nobody here has an ARM Linux machine, so CI runs
+  # the whole suite on one.
+  test-arm64:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+      - name: go test
+        run: go test -timeout 40m ./...
+
+  # On a pull request that touches the release config or workflow, go.mod
+  # or go.sum (a dependency can break a darwin or windows build, and CI is
+  # otherwise Linux only), or packaging/, install/, npm/ or publish.yml:
+  # check the config and build a snapshot of all five platforms (no signing,
+  # no SBOMs, nothing published).
+  goreleaser-check:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 0
+      - name: changed release files?
+        id: changed
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          files=$(git diff --name-only "$BASE"...HEAD) || exit 1
+          if printf '%s\n' "$files" | grep -qxE '\.goreleaser\.yaml|\.github/workflows/(release|publish)\.yml|go\.mod|go\.sum|(packaging|install|npm)/.*'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        if: steps.changed.outputs.run == 'true'
+        with:
+          go-version-file: go.mod
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+        if: steps.changed.outputs.run == 'true'
+        with:
+          distribution: goreleaser
+          version: v2.18.3
+          args: check
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+        if: steps.changed.outputs.run == 'true'
+        with:
+          distribution: goreleaser
+          version: v2.18.3
+          args: release --snapshot --clean --skip=sign,sbom
+      # The snapshot's archives go through the same render and npm build that
+      # publish.yml runs on a release. A snapshot version has "+" build
+      # metadata (0.0.1-devel+<sha>), left raw in the rendered URLs; that is
+      # fine because a snapshot is never published (render route refuses any
+      # tag but vX.Y.Z or vX.Y.Z-rc.N).
+      - name: render and build the npm packages from the snapshot
+        if: steps.changed.outputs.run == 'true'
+        run: |
+          v=$(grep -o '"version": *"[^"]*"' dist/metadata.json | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+          go run ./packaging/render render -version "$v" -checksums dist/checksums.txt -out rendered
+          node npm/build.mjs --version "$v" --assets dist --out npm-out
+          for d in npm-out/*/; do (cd "$d" && npm pack --dry-run > /dev/null); done
+          grep -cE '  install\.(sh|ps1)$' dist/checksums.txt | grep -qx 2
+
+  # The npm launcher and build script (Node's own test runner; no
+  # dependencies). The install script tests run in the Go jobs.
+  npm-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: node --test
+        run: node --test npm/build.test.mjs npm/launcher.test.mjs

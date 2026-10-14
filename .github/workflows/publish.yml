@@ -1,0 +1,206 @@
+name: publish
+
+# When a maintainer publishes a release (release.yml made it as a draft),
+# this verifies the release's files, then distributes it: the Homebrew
+# formula and the Scoop manifest go to ghostbranch-labs/homebrew-tap and
+# ghostbranch-labs/scoop-bucket, and the six npm packages go to npm. Test
+# builds (vX.Y.Z-rc.N) reach the tap and bucket only before the first
+# stable release. While the repo is private it only proves the App's access
+# and skips npm. See RELEASING.md § Release infrastructure.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+# One serial group, so releases published in order distribute in order and
+# the tap and bucket end on the newer one. GitHub keeps one run going and one
+# waiting; a third cancels the waiting one, which is older and usually left (see
+# RELEASING.md). The tap and bucket pushes retry once if someone else pushed
+# to them first.
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    # Never in a fork or in the Ghostbranch shadow repo.
+    if: github.repository == 'ghostbranch-labs/ghostbranch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Limited to v* tags in the repo settings; a release event's ref is the
+    # release's tag. Holds the ghostbranch-release App's client ID and key.
+    environment: release
+    permissions:
+      contents: read   # download the release
+      id-token: write  # npm trusted publishing and provenance
+    # Every step runs with -e and pipefail, so a failed command inside a pipe
+    # (gh api below) fails the job instead of feeding a wrong answer on.
+    defaults:
+      run:
+        shell: bash
+    env:
+      TAG: ${{ github.event.release.tag_name }}
+      PRERELEASE: ${{ github.event.release.prerelease }}
+      REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      # No ref: the default is the release's tag (github.ref) at the commit it
+      # pointed to when the release was published (github.sha). An explicit
+      # unqualified ref would prefer a branch of the same name.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.0.6
+
+      - name: download the release
+        run: gh release download "$TAG" --repo "$REPO" --dir assets
+
+      # Nothing below runs unless every file matches checksums.txt and
+      # checksums.txt carries release.yml's signature for this tag, made by a
+      # run on the commit checked out above, so the code that renders and
+      # builds is the code that was released. Every later step reads the
+      # files from this same folder; nothing downloads them again.
+      - name: verify before distributing
+        working-directory: assets
+        env:
+          IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/release.yml@refs/tags/${{ github.event.release.tag_name }}
+        run: |
+          sha256sum --strict -c checksums.txt
+          cosign verify-blob \
+            --bundle checksums.txt.sigstore.json \
+            --certificate-identity "$IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-github-workflow-sha "$(git rev-parse HEAD)" \
+            checksums.txt
+
+      # A stable release other than this one decides whether a test build may
+      # still reach the tap. Bool flags take only the -flag=value form.
+      - name: decide where it goes
+        id: route
+        run: |
+          stable=$(gh api "repos/$REPO/releases" --paginate \
+            --jq '[.[] | select(.draft == false and .prerelease == false and .tag_name != env.TAG)] | length' |
+            awk '{ s += $1 } END { print (s > 0) ? "true" : "false" }')
+          go run ./packaging/render route -tag="$TAG" -prerelease="$PRERELEASE" -stable-exists="$stable" | tee -a "$GITHUB_OUTPUT"
+
+      - name: render the formula and the manifest
+        env:
+          VERSION: ${{ steps.route.outputs.version }}
+        run: |
+          go run ./packaging/render render -version "$VERSION" -checksums assets/checksums.txt -out rendered
+          {
+            echo "### Rendered for $TAG"
+            echo '```ruby'; cat rendered/ghostbranch.rb; echo '```'
+            echo '```json'; cat rendered/ghostbranch.json; echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # A one-hour token that can write only the tap and the bucket.
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        id: app
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ghostbranch-labs
+          repositories: homebrew-tap,scoop-bucket
+          permission-contents: write
+      # A read-only token for every repository the App is installed on (no
+      # repositories:), used only to list them in the next step.
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        id: reach
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ghostbranch-labs
+          permission-metadata: read
+
+      - name: prove the App reaches the tap and the bucket, and nothing else
+        env:
+          APP_TOKEN: ${{ steps.app.outputs.token }}
+          REACH_TOKEN: ${{ steps.reach.outputs.token }}
+        run: |
+          export GIT_TERMINAL_PROMPT=0
+          want="ghostbranch-labs/homebrew-tap ghostbranch-labs/scoop-bucket"
+          got=$(GH_TOKEN="$REACH_TOKEN" gh api installation/repositories --paginate \
+            --jq '.repositories[].full_name' | sort | paste -sd ' ')
+          if [ "$got" != "$want" ]; then
+            echo "::error::the ghostbranch-release App is installed on [$got]; it must be installed on exactly [$want]"
+            exit 1
+          fi
+          echo "the App is installed on $got, and nothing else"
+          auth="Authorization: Basic $(printf 'x-access-token:%s' "$APP_TOKEN" | base64 -w0)"
+          for r in homebrew-tap scoop-bucket; do
+            git -c http.extraHeader="$auth" ls-remote "https://github.com/ghostbranch-labs/$r.git" > /dev/null
+            echo "the token reaches $r"
+          done
+
+      - name: push the formula and the manifest
+        if: ${{ !github.event.repository.private && steps.route.outputs.tap == 'true' }}
+        env:
+          APP_TOKEN: ${{ steps.app.outputs.token }}
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
+          VERSION: ${{ steps.route.outputs.version }}
+        run: |
+          export GIT_TERMINAL_PROMPT=0
+          auth="Authorization: Basic $(printf 'x-access-token:%s' "$APP_TOKEN" | base64 -w0)"
+          bot="${APP_SLUG}[bot]"
+          id=$(gh api "users/$bot" --jq .id)
+          # Called on the left of ||, where bash ignores -e, so every command
+          # returns on failure itself.
+          attempt() { # repo, rendered file, path in the repo
+            rm -rf "work/$1" || return 1
+            git -c http.extraHeader="$auth" clone --depth 1 "https://github.com/ghostbranch-labs/$1.git" "work/$1" || return 1
+            mkdir -p "work/$1/$(dirname "$3")" || return 1
+            cp "$2" "work/$1/$3" || return 1
+            git -C "work/$1" add "$3" || return 1
+            if git -C "work/$1" diff --cached --quiet; then
+              echo "$1 already has ghostbranch $VERSION"
+              return 0
+            fi
+            git -C "work/$1" -c user.name="$bot" -c user.email="$id+$bot@users.noreply.github.com" commit -m "ghostbranch $VERSION" || return 1
+            git -C "work/$1" -c http.extraHeader="$auth" push origin HEAD:main
+          }
+          # The change is one whole file, so a push that someone else's push beat
+          # is retried once on a fresh clone of the new main. A second failure
+          # fails the job.
+          push() {
+            attempt "$@" || { echo "retrying $1 on its new main"; attempt "$@"; }
+          }
+          push homebrew-tap rendered/ghostbranch.rb Formula/ghostbranch.rb
+          push scoop-bucket rendered/ghostbranch.json bucket/ghostbranch.json
+
+      # npm publishes are public and permanent, and provenance needs a public
+      # repo, so npm waits for the repo to go public.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: ${{ !github.event.repository.private }}
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: publish to npm (trusted publishing)
+        if: ${{ !github.event.repository.private }}
+        env:
+          VERSION: ${{ steps.route.outputs.version }}
+          NPM_TAG: ${{ steps.route.outputs.npm_tag }}
+        run: |
+          # Trusted publishing needs npm 11.5.1 or later; npm 12 needs a newer
+          # Node 22 than the runner may have. Pinned to the newest 11.x.
+          npm install -g npm@11.21.0
+          npm --version
+          # The archives in assets/ are the ones the verify step checked.
+          node npm/build.mjs --version "$VERSION" --assets assets --out npm-out
+          # The platform packages first, so the launcher never points at a
+          # version that isn't there. A re-run skips what is already up.
+          for dir in cli-darwin-arm64 cli-darwin-x64 cli-linux-arm64 cli-linux-x64 cli-win32-x64 ghostbranch; do
+            name=$(node -p "require('./npm-out/$dir/package.json').name")
+            if [ "$(npm view "$name@$VERSION" version 2> /dev/null)" = "$VERSION" ]; then
+              echo "$name@$VERSION is already published; skipped"
+              continue
+            fi
+            npm publish "./npm-out/$dir" --access public --provenance --tag "$NPM_TAG"
+          done

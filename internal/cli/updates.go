@@ -188,7 +188,7 @@ func (a *app) upgradeCommand(page string) string {
 	if a.env.UserHome != nil {
 		home, _ = a.env.UserHome()
 	}
-	return updatecheck.UpgradeCommand(exe, updatecheck.InstallEnv{Getenv: a.env.Getenv, Home: home, Module: updatecheck.Module()}, page)
+	return updatecheck.UpgradeCommand(exe, updatecheck.InstallEnv{Getenv: a.env.Getenv, Home: home, Module: updatecheck.Module(), GOOS: runtime.GOOS}, page)
 }
 
 // printReminder is the person's reminder, after the command's own output

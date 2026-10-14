@@ -103,6 +103,10 @@ func (e *Engine) open(ctx context.Context, op string, p workspace.Pair, mutating
 		}
 		pc.held = true
 	}
+	// The fetch can take minutes on a large repo: its own step, so the
+	// command isn't silent under the "Reading" line meanwhile.
+	st.Done("")
+	st = e.startStep("Updating the local copy of %s and %s", p.Public, p.Shadow)
 	if pc.git, err = e.mirror(ctx, p, pub, sh); err == nil {
 		if mutating && !e.DryRun {
 			e.privateMirror(ctx, pc.git)

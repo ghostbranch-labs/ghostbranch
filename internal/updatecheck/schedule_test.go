@@ -109,6 +109,8 @@ func TestOffReason(t *testing.T) {
 		{"unknown", "(unknown)", env(), "development build"},
 		{"pseudo", "v0.0.0-20261011120000-abcdef123456", env(), "development build"},
 		{"dirty", "v0.13.0+dirty", env(), "development build"},
+		{"goreleaser snapshot", "0.0.1-devel+abc1234", env(), "development build"},
+		{"release candidate", "v0.1.0-rc.1", env(), ""},
 	} {
 		if got := updatecheck.OffReason(c.getenv, c.version); got != c.want {
 			t.Errorf("%s: %q, want %q", c.name, got, c.want)

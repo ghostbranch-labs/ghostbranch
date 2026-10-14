@@ -1,0 +1,26 @@
+{
+    "version": "0.1.0",
+    "description": "Private branches for public GitHub repos",
+    "homepage": "https://ghostbranch.site",
+    "license": "Apache-2.0",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/ghostbranch-labs/ghostbranch/releases/download/v0.1.0/ghostbranch_0.1.0_windows_amd64.zip",
+            "hash": "4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e"
+        }
+    },
+    "bin": "ghostbranch.exe",
+    "checkver": {
+        "github": "https://github.com/ghostbranch-labs/ghostbranch"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/ghostbranch-labs/ghostbranch/releases/download/v$version/ghostbranch_$version_windows_amd64.zip"
+            }
+        },
+        "hash": {
+            "url": "$baseurl/checksums.txt"
+        }
+    }
+}
