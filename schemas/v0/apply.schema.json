@@ -3,7 +3,7 @@
   "title": "apply data",
   "type": "object",
   "additionalProperties": false,
-  "required": ["plan_id", "public_branch", "public_pr", "pr_url", "resumed", "approval", "waived", "preview", "prs", "stack_number"],
+  "required": ["plan_id", "public_branch", "public_pr", "pr_url", "resumed", "approval", "waived", "preview", "prs", "stack_number", "after_publish"],
   "properties": {
     "prs": { "description": "the chain's PRs, bottom first", "type": "array", "items": { "$ref": "common.schema.json#/$defs/stackPR" } },
     "stack_number": { "$ref": "common.schema.json#/$defs/stackNumber" },
@@ -23,6 +23,10 @@
       ]
     },
     "waived": { "type": "array", "items": { "$ref": "waived.schema.json" } },
+    "after_publish": {
+      "description": "what happened to each published feature's shadow branch after the publish, by feature: archived (handed off to the public repo), kept, or incomplete (ARCHIVE_INCOMPLETE says where it stopped)",
+      "type": "object", "additionalProperties": { "enum": ["archived", "kept", "incomplete"] }
+    },
     "preview": { "oneOf": [{ "type": "null" }, { "$ref": "preview.schema.json" }] }
   }
 }

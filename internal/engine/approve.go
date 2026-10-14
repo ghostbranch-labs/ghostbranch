@@ -58,9 +58,8 @@ func (e *Engine) grantFor(p workspace.Pair) (grant.Grant, bool, error) {
 	return g, ok, nil
 }
 
-// confirm asks the person at the console. A refusal keeps its reason.
-func (e *Engine) confirm(ctx context.Context, planID, summary string) error {
-	err := e.Approver.Confirm(ctx, summary)
+// approvalErr maps an approver's error: a refusal keeps its reason.
+func approvalErr(planID string, err error) error {
 	var ref *approval.Refusal
 	if errors.As(err, &ref) {
 		return needsApproval(planID, ref.Reason)
@@ -71,24 +70,49 @@ func (e *Engine) confirm(ctx context.Context, planID, summary string) error {
 	return nil
 }
 
+// confirm asks the person at the console. A refusal keeps its reason.
+func (e *Engine) confirm(ctx context.Context, planID, summary string) error {
+	return approvalErr(planID, e.Approver.Confirm(ctx, summary))
+}
+
 // authorize is spec §6.2: the last step before a public push. The actor
 // label is never consulted.
 func (e *Engine) authorize(ctx context.Context, p workspace.Pair, planID, summary string, yes bool) (*ledger.Approval, error) {
+	a, _, err := e.authorizeChoosing(ctx, p, planID, summary, yes, nil)
+	return a, err
+}
+
+// authorizeChoosing is authorize that also asks ch (6.5's Archive or Keep)
+// just above the code, when a person is asked at the console without
+// --yes (R4) and the approver can ask it. It returns the option picked:
+// ch.Default whenever nothing was asked; 0 when ch is nil.
+func (e *Engine) authorizeChoosing(ctx context.Context, p workspace.Pair, planID, summary string, yes bool, ch *approval.Choice) (*ledger.Approval, int, error) {
+	pick := 0
+	if ch != nil {
+		pick = ch.Default
+	}
 	g, valid, err := e.grantFor(p)
 	if err != nil {
-		return nil, err
+		return nil, pick, err
 	}
 	d := approval.Decide(valid, yes, e.Approver != nil)
 	switch d.Outcome {
 	case approval.UnderGrant:
-		return &ledger.Approval{Kind: "grant", GrantID: g.ID, CreatedBy: g.CreatedBy}, nil
+		return &ledger.Approval{Kind: "grant", GrantID: g.ID, CreatedBy: g.CreatedBy}, pick, nil
 	case approval.Challenge:
-		if err := e.confirm(ctx, planID, summary); err != nil {
-			return nil, err
+		if c, ok := e.Approver.(approval.Chooser); ok && ch != nil && !yes {
+			i, err := c.ConfirmChoosing(ctx, summary, *ch)
+			if err != nil {
+				return nil, pick, approvalErr(planID, err)
+			}
+			return &ledger.Approval{Kind: "console"}, i, nil
 		}
-		return &ledger.Approval{Kind: "console"}, nil
+		if err := e.confirm(ctx, planID, summary); err != nil {
+			return nil, pick, err
+		}
+		return &ledger.Approval{Kind: "console"}, pick, nil
 	}
-	return nil, needsApproval(planID, d.Reason)
+	return nil, pick, needsApproval(planID, d.Reason)
 }
 
 // planSummary is the "what goes public" view shown before confirming.

@@ -136,7 +136,10 @@
           "url": "https://github.example/acme/widget/pull/1"
         }
       ],
-      "stack_number": null
+      "stack_number": null,
+      "after_publish": {
+        "feat-x": "kept"
+      }
     },
     "preview": null,
     "prs": [

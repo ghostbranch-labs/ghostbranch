@@ -43,7 +43,10 @@
         "url": ""
       }
     ],
-    "stack_number": null
+    "stack_number": null,
+    "after_publish": {
+      "feat-x": "kept"
+    }
   },
   "warnings": [],
   "next": [],

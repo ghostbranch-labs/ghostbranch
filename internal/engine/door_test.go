@@ -166,9 +166,12 @@ func TestOnlyPromoteAndApplyReachThePublicRepo(t *testing.T) {
 	run("declined apply", err, contract.ApprovalRequired)
 	h.eng.Approver = h.approver
 
-	applied, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: res.Plan.ID})
+	applied, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: res.Plan.ID, Archive: true})
 	if err != nil {
 		t.Fatalf("apply: %v", err)
+	}
+	if applied.AfterPublish["good"] != engine.AfterArchived {
+		t.Fatalf("apply did not hand good off: %+v", applied.AfterPublish)
 	}
 	var public []pushEvent
 	for _, p := range h.pushes {

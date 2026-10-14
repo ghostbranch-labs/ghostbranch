@@ -44,6 +44,7 @@ type PromoteOptions struct {
 	Groups   []plan.Group // the --curate file's groups, as read (ValidatePromoteOptions loads them)
 	PlanOnly bool
 	Yes      bool
+	Archive  bool // as ApplyOptions.Archive
 	Detach   bool // gate and return the pending job without waiting on CI
 }
 
@@ -75,7 +76,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	defer func() {
 		summary := ""
 		if res != nil && res.Applied != nil && err == nil {
-			summary = publishSummary(res.Applied)
+			summary = publishSummary(res.Applied) + archivedSummary(res.Applied)
 		} else if res != nil && res.Plan != nil {
 			summary = "plan " + res.Plan.ID + " saved"
 		}
@@ -85,6 +86,9 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 			}
 			if res != nil && res.Applied != nil {
 				ent.Approval = res.Applied.Approval
+				if len(res.Applied.moved) > 0 {
+					ent.Refs = res.Applied.moved
+				}
 			}
 		})
 	}()
@@ -529,7 +533,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	if opt.PlanOnly {
 		return res, warns, nil
 	}
-	ar, aw, err := e.apply(ctx, pc, pl, opt.Yes)
+	ar, aw, err := e.apply(ctx, pc, pl, applyOpts{yes: opt.Yes, archive: opt.Archive})
 	res.Applied = ar
 	if ar != nil {
 		res.PRs, res.StackNumber = ar.PRs, ar.StackNumber

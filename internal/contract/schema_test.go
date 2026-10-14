@@ -186,7 +186,7 @@ func reportJSON(state, extra string) string {
 
 func applyJSON(extra string) string {
 	return `{"plan_id":"20261010T120000Z-0a0b0c","public_branch":"b","public_pr":12,"pr_url":"https://github.com/acme/widget/pull/12",` +
-		`"resumed":false,"approval":{"kind":"console"},"waived":[],"preview":null` + extra + `}`
+		`"resumed":false,"approval":{"kind":"console"},"waived":[],"preview":null,"after_publish":{}` + extra + `}`
 }
 
 func promoteJSON(extra string) string {

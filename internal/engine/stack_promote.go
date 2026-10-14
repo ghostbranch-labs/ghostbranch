@@ -692,7 +692,7 @@ func (e *Engine) promoteStack(ctx context.Context, pc *pairCtx, cfg config.Confi
 	if opt.PlanOnly {
 		return planID, warns, nil
 	}
-	ar, aw, err := e.apply(ctx, pc, pl, opt.Yes)
+	ar, aw, err := e.apply(ctx, pc, pl, applyOpts{yes: opt.Yes, archive: opt.Archive})
 	res.Applied = ar
 	if ar != nil {
 		res.PRs, res.StackNumber = ar.PRs, ar.StackNumber
@@ -740,7 +740,7 @@ func chainNames(pl plan.Plan) []string {
 // PR in that feature's record at once. Last, it registers the native GitHub
 // stack (stackUp). Every step is safe to run again: an apply that stopped
 // resumes at the first PR it hadn't opened.
-func (e *Engine) applyStack(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool) (res *ApplyResult, warns []contract.Warning, err error) {
+func (e *Engine) applyStack(ctx context.Context, pc *pairCtx, pl plan.Plan, ao applyOpts) (res *ApplyResult, warns []contract.Warning, err error) {
 	g := pc.git
 	n := len(pl.Chain)
 	cfg, O, warns, err := e.readConfig(ctx, pc)
@@ -775,7 +775,7 @@ func (e *Engine) applyStack(ctx context.Context, pc *pairCtx, pl plan.Plan, yes 
 		}
 	}
 	if allLanded {
-		return e.finishLanded(ctx, pc, cfg, pl, yes, warns)
+		return e.finishLanded(ctx, pc, cfg, pl, ao.yes, warns) // never archives (R14)
 	}
 	pm, err := g.MustResolve(ctx, publicRef("main"))
 	if err != nil {
@@ -907,6 +907,18 @@ func (e *Engine) applyStack(ctx context.Context, pc *pairCtx, pl plan.Plan, yes 
 				return res, warns, err
 			}
 		}
+		ch, err := e.handOffChoice(ctx, pc, names, ao.archive)
+		if err != nil {
+			return res, warns, err
+		}
+		if ch != nil && archives(ch, ch.Default) {
+			res.handOff = names
+			for i := len(names) - 1; i >= 0; i-- { // top first, as handOff runs
+				if err := e.previewArchive(ctx, pc, pv, names[i]); err != nil {
+					return res, warns, err
+				}
+			}
+		}
 		res.Preview = pv
 		return res, warns, nil
 	}
@@ -918,8 +930,17 @@ func (e *Engine) applyStack(ctx context.Context, pc *pairCtx, pl plan.Plan, yes 
 			return res, warns, stackLevelErr(err, names)
 		}
 	}
-	if res.Approval, err = e.authorize(ctx, pc.pair, pl.ID, stackSummary(pl, shown, authors, files, res.Waived, scanWarnings, folded), yes); err != nil {
+	ch, err := e.handOffChoice(ctx, pc, names, ao.archive)
+	if err != nil {
 		return nil, warns, err
+	}
+	appr, pick, err := e.authorizeChoosing(ctx, pc.pair, pl.ID, stackSummary(pl, shown, authors, files, res.Waived, scanWarnings, folded), ao.yes, ch)
+	if err != nil {
+		return nil, warns, err
+	}
+	res.Approval = appr
+	if archives(ch, pick) {
+		res.handOff = names
 	}
 	for i, en := range pl.Chain {
 		branch, base, P := en.Publish.TargetBranch, pl.PRs[i].Base, en.Publish.Commit

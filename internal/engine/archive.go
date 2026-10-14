@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/ghostbranch-labs/ghostbranch/internal/approval"
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
@@ -438,4 +439,64 @@ func archivedErr(name string, m feature.Meta) error {
 		"feature %s was handed off to the public repo: its shadow branch is archived at %s; fix or change PR #%d by pushing to its branch %s, and ghostbranch sync closes the feature when it merges",
 		name, m.Archived.Ref, pr, branch).WithField("feature").
 		WithDetails(map[string]any{"feature": name, "public_pr": pr, "branch": branch, "archive_ref": m.Archived.Ref})
+}
+
+// handOffChoice is the Archive or Keep choice for names (one plan), nil
+// when archive is false (Keep without asking, R3). Archive is unavailable,
+// with the reason, while something blocks it (R8); Keep is then the default.
+func (e *Engine) handOffChoice(ctx context.Context, pc *pairCtx, names []string, archive bool) (*approval.Choice, error) {
+	if !archive {
+		return nil, nil
+	}
+	kids, unreadable, err := e.archiveBlockers(ctx, pc, names)
+	if err != nil {
+		return nil, err
+	}
+	ch := approval.Choice{Title: "After publishing, this feature:", Options: []approval.Option{
+		{Key: "a", Name: "Archive", Text: "the private branch is archived; make fixes or changes to this PR by pushing to it directly"},
+		{Key: "k", Name: "Keep", Text: "the private branch stays; make fixes or changes to this PR through gate and promote, as today"}}}
+	if len(names) > 1 {
+		ch.Title = "After publishing, these features:"
+		ch.Options[0].Text = "the private branches are archived; make fixes or changes to these PRs by pushing to them directly"
+		ch.Options[1].Text = "the private branches stay; make fixes or changes to these PRs through gate and promote, as today"
+	}
+	if why := blockedWhy(kids, unreadable, len(names)); why != "" {
+		ch.Options[0].Unavailable, ch.Default = why, 1
+	}
+	return &ch, nil
+}
+
+// archives reports whether pick, an answer to ch, hands off.
+func archives(ch *approval.Choice, pick int) bool {
+	return ch != nil && pick == 0 && ch.Options[0].Unavailable == ""
+}
+
+// handOff archives res's features after a successful publish, top first
+// (names is bottom first), and stops at the first that fails (P5): that one
+// is ARCHIVE_INCOMPLETE (incomplete), and every level below it stays kept
+// with its branch untouched, so no live feature is ever left on an
+// archived parent (R8). It never undoes the publish. res.Archived stays
+// bottom first.
+func (e *Engine) handOff(ctx context.Context, pc *pairCtx, res *ApplyResult, names []string) []contract.Warning {
+	var warns []contract.Warning
+	for i := len(names) - 1; i >= 0; i-- {
+		name := names[i]
+		d, aw, err := e.archiveOne(ctx, pc, name)
+		warns = addWarnings(warns, aw...)
+		if d != nil {
+			for ref, sha := range d.moved {
+				if res.moved == nil {
+					res.moved = map[string]string{}
+				}
+				res.moved[ref] = sha
+			}
+		}
+		if err != nil {
+			res.AfterPublish[name] = AfterIncomplete
+			return addWarnings(warns, archiveIncomplete(name, err))
+		}
+		res.AfterPublish[name] = AfterArchived
+		res.Archived = append([]string{name}, res.Archived...)
+	}
+	return warns
 }
