@@ -167,7 +167,7 @@ func TestGuideCoversSetupAndCIParity(t *testing.T) {
 		"of `error.details.steps`", "Shadow: Contents, Pull requests and Workflows write",
 		"other than through `ghostbranch init`", "`SYNC_DIVERGED`, which needs a",
 		"Shadow: Administration, Contents and Workflows read and write |",
-		"then narrow the token to the public and shadow repos, or make a new one, before an agent gets it",
+		"afterwards narrow it to the shadow repo or delete it, and give an agent only its own shadow-only token (see *Strict isolation*)",
 		"Any token can read public repos, so for a public repo you only grant permissions on the shadow repo",
 		"never give it to an agent", "Actions write (optional: lets `sync` cancel the workflow runs its pushes start)",
 		"add `--shadow <owner/name>` to both", "(`--no-cancel` skips that)",
@@ -508,8 +508,14 @@ func TestGuideTeachesHandOff(t *testing.T) {
 func TestGuideListsEveryState(t *testing.T) {
 	t.Parallel()
 	out := guide.Render(contract.Registry())
-	_, sec, _ := strings.Cut(out, "## Lifecycle")
-	list, _, _ := strings.Cut(sec, "\n- `ghostbranch sync")
+	_, sec, ok := strings.Cut(out, "## Lifecycle")
+	if !ok {
+		t.Fatal("the guide has no ## Lifecycle section")
+	}
+	list, _, ok := strings.Cut(sec, "\n- `ghostbranch sync")
+	if !ok {
+		t.Fatal("the Lifecycle section has no sync bullet to end the state list")
+	}
 	if len(feature.States) != 14 {
 		t.Fatalf("feature.States has %d states, want 14", len(feature.States))
 	}
