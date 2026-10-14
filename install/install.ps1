@@ -80,9 +80,16 @@ function Install-Ghostbranch {
         $testKey = $true
     }
 
+    # The install folder, absolute and without a trailing backslash, except
+    # on a drive root: C: alone means the current folder on C:.
+    function Resolve-InstallDir([string]$d) {
+        $d = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($d).TrimEnd('\')
+        if ($d -match '^[A-Za-z]:$') { $d += '\' }
+        $d
+    }
     $dir = $env:GHOSTBRANCH_INSTALL_DIR
     if (-not $dir) { $dir = Join-Path $env:LOCALAPPDATA 'Programs\ghostbranch' }
-    $dir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($dir).TrimEnd('\')
+    $dir = Resolve-InstallDir $dir
 
     try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
     $new = $null

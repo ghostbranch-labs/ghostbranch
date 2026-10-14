@@ -421,3 +421,30 @@ func TestInstallPs1RefusesAMalformedChecksumsFile(t *testing.T) {
 		}
 	}
 }
+
+// A drive root keeps its backslash: "C:" on the PATH means "the current
+// folder on C:", not the root. Resolve-InstallDir is called straight from
+// install.ps1's source (parsed, not run), so nothing is installed into C:\.
+func TestInstallPs1KeepsADriveRootsBackslash(t *testing.T) {
+	t.Parallel()
+	windowsOnly(t)
+	for _, shell := range powershells(t) {
+		for in, want := range map[string]string{
+			`C:\`:          `C:\`,
+			`C:\Tools\gb\`: `C:\Tools\gb`,
+			`C:\Tools\gb`:  `C:\Tools\gb`,
+		} {
+			cmd := exec.Command(shell, "-NoProfile", "-NonInteractive", "-Command", `
+$ast = [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'install.ps1').Path, [ref]$null, [ref]$null)
+$fn = $ast.Find({ param($a) $a -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $a.Name -eq 'Resolve-InstallDir' }, $true)
+if (-not $fn) { throw 'no Resolve-InstallDir in install.ps1' }
+. ([scriptblock]::Create($fn.Extent.Text))
+[Console]::Out.Write((Resolve-InstallDir $env:GB_TEST_DIR))`)
+			cmd.Env = append(os.Environ(), "GB_TEST_DIR="+in)
+			out, err := cmd.CombinedOutput()
+			if err != nil || string(out) != want {
+				t.Errorf("%s: %q resolved to %q, want %q: %v", shell, in, out, want, err)
+			}
+		}
+	}
+}
