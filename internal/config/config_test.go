@@ -417,3 +417,49 @@ func TestRenderScheduleParses(t *testing.T) {
 		t.Fatalf("%+v %v", cfg.Sync, err)
 	}
 }
+
+// F-25: a section left empty (bare, comment-only or {}) means its
+// defaults, as sync: and ci: already did; before, it read as an unknown
+// key and every command said the pair was set up by a newer Ghostbranch.
+func TestEmptySectionsMeanTheDefaults(t *testing.T) {
+	t.Parallel()
+	base := "version: 1\npublic: o/r\nshadow: o/r-shadow\n"
+	want := config.Default()
+	want.Public, want.Shadow = "o/r", "o/r-shadow"
+	for _, extra := range []string{
+		"promote:\n", "promote: {}\n", "promote:\n  # default_mode: squash\n",
+		"leak_scan:\n", "leak_scan: {}\n", "leak_scan:\n  # secrets: false\n",
+		"leak_scan:\n  markers:\n", "leak_scan:\n  markers: {}\n", "leak_scan:\n  markers:\n    # begin: X-BEGIN\n",
+		"gate:\n", "gate: {}\n", "gate:\n  # ci_appear_timeout: 10m\n  # ci_timeout: 60m\n",
+		"promote:\n  author_map:\n", "promote:\n  author_map: {}\n",
+		"promote:\nleak_scan:\n  markers:\ngate:\nsync:\nci:\n",
+	} {
+		cfg, warns, err := config.Parse([]byte(base + extra))
+		if err != nil || len(warns) != 0 {
+			t.Errorf("%q: %v %+v", extra, err, warns)
+			continue
+		}
+		if !reflect.DeepEqual(cfg, want) {
+			t.Errorf("%q: got %+v\nwant %+v", extra, cfg, want)
+		}
+	}
+	// A key the section doesn't know is still an unknown key.
+	for y, key := range map[string]string{
+		base + "gate:\n  ci_timout: 5m\n":              "gate.ci_timout",
+		base + "leak_scan:\n  markers:\n    bgin: X\n": "leak_scan.markers.bgin",
+		base + "promote:\n  mode: squash\n":            "promote.mode",
+	} {
+		_, _, err := config.Parse([]byte(y))
+		if ce := contract.From(err); ce == nil || ce.Code != contract.ConfigInvalid || ce.Details["unknown_key"] != key {
+			t.Errorf("%q: want CONFIG_INVALID with unknown_key %q, got %v", y, key, err)
+		}
+	}
+	// A scalar or a list where a section belongs is not empty: it stays an
+	// error, as before (spec § 3.2 A6).
+	for _, extra := range []string{"gate: 5\n", "promote: []\n", "leak_scan: off\n", "leak_scan:\n  markers: [a, b]\n"} {
+		_, _, err := config.Parse([]byte(base + extra))
+		if ce := contract.From(err); ce == nil || ce.Code != contract.ConfigInvalid {
+			t.Errorf("%q: want CONFIG_INVALID, got %v", extra, err)
+		}
+	}
+}
