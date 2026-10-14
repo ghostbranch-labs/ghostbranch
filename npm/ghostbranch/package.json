@@ -1,0 +1,28 @@
+{
+  "name": "ghostbranch",
+  "version": "0.0.0-dev",
+  "description": "Private branches for public GitHub repos",
+  "homepage": "https://ghostbranch.site",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ghostbranch-labs/ghostbranch.git",
+    "directory": "npm/ghostbranch"
+  },
+  "bin": {
+    "ghostbranch": "bin/ghostbranch.js"
+  },
+  "files": [
+    "bin/ghostbranch.js"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "optionalDependencies": {
+    "@ghostbranch/cli-darwin-arm64": "0.0.0-dev",
+    "@ghostbranch/cli-darwin-x64": "0.0.0-dev",
+    "@ghostbranch/cli-linux-arm64": "0.0.0-dev",
+    "@ghostbranch/cli-linux-x64": "0.0.0-dev",
+    "@ghostbranch/cli-win32-x64": "0.0.0-dev"
+  }
+}
