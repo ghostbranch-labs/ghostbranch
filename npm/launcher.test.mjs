@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const launcherSrc = join(here, "ghostbranch", "bin", "ghostbranch.js");
-const { PACKAGES, binaryPath } = createRequire(import.meta.url)(launcherSrc);
+const { PACKAGES, binaryPath, signalExitCode } = createRequire(import.meta.url)(launcherSrc);
 const hostPkg = PACKAGES[`${process.platform} ${process.arch}`];
 const win = process.platform === "win32";
 const skipUnsupported = !hostPkg && "not a supported platform";
@@ -21,7 +21,7 @@ const skipUnsupported = !hostPkg && "not a supported platform";
 // launcher runs it where it sits. A test drives it with -e, and the child can
 // report process.argv0, the path the launcher gave to spawn. It returns the
 // launcher and the path the binary should be run from.
-function install(t, withPlatform = true) {
+function install(t, withPlatform = true, from = process.execPath) {
   const root = mkdtempSync(join(tmpdir(), "ghostbranch-launcher-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const launcher = join(root, "node_modules", "ghostbranch", "bin", "ghostbranch.js");
@@ -32,9 +32,9 @@ function install(t, withPlatform = true) {
     mkdirSync(dirname(bin), { recursive: true });
     writeFileSync(join(root, "node_modules", hostPkg, "package.json"), JSON.stringify({ name: hostPkg, version: "0.0.0" }));
     try {
-      linkSync(process.execPath, bin);
+      linkSync(from, bin);
     } catch {
-      copyFileSync(process.execPath, bin);
+      copyFileSync(from, bin);
     }
   }
   return { launcher, bin };
@@ -92,4 +92,19 @@ test("a missing platform package says which one and how to fix it", { skip: skip
 test("an unsupported platform lists the supported ones", () => {
   assert.throws(() => binaryPath("freebsd", "x64"), /no ghostbranch build for freebsd x64\. Supported: darwin arm64, darwin x64, linux arm64, linux x64, win32 x64\./);
   assert.throws(() => binaryPath("win32", "arm64"), /install script, which installs the amd64 build/);
+});
+
+test("a signal death maps to the shell's exit code, 128 + the signal number", () => {
+  assert.equal(signalExitCode("SIGTERM"), 128 + 15);
+  assert.equal(signalExitCode("SIGINT"), 128 + 2);
+  if (!win) assert.equal(signalExitCode("SIGPIPE"), 141);
+  assert.equal(signalExitCode("SIGNOPE"), 1);
+});
+
+// Node ignores SIGPIPE, so re-raising it can't end the launcher; it exits 141
+// as a shell would. The "binary" is a copy of sh, which dies of the signal.
+test("a binary killed by SIGPIPE makes the launcher exit 141", { skip: (win || !hostPkg) && "no POSIX signals here" }, (t) => {
+  const { launcher } = install(t, true, realpathSync("/bin/sh"));
+  const r = run(launcher, "-c", "kill -PIPE $$");
+  assert.equal(r.status, 141, `signal ${r.signal} ${r.stderr}`);
 });

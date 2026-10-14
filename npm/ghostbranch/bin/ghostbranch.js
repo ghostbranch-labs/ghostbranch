@@ -4,6 +4,7 @@
 // node_modules, so `ghostbranch` shows the right update command.
 "use strict";
 const { spawnSync } = require("child_process");
+const os = require("os");
 
 const PACKAGES = {
   "darwin arm64": "@ghostbranch/cli-darwin-arm64",
@@ -44,11 +45,26 @@ function main() {
     return process.exit(1);
   }
   if (r.signal) {
+    // Die of the same signal where Node lets it end the process. It can't
+    // for SIGPIPE (Node ignores it) or SIGUSR1 (it starts the inspector), so
+    // then exit as a shell would: 128 + the signal number.
     process.removeAllListeners("SIGINT");
-    process.kill(process.pid, r.signal);
+    try {
+      process.kill(process.pid, r.signal);
+    } catch {
+      // not a signal this platform can send
+    }
+    return process.exit(signalExitCode(r.signal));
   }
   process.exit(r.status ?? 1);
 }
 
+// signalExitCode is the shell's exit code for a death by signal: 128 + its
+// number (SIGPIPE gives 141), or 1 for a signal this platform doesn't know.
+function signalExitCode(signal) {
+  const n = os.constants.signals[signal];
+  return n ? 128 + n : 1;
+}
+
 if (require.main === module) main();
-module.exports = { PACKAGES, binaryPath };
+module.exports = { PACKAGES, binaryPath, signalExitCode };
