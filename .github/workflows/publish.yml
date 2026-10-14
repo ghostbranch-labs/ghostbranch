@@ -14,8 +14,11 @@ on:
 permissions:
   contents: read
 
+# One group per release, so publishing several releases close together
+# never cancels a pending one. The tap and bucket pushes retry once if
+# another publish moved them first.
 concurrency:
-  group: publish
+  group: publish-${{ github.event.release.tag_name }}
   cancel-in-progress: false
 
 jobs:
@@ -41,9 +44,11 @@ jobs:
       REPO: ${{ github.repository }}
       GH_TOKEN: ${{ github.token }}
     steps:
+      # No ref: the default is the release's tag (github.ref) at the commit it
+      # pointed to when the release was published (github.sha). An explicit
+      # unqualified ref would prefer a branch of the same name.
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
-          ref: ${{ github.event.release.tag_name }}
           persist-credentials: false
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
@@ -56,9 +61,10 @@ jobs:
         run: gh release download "$TAG" --repo "$REPO" --dir assets
 
       # Nothing below runs unless every file matches checksums.txt and
-      # checksums.txt carries release.yml's signature for this tag. Every
-      # later step reads the files from this same folder; nothing downloads
-      # them again.
+      # checksums.txt carries release.yml's signature for this tag, made by a
+      # run on the commit checked out above, so the code that renders and
+      # builds is the code that was released. Every later step reads the
+      # files from this same folder; nothing downloads them again.
       - name: verify before distributing
         working-directory: assets
         env:
@@ -69,6 +75,7 @@ jobs:
             --bundle checksums.txt.sigstore.json \
             --certificate-identity "$IDENTITY" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-github-workflow-sha "$(git rev-parse HEAD)" \
             checksums.txt
 
       # A stable release other than this one decides whether a test build may
@@ -142,17 +149,26 @@ jobs:
           auth="Authorization: Basic $(printf 'x-access-token:%s' "$APP_TOKEN" | base64 -w0)"
           bot="${APP_SLUG}[bot]"
           id=$(gh api "users/$bot" --jq .id)
-          push() { # repo, rendered file, path in the repo
-            git -c http.extraHeader="$auth" clone --depth 1 "https://github.com/ghostbranch-labs/$1.git" "work/$1"
-            mkdir -p "work/$1/$(dirname "$3")"
-            cp "$2" "work/$1/$3"
-            git -C "work/$1" add "$3"
+          # Called on the left of ||, where bash ignores -e, so every command
+          # returns on failure itself.
+          attempt() { # repo, rendered file, path in the repo
+            rm -rf "work/$1" || return 1
+            git -c http.extraHeader="$auth" clone --depth 1 "https://github.com/ghostbranch-labs/$1.git" "work/$1" || return 1
+            mkdir -p "work/$1/$(dirname "$3")" || return 1
+            cp "$2" "work/$1/$3" || return 1
+            git -C "work/$1" add "$3" || return 1
             if git -C "work/$1" diff --cached --quiet; then
               echo "$1 already has ghostbranch $VERSION"
-              return
+              return 0
             fi
-            git -C "work/$1" -c user.name="$bot" -c user.email="$id+$bot@users.noreply.github.com" commit -m "ghostbranch $VERSION"
+            git -C "work/$1" -c user.name="$bot" -c user.email="$id+$bot@users.noreply.github.com" commit -m "ghostbranch $VERSION" || return 1
             git -C "work/$1" -c http.extraHeader="$auth" push origin HEAD:main
+          }
+          # The change is one whole file, so a push that another publish beat
+          # is retried once on a fresh clone of the new main. A second failure
+          # fails the job.
+          push() {
+            attempt "$@" || { echo "retrying $1 on its new main"; attempt "$@"; }
           }
           push homebrew-tap rendered/ghostbranch.rb Formula/ghostbranch.rb
           push scoop-bucket rendered/ghostbranch.json bucket/ghostbranch.json
