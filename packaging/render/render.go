@@ -51,16 +51,21 @@ func newData(version, base, checksums string) (Data, error) {
 	if !versionPattern.MatchString(version) {
 		return Data{}, fmt.Errorf("version %q isn't X.Y.Z or X.Y.Z-pre", version)
 	}
-	if u, err := url.Parse(base); err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" ||
+	if u, err := url.Parse(base); err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.User != nil ||
 		strings.ContainsAny(base, "\"'\\ \t\r\n#{}$`") {
 		return Data{}, fmt.Errorf("download base %q isn't a plain http(s) URL", base)
 	}
 	sums := map[string]string{}
 	for _, line := range strings.Split(checksums, "\n") {
 		if f := strings.Fields(line); len(f) == 2 {
-			sums[strings.TrimPrefix(f[1], "*")] = f[0]
+			name := strings.TrimPrefix(f[1], "*")
+			if _, dup := sums[name]; dup {
+				return Data{}, fmt.Errorf("checksums.txt lists %s twice", name)
+			}
+			sums[name] = f[0]
 		}
 	}
+	var missing []string
 	d := Data{Version: version}
 	for _, a := range []struct {
 		suffix string
@@ -75,14 +80,31 @@ func newData(version, base, checksums string) (Data, error) {
 		name := "ghostbranch_" + version + "_" + a.suffix
 		sum, ok := sums[name]
 		if !ok {
-			return Data{}, fmt.Errorf("checksums.txt has no line for %s", name)
+			missing = append(missing, name)
+			continue
 		}
 		if !shaPattern.MatchString(sum) {
 			return Data{}, fmt.Errorf("checksums.txt has a malformed SHA-256 for %s", name)
 		}
 		*a.dst = Archive{URL: strings.TrimRight(base, "/") + "/v" + version + "/" + name, SHA256: sum}
 	}
+	if len(missing) > 0 {
+		return Data{}, fmt.Errorf("checksums.txt has no line for %s", strings.Join(missing, ", "))
+	}
 	return d, nil
+}
+
+// parseFlags parses fs and rejects leftover positional arguments. Go's bool
+// flags take only the -flag=value form, so "-prerelease false" would stop
+// parsing at "false" and silently drop every flag after it.
+func parseFlags(fs *flag.FlagSet, args []string) error {
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("unexpected arguments %q", fs.Args())
+	}
+	return nil
 }
 
 // fill executes the template file at path with d.
@@ -139,7 +161,7 @@ func run(args []string, stdout io.Writer) error {
 		dir := fs.String("packaging", "packaging", "the folder holding homebrew/ and scoop/")
 		base := fs.String("download-base", DefaultDownloadBase, "the release download base URL")
 		out := fs.String("out", "", "the folder to write ghostbranch.rb and ghostbranch.json into")
-		if err := fs.Parse(args[1:]); err != nil {
+		if err := parseFlags(fs, args[1:]); err != nil {
 			return err
 		}
 		if *sums == "" || *out == "" {
@@ -178,7 +200,7 @@ func run(args []string, stdout io.Writer) error {
 		tag := fs.String("tag", "", "the release's tag")
 		pre := fs.Bool("prerelease", false, "the release is marked pre-release")
 		stable := fs.Bool("stable-exists", false, "a published release that isn't a pre-release exists")
-		if err := fs.Parse(args[1:]); err != nil {
+		if err := parseFlags(fs, args[1:]); err != nil {
 			return err
 		}
 		r, err := Route(*tag, *pre, *stable)
