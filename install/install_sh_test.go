@@ -273,6 +273,9 @@ func TestInstallShWarnsWhenTheBinaryCannotRun(t *testing.T) {
 	if !strings.Contains(r.out, "doesn't run on this machine") || strings.Contains(r.out, "Installed ") {
 		t.Errorf("a binary that can't run wasn't flagged:\n%s", r.out)
 	}
+	if r.err != nil {
+		t.Errorf("a binary that can't run failed the install (it should warn and exit 0): %v\n%s", r.err, r.out)
+	}
 }
 
 // The PATH hints quote the folder inside an echo '…"$dir"…' line, so a
