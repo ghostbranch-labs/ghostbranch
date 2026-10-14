@@ -451,7 +451,25 @@ func TestDoctorPairCheck(t *testing.T) {
 		{"a public shadow repo", func(h *harness, _ *engine.DoctorOptions) { h.forge.SetPrivate(shadowName, false) },
 			engine.DoctorFail, ""},
 		{"--repo names an unregistered repo", func(h *harness, opt *engine.DoctorOptions) { opt.Repo = "acme/other" },
-			engine.DoctorFail, "ghostbranch init acme/other"},
+			engine.DoctorFail, "ghostbranch init acme/other --adopt --plan"},
+		{"the shadow repo is gone", func(h *harness, _ *engine.DoctorOptions) {
+			err := h.eng.WS.Update(h.clock.Now(), func(w *workspace.Workspace) bool {
+				for i := range w.Pairs {
+					if w.Pairs[i].Public == publicName {
+						w.Pairs[i].Shadow = "acme/gone-shadow"
+					}
+				}
+				return true
+			})
+			if err != nil {
+				h.t.Fatal(err)
+			}
+		}, engine.DoctorFail, "ghostbranch init acme/widget --plan"},
+		{"the overlay branch is missing", func(h *harness, _ *engine.DoctorOptions) {
+			if err := h.shadowGit().DeleteRef(h.ctx, "refs/heads/ghostbranch"); err != nil {
+				h.t.Fatal(err)
+			}
+		}, engine.DoctorFail, "ghostbranch init acme/widget --adopt --plan"},
 		{"a checkout of an unregistered repo", func(h *harness, opt *engine.DoctorOptions) {
 			opt.Repo, opt.Remotes = "", []workspace.Remote{{Name: "origin", URL: "https://github.com/acme/other.git"}}
 		}, engine.DoctorSkipped, ""},

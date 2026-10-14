@@ -39,6 +39,9 @@ type RestackResult struct {
 	Restacked []RestackedBranch `json:"restacked"` // never null
 	Pending   []string          `json:"pending"`   // not reached because it stopped, the one it stopped at first; never null
 	Preview   *preview.Preview  `json:"preview"`
+	// StoppedOnConflict is true when the restack stopped at Pending[0] on a
+	// conflict (REBASE_CONFLICT), not on Ctrl-C or a git failure.
+	StoppedOnConflict bool `json:"-"`
 	// gateFirst is GateFirst's answer.
 	gateFirst string
 }
@@ -160,6 +163,7 @@ func (e *Engine) FeatureRestack(ctx context.Context, p workspace.Pair, opt Resta
 		warns = addWarnings(warns, rw...)
 		if err != nil {
 			res.Pending = append(res.Pending, order[i:]...)
+			res.StoppedOnConflict = contract.From(err).Code == contract.RebaseConflict
 			return res, warns, err
 		}
 		tips[n] = b.To

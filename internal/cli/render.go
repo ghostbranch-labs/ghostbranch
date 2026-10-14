@@ -47,14 +47,47 @@ func findings(b *strings.Builder, fs []leak.Finding) {
 	}
 }
 
+// nothingLine is previewText's line for a preview with no ops. A run that
+// ended in an error never prints it (withoutNothing): the run stopped, so
+// "nothing" would read as the whole answer (F-13).
+const nothingLine = "  (nothing)\n"
+
 func previewText(b *strings.Builder, p *preview.Preview) {
 	b.WriteString("Dry run; nothing was changed. This would:\n")
 	for _, line := range p.Describe() {
 		fmt.Fprintf(b, "  - %s\n", line)
 	}
 	if len(p.Ops) == 0 {
-		b.WriteString("  (nothing)\n")
+		b.WriteString(nothingLine)
 	}
+}
+
+// withoutNothing drops nothingLine from a result's text when the command
+// failed, with the "This would:" header above it, so no empty list dangles.
+func withoutNothing(out string, failed bool) string {
+	if !failed {
+		return out
+	}
+	out = strings.ReplaceAll(out, " This would:\n"+nothingLine, "\n")
+	return strings.ReplaceAll(out, nothingLine, "")
+}
+
+// restackStopText is a restack dry run that stopped: what it would do
+// before stopping, and where it stops. Only a conflict says the branch
+// doesn't restack cleanly; Ctrl-C or a git failure says where it stopped.
+func restackStopText(b *strings.Builder, v *engine.RestackResult) {
+	b.WriteString("Dry run; nothing was changed.\n")
+	if len(v.Preview.Ops) > 0 {
+		b.WriteString("Before stopping, it would:\n")
+		for _, line := range v.Preview.Describe() {
+			fmt.Fprintf(b, "  - %s\n", line)
+		}
+	}
+	if v.StoppedOnConflict {
+		fmt.Fprintf(b, "It would stop at %s: it doesn't restack cleanly (see the error below).\n", oneLine(v.Pending[0]))
+		return
+	}
+	fmt.Fprintf(b, "It stopped at %s (see the error below).\n", oneLine(v.Pending[0]))
 }
 
 // human renders a result for people. It never prints secret values.
@@ -372,6 +405,10 @@ func human(r any, st style.Styler) string {
 		}
 		b.WriteString("The ledger keeps each deleted ref's SHA (ghostbranch log).\n")
 	case *engine.RestackResult:
+		if v.Preview != nil && len(v.Pending) > 0 {
+			restackStopText(&b, v)
+			break
+		}
 		if v.Preview != nil {
 			previewText(&b, v.Preview)
 			break

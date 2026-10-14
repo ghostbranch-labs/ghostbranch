@@ -73,7 +73,7 @@ main, green CI, and a leak scan of exactly what will be published.
 
 ## Set up a repo
 
-0. **`ghostbranch doctor --json` checks the setup and changes nothing.** `data.checks[]` holds
+0. **`ghostbranch doctor --json` checks the setup and changes nothing in your repos or records.** `data.checks[]` holds
    `tools`, `token`, `pair`, `guard`, `state` and `ci`, each `ok`, `warn`, `fail` or `skipped`, with a
    `fix` command when there is one. Exit 1 with `DOCTOR_FAILED` lists the failing checks in
    `error.details.failed`, and `next` gives their fixes. Run it first, and whenever a command fails in
@@ -219,7 +219,7 @@ main, green CI, and a leak scan of exactly what will be published.
 - Write the PR `--title` (and, for squash, `-m`; for curated, each group's message) yourself from the
   change: they go public. Show them to the person; use theirs if they give them.
 - `LOCKED`: another ghostbranch command is running on this machine (`error.details.held_by`: `pid`,
-  `op`, `since`). Wait and retry. A lock frees itself when its process ends; never delete lock files.
+  `op`, `since`). Wait a few seconds and retry. A lock frees itself when its process ends; never delete lock files.
 - `TOKEN_PERMISSION_MISSING` names the permission and the repo in `error.details.permission` and
   `error.details.repo`: stop and tell the person both. `ghostbranch doctor --json` lists everything
   the token lacks, per command. Never ask for a token with wider access than that.

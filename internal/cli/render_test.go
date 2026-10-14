@@ -6,8 +6,10 @@ import (
 	"testing"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/cli/style"
+	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/plan"
+	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
 )
 
 func TestGateCell(t *testing.T) {
@@ -152,5 +154,65 @@ func TestHumanSaysHowAnOpenPRWasUpdated(t *testing.T) {
 	want = "Updated PR #13 on a: " + u1 + "\nPublished b as PR #14: " + u2 + "\n"
 	if got := human(stack, style.Styler{}); !strings.HasPrefix(got, want) {
 		t.Errorf("human for an append and a first publish = %q, want it to start %q", got, want)
+	}
+}
+
+// F-13: a restack dry run that stops on a conflict says where it stops,
+// and never that it would do nothing.
+func TestRestackPlanConflictNeverSaysNothing(t *testing.T) {
+	t.Parallel()
+	r := &engine.RestackResult{Feature: "feat-x", Restacked: []engine.RestackedBranch{}, Pending: []string{"feat-y"},
+		Preview: preview.New(map[string]string{}), StoppedOnConflict: true}
+	want := "Dry run; nothing was changed.\nIt would stop at feat-y: it doesn't restack cleanly (see the error below).\n"
+	if got := human(r, style.Styler{}); got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	r.Pending = []string{"feat-y", "feat-z"}
+	r.Preview.Add(preview.PushRef("acme/widget-shadow", "refs/heads/feat-w", "a", "b"))
+	got := human(r, style.Styler{})
+	if !strings.Contains(got, "Before stopping, it would:\n  - ") || !strings.Contains(got, "It would stop at feat-y:") || strings.Contains(got, "(nothing)") {
+		t.Fatalf("got %q", got)
+	}
+}
+
+// A restack dry run that stopped on anything but a conflict (Ctrl-C, a git
+// failure) says only where it stopped, not that the branch conflicts.
+func TestRestackPlanOtherStopNeverClaimsAConflict(t *testing.T) {
+	t.Parallel()
+	r := &engine.RestackResult{Feature: "feat-x", Restacked: []engine.RestackedBranch{}, Pending: []string{"feat-y"},
+		Preview: preview.New(map[string]string{})}
+	want := "Dry run; nothing was changed.\nIt stopped at feat-y (see the error below).\n"
+	if got := human(r, style.Styler{}); got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+// The general guard: after an error, no preview says "(nothing)".
+func TestWithoutNothingAfterAnError(t *testing.T) {
+	t.Parallel()
+	out := "Dry run; nothing was changed. This would:\n" + nothingLine
+	// No header left dangling over an empty list either.
+	if got := withoutNothing(out, true); got != "Dry run; nothing was changed.\n" {
+		t.Fatalf("failed: %q", got)
+	}
+	if got := withoutNothing(out, false); got != out {
+		t.Fatalf("succeeded: %q", got)
+	}
+}
+
+// render applies the guard: a failed command whose result carries an empty
+// preview prints neither "(nothing)" nor a dangling "This would:".
+func TestRenderOfAFailedDryRunNeverSaysNothing(t *testing.T) {
+	t.Parallel()
+	var out, errOut strings.Builder
+	a := &app{env: Env{Stdout: &out, Stderr: &errOut, Getenv: func(string) string { return "" }}, command: "feature restack",
+		result: &engine.RestackResult{Feature: "feat-x", Restacked: []engine.RestackedBranch{}, Pending: []string{},
+			Preview: preview.New(map[string]string{})}}
+	a.render(contract.New(contract.Internal, "git went away"))
+	if got := out.String(); strings.Contains(got, "(nothing)") || strings.Contains(got, "This would:") {
+		t.Fatalf("stdout: %q", got)
+	}
+	if !strings.Contains(errOut.String(), "[INTERNAL]") {
+		t.Fatalf("stderr: %q", errOut.String())
 	}
 }

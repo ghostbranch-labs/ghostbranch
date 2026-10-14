@@ -249,3 +249,39 @@ func (l *lockedBuffer) Write(p []byte) (int, error) {
 	return l.b.Write(p)
 }
 func (l *lockedBuffer) String() string { l.mu.Lock(); defer l.mu.Unlock(); return l.b.String() }
+
+// F-27: doctor's next for a repo that isn't set up here is exactly
+// PAIR_NOT_FOUND's: adopt first, then create, both dry runs.
+func TestDoctorNextForAnUnregisteredRepoIsInit(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	code, env := te.runJSON("doctor", "--repo", "acme/other")
+	if code != 1 {
+		t.Fatalf("exit %d", code)
+	}
+	_, pairEnv := te.runJSON("agents", "status", "--repo", "acme/other")
+	got, want := nextOf(t, env), nextOf(t, pairEnv)
+	if len(got) != 2 || !reflect.DeepEqual(got, want) {
+		t.Fatalf("doctor next %v, PAIR_NOT_FOUND next %v", got, want)
+	}
+	data, _ := env["data"].(map[string]any)
+	for _, c := range data["checks"].([]any) {
+		if m := c.(map[string]any); m["id"] == "pair" && m["fix"] != "ghostbranch init acme/other --adopt --plan" {
+			t.Fatalf("pair fix %q", m["fix"])
+		}
+	}
+}
+
+// F-26: doctor's help says what it does write: its fetch into the local
+// copy of the pair, and the update check's cache.
+func TestDoctorHelpSaysWhatItWrites(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	code, out, _ := te.run("doctor", "--help")
+	flat := strings.Join(strings.Fields(out), " ")
+	if code != 0 || strings.Contains(flat, "never writes") ||
+		!strings.Contains(flat, "It changes nothing in your repos, records or keychain and never prompts; it fetches into its local copy of the pair (making it if needed) and refreshes the update check's cache. It isn't ledgered.") {
+		t.Fatalf("exit %d\n%s", code, out)
+	}
+}

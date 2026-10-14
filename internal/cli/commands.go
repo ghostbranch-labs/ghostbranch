@@ -377,6 +377,16 @@ func (a *app) applyCmd() *cobra.Command {
 				return err
 			}
 			o.Plan = args[0]
+			// A plan file another machine made isn't here: apply then looks
+			// for its ref in this pair's shadow repo. Resolve directly, not
+			// through a.pair, so apply's other next steps don't change.
+			// A --repo that was passed but isn't set up is why nothing could
+			// be looked up: apply says that, with its init steps (review M3).
+			if p, err := e.WS.Resolve(a.repo, a.env.CwdRemotes()); err == nil {
+				o.Lookup = &p
+			} else if a.repo != "" {
+				o.LookupErr = err
+			}
 			res, w, err := e.Apply(cmd.Context(), o)
 			return done(a, res, w, err)
 		},

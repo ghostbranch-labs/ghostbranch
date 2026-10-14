@@ -26,14 +26,15 @@ import (
 )
 
 type testEnv struct {
-	t       *testing.T
-	root    string
-	forge   *fake.Forge
-	pubGit  *gitx.Git
-	vars    map[string]string
-	env     cli.Env
-	finding string
-	oldJob  string // a replaced gate job, for <OLD_JOB>
+	t        *testing.T
+	root     string
+	forge    *fake.Forge
+	pubGit   *gitx.Git
+	vars     map[string]string
+	env      cli.Env
+	finding  string
+	oldJob   string // a replaced gate job, for <OLD_JOB>
+	gonePlan string // a plan ID whose file was deleted, for <GONE_PLAN>
 }
 
 func newTestEnv(t *testing.T) *testEnv {

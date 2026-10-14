@@ -152,7 +152,7 @@ func TestRemoveThroughTheCLI(t *testing.T) {
 	if b, _ := os.ReadFile(filepath.Join(ws, "grants.json")); strings.Contains(string(b), "acme/widget") {
 		t.Fatalf("the grant survived:\n%s", b)
 	}
-	if code, env := te.runJSON("sync"); code != 2 || env["error"].(map[string]any)["code"] != "PAIR_AMBIGUOUS" {
+	if code, env := te.runJSON("sync"); code != 2 || env["error"].(map[string]any)["code"] != "PAIR_NOT_FOUND" {
 		t.Fatalf("the pair is still registered: %d %v", code, env)
 	}
 }

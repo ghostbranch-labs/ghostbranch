@@ -1,11 +1,16 @@
 package engine_test
 
 import (
+	"fmt"
 	"reflect"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
+	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
+	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
 )
 
@@ -217,7 +222,7 @@ func TestPullByHandMergeKeepsItsContentOnTheNextUpdate(t *testing.T) {
 	}
 }
 
-// Nothing foreign: nothing changes. No open PR: BAD_FLAG.
+// Nothing foreign: nothing changes. No open PR: NO_OPEN_PR.
 func TestPullWithNothingToPullAndWithoutAnOpenPR(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
@@ -230,7 +235,7 @@ func TestPullWithNothingToPullAndWithoutAnOpenPR(t *testing.T) {
 	}
 	h.startFeature("b", map[string]string{"b.txt": "b\n"})
 	_, err = h.pull("b")
-	_ = wantCode(t, err, contract.BadFlag)
+	_ = wantCode(t, err, contract.NoOpenPR)
 }
 
 // --plan previews the leased pushes and changes nothing.
@@ -273,5 +278,90 @@ func TestPullLeasesABranchItDoesNotMove(t *testing.T) {
 	_ = wantCode(t, err, contract.RefMoved)
 	if h.head("a") != moved || !reflect.DeepEqual(h.shadowMeta("a").Promoted, meta.Promoted) {
 		t.Fatal("a pull whose branch moved must record nothing")
+	}
+}
+
+// F-14: feature pull names why there is no open PR, so next can say what
+// to do instead.
+func TestPullWithoutOpenPR(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name, reason string
+		setup        func(h *harness)
+	}{
+		{"never published", "not_published", func(h *harness) { h.startFeature("a", map[string]string{"a.txt": "a\n"}) }},
+		{"merged", "merged", func(h *harness) { pr, _ := h.publish("a"); h.forge.SetPRMerged(publicName, pr) }},
+		{"closed", "closed", func(h *harness) {
+			pr, _ := h.publish("a")
+			if err := h.forge.ClosePullRequest(h.ctx, publicName, pr); err != nil {
+				h.t.Fatal(err)
+			}
+		}},
+		{"branch gone", "branch_gone", func(h *harness) {
+			h.publish("a")
+			branch := h.shadowMeta("a").Promoted.Branch
+			if branch == "" {
+				branch = "a"
+			}
+			if err := h.pubGit.DeleteRef(h.ctx, "refs/heads/"+branch); err != nil {
+				h.t.Fatal(err)
+			}
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			h := newHarness(t)
+			h.init()
+			c.setup(h)
+			_, err := h.pull("a")
+			ce := wantCode(t, err, contract.NoOpenPR)
+			if ce.Field != "feature" || ce.Details["feature"] != "a" || ce.Details["reason"] != c.reason {
+				t.Fatalf("error = %+v", ce)
+			}
+			if _, has := ce.Details["public_pr"]; has == (c.reason == "not_published") {
+				t.Fatalf("public_pr in %v", ce.Details)
+			}
+		})
+	}
+}
+
+// Review Focus 2: a GitHub read that fails while working out the reason is
+// that read's error, never a guessed reason.
+func TestPullWithoutOpenPRNeverGuessesFromAFailedRead(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	pr, _ := h.publish("a")
+	if err := h.forge.ClosePullRequest(h.ctx, publicName, pr); err != nil {
+		t.Fatal(err)
+	}
+	var reads atomic.Int32
+	h.forge.GetPRErr = func(_ string, n int) error {
+		if n == pr && reads.Add(1) > 1 {
+			return fmt.Errorf("%w: rate limited", forge.ErrTransient)
+		}
+		return nil
+	}
+	_, err := h.pull("a")
+	if ce := wantCode(t, err, contract.ForgeError); !ce.Retryable {
+		t.Fatalf("error = %+v", ce)
+	}
+}
+
+// Spec § 4.3: a feature whose record says unpublished is not_published,
+// with exactly {feature, reason}, even when a public branch of its name
+// holds a plan's commits. No plan is guessed from the branch: it could be
+// another feature's (re-review N1), and apply of it would publish that one.
+func TestPullWithoutOpenPRNeverNamesAPlan(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.publish("a")
+	h.editRemoteMeta("a", func(m *feature.Meta) { m.Promoted = nil })
+	_, err := h.pull("a")
+	ce := wantCode(t, err, contract.NoOpenPR)
+	if !reflect.DeepEqual(ce.Details, map[string]any{"feature": "a", "reason": "not_published"}) || strings.Contains(ce.Message, "apply") {
+		t.Fatalf("error = %+v", ce)
 	}
 }

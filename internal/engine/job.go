@@ -12,6 +12,7 @@ package engine
 
 import (
 	"context"
+	"path"
 	"regexp"
 	"strings"
 	"time"
@@ -23,6 +24,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
 	"github.com/ghostbranch-labs/ghostbranch/internal/progress"
+	"github.com/ghostbranch-labs/ghostbranch/internal/workflow"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
@@ -98,19 +100,50 @@ func (e *Engine) relock(ctx context.Context, pc *pairCtx, job string) error {
 	return e.fetchMeta(ctx, pc.git)
 }
 
-// outcomeErr is the error a settled CI outcome stands for; nil when it passed.
-func outcomeErr(out checkOutcome, pr int, cfg config.Gate, shadow string) error {
+// outcomeErr is the error a settled CI outcome stands for; nil when it
+// passed. workflows lists the candidate's own workflow files (read only for
+// NO_CI); known is false when the candidate couldn't be read.
+func outcomeErr(out checkOutcome, pr int, cfg config.Gate, shadow string, workflows func() (files []string, known bool)) error {
 	switch out.status {
 	case feature.ChecksFailed:
 		return contract.New(contract.ChecksFailed, "checks failed on the gate candidate: %s", strings.Join(out.failed, ", ")).
 			WithDetails(map[string]any{"failed": out.failed, "shadow_pr": pr})
 	case feature.ChecksNoCI:
+		wf, known := workflows()
+		if known && len(wf) == 0 {
+			return contract.New(contract.NoCI,
+				"no checks appeared on shadow PR #%d within %s, and the gate candidate has no workflow under .github/workflows (public main has none): add CI to the public repo, or, if your CI is an external app, install it on %s",
+				pr, cfg.CIAppearTimeout, shadow).WithDetails(map[string]any{"reason": "no_workflow", "shadow_pr": pr})
+		}
+		// An unreadable candidate gives no reason: which one holds is unknown.
+		details := map[string]any{"shadow_pr": pr}
+		if known {
+			details["reason"] = "actions_disabled_or_untriggered"
+		}
 		return contract.New(contract.NoCI,
-			"no checks appeared on shadow PR #%d within %s; check that Actions is enabled in %s", pr, cfg.CIAppearTimeout, shadow)
+			"no checks appeared on shadow PR #%d within %s; check that Actions is enabled in %s, or no workflow triggers on pull_request", pr, cfg.CIAppearTimeout, shadow).
+			WithDetails(details)
 	case feature.ChecksTimeout:
 		return contract.New(contract.CITimeout, "checks did not finish within %s", cfg.CITimeout)
 	}
 	return nil
+}
+
+// candidateWorkflows lists the workflow files in candidate C, leaving out
+// Ghostbranch's own (ghostbranch-*.yml); known is false when C can't be
+// read.
+func candidateWorkflows(ctx context.Context, g *gitx.Git, C string) (files []string, known bool) {
+	es, err := g.ListTree(ctx, C)
+	if err != nil {
+		return nil, false
+	}
+	files = []string{}
+	for _, en := range es {
+		if workflow.IsWorkflowPath(en.Path) && !strings.HasPrefix(path.Base(en.Path), "ghostbranch-") {
+			files = append(files, en.Path)
+		}
+	}
+	return files, true
 }
 
 // finish is a job's second half: it waits on CI for the pending gate and
@@ -191,7 +224,8 @@ func (e *Engine) finish(ctx context.Context, pc *pairCtx, name string, res *Gate
 				"; run ghostbranch wait " + job + " to record it",
 			Details: map[string]any{"job": job}})
 	}
-	return res, warns, outcomeErr(checkOutcome{status: res.Checks, failed: res.FailedChecks}, pending.ShadowPR, cfg.Gate, shadow)
+	return res, warns, outcomeErr(checkOutcome{status: res.Checks, failed: res.FailedChecks}, pending.ShadowPR, cfg.Gate, shadow,
+		func() ([]string, bool) { return candidateWorkflows(ctx, pc.git, C) })
 }
 
 // recordFinish takes the lock back and records res's outcome over the
@@ -430,7 +464,8 @@ func (e *Engine) Wait(ctx context.Context, p workspace.Pair, job string, opt Wai
 		if err != nil {
 			return res, warns, err
 		}
-		return res, warns, outcomeErr(checkOutcome{status: res.Checks, failed: res.FailedChecks}, m.Gate.ShadowPR, cfg.Gate, pc.pair.Shadow)
+		return res, warns, outcomeErr(checkOutcome{status: res.Checks, failed: res.FailedChecks}, m.Gate.ShadowPR, cfg.Gate, pc.pair.Shadow,
+			func() ([]string, bool) { return candidateWorkflows(ctx, pc.git, m.Gate.Candidate) })
 	}
 	var deadline time.Time
 	if opt.Timeout > 0 {

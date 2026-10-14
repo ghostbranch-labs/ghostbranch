@@ -3,8 +3,10 @@ package workspace
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -27,8 +29,13 @@ func Lock(path string, now time.Time, op string) (func(), error) {
 	if err := lockFile(f); err != nil {
 		_ = f.Close()
 		if errors.Is(err, errBusy) {
-			return nil, contract.New(contract.Locked, "another ghostbranch operation holds the lock %s", path).
-				WithDetails(map[string]any{"held_by": holder(path), "path": path})
+			// Every busy OS lock is transient: its holder ends, or dies and
+			// the OS frees it (F-29).
+			h := holder(path)
+			ce := contract.New(contract.Locked, "%s", lockedMessage(path, h)).
+				WithDetails(map[string]any{"held_by": h, "path": path})
+			ce.Retryable = true
+			return nil, ce
 		}
 		return nil, err
 	}
@@ -43,6 +50,38 @@ func Lock(path string, now time.Time, op string) (func(), error) {
 }
 
 var errBusy = errors.New("lock busy")
+
+// lockedMessage names the lock's holder when its file says who (HolderText).
+// A holder that can't be read is left out.
+func lockedMessage(path string, h map[string]any) string {
+	if who := HolderText(h); who != "" {
+		return fmt.Sprintf("another ghostbranch operation (%s) holds the lock %s", who, path)
+	}
+	return "another ghostbranch operation holds the lock " + path
+}
+
+// holderOp is an operation name as Ghostbranch writes it in a lock file.
+var holderOp = regexp.MustCompile(`^[a-z][a-z -]{0,40}$`)
+
+// HolderText is "op, pid N, since T" for a lock holder (holder's map, or
+// LOCKED's details.held_by), or "" unless every part looks as Ghostbranch
+// writes it: op a short lower-case name, pid above 0, since RFC 3339 in
+// UTC with whole seconds. The file's text reaches a terminal, so nothing
+// else is shown (review M8).
+func HolderText(h map[string]any) string {
+	op, _ := h["op"].(string)
+	pid, _ := h["pid"].(int)
+	since, _ := h["since"].(string)
+	if !holderOp.MatchString(op) || pid <= 0 {
+		return ""
+	}
+	// since exactly as Lock writes it: UTC, whole seconds, so its length
+	// is fixed (re-review N2: a fraction may otherwise run on).
+	if at, err := time.Parse(time.RFC3339, since); err != nil || at.UTC().Format(time.RFC3339) != since {
+		return ""
+	}
+	return fmt.Sprintf("%s, pid %d, since %s", op, pid, since)
+}
 
 // holder reads who holds the lock, best effort: a 5c-format or empty file
 // gives what it can.

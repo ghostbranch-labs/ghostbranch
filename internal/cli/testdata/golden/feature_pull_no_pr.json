@@ -1,0 +1,33 @@
+{
+  "schema_version": "0.14",
+  "command": "feature pull",
+  "ok": false,
+  "exit_code": 2,
+  "data": {},
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "promote",
+        "feat-x",
+        "--plan",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "nothing of feat-x is public yet; publish it first",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
+  "error": {
+    "code": "NO_OPEN_PR",
+    "message": "feature pull brings in commits from a feature's open public PR, and feat-x has none: it was never published",
+    "field": "feature",
+    "retryable": false,
+    "details": {
+      "feature": "feat-x",
+      "reason": "not_published"
+    }
+  }
+}

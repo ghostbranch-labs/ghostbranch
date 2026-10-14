@@ -62,9 +62,10 @@ func TestNextForJobErrors(t *testing.T) {
 			t.Errorf("%s: next = %+v, want %v", tc.name, next, tc.want)
 		}
 	}
-	a := &app{env: Env{Getenv: func(string) string { return "" }}}
-	if next := a.next(contract.New(contract.Locked, "x")); len(next) != 0 {
-		t.Errorf("a plain LOCKED offers nothing new: %+v", next)
+	// A plain LOCKED runs the same command again (F-29).
+	a := &app{env: Env{Getenv: func(string) string { return "" }}, args: []string{"sync"}}
+	if next := a.next(contract.New(contract.Locked, "x")); len(next) != 1 || !slices.Equal(next[0].Command, []string{"ghostbranch", "sync"}) {
+		t.Errorf("a plain LOCKED repeats the command: %+v", next)
 	}
 	// An interrupted promote --detach: wait on the job, then promote again
 	// without --detach, which reuses the green gate.
@@ -613,5 +614,86 @@ func TestNextAfterAStackPublish(t *testing.T) {
 	a.result = &engine.ApplyResult{PublicPR: 7, PRs: []plan.StackPR{{Feature: "feat-a", Number: 6}, {Feature: "feat-b", Number: 7}}}
 	if next = a.next(nil); len(next) != 1 || strings.Contains(next[0].Why, "merges them all") || !strings.Contains(next[0].Why, "#6 first") {
 		t.Fatalf("plain chain: next = %+v", next)
+	}
+}
+
+// F-29: next for a busy lock is the same command again, and says who holds
+// it. A LOCKED with a job keeps its wait step.
+func TestNextForLockedRunsTheCommandAgain(t *testing.T) {
+	t.Parallel()
+	a := testApp("sync", "sync", "--repo", "acme/widget")
+	err := contract.New(contract.Locked, "busy").WithDetails(map[string]any{
+		"held_by": map[string]any{"op": "gate", "pid": 13096, "since": "2026-10-13T07:58:14Z"}, "path": "/s/locks/acme__widget.lock"})
+	next := a.next(err)
+	if len(next) != 1 || !slices.Equal(next[0].Command, []string{"ghostbranch", "sync", "--repo", "acme/widget"}) || next[0].NeedsHuman ||
+		!strings.Contains(next[0].Why, "(gate, pid 13096, since 2026-10-13T07:58:14Z)") || !strings.Contains(next[0].Why, "wait") {
+		t.Fatalf("next = %+v", next)
+	}
+	err.Details["job"] = "gate/feat-x/0123456789ab"
+	if next = a.next(err); len(next) != 1 || next[0].Command[1] != "wait" {
+		t.Fatalf("with a job, next = %+v", next)
+	}
+}
+
+// F-14 and review M6(b): next after NO_OPEN_PR for every reason.
+func TestNextForNoOpenPRByReason(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		details map[string]any
+		want    []string
+		human   bool
+	}{
+		{"not published", map[string]any{"feature": "feat-x", "reason": "not_published"},
+			[]string{"ghostbranch", "promote", "feat-x", "--plan", "--repo", "acme/widget"}, false},
+		{"merged", map[string]any{"feature": "feat-x", "reason": "merged", "public_pr": 3},
+			[]string{"ghostbranch", "sync", "--repo", "acme/widget"}, false},
+		{"closed", map[string]any{"feature": "feat-x", "reason": "closed", "public_pr": 3},
+			[]string{"ghostbranch", "feature", "show", "feat-x", "--repo", "acme/widget"}, false},
+		{"branch gone", map[string]any{"feature": "feat-x", "reason": "branch_gone", "public_pr": 3},
+			[]string{"ghostbranch", "feature", "show", "feat-x", "--repo", "acme/widget"}, false},
+	} {
+		a := testApp("feature pull", "feature", "pull", "feat-x", "--repo", "acme/widget")
+		next := a.next(contract.New(contract.NoOpenPR, "x").WithField("feature").WithDetails(tc.details))
+		if len(next) == 0 || !slices.Equal(next[0].Command, tc.want) || next[0].NeedsHuman != tc.human {
+			t.Errorf("%s: next = %+v, want %v", tc.name, next, tc.want)
+		}
+	}
+}
+
+// Review M8: a holder whose text isn't as Ghostbranch writes it is left out
+// of next's why.
+func TestNextForLockedLeavesOutAnOddHolder(t *testing.T) {
+	t.Parallel()
+	a := testApp("sync", "sync", "--repo", "acme/widget")
+	err := contract.New(contract.Locked, "busy").WithDetails(map[string]any{
+		"held_by": map[string]any{"op": "gate\x1b]0;pwned\x07", "pid": 13096, "since": "2026-10-13T07:58:14Z"}})
+	next := a.next(err)
+	if len(next) != 1 || strings.Contains(next[0].Why, "pid") || strings.ContainsAny(next[0].Why, "\x1b\x07") {
+		t.Fatalf("next = %+v", next)
+	}
+}
+
+// Review M7: LOCKED on a command only a person can finish repeats it for a
+// person: needs_human, without --json, naming the pair.
+func TestNextForLockedOnAPersonOnlyCommand(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		command string
+		args    []string
+		human   bool
+	}{
+		{"agents allow", []string{"agents", "allow", "--json"}, true},
+		{"waivers add", []string{"waivers", "add", "feat-x", "f-0123456789ab", "--json"}, true},
+		{"login", []string{"login", "--json"}, true},
+		{"apply", []string{"apply", "20261005T120000Z-0a0b0c", "--json"}, true},
+		{"apply", []string{"apply", "20261005T120000Z-0a0b0c", "--yes", "--json"}, false},
+		{"sync", []string{"sync", "--json"}, false},
+	} {
+		a := testApp(tc.command, tc.args...)
+		next := a.next(contract.New(contract.Locked, "busy"))
+		if len(next) != 1 || next[0].NeedsHuman != tc.human || slices.Contains(next[0].Command, "--json") == tc.human {
+			t.Errorf("%v: next = %+v", tc.args, next)
+		}
 	}
 }

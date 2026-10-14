@@ -68,6 +68,9 @@ type DoctorCheck struct {
 	Fix     string         `json:"fix"`
 	FixArgv []string       `json:"-"`
 	Details map[string]any `json:"details"`
+	// Unregistered is the public repo a failing pair check is about when
+	// it isn't set up here: next offers both init forms (F-27).
+	Unregistered string `json:"-"`
 }
 
 // withFix sets c's fix to argv; no argv leaves it without one.
@@ -138,8 +141,10 @@ type doctorRun struct {
 }
 
 // Doctor checks this machine's setup and, when there is one, the pair. It
-// writes nothing: no record, ledger entry, lock, keychain entry, push or
-// forge write. It only fetches into the local mirror, as status does.
+// changes nothing in the repos, the records or the keychain: no record,
+// ledger entry, lock, keychain entry, chmod, push or forge write. It
+// fetches into the local mirror (making it if needed), as status does; the
+// CLI also refreshes the update check's cache.
 // Every check reports, whatever the others found; it stops early only on
 // Ctrl-C, with the checks so far and INTERRUPTED.
 func (e *Engine) Doctor(ctx context.Context, opt DoctorOptions) (*DoctorResult, error) {

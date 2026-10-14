@@ -3,6 +3,7 @@ package managed_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -57,6 +58,10 @@ type syncEnv struct {
 	pubDir, shDir string
 	summary       string
 	shell         []string
+	// pathPrefix, when set, goes first on the script's PATH (a fake git);
+	// extraEnv is added to its environment.
+	pathPrefix string
+	extraEnv   []string
 }
 
 func newSyncEnv(t *testing.T, shell []string) *syncEnv {
@@ -79,7 +84,14 @@ func eachShell(t *testing.T, body func(t *testing.T, s *syncEnv)) {
 func (s *syncEnv) run(branches string, publicURL string) (int, string) {
 	s.t.Helper()
 	script := filepath.Join(s.t.TempDir(), "sync.sh")
-	if err := os.WriteFile(script, []byte(managed.Script()), 0o755); err != nil {
+	body := managed.Script()
+	if s.pathPrefix != "" {
+		// Set inside the script: Git for Windows' bash launcher puts its own
+		// git ahead of an inherited PATH. cygpath turns a Windows path into
+		// bash's form; elsewhere the path is already one.
+		body = fmt.Sprintf("PATH=\"$(cygpath -u '%[1]s' 2>/dev/null || echo '%[1]s'):$PATH\"\n", s.pathPrefix) + body
+	}
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 		s.t.Fatal(err)
 	}
 	cmd := exec.Command(findBash(s.t), append(append([]string{}, s.shell...), script)...)
@@ -87,6 +99,7 @@ func (s *syncEnv) run(branches string, publicURL string) (int, string) {
 		"PUBLIC_REPO=acme/widget", "BRANCHES="+branches,
 		"PUBLIC_URL="+filepath.ToSlash(publicURL), "SHADOW_URL="+filepath.ToSlash(s.shDir),
 		"GITHUB_STEP_SUMMARY="+filepath.ToSlash(s.summary), "SYNC_TOKEN=", "DEFAULT_TOKEN=")
+	cmd.Env = append(cmd.Env, s.extraEnv...)
 	out, err := cmd.CombinedOutput()
 	code := 0
 	var ee *exec.ExitError
@@ -167,10 +180,48 @@ func TestSyncScriptRefusesDivergedAndMissing(t *testing.T) {
 	})
 }
 
+// F-19: a private public repo is not something a token can fix here (a
+// token that could read it could also write it): the hint says to turn
+// scheduled sync off and sync locally, never to add a read token.
 func TestSyncScriptPublicUnreadable(t *testing.T) {
 	eachShell(t, func(t *testing.T, s *syncEnv) {
 		code, out := s.run("main", filepath.Join(t.TempDir(), "missing.git"))
-		if code != 1 || !strings.Contains(out, "cannot read the public repo acme/widget") || !strings.Contains(out, "GHOSTBRANCH_SYNC_TOKEN") {
+		if code != 1 || !strings.Contains(out, "cannot read the public repo acme/widget: ") ||
+			!strings.Contains(out, "scheduled sync isn't supported for a private public repo") ||
+			!strings.Contains(out, "run ghostbranch sync --repo acme/widget locally. Nothing was pushed.") ||
+			strings.Contains(out, "GHOSTBRANCH_SYNC_TOKEN") {
+			t.Fatalf("%d %s", code, out)
+		}
+	})
+}
+
+// fakeGitLsRemote is a git that fails every ls-remote with stderr line and
+// hands every other command to the real git (the next one on PATH).
+const fakeGitLsRemote = `#!/usr/bin/env bash
+for a in "$@"; do
+  if [ "$a" = ls-remote ]; then
+    echo "$FAKE_GIT_STDERR" >&2
+    exit 128
+  fi
+done
+PATH="${PATH#*:}"
+exec git "$@"
+`
+
+// Review Focus 5: the echoed git line never carries credentials from a URL.
+// Real git already anonymises its own "unable to access" URL, so a fake git
+// prints one with credentials in it: only the script's sed can remove them.
+func TestSyncScriptPublicUnreadableHidesURLCredentials(t *testing.T) {
+	eachShell(t, func(t *testing.T, s *syncEnv) {
+		bin := t.TempDir()
+		if err := os.WriteFile(filepath.Join(bin, "git"), []byte(fakeGitLsRemote), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		s.pathPrefix = bin
+		s.extraEnv = []string{"FAKE_GIT_STDERR=fatal: unable to access 'https://x-access-token:s3cr3t-value@example.invalid/acme/widget.git/': from the fake git"}
+		code, out := s.run("main", "https://example.invalid/acme/widget.git")
+		if code != 1 || strings.Contains(out, "s3cr3t-value") || strings.Contains(out, "x-access-token") ||
+			!strings.Contains(out, "cannot read the public repo acme/widget: fatal: unable to access 'https://example.invalid/acme/widget.git/': from the fake git") {
 			t.Fatalf("%d %s", code, out)
 		}
 	})

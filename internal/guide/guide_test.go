@@ -49,7 +49,8 @@ func TestRenderListsEveryCodeFromTheRegistry(t *testing.T) {
 	// 429: commits pulled in from the PR keep their authors (6.1a-2 final review, owner's ruling).
 	// 432: a clean rebase replaces, and stale_gate's update_mode (6.1a-2 acceptance fixes).
 	// 443: the Updates section and the stderr line (6.4a).
-	if n := strings.Count(out, "\n"); n > 443 {
+	// 446: the three 6.3b error rows (PAIR_NOT_FOUND, NO_OPEN_PR, PLAN_NOT_FOUND).
+	if n := strings.Count(out, "\n"); n > 446 {
 		t.Errorf("the guide is %d lines; keep it short (spec: about 150 plus the tables)", n)
 	}
 }
@@ -359,7 +360,7 @@ func TestGuideTeachesSetup(t *testing.T) {
 	t.Parallel()
 	out := strings.Join(strings.Fields(guide.Render(contract.Registry())), " ")
 	for _, want := range []string{
-		"**`ghostbranch doctor --json` checks the setup and changes nothing.**",
+		"**`ghostbranch doctor --json` checks the setup and changes nothing in your repos or records.**",
 		"`DOCTOR_FAILED` lists the failing checks in `error.details.failed`",
 		"with a `fix` command when there is one.",
 		"When you install the app, pick both the public repo and its shadow repo.",

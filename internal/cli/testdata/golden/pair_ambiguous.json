@@ -1,0 +1,21 @@
+{
+  "schema_version": "0.14",
+  "command": "status",
+  "ok": false,
+  "exit_code": 2,
+  "data": {},
+  "warnings": [],
+  "next": [],
+  "error": {
+    "code": "PAIR_AMBIGUOUS",
+    "message": "several repos in workspace \"default\"; pass --repo",
+    "field": "repo",
+    "retryable": false,
+    "details": {
+      "candidates": [
+        "acme/other",
+        "acme/widget"
+      ]
+    }
+  }
+}

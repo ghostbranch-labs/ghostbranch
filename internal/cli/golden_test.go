@@ -20,6 +20,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
+	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
 var update = flag.Bool("update", false, "rewrite golden files")
@@ -41,6 +42,14 @@ var dataSchemas = map[string]string{
 
 var rootPath = regexp.MustCompile(`<ROOT>[^"]*`)
 
+// pidNumber and pidField are a process id in a LOCKED holder's message and
+// details; it differs per run. The field becomes the string "<PID>" so the
+// golden stays valid JSON.
+var (
+	pidNumber = regexp.MustCompile(`pid [0-9]+`)
+	pidField  = regexp.MustCompile(`"pid": [0-9]+`)
+)
+
 // normalize replaces the temp dir with <ROOT> and uses / in those paths, so
 // goldens match on every OS.
 func normalize(out, root string) string {
@@ -48,6 +57,8 @@ func normalize(out, root string) string {
 	out = strings.ReplaceAll(out, strings.Trim(string(esc), `"`), "<ROOT>")
 	out = strings.ReplaceAll(out, filepath.ToSlash(root), "<ROOT>")
 	out = rootPath.ReplaceAllStringFunc(out, func(s string) string { return strings.ReplaceAll(s, `\\`, "/") })
+	out = pidNumber.ReplaceAllString(out, "pid <PID>")
+	out = pidField.ReplaceAllString(out, `"pid": "<PID>"`)
 	return normalizeSHAs(out)
 }
 
@@ -155,6 +166,8 @@ func TestGoldenContract(t *testing.T) {
 		{"feature_start_from", withFeature, []string{"feature", "start", "feat-y", "--from", "feat-x"}, 0},
 		{"feature_start_from_plan", withFeature, []string{"feature", "start", "feat-y", "--from", "feat-x", "--plan"}, 0},
 		{"feature_start_from_unknown", initOnly, []string{"feature", "start", "feat-y", "--from", "nope"}, 2},
+		{"gate_no_commits", func(te *testEnv) { initOnly(te); te.mustRun("feature", "start", "feat-x") }, []string{"gate", "feat-x"}, contract.NothingToPublish.Exit()},
+		{"promote_no_commits", func(te *testEnv) { initOnly(te); te.mustRun("feature", "start", "feat-x") }, []string{"promote", "feat-x", "--plan"}, contract.NothingToPublish.Exit()},
 		{"feature_start_from_behind", func(te *testEnv) {
 			withFeature(te)
 			testutil.Commit(te.t, te.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
@@ -353,6 +366,29 @@ jobs:
 		{"doctor", initOnly, []string{"doctor", "--repo", "acme/widget"}, 0},
 		{"doctor_no_pair", nil, []string{"doctor"}, 0},
 		{"doctor_failed", func(te *testEnv) { initOnly(te); delete(te.vars, "GHOSTBRANCH_TOKEN") }, []string{"doctor", "--repo", "acme/widget"}, 1},
+		{"doctor_unregistered", initOnly, []string{"doctor", "--repo", "acme/other"}, 1},
+		{"feature_pull_no_pr", withFeature, []string{"feature", "pull", "feat-x"}, contract.NoOpenPR.Exit()},
+		{"apply_plan_not_found", initOnly, []string{"apply", "20261005T120000Z-0a0b0c"}, contract.PlanNotFound.Exit()},
+		{"apply_plan_other_machine", func(te *testEnv) {
+			gatedFeature(te)
+			te.mustRun("promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--plan")
+			te.gonePlan = te.lastPlanID()
+			if err := os.Remove(filepath.Join(te.vars["GHOSTBRANCH_HOME"], "workspaces", "default", "plans", te.gonePlan+".json")); err != nil {
+				te.t.Fatal(err)
+			}
+			// No mirror either: the plan's ref can only come from the
+			// shadow repo (review M6a).
+			mirror := filepath.Join(te.vars["GHOSTBRANCH_HOME"], "workspaces", "default", "pairs", "acme__widget", "mirror.git")
+			if _, err := os.Stat(mirror); err != nil {
+				te.t.Fatal(err)
+			}
+			if err := os.RemoveAll(mirror); err != nil {
+				te.t.Fatal(err)
+			}
+		}, []string{"apply", "<GONE_PLAN>"}, contract.PlanNotFound.Exit()},
+		{"locked", func(te *testEnv) { initOnly(te); holdPairLock(te) }, []string{"sync"}, contract.Locked.Exit()},
+		{"pair_not_found", initOnly, []string{"agents", "status", "--repo", "acme/other"}, contract.PairNotFound.Exit()},
+		{"pair_ambiguous", twoPairs, []string{"status"}, contract.PairAmbiguous.Exit()},
 	}
 	for _, s := range scenarios {
 		t.Run(s.name, func(t *testing.T) {
@@ -377,6 +413,9 @@ jobs:
 				}
 				if a == "<OLD_JOB>" {
 					args[i] = te.oldJob
+				}
+				if a == "<GONE_PLAN>" {
+					args[i] = te.gonePlan
 				}
 			}
 			code, out, errOut := te.run(append(args, "--json")...)
@@ -487,6 +526,31 @@ func editConfig(te *testEnv, old, new string) {
 		te.t.Fatalf("config has no %q", old)
 	}
 	te.shadowCommit("ghostbranch", map[string]string{".ghostbranch.yml": strings.Replace(string(raw), old, new, 1)})
+}
+
+// holdPairLock takes acme/widget's pair lock as a gate started at the test
+// clock's time would, until the test ends.
+func holdPairLock(te *testEnv) {
+	te.t.Helper()
+	path := filepath.Join(te.vars["GHOSTBRANCH_HOME"], "workspaces", "default", "locks", "acme__widget.lock")
+	drop, err := workspace.Lock(path, time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC), "gate")
+	if err != nil {
+		te.t.Fatal(err)
+	}
+	te.t.Cleanup(drop)
+}
+
+// twoPairs registers acme/widget and acme/other, so a command with no
+// --repo outside a checkout can't tell which one.
+func twoPairs(te *testEnv) {
+	te.t.Helper()
+	initOnly(te)
+	dir, err := te.forge.AddRepo("acme/other", false)
+	if err != nil {
+		te.t.Fatal(err)
+	}
+	testutil.Commit(te.t, gitx.New(dir), "main", "initial", map[string]string{"README.md": "# other\n"})
+	te.mustRun("init", "acme/other")
 }
 
 // Plans, feature.json and the ledger are part of the contract too.

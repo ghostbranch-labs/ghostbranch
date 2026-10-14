@@ -131,3 +131,18 @@ func TestNextAfterAdoptedMissingCherryPicks(t *testing.T) {
 		t.Fatalf("exit %d, error %v, next %v", code, e, cmds)
 	}
 }
+
+// F-14: next after NO_OPEN_PR depends on why: never published is a promote.
+func TestNextAfterNoOpenPR(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	withFeature(te)
+	code, env := te.runJSON("feature", "pull", "feat-x")
+	e, _ := env["error"].(map[string]any)
+	if code != 2 || e["code"] != "NO_OPEN_PR" || e["retryable"] != false {
+		t.Fatalf("exit %d, env %v", code, env)
+	}
+	if !hasNext(env, "ghostbranch promote feat-x --plan --repo acme/widget") {
+		t.Fatalf("next = %v", nextCommands(env))
+	}
+}

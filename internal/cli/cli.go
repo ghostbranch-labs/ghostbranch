@@ -335,7 +335,7 @@ func (a *app) render(err error) int {
 		_, _ = fmt.Fprintf(a.env.Stderr, "%s %s\n", errSt.Warn("warning:"), w.Message)
 	}
 	if a.result != nil {
-		_, _ = fmt.Fprint(a.env.Stdout, human(a.result, outSt))
+		_, _ = fmt.Fprint(a.env.Stdout, withoutNothing(human(a.result, outSt), env.Error != nil))
 	}
 	if env.Error != nil {
 		_, _ = fmt.Fprintf(a.env.Stderr, "%s %s [%s]\n", errSt.Fail("error:"), env.Error.Message, env.Error.Code)

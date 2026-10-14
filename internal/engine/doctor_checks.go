@@ -70,7 +70,7 @@ func (d *doctorRun) findPair() {
 	case pub != "" && d.opt.Repo != "":
 		d.unregistered = pub
 	case pub != "":
-		d.noPair = fmt.Sprintf("this checkout's repo %s isn't set up in workspace %q (ghostbranch init %s sets it up)", pub, e.WS.Name, pub)
+		d.noPair = fmt.Sprintf("this checkout's repo %s isn't set up in workspace %q: ghostbranch init %s --adopt --plan sets it up if its shadow repo exists, else ghostbranch init %s --plan", pub, e.WS.Name, pub, pub)
 	default:
 		d.noPair = "not in a checkout of a registered public repo; pass --repo <owner/repo> to check a pair"
 	}
@@ -366,8 +366,10 @@ func (d *doctorRun) pairCheck(ctx context.Context) DoctorCheck {
 	e := d.e
 	switch {
 	case d.unregistered != "":
-		return DoctorCheck{Status: DoctorFail, Details: map[string]any{"public": d.unregistered},
-			Message: fmt.Sprintf("%s isn't set up in workspace %q", d.unregistered, e.WS.Name)}.withFix("ghostbranch", "init", d.unregistered)
+		pub := d.unregistered
+		return DoctorCheck{Status: DoctorFail, Details: map[string]any{"public": pub}, Unregistered: pub,
+			Message: fmt.Sprintf("%s isn't set up in workspace %q: ghostbranch init %s --adopt --plan if its shadow repo exists, else ghostbranch init %s --plan", pub, e.WS.Name, pub, pub)}.
+			withFix("ghostbranch", "init", pub, "--adopt", "--plan")
 	case d.pair == nil:
 		return skipped(d.noPair)
 	case e.Forge == nil:
@@ -384,7 +386,7 @@ func (d *doctorRun) pairCheck(ctx context.Context) DoctorCheck {
 	}
 	sh, err := e.Forge.GetRepo(ctx, p.Shadow)
 	if errors.Is(err, forge.ErrNotFound) {
-		return fail(repoProblem(p.Shadow, err), "ghostbranch", "init", p.Public)
+		return fail(repoProblem(p.Shadow, err), "ghostbranch", "init", p.Public, "--plan")
 	}
 	if err != nil {
 		return fail(repoProblem(p.Shadow, err))
@@ -399,7 +401,7 @@ func (d *doctorRun) pairCheck(ctx context.Context) DoctorCheck {
 	}
 	d.pc = pc
 	if _, ok, err := pc.git.Resolve(ctx, shadowRef(OverlayBranch)); err != nil || !ok {
-		return fail(fmt.Sprintf("the shadow repo %s has no %q overlay branch", p.Shadow, OverlayBranch), "ghostbranch", "init", p.Public)
+		return fail(fmt.Sprintf("the shadow repo %s has no %q overlay branch", p.Shadow, OverlayBranch), "ghostbranch", "init", p.Public, "--adopt", "--plan")
 	}
 	cfg, O, _, err := e.readConfig(ctx, pc)
 	if err != nil {

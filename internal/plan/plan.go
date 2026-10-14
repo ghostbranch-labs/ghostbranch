@@ -277,7 +277,14 @@ func Load(dir, ref string) (Plan, string, error) {
 	}
 	b, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return Plan{}, "", contract.Wrap(contract.BadFlag, ErrNotFound, "no plan %q", ref).WithField("plan")
+		// A well-formed ID with no file is PLAN_NOT_FOUND, which apply looks
+		// up in the shadow repo (F-18); a .json path that isn't there stays a
+		// bad flag.
+		code := contract.BadFlag
+		if ValidID(ref) {
+			code = contract.PlanNotFound
+		}
+		return Plan{}, "", contract.Wrap(code, ErrNotFound, "no plan %q", ref).WithField("plan")
 	}
 	if err != nil {
 		return Plan{}, "", contract.Wrap(contract.Internal, err, "read plan %q", ref)

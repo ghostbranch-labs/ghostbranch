@@ -240,7 +240,9 @@ func TestGateOverlayCollision(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	h.init()
-	h.startFeature("feat-x", map[string]string{".ghostbranch.yml": "mine\n"})
+	// feature.txt keeps the feature from being overlay-only, which stops
+	// earlier as NOTHING_TO_PUBLISH (F-07).
+	h.startFeature("feat-x", map[string]string{".ghostbranch.yml": "mine\n", "feature.txt": "x\n"})
 	_, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
 	_ = wantCode(t, err, contract.OverlayCollision)
 }
@@ -567,5 +569,182 @@ func TestGateListsTheCommitsForCurating(t *testing.T) {
 	}
 	if !reflect.DeepEqual(res.Commits, want) {
 		t.Fatalf("commits = %+v", res.Commits)
+	}
+}
+
+// gateLeftNoTrace fails t when the gate pushed anything or opened a gate PR
+// since pushes were counted.
+func gateLeftNoTrace(t *testing.T, h *harness, pushes int, name string) {
+	t.Helper()
+	if len(h.pushes) != pushes {
+		t.Fatalf("pushed: %+v", h.pushes[pushes:])
+	}
+	if pr, err := h.forge.FindOpenPR(h.ctx, shadowName, "ghostbranch-gate/"+name, "main"); err != nil || pr != nil {
+		t.Fatalf("gate PR %+v %v", pr, err)
+	}
+}
+
+// F-07: a feature with no commits of its own stops in seconds, before any
+// push, gate PR or ten-minute CI wait.
+func TestGateWithNoCommitsIsNothingToPublish(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	if _, _, err := h.eng.FeatureStart(h.ctx, h.pair, "feat-x"); err != nil {
+		t.Fatal(err)
+	}
+	pushes := len(h.pushes)
+	_, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
+	ce := wantCode(t, err, contract.NothingToPublish)
+	if ce.Details["feature"] != "feat-x" || ce.Details["reason"] != "no_commits" || !strings.Contains(ce.Message, "has no commits of its own yet") {
+		t.Fatalf("error = %+v", ce)
+	}
+	gateLeftNoTrace(t, h, pushes, "feat-x")
+}
+
+// The gate promote runs first stops the same way.
+func TestPromoteWithNoCommitsStopsBeforeGate(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	if _, _, err := h.eng.FeatureStart(h.ctx, h.pair, "feat-x"); err != nil {
+		t.Fatal(err)
+	}
+	pushes := len(h.pushes)
+	_, err := promote(h, engine.PromoteOptions{Mode: "preserve", PlanOnly: true})
+	if ce := wantCode(t, err, contract.NothingToPublish); ce.Details["reason"] != "no_commits" {
+		t.Fatalf("error = %+v", ce)
+	}
+	gateLeftNoTrace(t, h, pushes, "feat-x")
+}
+
+// Commits that touch only overlay paths or internal sections publish
+// nothing; the gate stops before CI in the default mode and in squash.
+func TestGateOfOverlayOnlyCommitsStopsBeforeCI(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name string
+		// setup makes the feature to gate; it returns its name and its own
+		// commits, oldest first.
+		setup func(h *harness) (string, []string)
+	}{
+		{"overlay paths only", func(h *harness) (string, []string) {
+			return "feat-x", []string{h.startFeature("feat-x", map[string]string{".ghostbranch/notes.md": "private\n"})}
+		}},
+		{"internal sections only", func(h *harness) (string, []string) {
+			return "feat-x", []string{h.startFeature("feat-x", map[string]string{"README.md": "# widget\n# BEGIN-INTERNAL\nship it on Friday\n# END-INTERNAL\n"})}
+		}},
+		// R13: commits that cancel each other out publish no change either.
+		{"commits that cancel out", func(h *harness) (string, []string) {
+			add := h.startFeature("feat-x", map[string]string{"x.txt": "x\n"})
+			drop := testutil.Commit(h.t, h.shadowGit(), "feat-x", "undo", map[string]string{"x.txt": testutil.Delete})
+			return "feat-x", []string{add, drop}
+		}},
+		// A stacked level compares with the published tree below it, not
+		// its parent's unstripped commit: the parent here has an internal
+		// section, so the two differ.
+		{"stacked, overlay paths only", func(h *harness) (string, []string) {
+			h.startFeature("feat-a", map[string]string{"a.txt": "a\n", "README.md": "# widget\n# BEGIN-INTERNAL\nship it on Friday\n# END-INTERNAL\n"})
+			if _, _, err := h.eng.FeatureStart(h.ctx, h.pair, "feat-x", engine.FeatureStartOptions{From: "feat-a"}); err != nil {
+				h.t.Fatal(err)
+			}
+			return "feat-x", []string{testutil.Commit(h.t, h.shadowGit(), "feat-x", "notes", map[string]string{".ghostbranch/notes.md": "private\n"})}
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			h := newHarness(t)
+			h.init()
+			name, own := c.setup(h)
+			pushes := len(h.pushes)
+			_, _, err := h.eng.Gate(h.ctx, h.pair, name)
+			ce := wantCode(t, err, contract.NothingToPublish)
+			if ce.Details["reason"] != "all_stripped" || !reflect.DeepEqual(ce.Details["dropped_empty"], own) {
+				t.Fatalf("gate: %+v", ce)
+			}
+			gateLeftNoTrace(t, h, pushes, name)
+			if strings.HasPrefix(c.name, "stacked") {
+				return
+			}
+			_, err = promote(h, engine.PromoteOptions{Mode: "squash", Message: "x", PlanOnly: true})
+			if ce := wantCode(t, err, contract.NothingToPublish); ce.Details["reason"] != "all_stripped" {
+				t.Fatalf("promote --mode squash: %+v", ce)
+			}
+			gateLeftNoTrace(t, h, pushes, name)
+		})
+	}
+}
+
+// A stack level with no commits of its own is refused, naming it.
+func TestStackLevelWithNoCommitsIsRefused(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.startFeature("feat-a", map[string]string{"a.txt": "a\n"})
+	if _, _, err := h.eng.FeatureStart(h.ctx, h.pair, "feat-b", engine.FeatureStartOptions{From: "feat-a"}); err != nil {
+		t.Fatal(err)
+	}
+	pushes := len(h.pushes)
+	_, _, err := h.eng.Gate(h.ctx, h.pair, "feat-b")
+	if ce := wantCode(t, err, contract.NothingToPublish); ce.Details["feature"] != "feat-b" || ce.Details["reason"] != "no_commits" {
+		t.Fatalf("error = %+v", ce)
+	}
+	gateLeftNoTrace(t, h, pushes, "feat-b")
+}
+
+// The update of an open PR with nothing new keeps promote's own answer, and
+// waivers add (which reads tree findings only) never stops on the check.
+func TestEmptyFeatureCheckLeavesUpdatesAndWaiversAlone(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.publishPreserve("feat-x")
+	_, err := promote(h, engine.PromoteOptions{Mode: "preserve", PlanOnly: true})
+	if ce := wantCode(t, err, contract.NothingToPublish); !strings.Contains(ce.Message, "already holds every change") || ce.Details["reason"] != nil {
+		t.Fatalf("update: %+v", ce)
+	}
+	if _, _, err := h.eng.FeatureStart(h.ctx, h.pair, "feat-y"); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = h.eng.WaiversAdd(h.ctx, h.pair, engine.WaiversAddOptions{Feature: "feat-y", IDs: []string{"f-000000000000"}, Reason: "test"})
+	if codeOf(err) == contract.NothingToPublish {
+		t.Fatalf("waivers add stopped on the empty-feature check: %v", err)
+	}
+}
+
+// F-07: NO_CI says why: the candidate has no workflow at all, or it has one
+// that never ran. A gate is never refused up front for having no
+// workflow: an external CI app posts checks without one.
+func TestNoCIMessageNamesMissingWorkflow(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name         string
+		dropCI       bool
+		reason, says string
+	}{
+		{"no workflow at all", true, "no_workflow", "the gate candidate has no workflow under .github/workflows (public main has none)"},
+		{"a workflow that never ran", false, "actions_disabled_or_untriggered", "or no workflow triggers on pull_request"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			h := newHarness(t)
+			if c.dropCI {
+				testutil.Commit(t, h.pubGit, "main", "drop CI", map[string]string{".github/workflows/ci.yml": testutil.Delete})
+			}
+			h.init()
+			h.forge.Checks = func(string, string) []forge.Check { return nil }
+			h.startFeature("feat-x", map[string]string{"x.txt": "x\n"})
+			res, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
+			ce := wantCode(t, err, contract.NoCI)
+			if ce.Details["reason"] != c.reason || !strings.Contains(ce.Message, c.says) {
+				t.Fatalf("error = %+v", ce)
+			}
+			// wait on the settled job re-reads the record and says the same.
+			_, _, err = h.eng.Wait(h.ctx, h.pair, "gate/feat-x/"+res.Candidate[:12], engine.WaitOptions{})
+			ce = wantCode(t, err, contract.NoCI)
+			if ce.Details["reason"] != c.reason || !strings.Contains(ce.Message, c.says) {
+				t.Fatalf("wait: %+v", ce)
+			}
+		})
 	}
 }

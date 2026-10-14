@@ -1,7 +1,12 @@
 package cli_test
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
@@ -89,5 +94,65 @@ func TestApplyLeakNextForAnOlderCommit(t *testing.T) {
 	}
 	if !slices.Contains(needsInput(next[0]), "--message") || !slices.Contains(needsInput(next[1]), "--curate") {
 		t.Fatalf("needs_input = %v, %v", next[0]["needs_input"], next[1]["needs_input"])
+	}
+}
+
+// F-18: next after PLAN_NOT_FOUND re-plans the feature whose gate matches,
+// on this pair.
+func TestNextAfterPlanNotFound(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	gatedFeature(te)
+	te.mustRun("promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--plan")
+	id := te.lastPlanID()
+	if err := os.Remove(filepath.Join(te.vars["GHOSTBRANCH_HOME"], "workspaces", "default", "plans", id+".json")); err != nil {
+		t.Fatal(err)
+	}
+	code, env := te.runJSON("apply", id)
+	n := nextOf(t, env)
+	if e, _ := env["error"].(map[string]any); code != 2 || e["code"] != "PLAN_NOT_FOUND" || len(n) != 1 ||
+		!slices.Equal(argv(n[0]), []string{"ghostbranch", "promote", "feat-x", "--plan", "--repo", "acme/widget"}) {
+		t.Fatalf("exit %d, env %v", code, env)
+	}
+}
+
+// Review M2: with several pairs and no --repo, PLAN_NOT_FOUND's status step
+// asks for --repo, so it runs once given; with it, apply looks the plan up.
+func TestNextAfterPlanNotFoundWithoutAPair(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	twoPairs(te)
+	code, env := te.runJSON("apply", "20261005T120000Z-0a0b0c")
+	n := nextOf(t, env)
+	if e, _ := env["error"].(map[string]any); code != 2 || e["code"] != "PLAN_NOT_FOUND" || len(n) != 1 ||
+		!slices.Equal(argv(n[0]), []string{"ghostbranch", "status"}) || !reflect.DeepEqual(n[0]["needs_input"], []any{"--repo"}) {
+		t.Fatalf("exit %d, env %v", code, env)
+	}
+	if code, out, errOut := te.run("status", "--repo", "acme/widget"); code != 0 {
+		t.Fatalf("status --repo: exit %d\n%s\n%s", code, out, errOut)
+	}
+}
+
+// Review M3: an apply --repo that names a repo that isn't set up says so
+// (PAIR_NOT_FOUND, with the init steps), not "pass --repo".
+func TestApplyWithAnUnregisteredRepoIsPairNotFound(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	code, env := te.runJSON("apply", "20261005T120000Z-0a0b0c", "--repo", "acme/other")
+	e, _ := env["error"].(map[string]any)
+	d, _ := e["details"].(map[string]any)
+	if code != 2 || e["code"] != "PAIR_NOT_FOUND" || d["public"] != "acme/other" || len(nextOf(t, env)) != 2 {
+		t.Fatalf("exit %d, env %v", code, env)
+	}
+	// Re-review N4: the ledger records the code the agent got.
+	raw, err := os.ReadFile(filepath.Join(te.vars["GHOSTBRANCH_HOME"], "workspaces", "default", "ledger.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	var last map[string]any
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &last); err != nil || last["op"] != "apply" || last["error_code"] != "PAIR_NOT_FOUND" {
+		t.Fatalf("last ledger entry %v %v", last, err)
 	}
 }

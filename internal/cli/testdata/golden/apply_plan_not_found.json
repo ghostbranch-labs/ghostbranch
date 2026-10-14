@@ -1,0 +1,32 @@
+{
+  "schema_version": "0.14",
+  "command": "apply",
+  "ok": false,
+  "exit_code": 2,
+  "data": {},
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "status",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "see the features, then plan the one you meant again with promote <feature> --plan",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
+  "error": {
+    "code": "PLAN_NOT_FOUND",
+    "message": "no plan 20261005T120000Z-0a0b0c on this machine or in acme/widget-shadow",
+    "field": "plan",
+    "retryable": false,
+    "details": {
+      "plan": "20261005T120000Z-0a0b0c",
+      "public": "acme/widget",
+      "reason": "unknown"
+    }
+  }
+}

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ghostbranch-labs/ghostbranch/internal/config"
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
@@ -73,5 +74,28 @@ func TestRelockRetriesOnlyABusyLock(t *testing.T) {
 	err = e.relock(context.Background(), &pairCtx{lockPath: busy, op: "wait"}, job)
 	if ce := contract.From(err); ce == nil || ce.Code != contract.Locked || !ce.Retryable || ce.Details["job"] != job || ce.Details["held_by"] == nil {
 		t.Fatalf("a busy lock: %+v", ce)
+	}
+}
+
+// NO_CI's reason is a finding only when the candidate was read: an
+// unreadable candidate gives no reason rather than a guess.
+func TestNoCIReasonOnlyWhenTheCandidateWasRead(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name   string
+		files  []string
+		known  bool
+		reason any
+	}{
+		{"no workflow", []string{}, true, "no_workflow"},
+		{"a workflow", []string{".github/workflows/ci.yml"}, true, "actions_disabled_or_untriggered"},
+		{"candidate unreadable", nil, false, nil},
+	} {
+		err := outcomeErr(checkOutcome{status: feature.ChecksNoCI}, 7, config.Gate{}, "acme/widget-shadow",
+			func() ([]string, bool) { return c.files, c.known })
+		ce := contract.From(err)
+		if ce == nil || ce.Code != contract.NoCI || ce.Details["reason"] != c.reason || ce.Details["shadow_pr"] != 7 {
+			t.Fatalf("%s: %+v", c.name, ce)
+		}
 	}
 }

@@ -25,7 +25,9 @@ func (a *app) doctorCmd() *cobra.Command {
 expiry, whether it can publish, and the permissions each command group needs), pair (both repos,
 the overlay and its config, shadow main, the managed files), guard (the pre-push hook in this
 checkout), state (this machine's records) and ci (the audit's summary). Each is ok, warn, fail or
-skipped, and names the command that fixes it. It never writes, never prompts and isn't ledgered.
+skipped, and names the command that fixes it. It changes nothing in your repos, records or
+keychain and never prompts; it fetches into its local copy of the pair (making it if needed) and
+refreshes the update check's cache. It isn't ledgered.
 In a checkout of a pair it checks that pair; --repo names another; with neither it skips the
 checks that need a pair. It exits 0 unless a check fails (DOCTOR_FAILED, details.failed).`,
 		Args: cobra.NoArgs,
@@ -166,6 +168,13 @@ func (a *app) doctorNext() []contract.Next {
 	var out []contract.Next
 	seen := map[string]bool{}
 	for _, c := range r.Checks {
+		if c.Status == engine.DoctorFail && c.Unregistered != "" {
+			if key := "init\x00" + c.Unregistered; !seen[key] {
+				seen[key] = true
+				out = append(out, a.initNexts(c.Unregistered)...)
+			}
+			continue
+		}
 		argv := c.FixArgv
 		key := strings.Join(argv, "\x00")
 		if c.Status != engine.DoctorFail || len(argv) == 0 || seen[key] {

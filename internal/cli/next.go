@@ -121,14 +121,9 @@ func (a *app) steps(err error) []contract.Next {
 			}
 		case contract.LeakFound, contract.MarkerInvalid:
 			return a.leakNext(ce)
-		case contract.PairAmbiguous:
+		case contract.PairNotFound:
 			if pub, _ := ce.Details["public"].(string); pub != "" {
-				return []contract.Next{
-					{Command: a.gb("init", pub, "--adopt", "--plan", "--json"),
-						Why: "its shadow repo already exists (set up on another machine, or in another GHOSTBRANCH_HOME): adopt it — this only registers the pair here and checks the shadow repo. If the shadow repo has a non-default name, adopt it with --shadow <owner/name> instead"},
-					{Command: a.gb("init", pub, "--plan", "--json"),
-						Why: "no shadow repo yet: create one"},
-				}
+				return a.initNexts(pub)
 			}
 		case contract.DoctorFailed:
 			return a.doctorNext()
@@ -233,6 +228,19 @@ func (a *app) steps(err error) []contract.Next {
 				return []contract.Next{{Command: a.scoped("wait", job),
 					Why: "another ghostbranch command held the lock when the result was ready; wait records it"}}
 			}
+			who := "another ghostbranch command"
+			if h, _ := ce.Details["held_by"].(map[string]any); h != nil {
+				if text := workspace.HolderText(h); text != "" {
+					who += " (" + text + ")"
+				}
+			}
+			if a.personOnly() {
+				// Only a person can finish it: say so, as its own next
+				// does (review M7).
+				return []contract.Next{{Command: a.again(true), NeedsHuman: true,
+					Why: who + " holds the lock; wait a few seconds for it to end, then a person runs this again in their own terminal"}}
+			}
+			return []contract.Next{{Command: a.again(false), Why: who + " holds the lock; wait a few seconds for it to end, then run this again"}}
 		case contract.FeatureMoved:
 			if f, _ := ce.Details["feature"].(string); f != "" {
 				why := "the feature changed while it was being closed and nothing was deleted; look at it again before closing it"
@@ -496,6 +504,39 @@ func (a *app) steps(err error) []contract.Next {
 				{Command: a.scoped("feature", "pull", f), Why: "someone pushed commits to " + f + "'s public PR on GitHub (error.details.foreign); bring them into the feature branch: an update never overwrites them"},
 				{Command: a.scoped("gate", f), Why: "then gate it, and promote again: the update keeps their commits"},
 			}
+		case contract.PlanNotFound:
+			pub, _ := ce.Details["public"].(string)
+			onPair := func(args ...string) []string {
+				if pub != "" {
+					args = append(args, "--repo", pub)
+				}
+				return a.gb(args...)
+			}
+			if f, _ := ce.Details["feature"].(string); f != "" {
+				return []contract.Next{{Command: onPair("promote", f, "--plan"),
+					Why: "plan files stay on the machine that made them: plan " + f + " again here (a person approves it), or apply the plan on the machine that made it"}}
+			}
+			if pub == "" {
+				// No pair was found to look in (several pairs, none, or
+				// not a checkout): status needs one too (review M2).
+				return []contract.Next{{Command: a.gb("status"), NeedsInput: []string{"--repo"},
+					Why: "pass --repo <owner/repo> to see that pair's features, then plan the one you meant again with promote <feature> --plan; apply <plan> --repo <owner/repo> looks the plan up in that pair's shadow repo"}}
+			}
+			return []contract.Next{{Command: onPair("status"), Why: "see the features, then plan the one you meant again with promote <feature> --plan"}}
+		case contract.NoOpenPR:
+			f, _ := ce.Details["feature"].(string)
+			if f == "" {
+				break
+			}
+			switch reason, _ := ce.Details["reason"].(string); reason {
+			case "not_published":
+				return []contract.Next{{Command: a.scoped("promote", f, "--plan"), Why: "nothing of " + f + " is public yet; publish it first"}}
+			case "merged":
+				return []contract.Next{{Command: a.scoped("sync"), Why: "sync closes the merged feature"}}
+			case "closed", "branch_gone":
+				return []contract.Next{{Command: a.scoped("feature", "show", f),
+					Why: "a person decides: promote " + f + " again to open a new PR, or close the feature"}}
+			}
 		case contract.BadFlag:
 			switch ce.Field {
 			case "message":
@@ -684,6 +725,32 @@ func (a *app) mergedThenSync(r *engine.ApplyResult) contract.Next {
 		why = "a maintainer reviews and merges the PRs on GitHub from the bottom up (#" + strconv.Itoa(r.PRs[0].Number) + " first, each into main); then sync closes each merged feature and moves the branches above it onto main"
 	}
 	return contract.Next{Command: a.scoped("sync"), Why: why}
+}
+
+// personOnly is whether this command is one only a person can finish: it
+// asks for a console or an approval code (agents allow, waivers add,
+// login, and apply without --yes).
+func (a *app) personOnly() bool {
+	switch a.command {
+	case "agents allow", "waivers add", "login":
+		return true
+	case "apply":
+		return !slices.ContainsFunc(a.args, func(arg string) bool { return arg == "--yes" || arg == "--yes=true" })
+	}
+	return false
+}
+
+// initNexts sets up pub on this machine: adopt its shadow repo when it
+// exists (another machine set it up, or another GHOSTBRANCH_HOME), else
+// create one. Both are dry runs. PAIR_NOT_FOUND and doctor's failing pair
+// check (F-27) give exactly these.
+func (a *app) initNexts(pub string) []contract.Next {
+	return []contract.Next{
+		{Command: a.gb("init", pub, "--adopt", "--plan", "--json"),
+			Why: "its shadow repo already exists (set up on another machine, or in another GHOSTBRANCH_HOME): adopt it — this only registers the pair here and checks the shadow repo. If the shadow repo has a non-default name, adopt it with --shadow <owner/name> instead"},
+		{Command: a.gb("init", pub, "--plan", "--json"),
+			Why: "no shadow repo yet: create one"},
+	}
 }
 
 // waitNext finishes the pending gate job.

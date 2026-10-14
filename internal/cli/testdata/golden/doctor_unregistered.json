@@ -1,0 +1,118 @@
+{
+  "schema_version": "0.14",
+  "command": "doctor",
+  "ok": false,
+  "exit_code": 1,
+  "data": {
+    "checks": [
+      {
+        "id": "tools",
+        "status": "ok",
+        "message": "git 2.47.1; ghostbranch (unknown), commit (unknown)",
+        "fix": "",
+        "details": {
+          "commit": "(unknown)",
+          "git": "2.47.1",
+          "git_minimum": "2.38",
+          "version": "(unknown)"
+        }
+      },
+      {
+        "id": "token",
+        "status": "ok",
+        "message": "the unknown token from GHOSTBRANCH_TOKEN works, as octo; permissions not checked: no pair (run doctor in a checkout of the public repo, or pass --repo)",
+        "fix": "",
+        "details": {
+          "account": "octo",
+          "can_publish": "unknown",
+          "kind": "unknown",
+          "source": "GHOSTBRANCH_TOKEN"
+        }
+      },
+      {
+        "id": "pair",
+        "status": "fail",
+        "message": "acme/other isn't set up in workspace \"default\": ghostbranch init acme/other --adopt --plan if its shadow repo exists, else ghostbranch init acme/other --plan",
+        "fix": "ghostbranch init acme/other --adopt --plan",
+        "details": {
+          "public": "acme/other"
+        }
+      },
+      {
+        "id": "guard",
+        "status": "skipped",
+        "message": "no pair, so no public repo to guard (see pair)",
+        "fix": "",
+        "details": {}
+      },
+      {
+        "id": "state",
+        "status": "ok",
+        "message": "workspace \"default\"; the records are readable, none is newer than this binary, and no gate job has been pending for over an hour (features not checked: no readable pair); its state directories are private to you",
+        "fix": "",
+        "details": {
+          "dir": "<ROOT>/home/workspaces/default",
+          "workspace": "default"
+        }
+      },
+      {
+        "id": "ci",
+        "status": "skipped",
+        "message": "no readable pair to audit (see pair)",
+        "fix": "",
+        "details": {}
+      }
+    ],
+    "update_check": {
+      "enabled": false,
+      "off_reason": "development build",
+      "checked_at": null,
+      "current": "",
+      "latest": "",
+      "security": false,
+      "advisories": [],
+      "upgrade": "",
+      "error": "",
+      "override": ""
+    }
+  },
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "init",
+        "acme/other",
+        "--adopt",
+        "--plan",
+        "--json"
+      ],
+      "why": "its shadow repo already exists (set up on another machine, or in another GHOSTBRANCH_HOME): adopt it — this only registers the pair here and checks the shadow repo. If the shadow repo has a non-default name, adopt it with --shadow <owner/name> instead",
+      "needs_human": false,
+      "needs_input": []
+    },
+    {
+      "command": [
+        "ghostbranch",
+        "init",
+        "acme/other",
+        "--plan",
+        "--json"
+      ],
+      "why": "no shadow repo yet: create one",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
+  "error": {
+    "code": "DOCTOR_FAILED",
+    "message": "1 check(s) failed: pair",
+    "field": null,
+    "retryable": false,
+    "details": {
+      "failed": [
+        "pair"
+      ]
+    }
+  }
+}

@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.13",
+  "schema_version": "0.14",
   "command": "reference",
   "ok": true,
   "exit_code": 0,
@@ -102,7 +102,7 @@
         "path": "doctor",
         "use": "doctor",
         "short": "Check this machine's setup and the pair, and name each fix; changes nothing",
-        "long": "doctor runs six checks, in order: tools (git and this binary), token (its source, account,\nexpiry, whether it can publish, and the permissions each command group needs), pair (both repos,\nthe overlay and its config, shadow main, the managed files), guard (the pre-push hook in this\ncheckout), state (this machine's records) and ci (the audit's summary). Each is ok, warn, fail or\nskipped, and names the command that fixes it. It never writes, never prompts and isn't ledgered.\nIn a checkout of a pair it checks that pair; --repo names another; with neither it skips the\nchecks that need a pair. It exits 0 unless a check fails (DOCTOR_FAILED, details.failed).",
+        "long": "doctor runs six checks, in order: tools (git and this binary), token (its source, account,\nexpiry, whether it can publish, and the permissions each command group needs), pair (both repos,\nthe overlay and its config, shadow main, the managed files), guard (the pre-push hook in this\ncheckout), state (this machine's records) and ci (the audit's summary). Each is ok, warn, fail or\nskipped, and names the command that fixes it. It changes nothing in your repos, records or\nkeychain and never prompts; it fetches into its local copy of the pair (making it if needed) and\nrefreshes the update check's cache. It isn't ledgered.\nIn a checkout of a pair it checks that pair; --repo names another; with neither it skips the\nchecks that need a pair. It exits 0 unless a check fails (DOCTOR_FAILED, details.failed).",
         "read_only": true,
         "flags": []
       },

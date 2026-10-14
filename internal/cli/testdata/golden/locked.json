@@ -1,0 +1,34 @@
+{
+  "schema_version": "0.14",
+  "command": "sync",
+  "ok": false,
+  "exit_code": 1,
+  "data": {},
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "sync",
+        "--json"
+      ],
+      "why": "another ghostbranch command (gate, pid <PID>, since 2026-10-05T12:00:00Z) holds the lock; wait a few seconds for it to end, then run this again",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
+  "error": {
+    "code": "LOCKED",
+    "message": "another ghostbranch operation (gate, pid <PID>, since 2026-10-05T12:00:00Z) holds the lock <ROOT>/home/workspaces/default/locks/acme__widget.lock",
+    "field": null,
+    "retryable": true,
+    "details": {
+      "held_by": {
+        "op": "gate",
+        "pid": "<PID>",
+        "since": "2026-10-05T12:00:00Z"
+      },
+      "path": "<ROOT>/home/workspaces/default/locks/acme__widget.lock"
+    }
+  }
+}
