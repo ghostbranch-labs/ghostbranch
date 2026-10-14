@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "feature archive data",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["feature", "changed", "archived", "moved", "gate_pr", "public_pr", "branch", "preview"],
+  "properties": {
+    "feature": { "type": "string", "minLength": 1 },
+    "changed": { "description": "false when the feature was already archived", "type": "boolean" },
+    "archived": { "description": "the record's archive; null under --plan before it exists", "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/archived" }] },
+    "moved": { "description": "every shadow ref created or deleted, with its SHA; empty under --plan and when nothing changed", "type": "object", "additionalProperties": { "$ref": "common.schema.json#/$defs/sha" } },
+    "gate_pr": { "description": "the gate draft PR closed; null when none was open", "type": ["integer", "null"], "minimum": 1 },
+    "public_pr": { "type": "integer", "minimum": 0 },
+    "branch": { "description": "the PR's public branch: push fixes here", "type": "string" },
+    "preview": { "oneOf": [{ "type": "null" }, { "$ref": "preview.schema.json" }] }
+  }
+}

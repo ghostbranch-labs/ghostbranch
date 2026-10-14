@@ -256,6 +256,26 @@ func TestOnlyPromoteAndApplyReachThePublicRepo(t *testing.T) {
 		}
 	}
 
+	// feature archive (6.5) writes only to the shadow repo: its --plan, and
+	// the hand-off of a published feature whose PR is open.
+	h.publish("third")
+	baseline = h.publicRefs()
+	n = len(h.pushes)
+	h.eng.DryRun = true
+	_, _, err = h.eng.FeatureArchive(h.ctx, h.pair, "third")
+	run("feature archive --plan", err, "")
+	h.eng.DryRun = false
+	_, _, err = h.eng.FeatureArchive(h.ctx, h.pair, "third")
+	run("feature archive", err, "")
+	if len(h.pushes) == n {
+		t.Fatal("feature archive did not push")
+	}
+	for _, p := range h.pushes[n:] {
+		if p.remote != "shadow" {
+			t.Fatalf("%s pushed to %s: %+v", p.op, p.remote, p)
+		}
+	}
+
 	// remove is local: it unregisters the pair and touches no repo. It goes
 	// last, since nothing runs on the pair after it.
 	baseline = h.publicRefs()
@@ -297,6 +317,10 @@ func TestAShadowRepoTurnedPublicStopsEverything(t *testing.T) {
 		_, _, steps["feature show"] = h.eng.FeatureShow(h.ctx, h.pair, "good")
 		_, _, steps["feature abandon"] = h.eng.FeatureAbandon(h.ctx, h.pair, "good", false)
 		_, _, steps["feature close"] = h.eng.FeatureClose(h.ctx, h.pair, "good")
+		_, _, steps["feature archive"] = h.eng.FeatureArchive(h.ctx, h.pair, "good")
+		h.eng.DryRun = true
+		_, _, steps["feature archive --plan"] = h.eng.FeatureArchive(h.ctx, h.pair, "good")
+		h.eng.DryRun = false
 		for step, err := range steps {
 			if codeOf(err) != contract.ShadowNotPrivate {
 				t.Errorf("%s: want SHADOW_NOT_PRIVATE, got %v", step, err)

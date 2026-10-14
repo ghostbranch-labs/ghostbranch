@@ -162,7 +162,8 @@ const (
 	// a plan) isn't set up in this workspace and GHOSTBRANCH_HOME.
 	// details.public names it when it can.
 	PairNotFound Code = "PAIR_NOT_FOUND"
-	// NoOpenPR means feature pull found no open public PR for the feature.
+	// NoOpenPR means feature pull or feature archive found no open public PR
+	// for the feature.
 	// details: feature, reason (not_published, merged, closed, branch_gone),
 	// public_pr once it was published.
 	NoOpenPR Code = "NO_OPEN_PR"

@@ -85,7 +85,7 @@ func (e *Engine) FeaturePull(ctx context.Context, p workspace.Pair, opt PullOpti
 		return nil, warns, err
 	}
 	if u == nil {
-		return nil, warns, e.noOpenPR(ctx, pc, m, name)
+		return nil, warns, e.noOpenPRFor(ctx, pc, m, name, "feature pull")
 	}
 	// An update Ghostbranch pushed but never recorded is its own, not
 	// someone else's: adopting it would rewrite the feature with copies of
@@ -165,15 +165,15 @@ func (e *Engine) FeaturePull(ctx context.Context, p workspace.Pair, opt PullOpti
 	return res, warns, nil
 }
 
-// noOpenPR is NO_OPEN_PR for a feature prHead found no open PR for, naming
-// why (F-14): never published, its PR merged or closed, or its public
-// branch gone. It reads the PR again; a read that fails is that read's
-// error, never a guessed reason.
-func (e *Engine) noOpenPR(ctx context.Context, pc *pairCtx, m feature.Meta, name string) error {
+// noOpenPRFor is NO_OPEN_PR from op ("feature pull" or "feature archive")
+// for a feature with no open PR, naming why (F-14): never published, its
+// PR merged or closed, or its public branch gone. It reads the PR again;
+// a read that fails is that read's error, never a guessed reason.
+func (e *Engine) noOpenPRFor(ctx context.Context, pc *pairCtx, m feature.Meta, name, op string) error {
 	d := map[string]any{"feature": name}
 	none := func(reason, why string) error {
 		d["reason"] = reason
-		return contract.New(contract.NoOpenPR, "feature pull brings in commits from a feature's open public PR, and %s has none: %s", name, why).
+		return contract.New(contract.NoOpenPR, "%s needs a feature's open public PR, and %s has none: %s", op, name, why).
 			WithField("feature").WithDetails(d)
 	}
 	if m.Promoted == nil || m.Promoted.PublicPR == 0 {
@@ -199,7 +199,7 @@ func (e *Engine) noOpenPR(ctx context.Context, pc *pairCtx, m feature.Meta, name
 	}
 	// Open, with its branch, a moment after prHead saw otherwise: it changed
 	// while this ran.
-	return contract.New(contract.RefMoved, "public PR #%d of %s changed while feature pull read it; run it again", n, name)
+	return contract.New(contract.RefMoved, "public PR #%d of %s changed while %s read it; run it again", n, name, op)
 }
 
 // pullHead is the feature head that holds the PR's commits (u), and the
