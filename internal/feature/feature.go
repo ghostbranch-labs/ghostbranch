@@ -174,6 +174,22 @@ type AdoptedCommit struct {
 	Folded  bool   `json:"folded,omitempty"`
 }
 
+// ArchiveRefPrefix holds the archive refs in the shadow repo: a feature
+// handed off to the public repo (6.5) keeps its shadow branch's head there.
+const ArchiveRefPrefix = "refs/ghostbranch/archive/"
+
+// ArchiveRef is feature name's archive ref in the shadow repo.
+func ArchiveRef(name string) string { return ArchiveRefPrefix + name }
+
+// Archived records a feature handed off to the public repo: its shadow
+// branch was moved to Ref, at Head, at At. Its PR is fixed by pushing to
+// the PR's branch; promote, gate and feature pull refuse it.
+type Archived struct {
+	At   time.Time `json:"at"`
+	Ref  string    `json:"ref"`
+	Head string    `json:"head"`
+}
+
 // Meta is feature.json.
 type Meta struct {
 	SchemaVersion string    `json:"schema_version"`
@@ -192,6 +208,10 @@ type Meta struct {
 	// restacked onto: the feature's own commits are ForkedAt..head. Empty
 	// for a feature started from main.
 	ForkedAt string `json:"forked_at,omitempty"`
+	// Archived is set once the feature was handed off to the public repo
+	// (6.5); nil otherwise. It is optional, so records stay at 0.12: an
+	// older binary ignores it and reads the feature as branch_gone.
+	Archived *Archived `json:"archived,omitempty"`
 }
 
 // Encode serializes m as indented JSON with a trailing newline.
@@ -249,6 +269,10 @@ const (
 	// branch has commits the PR doesn't: gate it, then promote updates the
 	// PR.
 	StatePRBehind State = "pr_behind"
+	// StateArchived is a published feature handed off to the public repo:
+	// its shadow branch is archived and its open PR is fixed by pushing to
+	// it. Merged reads merged (or merged_moved), closed reads pr_closed.
+	StateArchived State = "archived"
 )
 
 // StateInput is everything state depends on.
@@ -280,6 +304,14 @@ func StateOf(in StateInput) State {
 	switch {
 	case m.Abandoned:
 		return StateAbandoned
+	case m.Archived != nil && in.PRState == "merged" && !in.Moved:
+		return StateMerged
+	case m.Archived != nil && in.PRState == "merged":
+		return StateMergedMoved
+	case m.Archived != nil && in.PRState == "closed":
+		return StatePRClosed
+	case m.Archived != nil:
+		return StateArchived
 	case !in.BranchExists:
 		return StateBranchGone
 	case m.Promoted != nil && in.PRState == "merged" && !in.Moved:

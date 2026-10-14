@@ -6,7 +6,7 @@
   "required": ["name", "state", "branch", "head", "base", "drift", "gate", "public_pr", "pr_state", "plan_id", "moved", "abandoned", "parent", "children", "stack"],
   "properties": {
     "name": { "type": "string" },
-    "state": { "enum": ["draft", "in_review", "gate_passed", "published", "merged", "merged_moved", "pr_closed", "branch_gone", "abandoned", "unreadable", "parent_stale", "public_pr_needs_update", "pr_behind"] },
+    "state": { "enum": ["draft", "in_review", "gate_passed", "published", "merged", "merged_moved", "pr_closed", "branch_gone", "abandoned", "unreadable", "parent_stale", "public_pr_needs_update", "pr_behind", "archived"] },
     "branch": { "type": "string" },
     "head": { "description": "the feature branch's head; empty when the branch is gone", "$ref": "common.schema.json#/$defs/shaOrEmpty" },
     "base": { "description": "empty when the record couldn't be read", "$ref": "common.schema.json#/$defs/shaOrEmpty" },

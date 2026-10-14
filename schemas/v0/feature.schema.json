@@ -14,6 +14,7 @@
     "abandoned": { "type": "boolean" },
     "parent": { "description": "the feature this one is stacked on, or main; absent means main, as in every record before 0.11", "type": "string", "minLength": 1 },
     "forked_at": { "description": "the parent's commit the feature was branched from or last restacked onto; its own commits are forked_at..head", "$ref": "common.schema.json#/$defs/shaOrEmpty" },
+    "archived": { "description": "set once the feature was handed off to the public repo; absent otherwise", "$ref": "common.schema.json#/$defs/archived" },
     "gate": {
       "oneOf": [
         { "type": "null" },

@@ -50,6 +50,15 @@
         "failed": { "type": "array", "items": { "$ref": "#/$defs/checkId" } }
       }
     },
+    "archived": {
+      "description": "a feature handed off to the public repo (6.5): its shadow branch was moved to ref, at head, at at",
+      "type": "object", "additionalProperties": false, "required": ["at", "ref", "head"],
+      "properties": {
+        "at": { "$ref": "#/$defs/time" },
+        "ref": { "type": "string", "pattern": "^refs/ghostbranch/archive/" },
+        "head": { "$ref": "#/$defs/sha" }
+      }
+    },
     "sha": { "type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$" },
     "shaOrEmpty": { "type": "string", "pattern": "^([0-9a-f]{40}([0-9a-f]{24})?)?$" },
     "repo": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },

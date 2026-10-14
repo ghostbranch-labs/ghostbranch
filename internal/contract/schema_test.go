@@ -456,4 +456,25 @@ func TestSubProject61a2Schemas(t *testing.T) {
 	if !slices.Contains(r.Properties.State.Enum, "pr_behind") {
 		t.Errorf("feature-report state enum lacks pr_behind")
 	}
+	if !slices.Contains(r.Properties.State.Enum, "archived") {
+		t.Errorf("feature-report state enum lacks archived")
+	}
+	var c struct {
+		Properties struct {
+			State struct {
+				Enum []string `json:"enum"`
+			} `json:"state"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(schemaFile(t, "feature-close.schema.json"), &c); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(c.Properties.State.Enum, "archived") {
+		t.Errorf("feature-close state enum lacks archived")
+	}
+	archived := func(ref string) string {
+		return recordJSON(`,"archived":{"at":"2026-10-14T12:00:00Z","ref":"` + ref + `","head":"` + sha40 + `"}`)
+	}
+	testutil.ValidateSchema(t, "feature.schema.json", []byte(archived("refs/ghostbranch/archive/b")))
+	schemaRejects(t, "feature.schema.json", archived("refs/heads/b")) // the ref must be under refs/ghostbranch/archive/
 }
