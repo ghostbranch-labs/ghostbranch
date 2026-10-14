@@ -31,7 +31,7 @@ type FeatureReport struct {
 	PublicPR  *int         `json:"public_pr"` // nil when never published
 	PRState   string       `json:"pr_state"`  // "", open, merged, closed, unknown
 	PlanID    string       `json:"plan_id"`
-	Moved     bool         `json:"moved"` // since publish; false when unpublished; meaningless when the branch is gone (branch_gone reads only PRState)
+	Moved     bool         `json:"moved"` // since publish; false when unpublished; for an archived feature, its archive head (and any archive ref) against the published head; otherwise meaningless when the branch is gone (branch_gone reads only PRState)
 	Abandoned bool         `json:"abandoned"`
 	// PR is how its open public PR compares with the feature; nil unless
 	// it is published, the PR is open and the feature's branch exists.
@@ -51,10 +51,8 @@ type FeatureReport struct {
 	unreadable string
 	// gateForPublished: the feature has no gate, or its gate is for the
 	// head that was published and its gate branch is gone or still at the
-	// gate's candidate, and an archive ref left by a partial archive (6.5)
-	// holds the published head. Otherwise the gate or the archive may hold
-	// commits never published, and a branch_gone feature doesn't close
-	// unattended. Set
+	// gate's candidate. Otherwise the gate may hold commits never
+	// published, and a branch_gone feature doesn't close unattended. Set
 	// only for a merged branch_gone feature, the one case
 	// ClosableWithoutConsole reads it.
 	gateForPublished bool
@@ -248,6 +246,7 @@ func (e *Engine) surveyOne(ctx context.Context, pc *pairCtx, name, pm, O string)
 	if r.Gate != nil && stackStale {
 		r.Gate.Fresh = false
 	}
+	archiveMoved := false
 	if m.Promoted != nil {
 		n := m.Promoted.PublicPR
 		r.PublicPR, r.PlanID = &n, m.Promoted.PlanID
@@ -275,6 +274,17 @@ func (e *Engine) surveyOne(ctx context.Context, pc *pairCtx, name, pm, O string)
 		// an old checkout, or by an older binary) may hold new private
 		// commits: moved, so a person closes it (P4).
 		r.Moved = base == "" || cur != base || (m.Archived != nil && exists && head != m.Archived.Head)
+		// The archive ref a close would delete, marked in the record or
+		// left by an archive that stopped before marking it, closes
+		// unattended only when it holds the head that was published:
+		// otherwise it may hold commits never published (R9).
+		arch, hasArch, err := pc.git.Resolve(ctx, archiveRef(name))
+		if err != nil {
+			return FeatureReport{}, nil, internalErr(err, "read archive ref "+remoteArchiveRef(name))
+		}
+		if hasArch && arch != m.Promoted.FeatureHead {
+			r.Moved, archiveMoved = true, true
+		}
 		// A branch_gone feature has nothing to compare with its PR.
 		if r.PRState == prOpen && exists {
 			var ws []contract.Warning
@@ -334,22 +344,17 @@ func (e *Engine) surveyOne(ctx context.Context, pc *pairCtx, name, pm, O string)
 	}
 	r.State = feature.StateOf(feature.StateInput{Meta: m, BranchExists: exists, Head: head, PublicMain: pm,
 		Overlay: O, PRState: r.PRState, Moved: r.Moved, ParentMoved: st.parentMoved, StackStale: stackStale, Behind: behind})
+	if r.State == feature.StateBranchGone && r.PRState == prMerged && archiveMoved {
+		// The branch lives on in an unmarked archive that moved: a person
+		// closes it.
+		r.State = feature.StateMergedMoved
+	}
 	// Only a merged branch_gone feature needs to know whether its gate is
 	// for what was published (ClosableWithoutConsole), so only it reads the
 	// gate branch.
 	if r.State == feature.StateBranchGone && r.PRState == prMerged {
 		if r.gateForPublished, err = gateIsForPublished(ctx, pc, name, m); err != nil {
 			return FeatureReport{}, nil, err
-		}
-		// An archive that stopped before its record was marked left the
-		// branch in its archive ref, which the close deletes: it closes
-		// unattended only when it holds what was published (R9).
-		if r.gateForPublished {
-			arch, ok, err := pc.git.Resolve(ctx, archiveRef(name))
-			if err != nil {
-				return FeatureReport{}, nil, internalErr(err, "read archive ref "+remoteArchiveRef(name))
-			}
-			r.gateForPublished = !ok || arch == e.publishedHead(m)
 		}
 	}
 	return r, warns, nil

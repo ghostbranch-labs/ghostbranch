@@ -63,7 +63,8 @@ func TestAnArchivedFeatureWhoseBranchCameBackIsMoved(t *testing.T) {
 	h.init()
 	pr := h.archived("feat-x")
 	sg := h.shadowGit()
-	if err := sg.UpdateRef(h.ctx, "refs/heads/feat-x", h.shadowRefs()[archiveRefX]); err != nil {
+	arch := h.shadowRefs()[archiveRefX]
+	if err := sg.UpdateRef(h.ctx, "refs/heads/feat-x", arch); err != nil {
 		t.Fatal(err)
 	}
 	back := testutil.Commit(t, sg, "feat-x", "pushed from an old checkout", map[string]string{"old.txt": "old\n"})
@@ -72,7 +73,7 @@ func TestAnArchivedFeatureWhoseBranchCameBackIsMoved(t *testing.T) {
 		t.Fatalf("report = %+v", r)
 	}
 	res, _ := h.syncOK(engine.SyncOptions{})
-	if len(res.Closed) != 0 || h.shadowRefs()["refs/heads/feat-x"] != back {
+	if refs := h.shadowRefs(); len(res.Closed) != 0 || refs["refs/heads/feat-x"] != back || refs[archiveRefX] != arch {
 		t.Fatalf("sync closed it unattended: %+v", res.Closed)
 	}
 }
@@ -150,28 +151,85 @@ func TestSyncClosesAPartlyArchivedFeature(t *testing.T) {
 	}
 }
 
+// partlyArchivedAhead is partlyArchived for a feature archived with a
+// commit it never published: the archive ref holds it. It returns the PR,
+// the published head and the archive's SHA.
+func (h *harness) partlyArchivedAhead(name string) (int, string, string) {
+	h.t.Helper()
+	pr, _ := h.publish(name)
+	published := h.head(name)
+	testutil.Commit(h.t, h.shadowGit(), name, "never published", map[string]string{"later.txt": "later\n"})
+	h.forge.ClosePRErr = errors.New("connection reset")
+	if _, _, err := h.eng.FeatureArchive(h.ctx, h.pair, name); err == nil {
+		h.t.Fatal("the archive was meant to stop at the gate PR")
+	}
+	h.forge.ClosePRErr = nil
+	if h.meta(name).Archived != nil {
+		h.t.Fatal("the record was meant to stay unmarked")
+	}
+	return pr, published, h.shadowRefs()[feature.ArchiveRef(name)]
+}
+
+// leftForAPerson checks a merged feature reads merged_moved, and that sync
+// closes nothing and leaves the archive ref at arch.
+func (h *harness) leftForAPerson(name, arch string) {
+	h.t.Helper()
+	if r := h.report(name); r.State != feature.StateMergedMoved || !r.Moved || engine.ClosableWithoutConsole(r) {
+		h.t.Fatalf("report = %+v", r)
+	}
+	res, _ := h.syncOK(engine.SyncOptions{})
+	if len(res.Closed) != 0 || h.shadowRefs()[feature.ArchiveRef(name)] != arch {
+		h.t.Fatalf("sync closed it unattended: %+v", res.Closed)
+	}
+}
+
 // The same, archived with commits it never published: the archive holds
 // them, so its merge needs a person, as for a marked archive (R9).
 func TestSyncLeavesAPartlyArchivedFeatureWithUnpublishedCommits(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	h.init()
-	pr, _ := h.publish("feat-x")
-	testutil.Commit(t, h.shadowGit(), "feat-x", "never published", map[string]string{"later.txt": "later\n"})
-	h.forge.ClosePRErr = errors.New("connection reset")
-	if _, _, err := h.eng.FeatureArchive(h.ctx, h.pair, "feat-x"); err == nil {
-		t.Fatal("the archive was meant to stop at the gate PR")
-	}
-	h.forge.ClosePRErr = nil
-	arch := h.shadowRefs()[archiveRefX]
+	pr, _, arch := h.partlyArchivedAhead("feat-x")
 	h.forge.SetPRMerged(publicName, pr)
-	if r := h.report("feat-x"); engine.ClosableWithoutConsole(r) {
-		t.Fatalf("report = %+v", r)
+	h.leftForAPerson("feat-x", arch)
+}
+
+// And with its shadow branch pushed back at the published head (from a
+// working clone, say): the branch reads unmoved, but the archive ref the
+// close would delete still holds the unpublished commit.
+func TestSyncLeavesAPartialArchiveWhoseBranchCameBackAtThePublishedHead(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	pr, published, arch := h.partlyArchivedAhead("feat-x")
+	if arch == published {
+		t.Fatal("the archive was meant to hold an unpublished commit")
 	}
-	res, _ := h.syncOK(engine.SyncOptions{})
-	if len(res.Closed) != 0 || h.shadowRefs()[archiveRefX] != arch {
-		t.Fatalf("sync closed it unattended: %+v", res.Closed)
+	if err := h.shadowGit().UpdateRef(h.ctx, "refs/heads/feat-x", published); err != nil {
+		t.Fatal(err)
 	}
+	h.forge.SetPRMerged(publicName, pr)
+	h.leftForAPerson("feat-x", arch)
+	if h.shadowRefs()["refs/heads/feat-x"] != published {
+		t.Fatal("sync deleted the branch")
+	}
+}
+
+// A marked archive whose ref no longer holds the archived (and published)
+// head: what the close would delete isn't what was published, so a person
+// closes it.
+func TestSyncLeavesAnArchiveWhoseRefMoved(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	pr := h.archived("feat-x")
+	sg := h.shadowGit()
+	other := testutil.Commit(t, sg, "elsewhere", "unrelated", map[string]string{"o.txt": "o\n"})
+	if err := sg.UpdateRef(h.ctx, archiveRefX, other); err != nil {
+		t.Fatal(err)
+	}
+	h.forge.SetPRMerged(publicName, pr)
+	h.leftForAPerson("feat-x", other)
 }
 
 // Pushes to an archived feature's PR are expected: no
@@ -206,6 +264,9 @@ func TestFeatureCloseDeletesTheArchive(t *testing.T) {
 	res, _, err := h.eng.FeatureClose(h.ctx, h.pair, "feat-x")
 	if err != nil || res.Deleted[archiveRefX] != arch || !res.NeedsConsole {
 		t.Fatalf("close = %+v %v", res, err)
+	}
+	if _, ok := h.shadowRefs()[archiveRefX]; ok {
+		t.Fatal("the archive ref survived the close")
 	}
 	if len(h.approver.asked) == 0 || !strings.Contains(h.approver.asked[len(h.approver.asked)-1], arch+":refs/heads/feat-x") {
 		t.Fatalf("the console summary must give the archive's recovery push: %q", h.approver.asked)

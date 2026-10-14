@@ -51,7 +51,7 @@
       "description": "the plan the feature was published from; empty when never published",
       "oneOf": [{ "const": "" }, { "$ref": "common.schema.json#/$defs/planId" }]
     },
-    "moved": { "description": "the branch moved since it was published; false when unpublished", "type": "boolean" },
+    "moved": { "description": "the branch moved since it was published; false when unpublished; for an archived feature, whether its archive holds anything other than what was published", "type": "boolean" },
     "abandoned": { "type": "boolean" },
     "parent": { "description": "the feature this one is stacked on, or main; empty when the record couldn't be read", "type": "string" },
     "children": { "description": "the live features stacked directly on this one", "type": "array", "items": { "type": "string" } },
