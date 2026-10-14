@@ -293,7 +293,7 @@ func newPathKey(t *testing.T, shell, kind, setRaw string) pathKey {
 	t.Helper()
 	k := pathKey{shell, `Software\ghostbranch-test-` + strings.ReplaceAll(t.Name(), "/", "_") + fmt.Sprint(os.Getpid(), "-", len(t.TempDir()), "-", filepath.Base(t.TempDir()))}
 	t.Cleanup(func() {
-		exec.Command(shell, "-NoProfile", "-NonInteractive", "-Command", `Remove-Item -Recurse -Force -ErrorAction SilentlyContinue 'HKCU:\`+k.sub+`'`).Run()
+		_ = exec.Command(shell, "-NoProfile", "-NonInteractive", "-Command", `Remove-Item -Recurse -Force -ErrorAction SilentlyContinue 'HKCU:\`+k.sub+`'`).Run()
 	})
 	script := `New-Item -Force 'HKCU:\` + k.sub + `' | Out-Null`
 	if kind != "" {
