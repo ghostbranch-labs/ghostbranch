@@ -17,10 +17,10 @@ import (
 // so it frees itself when its process ends, however it ends, and the file
 // is never deleted. Safety across machines comes from leased pushes.
 func Lock(path string, now time.Time, op string) (func(), error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err
 	}

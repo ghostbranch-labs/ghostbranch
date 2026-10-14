@@ -220,7 +220,7 @@ func NewID(now time.Time, rnd io.Reader) (string, error) {
 
 // Save writes p to dir/<id>.json atomically and returns the path.
 func Save(dir string, p Plan) (string, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
 	b, err := json.MarshalIndent(p, "", "  ")

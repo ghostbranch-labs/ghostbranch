@@ -48,7 +48,7 @@ type Approval struct {
 
 // Append writes e as one JSON line.
 func Append(path string, e Entry) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
 	b, err := json.Marshal(e)

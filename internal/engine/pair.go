@@ -97,12 +97,16 @@ func (e *Engine) open(ctx context.Context, op string, p workspace.Pair, mutating
 		pc.lockPath = e.WS.LockPath(p)
 	}
 	if mutating && !e.DryRun {
+		e.tightenState()
 		if pc.drop, err = workspace.Lock(pc.lockPath, e.Now(), op); err != nil {
 			return nil, err
 		}
 		pc.held = true
 	}
 	if pc.git, err = e.mirror(ctx, p, pub, sh); err == nil {
+		if mutating && !e.DryRun {
+			e.privateMirror(ctx, pc.git)
+		}
 		err = e.fetch(ctx, pc.git)
 	}
 	if err != nil {

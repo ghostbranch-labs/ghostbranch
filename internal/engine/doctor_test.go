@@ -616,6 +616,103 @@ func TestDoctorStateCheck(t *testing.T) {
 			t.Fatalf("fix %q", c["state"].Fix)
 		}
 	})
+	t.Run("state directories other users can open", func(t *testing.T) {
+		t.Parallel()
+		if runtime.GOOS == "windows" {
+			t.Skip("file modes are checked on macOS and Linux")
+		}
+		h := newHarness(t)
+		h.init()
+		h.asApp()
+		ws := h.eng.WS
+		pairs := filepath.Join(ws.Dir, "pairs")
+		for _, d := range []string{ws.Dir, pairs} {
+			if err := os.Chmod(d, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		_, c := h.doctor(doctorOpts())
+		wantStatus(t, c["state"], engine.DoctorWarn)
+		if c["state"].Fix != "chmod 700 "+ws.Dir+" "+pairs ||
+			!strings.Contains(c["state"].Message, "chmod -R go-rwx "+pairs) {
+			t.Fatalf("fix %q, message %q", c["state"].Fix, c["state"].Message)
+		}
+	})
+	for _, c := range []struct {
+		name    string
+		ownHome bool
+	}{{"a custom home other users can open", false}, {"the default home other users can open", true}} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			if runtime.GOOS == "windows" {
+				t.Skip("file modes are checked on macOS and Linux")
+			}
+			h := newHarness(t)
+			h.eng.WS.OwnHome = c.ownHome
+			h.init()
+			h.asApp()
+			home := h.eng.WS.Home()
+			if err := os.Chmod(home, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			_, c2 := h.doctor(doctorOpts())
+			wantStatus(t, c2["state"], engine.DoctorWarn)
+			msg := c2["state"].Message
+			if c2["state"].Fix != "chmod 700 "+home {
+				t.Fatalf("fix %q", c2["state"].Fix)
+			}
+			never := strings.Contains(msg, "ghostbranch never changes the mode of "+home+" itself, because you chose it: run chmod 700 "+home+" if no one else uses it")
+			next := strings.Contains(msg, "the next writing ghostbranch command makes "+home+" private")
+			if never == c.ownHome || next != c.ownHome {
+				t.Fatalf("message %q", msg)
+			}
+		})
+	}
+	t.Run("lock folders other users can open", func(t *testing.T) {
+		t.Parallel()
+		if runtime.GOOS == "windows" {
+			t.Skip("file modes are checked on macOS and Linux")
+		}
+		h := newHarness(t)
+		h.init()
+		h.asApp()
+		locks := filepath.Join(h.eng.WS.Dir, "locks")
+		if err := os.Chmod(locks, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		_, c := h.doctor(doctorOpts())
+		wantStatus(t, c["state"], engine.DoctorWarn)
+		if c["state"].Fix != "chmod 700 "+locks {
+			t.Fatalf("fix %q", c["state"].Fix)
+		}
+	})
+	t.Run("doctor never tightens", func(t *testing.T) {
+		t.Parallel()
+		if runtime.GOOS == "windows" {
+			t.Skip("file modes are checked on macOS and Linux")
+		}
+		h := newHarness(t)
+		h.init()
+		h.asApp()
+		if err := os.Chmod(h.eng.WS.Dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		h.doctor(doctorOpts())
+		if fi, err := os.Stat(h.eng.WS.Dir); err != nil || fi.Mode().Perm() != 0o755 {
+			t.Fatalf("doctor changed the workspace's mode: %v %v", fi.Mode(), err)
+		}
+	})
+	t.Run("private state says so", func(t *testing.T) {
+		t.Parallel()
+		h := newHarness(t)
+		h.init()
+		h.asApp()
+		_, c := h.doctor(doctorOpts())
+		wantStatus(t, c["state"], engine.DoctorOK)
+		if !strings.HasSuffix(c["state"].Message, "; its state directories are private to you") {
+			t.Fatalf("message %q", c["state"].Message)
+		}
+	})
 }
 
 func TestDoctorCICheck(t *testing.T) {

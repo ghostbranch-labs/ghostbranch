@@ -8,9 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -210,9 +212,16 @@ func (g *Git) RunInput(ctx context.Context, stdin io.Reader, args ...string) (st
 	return strings.TrimRight(string(out), "\r\n"), err
 }
 
-// Init creates a repository at dir, which may not exist yet.
+// Init creates a repository at dir, which may not exist yet. A mirror holds
+// unreleased shadow commits (F-28), so the repo is private whatever the
+// umask: its directory and every parent Init creates are 0700, the files
+// git init wrote lose their group and other bits, and
+// core.sharedRepository=0600 makes git write every later file 0600 and
+// directory 0700. The key is set after init rather than with --shared,
+// which would also set receive.denyNonFastForwards and so change how a
+// bare repo made here takes pushes.
 func Init(ctx context.Context, dir string, bare bool) (*Git, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
 	g := New(dir)
@@ -223,7 +232,44 @@ func Init(ctx context.Context, dir string, bare bool) (*Git, error) {
 	if _, err := g.Run(ctx, append(args, ".")...); err != nil {
 		return nil, err
 	}
+	if _, err := g.Run(ctx, "config", "core.sharedRepository", "0600"); err != nil {
+		return nil, err
+	}
+	gitDir := dir
+	if !bare {
+		gitDir = filepath.Join(dir, ".git")
+	}
+	if err := privateTree(gitDir); err != nil {
+		return nil, err
+	}
 	return g, nil
+}
+
+// privateTree takes group and other bits off everything under root and
+// makes its directories 0700. Windows has no mode bits to change.
+func privateTree(root string) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	return filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return os.Chmod(p, 0o700)
+		}
+		if d.Type()&fs.ModeSymlink != 0 {
+			return nil
+		}
+		fi, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if perm := fi.Mode().Perm(); perm&0o077 != 0 {
+			return os.Chmod(p, perm&^0o077)
+		}
+		return nil
+	})
 }
 
 func exitCode(err error) int {

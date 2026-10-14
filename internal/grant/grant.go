@@ -218,7 +218,7 @@ func (s *Store) save(gs []Grant) error {
 	if gs == nil {
 		gs = []Grant{}
 	}
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
 		return err
 	}
 	b, err := json.MarshalIndent(file{SchemaVersion: SchemaVersion, Grants: gs}, "", "  ")

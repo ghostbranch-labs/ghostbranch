@@ -84,6 +84,9 @@ type Engine struct {
 	// ledgerWarns holds a LEDGER_NOT_WRITTEN warning for each ledger entry
 	// that couldn't be written, until LedgerWarnings hands them over.
 	ledgerWarns []contract.Warning
+	// tightenFailed holds the state directories whose chmod failed in this
+	// run, so each failure is noted once (noteTightened).
+	tightenFailed map[string]bool
 }
 
 func (e *Engine) now() time.Time { return e.Now().UTC().Truncate(time.Second) }
@@ -204,6 +207,7 @@ func (e *Engine) recordWith(op string, pair *workspace.Pair, feat, planID, summa
 	if e.DryRun || e.WS == nil {
 		return
 	}
+	e.tightenState()
 	ent := ledger.Entry{TS: e.now(), Actor: e.Actor, Op: op, Feature: feat, PlanID: planID, Summary: summary}
 	if pair != nil {
 		ent.Pair = pair.Public

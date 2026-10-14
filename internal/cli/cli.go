@@ -464,7 +464,12 @@ func (a *app) openWorkspace() (*workspace.Workspace, error) {
 	if err != nil {
 		return nil, contract.Wrap(contract.Internal, err, "find the state directory")
 	}
-	return workspace.Open(home, a.workspaceName())
+	ws, err := workspace.Open(home, a.workspaceName())
+	if err != nil {
+		return nil, err
+	}
+	ws.OwnHome = a.env.Getenv("GHOSTBRANCH_HOME") == ""
+	return ws, nil
 }
 
 // workspaceName is the workspace this run uses: --workspace, else
