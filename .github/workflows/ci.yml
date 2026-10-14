@@ -26,8 +26,20 @@ on:
 permissions:
   contents: read
 
+# Saving Actions minutes on private repos (GitHub Free bills them):
+#  - Every job skips push runs except on the public repo once it is public,
+#    and on a release tag (release.yml calls this workflow from a tag push).
+#    So sync's pushes to the shadow repo's main start nothing, and merges to
+#    main don't re-run what the pull request already ran while the repo is
+#    private. The first two comparisons are the push guard ghostbranch
+#    audit suggests, so the audit stops reporting this file.
+#  - test-arm64 and npm-test also skip on a private repo: the shadow repo's
+#    gates, and everything here until launch. They run once the repo is
+#    public, where minutes are free.
+
 jobs:
   lint:
+    if: github.event_name != 'push' || github.repository == 'ghostbranch-labs/ghostbranch' && !github.event.repository.private || startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -44,6 +56,7 @@ jobs:
           version: v2.14.0
 
   vuln:
+    if: github.event_name != 'push' || github.repository == 'ghostbranch-labs/ghostbranch' && !github.event.repository.private || startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -60,6 +73,7 @@ jobs:
 
   test:
     name: test (${{ matrix.shard }})
+    if: github.event_name != 'push' || github.repository == 'ghostbranch-labs/ghostbranch' && !github.event.repository.private || startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -89,6 +103,7 @@ jobs:
   # linux/arm64 ships, and nobody here has an ARM Linux machine, so CI runs
   # the whole suite on one.
   test-arm64:
+    if: (github.event_name != 'push' || github.repository == 'ghostbranch-labs/ghostbranch' && !github.event.repository.private || startsWith(github.ref, 'refs/tags/')) && !github.event.repository.private
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
     steps:
@@ -105,7 +120,7 @@ jobs:
   # check the config and build a snapshot of all five platforms (no signing,
   # no SBOMs, nothing published).
   goreleaser-check:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && (github.event_name != 'push' || github.repository == 'ghostbranch-labs/ghostbranch')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -154,6 +169,7 @@ jobs:
   # The npm launcher and build script (Node's own test runner; no
   # dependencies). The install script tests run in the Go jobs.
   npm-test:
+    if: (github.event_name != 'push' || github.repository == 'ghostbranch-labs/ghostbranch' && !github.event.repository.private || startsWith(github.ref, 'refs/tags/')) && !github.event.repository.private
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
