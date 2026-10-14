@@ -14,11 +14,13 @@ on:
 permissions:
   contents: read
 
-# One group per release, so publishing several releases close together
-# never cancels a pending one. The tap and bucket pushes retry once if
-# another publish moved them first.
+# One serial group, so releases published in order distribute in order and
+# the tap and bucket end on the newer one. GitHub keeps one run going and one
+# waiting; a third cancels the waiting one, which then needs a re-run (see
+# RELEASING.md). The tap and bucket pushes retry once if someone else pushed
+# to them first.
 concurrency:
-  group: publish-${{ github.event.release.tag_name }}
+  group: publish
   cancel-in-progress: false
 
 jobs:

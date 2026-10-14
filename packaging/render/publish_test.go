@@ -81,7 +81,9 @@ func publishJob(t *testing.T) publishJobDef {
 
 // TestPublishTriggerPermissionsAndConcurrency: only a published release
 // starts it, with read-only contents and an OIDC token, in the release
-// environment, and one release never cancels another's run.
+// environment, and runs one at a time in publish order, so the tap and the
+// bucket end on the newer of two releases. A running publish is never
+// cancelled.
 func TestPublishTriggerPermissionsAndConcurrency(t *testing.T) {
 	wf := readPublish(t)
 	var types []string
@@ -102,8 +104,8 @@ func TestPublishTriggerPermissionsAndConcurrency(t *testing.T) {
 	if job.Environment != "release" {
 		t.Errorf("environment = %q; want release", job.Environment)
 	}
-	if wf.Concurrency.Group != "publish-${{ github.event.release.tag_name }}" || wf.Concurrency.CancelInProgress != "false" {
-		t.Errorf("concurrency = %+v; want one group per tag, never cancelling", wf.Concurrency)
+	if wf.Concurrency.Group != "publish" || wf.Concurrency.CancelInProgress != "false" {
+		t.Errorf("concurrency = %+v; want the one serial publish group, never cancelling", wf.Concurrency)
 	}
 }
 
