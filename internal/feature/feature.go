@@ -275,6 +275,16 @@ const (
 	StateArchived State = "archived"
 )
 
+// States is every State, in the order they are declared above, which is
+// the order of the state enum in schemas/v0/feature-report.schema.json.
+// The guide's Lifecycle list is tested against it, so a new state can't be
+// left out of the guide.
+var States = []State{
+	StateDraft, StateInReview, StateGatePassed, StatePublished, StateMerged, StateMergedMoved,
+	StatePRClosed, StateBranchGone, StateAbandoned, StateUnreadable, StateParentStale,
+	StatePublicPRNeedsUpdate, StatePRBehind, StateArchived,
+}
+
 // StateInput is everything state depends on.
 type StateInput struct {
 	Meta         Meta

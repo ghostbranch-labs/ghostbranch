@@ -1,13 +1,16 @@
 package guide_test
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
+	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 	"github.com/ghostbranch-labs/ghostbranch/internal/guide"
 )
 
@@ -54,7 +57,8 @@ func TestRenderListsEveryCodeFromTheRegistry(t *testing.T) {
 	// 453: the FEATURE_ARCHIVED error row (6.5).
 	// 472: the After publishing section, the archived state, the Never exception and the guard's archived-branch sentence (6.5).
 	// 473: the hand-off follow-ups: how to reach the PR branch, merged_moved, the three archive-blocked cases (6.5 Task 11 review).
-	if n := strings.Count(out, "\n"); n > 473 {
+	// 475: all 14 states in the Lifecycle list, its long lines rewrapped (6.6).
+	if n := strings.Count(out, "\n"); n > 475 {
 		t.Errorf("the guide is %d lines; keep it short (spec: about 150 plus the tables)", n)
 	}
 }
@@ -494,5 +498,49 @@ func TestGuideTeachesHandOff(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("the guide lacks %q", want)
 		}
+	}
+}
+
+// F-17: the Lifecycle list names every state status can show, so an agent
+// that meets one has a definition to act on.
+func TestGuideListsEveryState(t *testing.T) {
+	t.Parallel()
+	out := guide.Render(contract.Registry())
+	_, sec, _ := strings.Cut(out, "## Lifecycle")
+	list, _, _ := strings.Cut(sec, "\n- `ghostbranch sync")
+	if len(feature.States) != 14 {
+		t.Fatalf("feature.States has %d states, want 14", len(feature.States))
+	}
+	for _, s := range feature.States {
+		if !strings.Contains(list, "`"+string(s)+"`") {
+			t.Errorf("the Lifecycle list lacks `%s`", s)
+		}
+	}
+}
+
+// feature.States is exactly the feature report's state enum, in order, so
+// the guide test above covers every state the contract can carry.
+func TestStatesMatchTheFeatureReportSchema(t *testing.T) {
+	t.Parallel()
+	raw, err := os.ReadFile(filepath.Join("..", "..", "schemas", "v0", "feature-report.schema.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var s struct {
+		Properties struct {
+			State struct {
+				Enum []string `json:"enum"`
+			} `json:"state"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(raw, &s); err != nil {
+		t.Fatal(err)
+	}
+	got := make([]string, len(feature.States))
+	for i, st := range feature.States {
+		got[i] = string(st)
+	}
+	if !slices.Equal(got, s.Properties.State.Enum) {
+		t.Fatalf("feature.States = %v\nschema enum   = %v", got, s.Properties.State.Enum)
 	}
 }
