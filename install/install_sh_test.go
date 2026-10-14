@@ -279,11 +279,11 @@ func TestInstallShWarnsWhenTheBinaryCannotRun(t *testing.T) {
 }
 
 // The PATH hints quote the folder inside an echo '…"$dir"…' line, so a
-// folder holding a quote, a dollar sign or a backtick is refused before
-// anything is downloaded (the base is a closed local port).
+// folder holding a quote, a dollar sign, a backtick or a backslash is
+// refused before anything is downloaded (the base is a closed local port).
 func TestInstallShRefusesAFolderThePathHintCannotQuote(t *testing.T) {
 	t.Parallel()
-	for _, c := range []string{`'`, `"`, `$`, "`"} {
+	for _, c := range []string{`'`, `"`, `$`, "`", `\`} {
 		dir := filepath.Join(t.TempDir(), "a"+c+"b")
 		r := runInstallSh(t, "GHOSTBRANCH_DOWNLOAD_BASE=http://127.0.0.1:1", "GHOSTBRANCH_INSTALL_DIR="+dir)
 		if r.err == nil || !strings.Contains(r.out, "the install folder can't hold") {
