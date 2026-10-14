@@ -251,6 +251,31 @@ func TestGoldenContract(t *testing.T) {
 			te.mustRun("promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--plan")
 			te.forge.ClosePRErr = errors.New("connection reset")
 		}, []string{"apply", "<PLAN>", "--yes"}, 0},
+		{"apply_stack_archive_stopped", func(te *testEnv) {
+			// A three-level stack whose hand-off stops at the middle level:
+			// the top is archived, the middle incomplete, the bottom kept.
+			withGatedStack(te)
+			te.mustRun("feature", "start", "feat-c", "--from", "feat-b")
+			te.shadowCommit("feat-c", map[string]string{"c.txt": "c\n"})
+			te.mustRun("gate", "feat-c")
+			grantAgents(te)
+			te.mustRun("promote", "feat-a", "feat-b", "feat-c", "--mode", "squash", "--plan")
+			gate := 0
+			for _, pr := range te.forge.PRs("acme/widget-shadow") {
+				if pr.Head == "ghostbranch-gate/feat-b" && pr.State == "open" {
+					gate = pr.Number
+				}
+			}
+			if gate == 0 {
+				te.t.Fatal("no gate PR for feat-b")
+			}
+			te.forge.ClosePRFail = func(full string, n int) error {
+				if full == "acme/widget-shadow" && n == gate {
+					return errors.New("connection reset")
+				}
+				return nil
+			}
+		}, []string{"apply", "<PLAN>", "--yes"}, 0},
 		{"apply_stale", func(te *testEnv) {
 			gatedFeature(te)
 			te.mustRun("promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--plan")

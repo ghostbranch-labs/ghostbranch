@@ -1,0 +1,91 @@
+{
+  "schema_version": "0.15",
+  "command": "apply",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "plan_id": "20261005T120015Z-18191a",
+    "public_branch": "feat-c",
+    "public_pr": 3,
+    "pr_url": "https://github.example/acme/widget/pull/3",
+    "resumed": false,
+    "approval": {
+      "kind": "grant",
+      "grant_id": "g-0a0b0c",
+      "created_by": "human:octo"
+    },
+    "waived": [],
+    "preview": null,
+    "prs": [
+      {
+        "feature": "feat-a",
+        "base": "main",
+        "number": 1,
+        "url": "https://github.example/acme/widget/pull/1"
+      },
+      {
+        "feature": "feat-b",
+        "base": "feat-a",
+        "number": 2,
+        "url": "https://github.example/acme/widget/pull/2"
+      },
+      {
+        "feature": "feat-c",
+        "base": "feat-b",
+        "number": 3,
+        "url": "https://github.example/acme/widget/pull/3"
+      }
+    ],
+    "stack_number": 4,
+    "after_publish": {
+      "feat-a": "kept",
+      "feat-b": "incomplete",
+      "feat-c": "archived"
+    }
+  },
+  "warnings": [
+    {
+      "code": "ARCHIVE_INCOMPLETE",
+      "message": "published, but archiving feature feat-b stopped at gate_pr (close gate PR #2 of feature feat-b in acme/widget-shadow: connection reset); finish it with ghostbranch feature archive feat-b",
+      "details": {
+        "code": "FORGE_ERROR",
+        "feature": "feat-b",
+        "step": "gate_pr"
+      }
+    }
+  ],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "feature",
+        "archive",
+        "feat-b"
+      ],
+      "why": "the publish stands, but archiving feat-b stopped (warnings[].details.step); finish it: every step is safe to run again",
+      "needs_human": false,
+      "needs_input": []
+    },
+    {
+      "command": [
+        "ghostbranch",
+        "feature",
+        "archive",
+        "feat-a"
+      ],
+      "why": "the hand-off stopped above feat-a, so it was kept: archive it once the level above is finished (top first, or it is refused as HAS_CHILDREN), or leave it to keep fixing it through gate and promote",
+      "needs_human": false,
+      "needs_input": []
+    },
+    {
+      "command": [
+        "ghostbranch",
+        "sync"
+      ],
+      "why": "A maintainer merges the stack on GitHub: on the top PR's page (#3), the merge button merges that PR and every PR below it. Merging a lower PR lands only part of the stack. From a terminal, `gh pr merge` refuses a stacked PR; use merge-async on the top PR: `gh api -X PUT repos/acme/widget/pulls/3/merge-async -f merge_method=merge`. Then sync closes the merged features and moves any branch above onto main. Handed off: feat-c (branch feat-c); fix one by pushing to its branch (git fetch origin <branch>, commit on origin/<branch>, git push origin HEAD:<branch>).",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
+  "error": null
+}

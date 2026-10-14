@@ -66,8 +66,11 @@ type Forge struct {
 	// lock, so it must not call the fake); a non-nil error fails that call.
 	GetPRErr func(full string, number int) error
 	// ClosePRErr makes ClosePullRequest fail with that error; ClosePRRepos
-	// records the repo each ClosePullRequest call named.
+	// records the repo each ClosePullRequest call named. ClosePRFail, when
+	// set, is asked before each close (under the fake's lock, so it must
+	// not call the fake); a non-nil error fails that call.
 	ClosePRErr   error
+	ClosePRFail  func(full string, number int) error
 	ClosePRRepos []string
 	// Edits records each EditPR call, in order; EditPRErr makes EditPR
 	// fail with that error.
@@ -259,6 +262,11 @@ func (f *Forge) ClosePullRequest(_ context.Context, full string, number int) err
 	f.ClosePRRepos = append(f.ClosePRRepos, full)
 	if f.ClosePRErr != nil {
 		return f.ClosePRErr
+	}
+	if f.ClosePRFail != nil {
+		if err := f.ClosePRFail(full, number); err != nil {
+			return err
+		}
 	}
 	for i := range f.prs[full] {
 		if f.prs[full][i].Number == number {

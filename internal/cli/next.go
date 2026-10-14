@@ -807,19 +807,35 @@ func prBranch(r *engine.ApplyResult, i int) string {
 }
 
 // afterApplyNexts is what follows a publish: feature archive for each
-// archive that stopped (ARCHIVE_INCOMPLETE) first, then the merge and sync,
-// then, for one feature handed off, how to fix its PR. A handed-off stack
-// adds one sentence to the merge step instead. A resumed update that had
-// already landed archived nothing (R14), though the run that died may have
-// been asked to: its kept isn't final, so feature archive is offered for
-// each kept feature, top first.
+// archive that stopped (ARCHIVE_INCOMPLETE) first, then for each level a
+// stopped stack hand-off kept below it, then the merge and sync, then, for
+// one feature handed off, how to fix its PR. A handed-off stack adds one
+// sentence to the merge step instead, naming the archived levels only. A
+// resumed update that had already landed archived nothing (R14), though
+// the run that died may have been asked to: its kept isn't final, so
+// feature archive is offered for each kept feature, top first.
 func (a *app) afterApplyNexts(r *engine.ApplyResult) []contract.Next {
 	var out []contract.Next
+	failed := -1 // the lowest level whose archive stopped
 	for _, w := range a.warnings {
 		if f, _ := w.Details["feature"].(string); w.Code == contract.ArchiveIncomplete && f != "" {
 			out = append(out, contract.Next{Command: a.scoped("feature", "archive", f),
 				Why: "the publish stands, but archiving " + f + " stopped (warnings[].details.step); finish it: every step is safe to run again"})
+			if i := slices.IndexFunc(r.PRs, func(p plan.StackPR) bool { return p.Feature == f }); i >= 0 {
+				if failed < 0 || i < failed {
+					failed = i
+				}
+			}
 		}
+	}
+	// The hand-off runs top first and stops at the first failure (P5), so
+	// the levels below the failed one were kept although Archive was
+	// chosen for them too.
+	if failed > 0 {
+		out = append(out, a.keptArchiveNexts(r, failed, func(f string) string {
+			return "the hand-off stopped above " + f + ", so it was kept: archive it once the level above is finished (top first, or it is refused as HAS_CHILDREN), " +
+				"or leave it to keep fixing it through gate and promote"
+		})...)
 	}
 	merge := a.mergedThenSync(r)
 	switch {
@@ -827,20 +843,34 @@ func (a *app) afterApplyNexts(r *engine.ApplyResult) []contract.Next {
 		out = append(out, merge)
 		out = append(out, a.handOffNexts(r.Archived[0], r.PublicPR, r.PublicBranch)[:3]...)
 	case len(r.Archived) > 0:
-		merge.Why += " The PRs are handed off: fix one by pushing to its branch (git fetch origin <branch>, commit on origin/<branch>, git push origin HEAD:<branch>)."
+		var handed []string
+		for i, p := range r.PRs {
+			if r.AfterPublish[p.Feature] == engine.AfterArchived {
+				handed = append(handed, p.Feature+" (branch "+prBranch(r, i)+")")
+			}
+		}
+		merge.Why += " Handed off: " + strings.Join(handed, ", ") +
+			"; fix one by pushing to its branch (git fetch origin <branch>, commit on origin/<branch>, git push origin HEAD:<branch>)."
 		out = append(out, merge)
 	default:
 		out = append(out, merge)
 	}
-	if r.Landed {
-		for i := len(r.PRs) - 1; i >= 0; i-- {
-			f := r.PRs[i].Feature
-			if r.AfterPublish[f] != engine.AfterKept {
-				continue
-			}
-			out = append(out, contract.Next{Command: a.scoped("feature", "archive", f),
-				Why: "this run only recorded an update that had already landed, so " + f + "'s shadow branch was kept whatever was chosen before (R14): " +
-					"archive it to hand it off (fix its PR by pushing to it directly), or leave it to keep fixing it through gate and promote"})
+	if r.Landed && failed < 0 {
+		out = append(out, a.keptArchiveNexts(r, len(r.PRs), func(f string) string {
+			return "this run only recorded an update that had already landed, so " + f + "'s shadow branch was kept whatever was chosen before (R14): " +
+				"archive it to hand it off (fix its PR by pushing to it directly), or leave it to keep fixing it through gate and promote"
+		})...)
+	}
+	return out
+}
+
+// keptArchiveNexts offers feature archive for each kept level of r below
+// level below, top first: a parent is archived only after its child.
+func (a *app) keptArchiveNexts(r *engine.ApplyResult, below int, why func(f string) string) []contract.Next {
+	var out []contract.Next
+	for i := below - 1; i >= 0; i-- {
+		if f := r.PRs[i].Feature; r.AfterPublish[f] == engine.AfterKept {
+			out = append(out, contract.Next{Command: a.scoped("feature", "archive", f), Why: why(f)})
 		}
 	}
 	return out
