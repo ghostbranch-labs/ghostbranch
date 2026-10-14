@@ -251,3 +251,45 @@ func TestExplainTextHeaders(t *testing.T) {
 		t.Errorf("explain --all still says (exit, …)")
 	}
 }
+
+// F-11: a stack plan's text names every PR with its own commit count, not
+// only the bottom's.
+func TestStackPlanTextCountsEveryPR(t *testing.T) {
+	t.Parallel()
+	entry := func(name string, n, dropped int) plan.Entry {
+		return plan.Entry{Feature: name, Mode: "preserve",
+			Publish: plan.Publish{Commits: make([]plan.Commit, n), DroppedEmpty: make([]string, dropped)}}
+	}
+	p := &plan.Plan{ID: "20261014T072852Z-563f9d", Mode: "preserve", Feature: "feat-a",
+		Publish: plan.Publish{Commits: make([]plan.Commit, 8)},
+		Chain:   []plan.Entry{entry("feat-a", 8, 0), entry("feat-b", 39, 2)},
+		PRs:     []plan.StackPR{{Feature: "feat-a", Base: "main"}, {Feature: "feat-b", Base: "feat-a"}}}
+	want := "Plan 20261014T072852Z-563f9d saved to /plans/p.json: 2 PRs, bottom first.\n" +
+		"  feat-a (preserve): 8 public commit(s), PR on main\n" +
+		"  feat-b (preserve): 39 public commit(s), 2 dropped as empty, PR on feat-a\n" +
+		"Publish it with: ghostbranch apply 20261014T072852Z-563f9d\n"
+	if got := human(&engine.PromoteResult{Plan: p, PlanPath: "/plans/p.json"}, style.Styler{}); got != want {
+		t.Errorf("got\n%s\nwant\n%s", got, want)
+	}
+	// One feature: the line it always had.
+	one := &plan.Plan{ID: "p1", Mode: "squash", Publish: plan.Publish{Commits: make([]plan.Commit, 1)},
+		PRs: []plan.StackPR{{Feature: "feat-x", Base: "main"}}}
+	want = "Plan p1 saved to /plans/p1.json.\n  squash: 1 public commit(s)\nPublish it with: ghostbranch apply p1\n"
+	if got := human(&engine.PromoteResult{Plan: one, PlanPath: "/plans/p1.json"}, style.Styler{}); got != want {
+		t.Errorf("one feature: got %q, want %q", got, want)
+	}
+}
+
+// F-15: a fresh stack apply names every PR it opened, bottom first.
+func TestFreshStackApplyNamesEveryPR(t *testing.T) {
+	t.Parallel()
+	u1, u2 := "https://github.example/acme/widget/pull/13", "https://github.example/acme/widget/pull/14"
+	r := &engine.ApplyResult{PublicBranch: "feat-b", PublicPR: 14, PRURL: u2, PRs: []plan.StackPR{
+		{Feature: "feat-a", Base: "main", Number: 13, URL: u1}, {Feature: "feat-b", Base: "feat-a", Number: 14, URL: u2}}}
+	want := "Published feat-a as PR #13: " + u1 + "\nPublished feat-b as PR #14: " + u2 + "\n"
+	for _, res := range []any{r, &engine.PromoteResult{Applied: r, Plan: &plan.Plan{}}} {
+		if got := human(res, style.Styler{}); !strings.HasPrefix(got, want) {
+			t.Errorf("human(%T) = %q, want it to start %q", res, got, want)
+		}
+	}
+}

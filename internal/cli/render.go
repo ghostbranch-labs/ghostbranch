@@ -289,12 +289,7 @@ func human(r any, st style.Styler) string {
 			b.WriteString(publishedLine(v.Applied, k))
 			archivedLines(&b, v.Applied)
 		case v.Plan != nil && v.PlanPath != "":
-			fmt.Fprintf(&b, "Plan %s saved to %s.\n", v.Plan.ID, v.PlanPath)
-			fmt.Fprintf(&b, "  %s: %d public commit(s)", v.Plan.Mode, len(v.Plan.Publish.Commits))
-			if n := len(v.Plan.Publish.DroppedEmpty); n > 0 {
-				fmt.Fprintf(&b, ", %d dropped as empty", n)
-			}
-			fmt.Fprintf(&b, "\nPublish it with: ghostbranch apply %s\n", v.Plan.ID)
+			planLines(&b, v.Plan, v.PlanPath)
 		case v.Gate != nil && pendingJob(v.Gate):
 			b.WriteString(pendingLine(v.Gate))
 			b.WriteString("No plan yet: wait for the job, then promote again.\n")
@@ -577,6 +572,33 @@ func human(r any, st style.Styler) string {
 		}
 	}
 	return b.String()
+}
+
+// planLines is a saved promote plan: where it is, what it publishes, and
+// the apply command. A stack plan names each PR, bottom first, with its
+// own commit count (F-11); Plan.Publish is only the bottom's.
+func planLines(b *strings.Builder, p *plan.Plan, path string) {
+	if len(p.Chain) < 2 {
+		fmt.Fprintf(b, "Plan %s saved to %s.\n", p.ID, path)
+		fmt.Fprintf(b, "  %s: %d public commit(s)", p.Mode, len(p.Publish.Commits))
+		if n := len(p.Publish.DroppedEmpty); n > 0 {
+			fmt.Fprintf(b, ", %d dropped as empty", n)
+		}
+		fmt.Fprintf(b, "\nPublish it with: ghostbranch apply %s\n", p.ID)
+		return
+	}
+	fmt.Fprintf(b, "Plan %s saved to %s: %d PRs, bottom first.\n", p.ID, path, len(p.Chain))
+	for i, e := range p.Chain {
+		fmt.Fprintf(b, "  %s (%s): %d public commit(s)", oneLine(e.Feature), e.Mode, len(e.Publish.Commits))
+		if n := len(e.Publish.DroppedEmpty); n > 0 {
+			fmt.Fprintf(b, ", %d dropped as empty", n)
+		}
+		if i < len(p.PRs) {
+			fmt.Fprintf(b, ", PR on %s", oneLine(p.PRs[i].Base))
+		}
+		b.WriteString("\n")
+	}
+	fmt.Fprintf(b, "Publish it with: ghostbranch apply %s\n", p.ID)
 }
 
 // archivedLines says which features were handed off, and where their
