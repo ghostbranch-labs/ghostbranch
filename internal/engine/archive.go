@@ -423,3 +423,19 @@ func (e *Engine) FeatureArchive(ctx context.Context, p workspace.Pair, name stri
 	res.Archived, res.Changed = d.archived, true
 	return res, warns, nil
 }
+
+// archivedErr is FEATURE_ARCHIVED for a feature handed off to the public
+// repo, nil otherwise. Its next is the push hint (Task 10).
+func archivedErr(name string, m feature.Meta) error {
+	if m.Archived == nil {
+		return nil
+	}
+	pr, branch := 0, name
+	if m.Promoted != nil {
+		pr, branch = m.Promoted.PublicPR, publishedBranch(m)
+	}
+	return contract.New(contract.FeatureArchived,
+		"feature %s was handed off to the public repo: its shadow branch is archived at %s; fix or change PR #%d by pushing to its branch %s, and ghostbranch sync closes the feature when it merges",
+		name, m.Archived.Ref, pr, branch).WithField("feature").
+		WithDetails(map[string]any{"feature": name, "public_pr": pr, "branch": branch, "archive_ref": m.Archived.Ref})
+}

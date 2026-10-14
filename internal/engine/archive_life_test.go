@@ -211,3 +211,58 @@ func TestFeatureCloseDeletesTheArchive(t *testing.T) {
 		t.Fatalf("the console summary must give the archive's recovery push: %q", h.approver.asked)
 	}
 }
+
+// promote, gate and feature pull refuse an archived feature before any
+// shadow-branch lookup (never FEATURE_NOT_FOUND).
+func TestArchivedFeatureRefusals(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	pr := h.archived("feat-x")
+	check := func(what string, err error) {
+		t.Helper()
+		ce := wantCode(t, err, contract.FeatureArchived)
+		if ce.Field != "feature" || ce.Details["feature"] != "feat-x" || ce.Details["public_pr"] != pr ||
+			ce.Details["branch"] != "feat-x" || ce.Details["archive_ref"] != archiveRefX {
+			t.Errorf("%s: %+v", what, ce)
+		}
+	}
+	_, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
+	check("gate", err)
+	_, err = promote(h, engine.PromoteOptions{Feature: "feat-x", Mode: "squash", Message: "m", PlanOnly: true})
+	check("promote", err)
+	_, err = promote(h, engine.PromoteOptions{Features: []string{"feat-x", "feat-y"}, Mode: "squash", PlanOnly: true})
+	check("promote a stack", err)
+	_, err = h.pull("feat-x")
+	check("feature pull", err)
+}
+
+// A kept parent with an archived child (R12): promote updates only the
+// parent's own PR, and never refuses for the child.
+func TestPromoteOfAKeptParentSkipsAnArchivedChild(t *testing.T) {
+	t.Parallel()
+	h, prs := publishedStack(t, "feat-a", "feat-b")
+	if _, _, err := h.eng.FeatureArchive(h.ctx, h.pair, "feat-b"); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Commit(t, h.shadowGit(), "feat-a", "review fix", map[string]string{"a2.txt": "a2\n"})
+	h.gateFeature("feat-a")
+	res, err := promote(h, engine.PromoteOptions{Feature: "feat-a", Mode: "squash", Message: "Add a", PlanOnly: true})
+	if err != nil || res.Plan == nil || len(res.Plan.PRs) != 1 || res.Plan.PRs[0].Number != prs[0].Number {
+		t.Fatalf("promote feat-a = %+v %v", res, err)
+	}
+}
+
+// The parent's gate offers nothing for an archived child (R12).
+func TestGateReadinessLeavesArchivedChildrenOut(t *testing.T) {
+	t.Parallel()
+	h, _ := publishedStack(t, "feat-a", "feat-b")
+	if _, _, err := h.eng.FeatureArchive(h.ctx, h.pair, "feat-b"); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Commit(t, h.shadowGit(), "feat-a", "review fix", map[string]string{"a2.txt": "a2\n"})
+	res, _, err := h.eng.Gate(h.ctx, h.pair, "feat-a")
+	if err != nil || len(res.Ready.StaleAbove) != 0 || contains(res.Ready.Levels, "feat-b") {
+		t.Fatalf("gate feat-a = %+v %v", res.Ready, err)
+	}
+}

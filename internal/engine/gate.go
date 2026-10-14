@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/config"
@@ -254,6 +255,9 @@ func (e *Engine) build(ctx context.Context, pc *pairCtx, name, mode string, waiv
 	}
 	m, metaSHA, err := e.readMeta(ctx, pc, name)
 	if err != nil {
+		return nil, warns, err
+	}
+	if err := archivedErr(name, m); err != nil {
 		return nil, warns, err
 	}
 	head, ok, err := g.Resolve(ctx, shadowRef(m.Branch))
@@ -617,7 +621,8 @@ func (e *Engine) stackView(ctx context.Context, pc *pairCtx, res *GateResult) {
 	}
 	res.Parent, res.Children, res.Chain = parent, kids, chain
 	if res.Preview == nil && res.Checks == feature.ChecksPassed && res.Leak == feature.LeakClean {
-		res.Ready = e.readiness(ctx, pc, recs, res, chain, kids)
+		live := slices.DeleteFunc(slices.Clone(kids), func(k string) bool { return recs[k].meta.Archived != nil })
+		res.Ready = e.readiness(ctx, pc, recs, res, chain, live)
 	}
 }
 

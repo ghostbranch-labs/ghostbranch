@@ -323,7 +323,8 @@ func (e *Engine) openChildren(ctx context.Context, pc *pairCtx, recs map[string]
 	var open []string
 	for _, c := range childrenOf(recs, cur, false) {
 		cm := recs[c].meta
-		if skip[c] || cm.Promoted == nil || cm.Promoted.PublicPR == 0 {
+		// a handed-off child's PR is the person's now (R12)
+		if skip[c] || cm.Promoted == nil || cm.Promoted.PublicPR == 0 || cm.Archived != nil {
 			continue
 		}
 		pr, err := e.Forge.GetPR(ctx, pc.pair.Public, cm.Promoted.PublicPR)

@@ -124,6 +124,15 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	if err != nil {
 		return res, warns, err
 	}
+	// A handed-off feature is fixed by pushing to its PR (R11): refuse it
+	// before any stack logic reads its branch.
+	for _, n := range opt.Features {
+		if m, _, _, err := e.readMetaAny(ctx, pc, n); err == nil {
+			if err := archivedErr(n, m); err != nil {
+				return res, warns, err
+			}
+		}
+	}
 	mode := opt.Mode
 	if mode == "" {
 		mode = cfg.Promote.DefaultMode

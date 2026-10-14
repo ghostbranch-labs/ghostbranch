@@ -71,6 +71,9 @@ func (e *Engine) FeaturePull(ctx context.Context, p workspace.Pair, opt PullOpti
 	if err != nil {
 		return nil, warns, err
 	}
+	if err := archivedErr(name, m); err != nil {
+		return nil, warns, err
+	}
 	head, ok, err := g.Resolve(ctx, shadowRef(m.Branch))
 	if err != nil {
 		return nil, warns, internalErr(err, "read feature branch "+m.Branch)
