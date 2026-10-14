@@ -36,6 +36,9 @@ type FeatureReport struct {
 	// PR is how its open public PR compares with the feature; nil unless
 	// it is published, the PR is open and the feature's branch exists.
 	PR *PRSync `json:"pr,omitempty"`
+	// Archived is set once the feature was handed off (6.5): its archive
+	// ref and head.
+	Archived *feature.Archived `json:"archived,omitempty"`
 	// Error is why the feature couldn't be surveyed; set only with state
 	// unreadable. feature show returns it as its error.
 	Error string `json:"error,omitempty"`
@@ -48,8 +51,10 @@ type FeatureReport struct {
 	unreadable string
 	// gateForPublished: the feature has no gate, or its gate is for the
 	// head that was published and its gate branch is gone or still at the
-	// gate's candidate. Otherwise the gate may hold commits never
-	// published, and a branch_gone feature doesn't close unattended. Set
+	// gate's candidate, and an archive ref left by a partial archive (6.5)
+	// holds the published head. Otherwise the gate or the archive may hold
+	// commits never published, and a branch_gone feature doesn't close
+	// unattended. Set
 	// only for a merged branch_gone feature, the one case
 	// ClosableWithoutConsole reads it.
 	gateForPublished bool
@@ -217,6 +222,7 @@ func (e *Engine) surveyOne(ctx context.Context, pc *pairCtx, name, pm, O string)
 	}
 	r := FeatureReport{Name: name, Branch: m.Branch, Head: head, Base: m.Base, Abandoned: m.Abandoned,
 		Drift: Drift{Status: driftNA, Files: []string{}}}
+	r.Archived = m.Archived
 	r.meta, r.metaSHA = &m, metaSHA
 	r.Parent, r.Children = stackParent(m), []string{}
 	if m.Promoted != nil && m.Promoted.Stack != 0 {
@@ -260,7 +266,15 @@ func (e *Engine) surveyOne(ctx context.Context, pc *pairCtx, name, pm, O string)
 			r.PRState = prOpen
 		}
 		base := e.publishedHead(m)
-		r.Moved = base == "" || head != base
+		cur := head
+		if m.Archived != nil {
+			// Handed off: the archive holds what the branch held (R9).
+			cur = m.Archived.Head
+		}
+		// A shadow branch that came back after the archive (pushed from
+		// an old checkout, or by an older binary) may hold new private
+		// commits: moved, so a person closes it (P4).
+		r.Moved = base == "" || cur != base || (m.Archived != nil && exists && head != m.Archived.Head)
 		// A branch_gone feature has nothing to compare with its PR.
 		if r.PRState == prOpen && exists {
 			var ws []contract.Warning
@@ -326,6 +340,16 @@ func (e *Engine) surveyOne(ctx context.Context, pc *pairCtx, name, pm, O string)
 	if r.State == feature.StateBranchGone && r.PRState == prMerged {
 		if r.gateForPublished, err = gateIsForPublished(ctx, pc, name, m); err != nil {
 			return FeatureReport{}, nil, err
+		}
+		// An archive that stopped before its record was marked left the
+		// branch in its archive ref, which the close deletes: it closes
+		// unattended only when it holds what was published (R9).
+		if r.gateForPublished {
+			arch, ok, err := pc.git.Resolve(ctx, archiveRef(name))
+			if err != nil {
+				return FeatureReport{}, nil, internalErr(err, "read archive ref "+remoteArchiveRef(name))
+			}
+			r.gateForPublished = !ok || arch == e.publishedHead(m)
 		}
 	}
 	return r, warns, nil

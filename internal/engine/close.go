@@ -346,6 +346,11 @@ func (e *Engine) closeTargets(ctx context.Context, pc *pairCtx, r FeatureReport)
 	if err := add(remoteMetaRef(r.Name), metaRef(r.Name)); err != nil {
 		return t, nil, err
 	}
+	// The archive ref goes whenever it exists, also for an archive that
+	// stopped before its record was marked.
+	if err := add(remoteArchiveRef(r.Name), archiveRef(r.Name)); err != nil {
+		return t, nil, err
+	}
 	ids := map[string]bool{}
 	if plan.ValidID(r.PlanID) {
 		ids[r.PlanID] = true
@@ -561,14 +566,18 @@ func closeSummary(pc *pairCtx, r FeatureReport, t closeTargets) string {
 	b.WriteString("and close its gate draft PR, if one is open.\n")
 	var branches []string
 	for _, ref := range refs {
-		if strings.HasPrefix(ref, "refs/heads/") {
+		if strings.HasPrefix(ref, "refs/heads/") || strings.HasPrefix(ref, feature.ArchiveRefPrefix) {
 			branches = append(branches, ref)
 		}
 	}
 	if len(branches) > 0 {
 		b.WriteString("Recover a branch from a clone that still has its commits (your working clone, for example) with:\n")
 		for _, ref := range branches {
-			fmt.Fprintf(&b, "  git push %s %s:%s\n", visible(pc.shadow.CloneURL), t.refs[ref], visible(ref))
+			to := ref
+			if name, ok := strings.CutPrefix(ref, feature.ArchiveRefPrefix); ok {
+				to = "refs/heads/" + name
+			}
+			fmt.Fprintf(&b, "  git push %s %s:%s\n", visible(pc.shadow.CloneURL), t.refs[ref], visible(to))
 		}
 	}
 	return strings.TrimSuffix(b.String(), "\n")

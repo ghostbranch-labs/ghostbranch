@@ -107,10 +107,11 @@ func (a *app) featureCloseCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "close <name>",
 		Short: "Delete a feature from the shadow repo (a person confirms unless it merged unchanged)",
-		Long: `feature close deletes a feature from the shadow repo: its branch, its gate branch, its metadata
-and its plan refs, in one push that fails, deleting nothing, if any of them moved since it looked. Then it
-closes the gate's draft PR and removes the feature's plan files and mirror refs on this machine. The
-ledger records every ref deleted with the SHA it pointed at, so a branch can be pushed back.
+		Long: `feature close deletes a feature from the shadow repo: its branch, its gate branch, its metadata,
+its plan refs and, for an archived feature, its archive ref, in one push that fails, deleting nothing, if
+any of them moved since it looked. Then it closes the gate's draft PR and removes the feature's plan files
+and mirror refs on this machine. The ledger records every ref deleted with the SHA it pointed at, so a
+branch can be pushed back.
 
 A feature whose public PR merged and whose branch hasn't moved since closes without asking (sync does
 this on its own). Anything else would lose work that was never published, so a person confirms by
