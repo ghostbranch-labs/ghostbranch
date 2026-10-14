@@ -33,21 +33,24 @@ type StackReadiness struct {
 func (e *Engine) readiness(ctx context.Context, pc *pairCtx, recs map[string]stackRecord, res *GateResult, chain, kids []string) StackReadiness {
 	pm, O := res.PublicMain, res.Overlay
 	var rd StackReadiness
-	below := ""
+	// The bottom links as promote links it (review M4): to public main, or
+	// to its published parent's tree.
+	below, check := bottomBelow(recs, chain[0])
 	for _, n := range chain[:len(chain)-1] {
 		m := recs[n].meta
-		if fresh, _ := e.gateFresh(ctx, pc, n, m, pm, O); !fresh || !linked(m, below) {
+		if fresh, _ := e.gateFresh(ctx, pc, n, m, pm, O); !fresh || (check && !linked(m, below)) {
 			return StackReadiness{GateFirst: n}
 		}
 		rd.Levels = append(rd.Levels, n)
 		if len(m.Gate.Commits) > 1 {
 			rd.TitleFor = append(rd.TitleFor, n)
 		}
-		below = m.Gate.PublishedTree
+		below, check = m.Gate.PublishedTree, true
 	}
 	// This feature's gate just passed; it links to the level below by the
-	// tree it built on.
-	if below != "" && baseTree(recs, res) != below {
+	// tree it built on. As the bottom, it just built on what it builds on:
+	// a moved published parent is promote's parent_moved, not a re-gate.
+	if len(chain) > 1 && baseTree(recs, res) != below {
 		return StackReadiness{GateFirst: chain[len(chain)-2]}
 	}
 	rd.Levels = append(rd.Levels, res.Feature)
@@ -91,8 +94,25 @@ func baseTree(recs map[string]stackRecord, res *GateResult) string {
 	return ""
 }
 
-// linked reports whether m's gate built on the published tree below it; a
-// bottom level (below "") has nothing to link to.
+// bottomBelow is the published tree the stack's bottom gate must have
+// built on, as resolveStack has it: "" on public main, or the tree its
+// published parent's gate published. ok is false when the parent's record
+// can't say; promote then refuses on the parent (parent_moved or
+// parent_not_public), so readiness doesn't send the bottom to gate.
+func bottomBelow(recs map[string]stackRecord, bottom string) (tree string, ok bool) {
+	p := stackParent(recs[bottom].meta)
+	if p == feature.MainParent {
+		return "", true
+	}
+	pr, found := recs[p]
+	if !found || pr.meta.Promoted == nil || pr.meta.Gate == nil || pr.meta.Gate.PublishedTree == "" {
+		return "", false
+	}
+	return pr.meta.Gate.PublishedTree, true
+}
+
+// linked reports whether m's gate built on the published tree below it
+// ("" for public main), as resolveStack checks it.
 func linked(m feature.Meta, below string) bool {
-	return below == "" || (m.Gate != nil && m.Gate.BaseTree == below)
+	return m.Gate != nil && m.Gate.BaseTree == below
 }

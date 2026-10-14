@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
@@ -87,5 +88,39 @@ func TestWaitResultReadiness(t *testing.T) {
 	}
 	if rd := res.Ready; rd.GateFirst != "" || !slices.Equal(rd.Levels, []string{"feat-a", "feat-b"}) {
 		t.Fatalf("wait: %+v", rd)
+	}
+}
+
+// Review M4: readiness links the bottom level the way promote does, to
+// public main ("") or to its published parent's tree. A bottom whose gate
+// built on another tree is gated first, and promote agrees it is stale.
+func TestGateResultReadinessLinksTheBottomAsPromoteDoes(t *testing.T) {
+	t.Parallel()
+	for _, onParent := range []bool{false, true} {
+		h := newHarness(t)
+		h.init()
+		bottom := "feat-a"
+		if onParent {
+			h.publish("feat-p")
+			h.startOn("feat-a", "feat-p", map[string]string{"a.txt": "a\n"})
+		} else {
+			h.startFeature("feat-a", map[string]string{"a.txt": "a\n"})
+		}
+		h.startOn("feat-b", "feat-a", map[string]string{"b.txt": "b\n"})
+		gateOK(h, "feat-a")
+		if rd := gateOK(h, "feat-b").Ready; rd.GateFirst != "" || !slices.Equal(rd.Levels, []string{"feat-a", "feat-b"}) {
+			t.Fatalf("on parent %v: %+v", onParent, rd)
+		}
+		if _, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Features: []string{"feat-a", "feat-b"}, Mode: "preserve", PlanOnly: true}); err != nil {
+			t.Fatalf("on parent %v: promote = %v", onParent, err)
+		}
+		h.editRemoteMeta(bottom, func(m *feature.Meta) { m.Gate.BaseTree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904" })
+		if rd := gateOK(h, "feat-b").Ready; rd.GateFirst != "feat-a" || rd.Levels != nil {
+			t.Fatalf("on parent %v, bottom on another tree: %+v", onParent, rd)
+		}
+		_, _, err := h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Features: []string{"feat-a", "feat-b"}, Mode: "preserve", PlanOnly: true})
+		if ce := wantCode(t, err, contract.NotAStack); ce.Details["reason"] != "stale_gate" || ce.Details["feature"] != "feat-a" {
+			t.Fatalf("on parent %v: promote details = %+v", onParent, ce.Details)
+		}
 	}
 }
