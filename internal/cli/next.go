@@ -567,6 +567,9 @@ func (a *app) steps(err error) []contract.Next {
 				break
 			}
 			state, _ := ce.Details["pr_state"].(string)
+			if ce.Field == "from" || ce.Field == "onto" {
+				return a.stackOnArchivedNexts(ce.Field, f, pr, state)
+			}
 			if n := a.handedOffPRDone(f, pr, state); n != nil {
 				return n
 			}
@@ -822,6 +825,29 @@ func (a *app) handedOffPRDone(name string, pr int, state string) []contract.Next
 			Why: fmt.Sprintf("PR #%d was closed without merging; a person closes %s at the console", pr, name)}}
 	}
 	return nil
+}
+
+// stackOnArchivedNexts is next for FEATURE_ARCHIVED from feature start
+// --from (field "from") or feature restack --onto ("onto"): nothing is built
+// on handed-off feature name, so the same run starts from main, or restacks
+// onto main, instead. Its PR is not this run's to fix. Once that PR merged,
+// sync comes first: it closes name and brings main up to date.
+func (a *app) stackOnArchivedNexts(field, name string, pr int, state string) []contract.Next {
+	cmd := withoutFlags(a.again(false), "--"+field, "--repo")
+	why := "nothing can be stacked on handed-off feature " + name + ": start from main instead"
+	if field == "onto" {
+		cmd = append(cmd, "--onto", "main")
+		why = "nothing can be stacked on handed-off feature " + name + ": restack onto main instead"
+	}
+	if a.pairFull.Public != "" {
+		cmd = append(cmd, "--repo", a.pairFull.Public)
+	}
+	out := []contract.Next{{Command: cmd, Why: why}}
+	if state == "merged" {
+		out = append([]contract.Next{{Command: a.scoped("sync"),
+			Why: fmt.Sprintf("PR #%d merged; sync closes %s and brings main up to date", pr, name)}}, out...)
+	}
+	return out
 }
 
 // prBranch is the public branch of r's PR i: each PR's branch is the base

@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"fmt"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -214,5 +216,144 @@ func TestRenderOfAFailedDryRunNeverSaysNothing(t *testing.T) {
 	}
 	if !strings.Contains(errOut.String(), "[INTERNAL]") {
 		t.Fatalf("stderr: %q", errOut.String())
+	}
+}
+
+// F-23: an exit code's header says "exit 5:" once; a code keeps its kind
+// and exit code in brackets.
+func TestExplainTextHeaders(t *testing.T) {
+	t.Parallel()
+	exit, err := contract.Explain("5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := human(&ExplainResult{Entries: exit}, style.Styler{})
+	if !strings.HasPrefix(got, "exit 5: A person has to approve this before it runs") || strings.Contains(got, "(exit,") {
+		t.Errorf("explain 5 = %q", got)
+	}
+	if !strings.Contains(got, "\nAPPROVAL_REQUIRED (error, exit 5): ") {
+		t.Errorf("explain 5 lacks its codes: %q", got)
+	}
+	warn, err := contract.Explain("UPDATE_AVAILABLE")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := human(&ExplainResult{Entries: warn}, style.Styler{}); !strings.HasPrefix(got, "UPDATE_AVAILABLE (warning): ") {
+		t.Errorf("explain UPDATE_AVAILABLE = %q", got)
+	}
+	// explain --all: every exit code once, in the new form, each at the
+	// start of its own line (not only somewhere in another entry's text).
+	all := human(&ExplainResult{Entries: contract.Registry()}, style.Styler{})
+	for x := 0; x <= 6; x++ {
+		if !regexp.MustCompile(fmt.Sprintf(`(?m)^exit %d: `, x)).MatchString(all) {
+			t.Errorf("explain --all lacks exit %d", x)
+		}
+	}
+	if strings.Contains(all, "(exit,") {
+		t.Errorf("explain --all still says (exit, …)")
+	}
+}
+
+// F-11: a stack plan's text names every PR with its own commit count, not
+// only the bottom's.
+func TestStackPlanTextCountsEveryPR(t *testing.T) {
+	t.Parallel()
+	entry := func(name string, n, dropped int) plan.Entry {
+		return plan.Entry{Feature: name, Mode: "preserve",
+			Publish: plan.Publish{Commits: make([]plan.Commit, n), DroppedEmpty: make([]string, dropped)}}
+	}
+	p := &plan.Plan{ID: "20261014T072852Z-563f9d", Mode: "preserve", Feature: "feat-a",
+		Publish: plan.Publish{Commits: make([]plan.Commit, 8)},
+		Chain:   []plan.Entry{entry("feat-a", 8, 0), entry("feat-b", 39, 2)},
+		PRs:     []plan.StackPR{{Feature: "feat-a", Base: "main"}, {Feature: "feat-b", Base: "feat-a"}}}
+	want := "Plan 20261014T072852Z-563f9d saved to /plans/p.json: 2 PRs, bottom first.\n" +
+		"  feat-a (preserve): 8 public commit(s), PR on main\n" +
+		"  feat-b (preserve): 39 public commit(s), 2 dropped as empty, PR on feat-a\n" +
+		"Publish it with: ghostbranch apply 20261014T072852Z-563f9d\n"
+	if got := human(&engine.PromoteResult{Plan: p, PlanPath: "/plans/p.json"}, style.Styler{}); got != want {
+		t.Errorf("got\n%s\nwant\n%s", got, want)
+	}
+	// One feature: the line it always had.
+	one := &plan.Plan{ID: "p1", Mode: "squash", Publish: plan.Publish{Commits: make([]plan.Commit, 1)},
+		PRs: []plan.StackPR{{Feature: "feat-x", Base: "main"}}}
+	want = "Plan p1 saved to /plans/p1.json.\n  squash: 1 public commit(s)\nPublish it with: ghostbranch apply p1\n"
+	if got := human(&engine.PromoteResult{Plan: one, PlanPath: "/plans/p1.json"}, style.Styler{}); got != want {
+		t.Errorf("one feature: got %q, want %q", got, want)
+	}
+}
+
+// F-15: a fresh stack apply names every PR it opened, bottom first.
+func TestFreshStackApplyNamesEveryPR(t *testing.T) {
+	t.Parallel()
+	u1, u2 := "https://github.example/acme/widget/pull/13", "https://github.example/acme/widget/pull/14"
+	r := &engine.ApplyResult{PublicBranch: "feat-b", PublicPR: 14, PRURL: u2, PRs: []plan.StackPR{
+		{Feature: "feat-a", Base: "main", Number: 13, URL: u1}, {Feature: "feat-b", Base: "feat-a", Number: 14, URL: u2}}}
+	want := "Published feat-a as PR #13: " + u1 + "\nPublished feat-b as PR #14: " + u2 + "\n"
+	for _, res := range []any{r, &engine.PromoteResult{Applied: r, Plan: &plan.Plan{}}} {
+		if got := human(res, style.Styler{}); !strings.HasPrefix(got, want) {
+			t.Errorf("human(%T) = %q, want it to start %q", res, got, want)
+		}
+	}
+}
+
+// A stack apply that failed partway names only the PRs it opened: a PR it
+// never opened (number 0) gets no "PR #0" line (Task 7 review I1). One that
+// failed before any PR opened prints no published line at all.
+func TestPartlyFailedStackApplyNamesOnlyOpenedPRs(t *testing.T) {
+	t.Parallel()
+	u1 := "https://github.example/acme/widget/pull/13"
+	partly := &engine.ApplyResult{PRs: []plan.StackPR{
+		{Feature: "feat-a", Base: "main", Number: 13, URL: u1}, {Feature: "feat-b", Base: "feat-a"}}}
+	got := human(partly, style.Styler{})
+	if !strings.HasPrefix(got, "Published feat-a as PR #13: "+u1+"\n") || strings.Contains(got, "#0") || strings.Contains(got, "Published  ") {
+		t.Errorf("partly failed stack apply = %q", got)
+	}
+	none := &engine.ApplyResult{PRs: []plan.StackPR{
+		{Feature: "feat-a", Base: "main"}, {Feature: "feat-b", Base: "feat-a"}}}
+	if got := human(none, style.Styler{}); strings.Contains(got, "Published") || strings.Contains(got, "#0") {
+		t.Errorf("stack apply that opened nothing = %q", got)
+	}
+	if got := human(&engine.ApplyResult{PublicBranch: "feat-x"}, style.Styler{}); strings.Contains(got, "#0") {
+		t.Errorf("one-PR apply that opened nothing = %q", got)
+	}
+}
+
+// The stack lines escape a branch name a terminal would act on, as
+// archivedLines does (Task 7 review M1).
+func TestStackApplyLinesEscapeBranchNames(t *testing.T) {
+	t.Parallel()
+	rlo := string(rune(0x202e)) // RIGHT-TO-LEFT OVERRIDE, a bidi control
+	r := &engine.ApplyResult{PublicBranch: "feat-b\x1b[2J", PublicPR: 14, PRs: []plan.StackPR{
+		{Feature: "feat-a", Base: "main", Number: 13, Update: true, Style: plan.StyleAppend},
+		{Feature: "feat-b", Base: "feat-a" + rlo, Number: 14}}}
+	got := human(r, style.Styler{})
+	if strings.ContainsAny(got, "\x1b"+rlo) || !strings.Contains(got, `feat-b\x1b[2J`) || !strings.Contains(got, `feat-a`+`\`+`u202e`) {
+		t.Errorf("stack apply lines = %q", got)
+	}
+}
+
+// A guided init on a private shadow repo says again, just before the
+// walkthrough, that gates bill Actions minutes; otherwise it says nothing.
+func TestGuidedInitSaysMinutesAreBilled(t *testing.T) {
+	t.Parallel()
+	const note = "Note: acme/widget-shadow is private, so the CI that every gate runs bills your GitHub Actions minutes.\n"
+	res := func(guided, billed bool) *engine.InitResult {
+		return &engine.InitResult{Public: "acme/widget", Shadow: "acme/widget-shadow", Ready: true, Guided: guided,
+			Audit: &engine.AuditResult{Shadow: "acme/widget-shadow", Minutes: engine.AuditMinutes{Billed: billed}}}
+	}
+	got := human(res(true, true), style.Styler{})
+	if !strings.Contains(got, "\n"+note+"\nYour first feature:\n") {
+		t.Errorf("guided and billed: %q", got)
+	}
+	for _, c := range []struct{ guided, billed bool }{{true, false}, {false, true}} {
+		if got := human(res(c.guided, c.billed), style.Styler{}); strings.Contains(got, "Note:") {
+			t.Errorf("guided %v, billed %v: %q", c.guided, c.billed, got)
+		}
+	}
+	// No audit (it didn't run): no note, and the walkthrough still shows.
+	noAudit := res(true, true)
+	noAudit.Audit = nil
+	if got := human(noAudit, style.Styler{}); strings.Contains(got, "Note:") || !strings.Contains(got, "Your first feature:") {
+		t.Errorf("guided without an audit: %q", got)
 	}
 }

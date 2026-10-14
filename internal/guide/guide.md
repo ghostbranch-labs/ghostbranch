@@ -100,12 +100,14 @@ main, green CI, and a leak scan of exactly what will be published.
 
 - `ghostbranch status --repo <public> --json` shows the pair's health and every feature's state:
   `draft`, `in_review`, `gate_passed`, `published`, `pr_behind`, `merged`, `merged_moved`, `pr_closed`,
-  `branch_gone`, `archived`, `abandoned`, and `unreadable` (a record that can't be read: `feature show <name>`
-  gives the error; run the command again if it was a passing failure, as a corrupt one only a person
-  at the console closes; the other features still show). `feature list --repo <public>` and
+  `branch_gone`, `archived`, `abandoned`, `parent_stale` and `public_pr_needs_update` (both in a stack:
+  see *Stacks*), and `unreadable` (a record that can't be read: `feature show <name>` gives the error;
+  run the command again if it was a passing failure, as a corrupt one only a person at the console
+  closes; the other features still show). `feature list --repo <public>` and
   `feature show <name> --repo <public>` give the same by feature.
 - `ghostbranch sync --repo <public>` closes features whose public PR merged and whose branch hasn't
-  moved: it deletes their shadow branches (and an archived one's archive) and says so in `data.closed`. `--no-close` skips that.
+  moved: it deletes their shadow branches (and an archived one's archive) and says so in
+  `data.closed`. `--no-close` skips that.
 - `merged_moved`, `pr_closed` and any `branch_gone` that `sync` leaves (unmerged; or merged, but gated
   again after the publish, with its gate branch moved, or with a record too old to say what was
   published) are for a person to close (or promote a `merged_moved` feature's newer commits): `status`
@@ -186,14 +188,19 @@ main, green CI, and a leak scan of exactly what will be published.
   `--keep`. `data.after_publish` says, per feature: `archived`, `kept` or `incomplete`.
 - Archive hands the PR off: the shadow branch moves to `refs/ghostbranch/archive/<name>` (nothing is
   lost) and the feature's state is `archived`. Fix or change its PR on the PR's branch (`<branch>` is
-  `error.details.branch` of `FEATURE_ARCHIVED`, or in its `next`): `git fetch origin && git switch --detach origin/<branch>`,
-  commit there (never on the old shadow branch: the guard refuses its private commits; a plain
-  `git switch <branch>` lands on it), then `git push origin HEAD:<branch>`. No gate, no plan, no apply.
-- `promote`, `gate` and `feature pull` refuse an archived feature (`FEATURE_ARCHIVED`). When its PR merges,
-  `sync` closes it and deletes the archive (unless it reads `merged_moved`: a person closes it).
-- Archive is unavailable while another feature is built on this one: publish it with this one, restack it onto main, or close an abandoned one first,
-  then `ghostbranch feature archive <name> --repo <public> --json`. `ARCHIVE_INCOMPLETE`: the publish stands;
-  run `ghostbranch feature archive <name> --repo <public> --json` to finish. An older Ghostbranch shows an archived feature as `branch_gone`: update it.
+  `error.details.branch` of `FEATURE_ARCHIVED`, or in its `next`):
+  `git fetch origin && git switch --detach origin/<branch>`, commit there (never on the old shadow
+  branch: the guard refuses its private commits; a plain `git switch <branch>` lands on it), then
+  `git push origin HEAD:<branch>`. No gate, no plan, no apply.
+- `promote`, `gate`, `feature pull` and `waivers add` refuse an archived feature (`FEATURE_ARCHIVED`),
+  and nothing can be started from it (`feature start --from`) or restacked onto it
+  (`feature restack --onto`). When its PR merges, `sync` closes it and deletes the archive (unless it
+  reads `merged_moved`: a person closes it).
+- Archive is unavailable while another feature is built on this one: publish it with this one,
+  restack it onto main, or close an abandoned one first, then
+  `ghostbranch feature archive <name> --repo <public> --json`. `ARCHIVE_INCOMPLETE`: the publish
+  stands; run `ghostbranch feature archive <name> --repo <public> --json` to finish. An older
+  Ghostbranch shows an archived feature as `branch_gone`: update it.
 - Keep is the loop above: fixes go through the shadow branch, `gate` and `promote`.
 
 ## Keeping up with public
@@ -381,7 +388,7 @@ Fine-grained tokens, per command:
 
 | Command | Permissions |
 |---|---|
-| `init` that creates the shadow repo | Administration write on **all repositories** of the owner (a token can't name a repo that doesn't exist yet), plus the `init --adopt` set |
+| `init` that creates the shadow repo | Administration write on **all repositories** of the owner (a token can't name a repo that doesn't exist yet), plus the `init --adopt` set; afterwards narrow it to the shadow repo or delete it, and give an agent only its own shadow-only token (see *Strict isolation*) |
 | `init --adopt` (create the empty private repo yourself first) | Shadow: Administration, Contents and Workflows read and write |
 | `sync`, `upgrade` | Shadow: Contents and Workflows write; Actions write (optional: lets `sync` cancel the workflow runs its pushes start) |
 | `feature start`, `gate` | Shadow: Contents, Pull requests and Workflows write; Actions and Commit statuses read |

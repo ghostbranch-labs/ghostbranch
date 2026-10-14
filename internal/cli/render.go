@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -137,11 +136,15 @@ func human(r any, st style.Styler) string {
 		// It runs inside every public git push: a pass says nothing.
 	case *ExplainResult:
 		for _, e := range v.Entries {
-			exit := ""
-			if e.ExitCode != nil {
-				exit = fmt.Sprintf(", exit %d", *e.ExitCode)
+			switch {
+			case e.Kind == contract.KindExit:
+				// "exit 5: …", not "5 (exit, exit 5): …" (F-23).
+				fmt.Fprintf(&b, "exit %s: %s\n", e.Code, e.Summary)
+			case e.ExitCode != nil:
+				fmt.Fprintf(&b, "%s (%s, exit %d): %s\n", e.Code, e.Kind, *e.ExitCode, e.Summary)
+			default:
+				fmt.Fprintf(&b, "%s (%s): %s\n", e.Code, e.Kind, e.Summary)
 			}
-			fmt.Fprintf(&b, "%s (%s%s): %s\n", e.Code, e.Kind, exit, e.Summary)
 			for _, c := range e.Causes {
 				fmt.Fprintf(&b, "  cause: %s\n", c)
 			}
@@ -181,6 +184,11 @@ func human(r any, st style.Styler) string {
 			}
 		}
 		if v.Guided && v.Ready {
+			if v.Audit != nil && v.Audit.Minutes.Billed {
+				// Said again here, where a person reads on: the warning
+				// scrolls by among init's progress lines (6.1 acceptance).
+				fmt.Fprintf(&b, "\nNote: %s is private, so the CI that every gate runs bills your GitHub Actions minutes.\n", v.Shadow)
+			}
 			b.WriteString(walkthrough)
 		}
 	case *engine.AuditResult:
@@ -285,12 +293,7 @@ func human(r any, st style.Styler) string {
 			b.WriteString(publishedLine(v.Applied, k))
 			archivedLines(&b, v.Applied)
 		case v.Plan != nil && v.PlanPath != "":
-			fmt.Fprintf(&b, "Plan %s saved to %s.\n", v.Plan.ID, v.PlanPath)
-			fmt.Fprintf(&b, "  %s: %d public commit(s)", v.Plan.Mode, len(v.Plan.Publish.Commits))
-			if n := len(v.Plan.Publish.DroppedEmpty); n > 0 {
-				fmt.Fprintf(&b, ", %d dropped as empty", n)
-			}
-			fmt.Fprintf(&b, "\nPublish it with: ghostbranch apply %s\n", v.Plan.ID)
+			planLines(&b, v.Plan, v.PlanPath)
 		case v.Gate != nil && pendingJob(v.Gate):
 			b.WriteString(pendingLine(v.Gate))
 			b.WriteString("No plan yet: wait for the job, then promote again.\n")
@@ -575,6 +578,33 @@ func human(r any, st style.Styler) string {
 	return b.String()
 }
 
+// planLines is a saved promote plan: where it is, what it publishes, and
+// the apply command. A stack plan names each PR, bottom first, with its
+// own commit count (F-11); Plan.Publish is only the bottom's.
+func planLines(b *strings.Builder, p *plan.Plan, path string) {
+	if len(p.Chain) < 2 {
+		fmt.Fprintf(b, "Plan %s saved to %s.\n", p.ID, path)
+		fmt.Fprintf(b, "  %s: %d public commit(s)", p.Mode, len(p.Publish.Commits))
+		if n := len(p.Publish.DroppedEmpty); n > 0 {
+			fmt.Fprintf(b, ", %d dropped as empty", n)
+		}
+		fmt.Fprintf(b, "\nPublish it with: ghostbranch apply %s\n", p.ID)
+		return
+	}
+	fmt.Fprintf(b, "Plan %s saved to %s: %d PRs, bottom first.\n", p.ID, path, len(p.Chain))
+	for i, e := range p.Chain {
+		fmt.Fprintf(b, "  %s (%s): %d public commit(s)", oneLine(e.Feature), e.Mode, len(e.Publish.Commits))
+		if n := len(e.Publish.DroppedEmpty); n > 0 {
+			fmt.Fprintf(b, ", %d dropped as empty", n)
+		}
+		if i < len(p.PRs) {
+			fmt.Fprintf(b, ", PR on %s", oneLine(p.PRs[i].Base))
+		}
+		b.WriteString("\n")
+	}
+	fmt.Fprintf(b, "Publish it with: ghostbranch apply %s\n", p.ID)
+}
+
 // archivedLines says which features were handed off, and where their
 // PRs are fixed now.
 func archivedLines(b *strings.Builder, r *engine.ApplyResult) {
@@ -588,17 +618,21 @@ func archivedLines(b *strings.Builder, r *engine.ApplyResult) {
 
 // publishedLine is what an apply did: published a new PR, or updated an
 // open one, by adding k commits (k < 0 when the count isn't at hand) or by
-// replacing its branch. A stack plan that updated a PR says, for each of
-// its PRs, bottom first, what happened to it.
+// replacing its branch. A stack plan says, for each of its PRs, bottom
+// first, what happened to it (F-15: a fresh stack once named only its top).
+// A PR never opened (number 0: the apply failed first) gets no line.
 func publishedLine(r *engine.ApplyResult, k int) string {
-	if len(r.PRs) > 1 && slices.ContainsFunc(r.PRs, func(p plan.StackPR) bool { return p.Update }) {
+	if len(r.PRs) > 1 {
 		var b strings.Builder
 		for i, p := range r.PRs {
+			if p.Number == 0 {
+				continue
+			}
 			// Each PR's branch is the base of the PR above it; the top's is
 			// the result's.
-			branch := r.PublicBranch
+			branch := oneLine(r.PublicBranch)
 			if i+1 < len(r.PRs) {
-				branch = r.PRs[i+1].Base
+				branch = oneLine(r.PRs[i+1].Base)
 			}
 			switch {
 			case !p.Update:
@@ -623,6 +657,9 @@ func publishedLine(r *engine.ApplyResult, k int) string {
 			return fmt.Sprintf("Updated PR #%d (added %d commit%s): %s\n", r.PublicPR, k, s, r.PRURL)
 		}
 		return fmt.Sprintf("Replaced PR #%d's branch %s: %s\n", r.PublicPR, r.PublicBranch, r.PRURL)
+	}
+	if r.PublicPR == 0 {
+		return ""
 	}
 	return fmt.Sprintf("Published %s as PR #%d: %s\n", r.PublicBranch, r.PublicPR, r.PRURL)
 }

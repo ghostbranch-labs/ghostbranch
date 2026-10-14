@@ -183,7 +183,9 @@ func ArchiveRef(name string) string { return ArchiveRefPrefix + name }
 
 // Archived records a feature handed off to the public repo: its shadow
 // branch was moved to Ref, at Head, at At. Its PR is fixed by pushing to
-// the PR's branch; promote, gate and feature pull refuse it.
+// the PR's branch. promote, gate, feature pull and waivers add refuse it,
+// and so do feature start --from and feature restack --onto: nothing is
+// stacked on it.
 type Archived struct {
 	At   time.Time `json:"at"`
 	Ref  string    `json:"ref"`
@@ -274,6 +276,16 @@ const (
 	// it. Merged reads merged (or merged_moved), closed reads pr_closed.
 	StateArchived State = "archived"
 )
+
+// States is every State, in the order they are declared above, which is
+// the order of the state enum in schemas/v0/feature-report.schema.json.
+// The guide's Lifecycle list is tested against it, so a new state can't be
+// left out of the guide.
+var States = []State{
+	StateDraft, StateInReview, StateGatePassed, StatePublished, StateMerged, StateMergedMoved,
+	StatePRClosed, StateBranchGone, StateAbandoned, StateUnreadable, StateParentStale,
+	StatePublicPRNeedsUpdate, StatePRBehind, StateArchived,
+}
 
 // StateInput is everything state depends on.
 type StateInput struct {

@@ -11,8 +11,6 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/cli"
 )
 
-var ansi = regexp.MustCompile(`\x1b\[[0-9;]*m`)
-
 // runColor runs args with both streams marked as colour terminals.
 func (te *testEnv) runColor(truecolor bool, args ...string) (int, string, string) {
 	var out, errb bytes.Buffer
@@ -27,15 +25,13 @@ func TestColorDoctorMarks(t *testing.T) {
 	t.Parallel()
 	te := newTestEnv(t)
 	initOnly(te)
-	_, plain, _ := te.run("doctor", "--repo", "acme/widget")
+	// Only the marks: that colour never changes the text is
+	// TestColourNeverChangesTheText, on one rendered result.
 	_, out, _ := te.runColor(false, "doctor", "--repo", "acme/widget")
 	for _, want := range []string{"\x1b[92m✓\x1b[0m", "\x1b[93m!\x1b[0m", "\x1b[2m–\x1b[0m"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("doctor output lacks %q:\n%q", want, out)
 		}
-	}
-	if got := ansi.ReplaceAllString(out, ""); got != plain {
-		t.Errorf("colour changed the text:\n%q\nvs\n%q", got, plain)
 	}
 	_, tc, _ := te.runColor(true, "doctor", "--repo", "acme/widget")
 	if !strings.Contains(tc, "\x1b[38;2;132;204;22m✓\x1b[0m") {
@@ -48,7 +44,6 @@ func TestColorErrorNextAndFailMark(t *testing.T) {
 	te := newTestEnv(t)
 	initOnly(te)
 	delete(te.vars, "GHOSTBRANCH_TOKEN")
-	_, plainOut, plainErr := te.run("doctor", "--repo", "acme/widget")
 	code, out, errOut := te.runColor(false, "doctor", "--repo", "acme/widget")
 	if code == 0 {
 		t.Fatal("doctor should fail without a token")
@@ -64,9 +59,6 @@ func TestColorErrorNextAndFailMark(t *testing.T) {
 	}
 	if !regexp.MustCompile(`\n    \x1b\[2m[^\x1b]+\x1b\[0m\n`).MatchString(errOut) {
 		t.Errorf("why line not dim:\n%q", errOut)
-	}
-	if ansi.ReplaceAllString(out, "") != plainOut || ansi.ReplaceAllString(errOut, "") != plainErr {
-		t.Error("colour changed the text")
 	}
 }
 

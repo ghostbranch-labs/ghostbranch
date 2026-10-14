@@ -172,9 +172,11 @@ const (
 	// feature when known.
 	PlanNotFound Code = "PLAN_NOT_FOUND"
 	// FeatureArchived means promote, gate, feature pull or waivers add was
-	// asked to work on a feature handed off to the public repo (6.5): its shadow branch is
-	// archived, and its PR is fixed by pushing to the PR's branch. details:
-	// feature, public_pr, branch (the public branch), archive_ref.
+	// asked to work on a feature handed off to the public repo (6.5), or
+	// feature start --from or feature restack --onto to build on one (6.6):
+	// its shadow branch is archived, and its PR is fixed by pushing to the
+	// PR's branch. details: feature, public_pr, branch (the public branch),
+	// archive_ref, pr_state.
 	FeatureArchived Code = "FEATURE_ARCHIVED"
 )
 

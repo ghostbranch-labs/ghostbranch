@@ -116,6 +116,13 @@ var replaced = map[string]string{
 	"promote.require_human": "promote.require_human is replaced by agent grants (ghostbranch agents allow) and is ignored",
 }
 
+// sections are the honoured keys that hold other keys. Empty, each means
+// its defaults: yaml.v3 reads a bare or comment-only section as nil, which
+// flatten keeps as a leaf, and that leaf must not read as an unknown key
+// (CONFIG_INVALID with unknown_key, which the engine reports as
+// UPGRADE_NEEDED).
+var sections = map[string]bool{"promote": true, "leak_scan": true, "leak_scan.markers": true, "gate": true, "sync": true, "ci": true}
+
 // notASection is the error for a scalar or a list where a section belongs
 // ("sync: off"). It has no details.unknown_key, so it stays CONFIG_INVALID
 // rather than reading as a key from a newer Ghostbranch.
@@ -141,10 +148,10 @@ func Parse(data []byte) (Config, []contract.Warning, error) {
 	cfg := Default()
 	var warns []contract.Warning
 	for _, k := range keys {
+		if sections[k] && isEmptyMap(leaves[k]) {
+			continue // a bare, comment-only or {} section means its defaults (F-25)
+		}
 		if k == "sync" || k == "ci" {
-			if isEmptyMap(leaves[k]) {
-				continue // "sync: {}" means the defaults
-			}
 			return Config{}, nil, contract.New(contract.ConfigInvalid, "%s", notASection[k]).WithField(k)
 		}
 		switch root := ignoredRoot(k); {
@@ -265,6 +272,10 @@ func set(cfg *Config, key string, v any) error {
 	case "promote.author_email":
 		cfg.Promote.AuthorEmail, err = str()
 	case "promote.author_map":
+		if v == nil { // a bare author_map: no mappings
+			cfg.Promote.AuthorMap = map[string]string{}
+			break
+		}
 		m, ok := v.(map[string]any)
 		if !ok {
 			return invalid(key, "must map author emails to \"Name <email>\"")
