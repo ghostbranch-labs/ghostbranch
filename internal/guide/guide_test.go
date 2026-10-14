@@ -167,6 +167,7 @@ func TestGuideCoversSetupAndCIParity(t *testing.T) {
 		"of `error.details.steps`", "Shadow: Contents, Pull requests and Workflows write",
 		"other than through `ghostbranch init`", "`SYNC_DIVERGED`, which needs a",
 		"Shadow: Administration, Contents and Workflows read and write |",
+		"then narrow the token to the public and shadow repos, or make a new one, before an agent gets it",
 		"Any token can read public repos, so for a public repo you only grant permissions on the shadow repo",
 		"never give it to an agent", "Actions write (optional: lets `sync` cancel the workflow runs its pushes start)",
 		"add `--shadow <owner/name>` to both", "(`--no-cancel` skips that)",

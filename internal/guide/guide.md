@@ -388,7 +388,7 @@ Fine-grained tokens, per command:
 
 | Command | Permissions |
 |---|---|
-| `init` that creates the shadow repo | Administration write on **all repositories** of the owner (a token can't name a repo that doesn't exist yet), plus the `init --adopt` set |
+| `init` that creates the shadow repo | Administration write on **all repositories** of the owner (a token can't name a repo that doesn't exist yet), plus the `init --adopt` set; then narrow the token to the public and shadow repos, or make a new one, before an agent gets it (an agent's own token reaches only the shadow repo: see *Strict isolation*) |
 | `init --adopt` (create the empty private repo yourself first) | Shadow: Administration, Contents and Workflows read and write |
 | `sync`, `upgrade` | Shadow: Contents and Workflows write; Actions write (optional: lets `sync` cancel the workflow runs its pushes start) |
 | `feature start`, `gate` | Shadow: Contents, Pull requests and Workflows write; Actions and Commit statuses read |
