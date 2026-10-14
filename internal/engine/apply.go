@@ -64,6 +64,10 @@ type ApplyResult struct {
 	// null. Archived lists the features archived, bottom first.
 	AfterPublish map[string]string `json:"after_publish"`
 	Archived     []string          `json:"-"`
+	// Landed: the plan's updates had already landed, so this run only
+	// recorded them and archived nothing (finishLanded, R14), though the
+	// run that died may have been asked to. For next.
+	Landed bool `json:"-"`
 	// handOff are the features to archive once the publish succeeded;
 	// moved is every shadow ref the archives created or deleted (ledger).
 	handOff []string

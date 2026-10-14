@@ -39,6 +39,9 @@ type FeatureReport struct {
 	// Archived is set once the feature was handed off (6.5): its archive
 	// ref and head.
 	Archived *feature.Archived `json:"archived,omitempty"`
+	// PublicBranch is the public branch it was published to, for next;
+	// "" when unpublished.
+	PublicBranch string `json:"-"`
 	// Error is why the feature couldn't be surveyed; set only with state
 	// unreadable. feature show returns it as its error.
 	Error string `json:"error,omitempty"`
@@ -221,6 +224,9 @@ func (e *Engine) surveyOne(ctx context.Context, pc *pairCtx, name, pm, O string)
 	r := FeatureReport{Name: name, Branch: m.Branch, Head: head, Base: m.Base, Abandoned: m.Abandoned,
 		Drift: Drift{Status: driftNA, Files: []string{}}}
 	r.Archived = m.Archived
+	if m.Promoted != nil {
+		r.PublicBranch = publishedBranch(m)
+	}
 	r.meta, r.metaSHA = &m, metaSHA
 	r.Parent, r.Children = stackParent(m), []string{}
 	if m.Promoted != nil && m.Promoted.Stack != 0 {

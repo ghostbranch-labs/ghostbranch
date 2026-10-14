@@ -232,6 +232,25 @@ func TestGoldenContract(t *testing.T) {
 		{"promote_console_publish", func(te *testEnv) { gatedFeature(te); atConsole(te, typeTheCode) },
 			[]string{"promote", "feat-x", "--mode", "squash", "-m", "Add feature"}, 0},
 		{"promote_publish", publishable, []string{"promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--yes"}, 0},
+		{"promote_publish_keep", publishable, []string{"promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--yes", "--keep"}, 0},
+		{"apply_archived", func(te *testEnv) {
+			publishable(te)
+			te.mustRun("promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--plan")
+		}, []string{"apply", "<PLAN>", "--yes"}, 0},
+		{"apply_keep", func(te *testEnv) {
+			publishable(te)
+			te.mustRun("promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--plan")
+		}, []string{"apply", "<PLAN>", "--yes", "--keep"}, 0},
+		{"apply_archive_unavailable", func(te *testEnv) {
+			publishable(te)
+			te.mustRun("feature", "start", "feat-y", "--from", "feat-x")
+			te.mustRun("promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--plan")
+		}, []string{"apply", "<PLAN>", "--yes"}, 0},
+		{"apply_archive_incomplete", func(te *testEnv) {
+			publishable(te)
+			te.mustRun("promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--plan")
+			te.forge.ClosePRErr = errors.New("connection reset")
+		}, []string{"apply", "<PLAN>", "--yes"}, 0},
 		{"apply_stale", func(te *testEnv) {
 			gatedFeature(te)
 			te.mustRun("promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--plan")
@@ -319,10 +338,25 @@ jobs:
 			grantAgents(te)
 			te.forge.SetPRMerged("acme/widget", publishFeature(te, "feat-x"))
 		}, []string{"feature", "close", "feat-x"}, 0},
-		{"feature_archive", func(te *testEnv) {
-			publishable(te)
-			te.mustRun("promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--yes", "--keep")
-		}, []string{"feature", "archive", "feat-x"}, 0},
+		{"feature_archive", keptFeature, []string{"feature", "archive", "feat-x"}, 0},
+		{"feature_archive_plan", keptFeature, []string{"feature", "archive", "feat-x", "--plan"}, 0},
+		{"feature_archive_already", archivedFeature, []string{"feature", "archive", "feat-x"}, 0},
+		{"feature_archive_has_children", func(te *testEnv) {
+			keptFeature(te)
+			te.mustRun("feature", "start", "feat-y", "--from", "feat-x")
+		}, []string{"feature", "archive", "feat-x"}, contract.HasChildren.Exit()},
+		{"feature_archive_not_published", withFeature, []string{"feature", "archive", "feat-x"}, contract.NoOpenPR.Exit()},
+		{"gate_archived", archivedFeature, []string{"gate", "feat-x"}, contract.FeatureArchived.Exit()},
+		{"promote_archived", archivedFeature, []string{"promote", "feat-x", "--plan"}, contract.FeatureArchived.Exit()},
+		{"feature_pull_archived", archivedFeature, []string{"feature", "pull", "feat-x"}, contract.FeatureArchived.Exit()},
+		{"status_archived", archivedFeature, []string{"status"}, 0},
+		{"feature_list_archived", archivedFeature, []string{"feature", "list"}, 0},
+		{"feature_show_archived", archivedFeature, []string{"feature", "show", "feat-x"}, 0},
+		{"sync_closes_archived", func(te *testEnv) {
+			initOnly(te)
+			grantAgents(te)
+			te.forge.SetPRMerged("acme/widget", publishFeature(te, "feat-x"))
+		}, []string{"sync"}, 0},
 		{"feature_close_needs_human", withFeature, []string{"feature", "close", "feat-x"}, 5},
 		{"feature_close_plan", gatedFeature, []string{"feature", "close", "feat-x", "--plan"}, 0},
 		{"feature_fold", withStack, []string{"feature", "fold", "feat-y"}, 0},
@@ -656,6 +690,19 @@ func withGatedStack(te *testEnv) {
 	te.shadowCommit("feat-b", map[string]string{"b.txt": "b\n"})
 	te.mustRun("gate", "feat-a")
 	te.mustRun("gate", "feat-b")
+}
+
+// keptFeature publishes feat-x under the grant and keeps its shadow branch.
+func keptFeature(te *testEnv) {
+	publishable(te)
+	te.mustRun("promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--yes", "--keep")
+}
+
+// archivedFeature publishes feat-x under the grant; Archive is the
+// default, so it is handed off.
+func archivedFeature(te *testEnv) {
+	publishable(te)
+	te.mustRun("promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--yes")
 }
 
 // Run pre-scans argv for --json and --no-color; the reference must still

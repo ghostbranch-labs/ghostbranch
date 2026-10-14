@@ -1,0 +1,57 @@
+{
+  "schema_version": "0.15",
+  "command": "sync",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "public": "acme/widget",
+    "shadow": "acme/widget-shadow",
+    "action": "noop",
+    "public_main": "<SHA1>",
+    "shadow_main_before": "<SHA1>",
+    "shadow_main_after": "<SHA1>",
+    "branches": [
+      {
+        "name": "main",
+        "from": "<SHA1>",
+        "to": "<SHA1>",
+        "status": "up_to_date"
+      }
+    ],
+    "cancelled_runs": [],
+    "closed": [
+      {
+        "name": "feat-x",
+        "public_pr": 1,
+        "deleted": {
+          "refs/ghostbranch/archive/feat-x": "<SHA2>",
+          "refs/ghostbranch/features/feat-x": "<SHA3>",
+          "refs/ghostbranch/plans/20261005T120005Z-0c0d0e": "<SHA4>"
+        },
+        "reparented": []
+      }
+    ],
+    "surveyed": true,
+    "active_features": 0,
+    "attention": [],
+    "preview": null
+  },
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "feature",
+        "start",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "no feature is in progress; start one: put its name (the <name> argument) after start",
+      "needs_human": false,
+      "needs_input": [
+        "<name>"
+      ]
+    }
+  ],
+  "error": null
+}

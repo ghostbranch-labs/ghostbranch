@@ -1,0 +1,172 @@
+{
+  "schema_version": "0.15",
+  "command": "promote",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "gate": {
+      "feature": "feat-x",
+      "feature_head": "<SHA1>",
+      "public_main": "<SHA2>",
+      "parent": "",
+      "base": "<SHA2>",
+      "overlay": "<SHA3>",
+      "candidate": "<SHA4>",
+      "published_tree": "<SHA5>",
+      "scanned_as": "preserve",
+      "commits": [
+        {
+          "source": "<SHA1>",
+          "subject": "work",
+          "author": "Test Author <author@example.com>",
+          "files": [
+            "feature.txt"
+          ]
+        }
+      ],
+      "checks": "passed",
+      "failed_checks": [],
+      "leak": "clean",
+      "findings": [],
+      "waived": [],
+      "repo_guards": {
+        "mode": "rewrite",
+        "rewritten": [],
+        "unrewritable": [],
+        "skipped": []
+      },
+      "shadow_pr": null,
+      "job": null,
+      "reused": true,
+      "preview": null
+    },
+    "plan": {
+      "schema_version": "0.12",
+      "id": "20261005T120005Z-0c0d0e",
+      "kind": "promote",
+      "actor": "human:octo",
+      "created_at": "2026-10-05T12:00:05Z",
+      "pair": {
+        "public": "acme/widget",
+        "shadow": "acme/widget-shadow"
+      },
+      "feature": "feat-x",
+      "mode": "squash",
+      "fingerprint": {
+        "public_main": "<SHA2>",
+        "feature_head": "<SHA1>",
+        "overlay": "<SHA3>",
+        "gate_candidate": "<SHA4>"
+      },
+      "curate": null,
+      "publish": {
+        "commit": "<SHA6>",
+        "tree": "<SHA5>",
+        "parent": "<SHA2>",
+        "target_branch": "feat-x",
+        "pr": {
+          "title": "Add feature",
+          "body": ""
+        },
+        "commits": [
+          {
+            "commit": "<SHA6>",
+            "tree": "<SHA5>",
+            "parent": "<SHA2>",
+            "sources": [
+              "<SHA1>"
+            ],
+            "author": {
+              "name": "octo",
+              "email": "42+octo@users.noreply.github.com",
+              "date": "2026-10-05T12:00:05Z"
+            },
+            "subject": "Add feature"
+          }
+        ],
+        "dropped_empty": []
+      },
+      "typed": {
+        "title": false,
+        "body": false
+      },
+      "leak": {
+        "findings": [],
+        "waived": [],
+        "warnings": [],
+        "scanner_version": "gitleaks v8.30.1"
+      },
+      "ci": {
+        "repo_guards": {
+          "mode": "rewrite",
+          "rewritten": [],
+          "unrewritable": [],
+          "skipped": []
+        }
+      },
+      "prs": [
+        {
+          "feature": "feat-x",
+          "base": "main",
+          "number": 0,
+          "url": ""
+        }
+      ],
+      "stack_number": null
+    },
+    "plan_path": "<ROOT>/home/workspaces/default/plans/20261005T120005Z-0c0d0e.json",
+    "findings": [],
+    "waived": [],
+    "applied": {
+      "plan_id": "20261005T120005Z-0c0d0e",
+      "public_branch": "feat-x",
+      "public_pr": 1,
+      "pr_url": "https://github.example/acme/widget/pull/1",
+      "resumed": false,
+      "approval": {
+        "kind": "grant",
+        "grant_id": "g-0a0b0c",
+        "created_by": "human:octo"
+      },
+      "waived": [],
+      "preview": null,
+      "prs": [
+        {
+          "feature": "feat-x",
+          "base": "main",
+          "number": 1,
+          "url": "https://github.example/acme/widget/pull/1"
+        }
+      ],
+      "stack_number": null,
+      "after_publish": {
+        "feat-x": "kept"
+      }
+    },
+    "preview": null,
+    "prs": [
+      {
+        "feature": "feat-x",
+        "base": "main",
+        "number": 1,
+        "url": "https://github.example/acme/widget/pull/1"
+      }
+    ],
+    "stack_number": null
+  },
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "sync",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "a maintainer reviews and merges PR #1 on GitHub; then sync closes the feature",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
+  "error": null
+}

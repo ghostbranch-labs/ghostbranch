@@ -1,0 +1,65 @@
+{
+  "schema_version": "0.15",
+  "command": "status",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "public": "acme/widget",
+    "shadow": "acme/widget-shadow",
+    "public_main": "<SHA1>",
+    "shadow_main": "<SHA1>",
+    "shadow_behind": false,
+    "overlay": "<SHA2>",
+    "overlay_status": "current",
+    "scheduled_sync": false,
+    "features": [
+      {
+        "name": "feat-x",
+        "state": "archived",
+        "branch": "feat-x",
+        "head": "",
+        "base": "<SHA1>",
+        "parent": "main",
+        "children": [],
+        "stack": null,
+        "drift": {
+          "status": "n/a",
+          "files": []
+        },
+        "gate": {
+          "checks": "passed",
+          "leak": "clean",
+          "scanned_as": "preserve",
+          "fresh": false,
+          "at": "2026-10-05T12:00:05Z",
+          "job": null
+        },
+        "public_pr": 1,
+        "pr_state": "open",
+        "plan_id": "20261005T120005Z-0c0d0e",
+        "moved": false,
+        "abandoned": false,
+        "archived": {
+          "at": "2026-10-05T12:00:05Z",
+          "ref": "refs/ghostbranch/archive/feat-x",
+          "head": "<SHA3>"
+        }
+      }
+    ]
+  },
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "sync",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "handed off to the public repo: fix or change PR #1 (feat-x, branch feat-x) by pushing to the PR's branch (git fetch origin <branch>, commit on origin/<branch>, git push origin HEAD:<branch>); when a PR merges, sync closes its feature",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
+  "error": null
+}

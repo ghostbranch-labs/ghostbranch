@@ -1,0 +1,68 @@
+{
+  "schema_version": "0.15",
+  "command": "feature archive",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "feature": "feat-x",
+    "changed": false,
+    "archived": null,
+    "moved": {},
+    "gate_pr": null,
+    "public_pr": 1,
+    "branch": "feat-x",
+    "preview": {
+      "fingerprint": {},
+      "ops": [
+        {
+          "from": null,
+          "op": "push_ref",
+          "ref": "refs/ghostbranch/archive/feat-x",
+          "repo": "acme/widget-shadow",
+          "to": "<SHA1>"
+        },
+        {
+          "op": "delete_ref",
+          "ref": "refs/heads/feat-x",
+          "repo": "acme/widget-shadow",
+          "sha": "<SHA1>"
+        },
+        {
+          "op": "delete_ref",
+          "ref": "refs/heads/ghostbranch-gate/feat-x",
+          "repo": "acme/widget-shadow",
+          "sha": "<SHA2>"
+        },
+        {
+          "number": 1,
+          "op": "close_pr",
+          "repo": "acme/widget-shadow"
+        },
+        {
+          "from": "<SHA3>",
+          "op": "push_ref",
+          "ref": "refs/ghostbranch/features/feat-x",
+          "repo": "acme/widget-shadow",
+          "to": null
+        }
+      ]
+    }
+  },
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "feature",
+        "archive",
+        "feat-x",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "the preview lists what archiving changes; run it to archive",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
+  "error": null
+}

@@ -1,0 +1,78 @@
+{
+  "schema_version": "0.15",
+  "command": "apply",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "plan_id": "20261005T120005Z-0c0d0e",
+    "public_branch": "feat-x",
+    "public_pr": 1,
+    "pr_url": "https://github.example/acme/widget/pull/1",
+    "resumed": false,
+    "approval": {
+      "kind": "grant",
+      "grant_id": "g-0a0b0c",
+      "created_by": "human:octo"
+    },
+    "waived": [],
+    "preview": null,
+    "prs": [
+      {
+        "feature": "feat-x",
+        "base": "main",
+        "number": 1,
+        "url": "https://github.example/acme/widget/pull/1"
+      }
+    ],
+    "stack_number": null,
+    "after_publish": {
+      "feat-x": "archived"
+    }
+  },
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "sync"
+      ],
+      "why": "a maintainer reviews and merges PR #1 on GitHub; then sync closes the feature",
+      "needs_human": false,
+      "needs_input": []
+    },
+    {
+      "command": [
+        "git",
+        "fetch",
+        "origin",
+        "feat-x"
+      ],
+      "why": "feature feat-x is handed off: fix or change PR #1 on its branch feat-x. In your checkout, fetch it from the public repo (origin is its remote there)",
+      "needs_human": false,
+      "needs_input": []
+    },
+    {
+      "command": [
+        "git",
+        "switch",
+        "--detach",
+        "origin/feat-x"
+      ],
+      "why": "work on the PR's branch as GitHub has it, never on the feature's old shadow branch: the guard refuses its private commits",
+      "needs_human": false,
+      "needs_input": []
+    },
+    {
+      "command": [
+        "git",
+        "push",
+        "origin",
+        "HEAD:feat-x"
+      ],
+      "why": "after committing the fix, push it to the PR; no gate, plan or apply",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
+  "error": null
+}
