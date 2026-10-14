@@ -100,12 +100,12 @@ main, green CI, and a leak scan of exactly what will be published.
 
 - `ghostbranch status --repo <public> --json` shows the pair's health and every feature's state:
   `draft`, `in_review`, `gate_passed`, `published`, `pr_behind`, `merged`, `merged_moved`, `pr_closed`,
-  `branch_gone`, `abandoned`, and `unreadable` (a record that can't be read: `feature show <name>`
+  `branch_gone`, `archived`, `abandoned`, and `unreadable` (a record that can't be read: `feature show <name>`
   gives the error; run the command again if it was a passing failure, as a corrupt one only a person
   at the console closes; the other features still show). `feature list --repo <public>` and
   `feature show <name> --repo <public>` give the same by feature.
 - `ghostbranch sync --repo <public>` closes features whose public PR merged and whose branch hasn't
-  moved: it deletes their shadow branches and says so in `data.closed`. `--no-close` skips that.
+  moved: it deletes their shadow branches (and an archived one's archive) and says so in `data.closed`. `--no-close` skips that.
 - `merged_moved`, `pr_closed` and any `branch_gone` that `sync` leaves (unmerged; or merged, but gated
   again after the publish, with its gate branch moved, or with a record too old to say what was
   published) are for a person to close (or promote a `merged_moved` feature's newer commits): `status`
@@ -178,6 +178,22 @@ main, green CI, and a leak scan of exactly what will be published.
   `unrecorded_update`: an update Ghostbranch pushed was never recorded; run `apply <error.details.plan>`
   (where the plan was made), never `feature pull`. `adopted_missing`: cherry-pick the pulled commits back.
 - `PLAN_STALE` with `public_branch` in `error.details.moved`: the PR moved after the plan; plan again.
+
+## After publishing
+
+- `apply` (and `promote` without `--plan`) asks just above the code what happens after publishing:
+  **Archive** (the default) or **Keep**. Under `--yes` or `--non-interactive` it archives unless you pass
+  `--keep`. `data.after_publish` says, per feature: `archived`, `kept` or `incomplete`.
+- Archive hands the PR off: the shadow branch moves to `refs/ghostbranch/archive/<name>` (nothing is
+  lost) and the feature's state is `archived`. Fix or change its PR on the PR's branch:
+  `git fetch origin <branch>`, commit on `origin/<branch>` (never on the old shadow branch: the guard
+  refuses its private commits), then `git push origin HEAD:<branch>`. No gate, no plan, no apply.
+- `promote`, `gate` and `feature pull` refuse an archived feature (`FEATURE_ARCHIVED`). When its PR merges,
+  `sync` closes it and deletes the archive.
+- Archive is unavailable while another feature is built on this one: publish or restack that one first,
+  then `ghostbranch feature archive <name> --repo <public> --json`. `ARCHIVE_INCOMPLETE`: the publish stands;
+  run `feature archive <name>` to finish. An older Ghostbranch shows an archived feature as `branch_gone`: update it.
+- Keep is the loop above: fixes go through the shadow branch, `gate` and `promote`.
 
 ## Keeping up with public
 
@@ -267,7 +283,8 @@ main, green CI, and a leak scan of exactly what will be published.
 ## Never
 
 - Never push a feature branch, `ghostbranch`, or a `ghostbranch-gate/*` branch to the public repo
-  with git. Publishing goes through `ghostbranch promote` only.
+  with git. Publishing goes through `ghostbranch promote` only. The one exception is an `archived`
+  feature's own PR branch (see *After publishing*).
 - Never skip git hooks with `--no-verify`. The pre-push guard is there to stop leaks.
 - Never fake a terminal, read or type a console code, or run `ghostbranch agents allow`. Those are
   the person's.
@@ -305,6 +322,8 @@ feature work to the public repo. Its limits:
 - It knows features from the local mirror. It refuses any push that carries an unpublished feature
   commit the mirror knows of, under any branch name, and a pushed ref that isn't a commit. A branch
   named after a feature the mirror knows is refused whatever it carries, rewritten commits included.
+  The one exception is an `archived` feature's own PR branch: a push to it is allowed unless it carries
+  the archive's private commits, so commit fixes on `origin/<branch>`, never on the old shadow branch.
   Run `ghostbranch sync --repo <public>` now and then so the mirror has seen your features. Commits
   rewritten out of the shadow repo can't be recognized under another name; publish only with `promote`.
 - It covers only the checkout it is installed in, and `git push --no-verify` skips it.
