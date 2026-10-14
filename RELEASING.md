@@ -81,12 +81,15 @@ gh attestation verify ghostbranch_0.2.0_linux_amd64.tar.gz --repo ghostbranch-la
 never distributes anything. Publish runs go one at a time, in the order the
 releases were published. GitHub keeps only one queued publish run: a third
 release published while one runs and one waits cancels the waiting one.
-The cancelled run is for an older release than the one published after it,
-which has already updated the tap, the bucket and npm, so usually leave it
-alone: re-running it would move the tap, the bucket and npm `latest` back
-to the older version. Re-run it (from the Actions tab, or set that release
-back to draft and publish it again) only when the newer release didn't
-replace it: for example, a stable release cancelled by a test build, which
+The cancelled run is for an older release than the one published after it.
+That newer release's run is the one still waiting, and it will update the
+tap, the bucket and npm. So usually leave the cancelled run alone: the
+older version then never reaches the tap, the bucket or npm, which is fine
+when the newer release replaces it, and re-running it would move the tap,
+the bucket and npm `latest` back to the older version. Re-run it (from the
+Actions tab, or set that release back to draft and publish it again, which
+works only while GitHub's immutable releases setting is off) only when the
+newer release didn't replace it: for example, a stable release cancelled by a test build, which
 goes only to npm `next`.
 
 1. It downloads the release, checks every file against `checksums.txt`, and
