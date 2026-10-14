@@ -48,9 +48,9 @@ func TestUpgradeCommandPerInstallMethod(t *testing.T) {
 		"/home/ana/.local/bin/ghostbranch":     "curl -fsSL https://ghostbranch.site/install.sh | sh",
 		"/home/ana/.local/bin/sub/ghostbranch": page,
 		// anywhere else: the release page
-		"/usr/local/bin/ghostbranch":               page,
-		`D:\Dev\tools\ghostbranch\ghostbranch.exe`: page,
-		"": page,
+		"/usr/local/bin/ghostbranch":           page,
+		`D:\Tools\ghostbranch\ghostbranch.exe`: page,
+		"":                                     page,
 	} {
 		if got := updatecheck.UpgradeCommand(exe, env, page); got != want {
 			t.Errorf("%q: %q, want %q", exe, got, want)
