@@ -140,8 +140,13 @@ func TestPublishFailsClosed(t *testing.T) {
 // the job instead of routing a test build to the tap.
 func TestPublishJobGuardAndShell(t *testing.T) {
 	job := publishJob(t)
-	if job.If != "github.repository == 'ghostbranch-labs/ghostbranch'" {
-		t.Errorf("job if = %q; want the repo guard", job.If)
+	// Two forms only: the original guard, and what Ghostbranch's gate writes
+	// in its place on a candidate (workflow.widen: the guard also allows the
+	// shadow repo). Anything else, a missing guard or another repo, fails.
+	const guard = "github.repository == 'ghostbranch-labs/ghostbranch'"
+	const gated = "(github.repository == 'ghostbranch-labs/ghostbranch' || github.repository == 'ghostbranch-labs/ghostbranch-shadow')"
+	if job.If != guard && job.If != gated {
+		t.Errorf("job if = %q; want %q, or the gate's rewrite %q", job.If, guard, gated)
 	}
 	if job.Defaults.Run.Shell != "bash" {
 		t.Errorf("defaults.run.shell = %q; want bash (pipefail)", job.Defaults.Run.Shell)
