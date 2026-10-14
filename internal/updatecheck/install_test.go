@@ -14,7 +14,7 @@ func TestUpgradeCommandPerInstallMethod(t *testing.T) {
 	vars := map[string]string{}
 	env := updatecheck.InstallEnv{Getenv: func(k string) string { return vars[k] }, Home: "/home/ana", Module: "github.com/ghostbranch-labs/ghostbranch", GOOS: "linux"}
 	for exe, want := range map[string]string{
-		// npm and friends: checked first, since Homebrew's and Scoop's node keep global packages under their prefixes (R9)
+		// npm and friends: checked first, since Homebrew's and Scoop's node keep global packages under their prefixes
 		"/usr/local/lib/node_modules/ghostbranch/bin/ghostbranch":                                              "npm update -g ghostbranch",
 		"/opt/homebrew/lib/node_modules/@ghostbranch-labs/darwin-arm64/bin/ghostbranch":                        "npm update -g ghostbranch",
 		`C:\Users\Ana\AppData\Roaming\npm\node_modules\@ghostbranch-labs\win32-x64\ghostbranch.exe`:            "npm update -g ghostbranch",
