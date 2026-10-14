@@ -218,15 +218,20 @@ func (e *Engine) apply(ctx context.Context, pc *pairCtx, pl plan.Plan, yes bool)
 	return res, warns, err
 }
 
-// keepsHistory reports whether some PR of pl publishes more than one
-// commit in preserve or curated mode.
+// keepsHistory reports whether some PR of pl holds more than one commit
+// in preserve or curated mode. An append adds its commits on top of the
+// open PR's own, so one appended commit already makes two (review M2).
 func keepsHistory(pl plan.Plan) bool {
 	entries := pl.Chain
 	if len(entries) == 0 {
 		entries = []plan.Entry{{Mode: pl.Mode, Publish: pl.Publish}}
 	}
 	for _, en := range entries {
-		if (en.Mode == config.ModePreserve || en.Mode == config.ModeCurated) && len(en.Publish.Commits) > 1 {
+		n := len(en.Publish.Commits)
+		if en.Publish.Update && en.Publish.Style == plan.StyleAppend && n > 0 {
+			n++ // the PR's head, and whatever came before it
+		}
+		if (en.Mode == config.ModePreserve || en.Mode == config.ModeCurated) && n > 1 {
 			return true
 		}
 	}
