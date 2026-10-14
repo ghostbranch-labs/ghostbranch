@@ -1,7 +1,7 @@
 // Tests for the launcher, npm/ghostbranch/bin/ghostbranch.js.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { copyFileSync, linkSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, linkSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -102,9 +102,15 @@ test("a signal death maps to the shell's exit code, 128 + the signal number", ()
 });
 
 // Node ignores SIGPIPE, so re-raising it can't end the launcher; it exits 141
-// as a shell would. The "binary" is a copy of sh, which dies of the signal.
+// as a shell would. The "binary" is a script that sh runs, which dies of the
+// signal. It is not a copy of sh: macOS kills a copied system binary on launch.
 test("a binary killed by SIGPIPE makes the launcher exit 141", { skip: (win || !hostPkg) && "no POSIX signals here" }, (t) => {
-  const { launcher } = install(t, true, realpathSync("/bin/sh"));
-  const r = run(launcher, "-c", "kill -PIPE $$");
+  const dir = mkdtempSync(join(tmpdir(), "ghostbranch-sigpipe-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const script = join(dir, "killed-by-sigpipe");
+  writeFileSync(script, "#!/bin/sh\nkill -PIPE $$\n", { mode: 0o755 });
+  chmodSync(script, 0o755);
+  const { launcher } = install(t, true, script);
+  const r = run(launcher);
   assert.equal(r.status, 141, `signal ${r.signal} ${r.stderr}`);
 });
