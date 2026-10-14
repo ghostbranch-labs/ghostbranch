@@ -40,3 +40,17 @@ func TestWaiveSummaryEscapesControlCharacters(t *testing.T) {
 		}
 	}
 }
+
+// The summary's header escapes the feature and repo names too, so no field
+// of it reaches the terminal raw (Task 3 review minor).
+func TestWaiveSummaryEscapesTheHeaderNames(t *testing.T) {
+	t.Parallel()
+	rlo := string(rune(0x202e)) // RIGHT-TO-LEFT OVERRIDE, a bidi control
+	got := waiveSummary(workspace.Pair{Public: "acme/" + rlo + "widget"}, "feat-\x1b[2Jx",
+		[]leak.Finding{{ID: "L1", Rule: "large-file", Path: "bin/data.bin"}}, []string{"L1"}, "fixture")
+	header, _, _ := strings.Cut(got, "\n")
+	want := `Waive 1 leak finding(s) in feat-\u001b[2Jx for acme/` + `\` + `u202ewidget, so they no longer block a publish:`
+	if strings.ContainsAny(header, "\x1b"+rlo) || header != want {
+		t.Errorf("header = %q", header)
+	}
+}

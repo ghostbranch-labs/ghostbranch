@@ -263,7 +263,7 @@ func (e *Engine) WaiversAdd(ctx context.Context, p workspace.Pair, opt WaiversAd
 // something else.
 func waiveSummary(p workspace.Pair, feat string, fs []leak.Finding, ids []string, reason string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Waive %d leak finding(s) in %s for %s, so they no longer block a publish:\n", len(fs), feat, p.Public)
+	fmt.Fprintf(&b, "Waive %d leak finding(s) in %s for %s, so they no longer block a publish:\n", len(fs), visible(feat), visible(p.Public))
 	for _, f := range fs {
 		shown := visible(f.Hint)
 		if f.Match != "" {
