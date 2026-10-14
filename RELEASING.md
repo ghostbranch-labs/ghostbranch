@@ -78,7 +78,11 @@ gh attestation verify ghostbranch_0.2.0_linux_amd64.tar.gz --repo ghostbranch-la
 ## Where a published release goes
 
 `publish.yml` runs when a release is published. A draft that is deleted
-never distributes anything.
+never distributes anything. Publish runs go one at a time, in the order the
+releases were published. GitHub keeps only one queued publish run: a third
+release published while one runs and one waits cancels the waiting one;
+re-run it from the Actions tab, or set that release back to draft and
+publish it again.
 
 1. It downloads the release, checks every file against `checksums.txt`, and
    checks that `checksums.txt` was signed by `release.yml` at that tag. A
