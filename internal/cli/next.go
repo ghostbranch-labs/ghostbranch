@@ -587,6 +587,15 @@ func (a *app) steps(err error) []contract.Next {
 	case *engine.GateResult:
 		if r.Preview == nil && r.Checks == feature.ChecksPassed && r.Leak == feature.LeakClean {
 			rd := r.Ready
+			// promoteOne is the feature's own promote, on its own.
+			promoteOne := func(why string) {
+				mode := r.ScannedAs
+				need := modeInputs(mode)
+				if mode != config.ModeSquash && len(r.Commits) > 1 {
+					need = append(need, "--title")
+				}
+				out = append(out, contract.Next{Command: a.scoped("promote", r.Feature, "--mode", mode, "--plan"), Why: why, NeedsInput: need})
+			}
 			switch {
 			case rd.GateFirst != "":
 				out = append(out, contract.Next{Command: a.scoped("gate", rd.GateFirst),
@@ -607,16 +616,17 @@ func (a *app) steps(err error) []contract.Next {
 					}
 					out = append(out, contract.Next{Command: a.scoped(args...), NeedsInput: need,
 						Why: "every gate from the bottom up to " + rd.Levels[len(rd.Levels)-1] + " is fresh; plan the publish of the stack: one PR per branch, each on the branch below, one approval for all"})
+				} else if len(rd.StaleAbove) == 0 {
+					// Review I1: the stack forks above this feature, and every
+					// line on it is fresh. One plan publishes one line, so
+					// publish this feature on its own first; next never ends
+					// empty after a passing gate.
+					promoteOne("the gate passed, and the stack forks above " + r.Feature + " (" + strings.Join(r.Children, ", ") +
+						"); plan the publish of " + r.Feature + " on its own, then promote each line above it")
 				}
 			default:
 				// A feature on its own, or one on a published parent.
-				mode := r.ScannedAs
-				need := modeInputs(mode)
-				if mode != config.ModeSquash && len(r.Commits) > 1 {
-					need = append(need, "--title")
-				}
-				out = append(out, contract.Next{Command: a.scoped("promote", r.Feature, "--mode", mode, "--plan"),
-					Why: "the gate passed; plan the publish", NeedsInput: need})
+				promoteOne("the gate passed; plan the publish")
 			}
 		} else if r.Checks == feature.ChecksPending && r.Job != nil {
 			out = append(out, a.waitNext(*r.Job))

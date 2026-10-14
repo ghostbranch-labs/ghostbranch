@@ -124,3 +124,30 @@ func TestNextAsksForTheTitleOfALevelWithSeveralCommits(t *testing.T) {
 		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
 	}
 }
+
+// Review I1: at a fork whose children are all fresh, a passing gate of the
+// bottom never leaves next empty: it offers the bottom's own promote, which
+// plans as given.
+func TestNextAtAForkOffersTheBottomsPromote(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	te.mustRun("feature", "start", "feat-a")
+	te.shadowCommit("feat-a", map[string]string{"a.txt": "a\n"})
+	te.mustRun("feature", "start", "feat-b", "--from", "feat-a")
+	te.shadowCommit("feat-b", map[string]string{"b.txt": "b\n"})
+	te.mustRun("feature", "start", "feat-c", "--from", "feat-a")
+	te.shadowCommit("feat-c", map[string]string{"c.txt": "c\n"})
+	te.mustRun("gate", "feat-a")
+	te.mustRun("gate", "feat-b")
+	te.mustRun("gate", "feat-c")
+
+	_, env := te.runJSON("gate", "feat-a")
+	if cmds := nextCommands(env); len(cmds) == 0 || cmds[0] != "ghostbranch promote feat-a --mode preserve --plan --repo acme/widget" {
+		t.Fatalf("at a fork, next = %v", cmds)
+	}
+	n := nextOf(t, env)
+	if code, out, errOut := te.run(argv(n[0])[1:]...); code != 0 {
+		t.Fatalf("next[0] %v: exit %d\n%s\n%s", argv(n[0]), code, out, errOut)
+	}
+}
