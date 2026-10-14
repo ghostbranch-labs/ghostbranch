@@ -293,3 +293,29 @@ func TestFreshStackApplyNamesEveryPR(t *testing.T) {
 		}
 	}
 }
+
+// A guided init on a private shadow repo says again, just before the
+// walkthrough, that gates bill Actions minutes; otherwise it says nothing.
+func TestGuidedInitSaysMinutesAreBilled(t *testing.T) {
+	t.Parallel()
+	const note = "Note: acme/widget-shadow is private, so the CI that every gate runs bills your GitHub Actions minutes.\n"
+	res := func(guided, billed bool) *engine.InitResult {
+		return &engine.InitResult{Public: "acme/widget", Shadow: "acme/widget-shadow", Ready: true, Guided: guided,
+			Audit: &engine.AuditResult{Shadow: "acme/widget-shadow", Minutes: engine.AuditMinutes{Billed: billed}}}
+	}
+	got := human(res(true, true), style.Styler{})
+	if !strings.Contains(got, "\n"+note+"\nYour first feature:\n") {
+		t.Errorf("guided and billed: %q", got)
+	}
+	for _, c := range []struct{ guided, billed bool }{{true, false}, {false, true}} {
+		if got := human(res(c.guided, c.billed), style.Styler{}); strings.Contains(got, "Note:") {
+			t.Errorf("guided %v, billed %v: %q", c.guided, c.billed, got)
+		}
+	}
+	// No audit (it didn't run): no note, and the walkthrough still shows.
+	noAudit := res(true, true)
+	noAudit.Audit = nil
+	if got := human(noAudit, style.Styler{}); strings.Contains(got, "Note:") || !strings.Contains(got, "Your first feature:") {
+		t.Errorf("guided without an audit: %q", got)
+	}
+}

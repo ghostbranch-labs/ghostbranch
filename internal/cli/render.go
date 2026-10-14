@@ -184,6 +184,11 @@ func human(r any, st style.Styler) string {
 			}
 		}
 		if v.Guided && v.Ready {
+			if v.Audit != nil && v.Audit.Minutes.Billed {
+				// Said again here, where a person reads on: the warning
+				// scrolls by among init's progress lines (6.1 acceptance).
+				fmt.Fprintf(&b, "\nNote: %s is private, so the CI that every gate runs bills your GitHub Actions minutes.\n", v.Shadow)
+			}
 			b.WriteString(walkthrough)
 		}
 	case *engine.AuditResult:
