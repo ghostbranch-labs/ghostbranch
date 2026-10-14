@@ -86,3 +86,20 @@ func TestApplyKeepKeepsTheShadowBranch(t *testing.T) {
 		t.Fatalf("archive ref: present %v, %v", ok, err)
 	}
 }
+
+// An archive that stopped partway (its branch in the archive ref, its
+// record unmarked) reads branch_gone; while its PR is open, status offers
+// to finish it, not a person's close (review M4).
+func TestNextForAPartlyArchivedFeature(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	publishable(te)
+	te.mustRun("promote", "feat-x", "--mode", "squash", "-m", "Add feature", "--plan")
+	te.forge.ClosePRErr = errClosePR
+	te.mustRun("apply", te.lastPlanID(), "--yes")
+	te.forge.ClosePRErr = nil
+	_, env := te.runJSON("status")
+	if !hasNext(env, "ghostbranch feature archive feat-x") || hasNext(env, "feature close feat-x") {
+		t.Fatalf("status next = %v", nextCommands(env))
+	}
+}

@@ -42,6 +42,10 @@ type FeatureReport struct {
 	// PublicBranch is the public branch it was published to, for next;
 	// "" when unpublished.
 	PublicBranch string `json:"-"`
+	// PartlyArchived, for next: an archive ref exists but the record
+	// isn't marked, so an archive stopped partway (feature archive
+	// finishes it).
+	PartlyArchived bool `json:"-"`
 	// Error is why the feature couldn't be surveyed; set only with state
 	// unreadable. feature show returns it as its error.
 	Error string `json:"error,omitempty"`
@@ -290,6 +294,7 @@ func (e *Engine) surveyOne(ctx context.Context, pc *pairCtx, name, pm, O string)
 		if err != nil {
 			return FeatureReport{}, nil, internalErr(err, "read archive ref "+remoteArchiveRef(name))
 		}
+		r.PartlyArchived = hasArch && m.Archived == nil
 		if hasArch && (base == "" || arch != base) {
 			r.Moved, archiveMoved = true, true
 		}

@@ -1025,6 +1025,13 @@ func (a *app) featureNexts(out []contract.Next, rs []engine.FeatureReport) []con
 			rest = append(rest, contract.Next{Command: closeCmd, NeedsHuman: true,
 				Why: "its record couldn't be read; run feature show " + r.Name + " for the error: run the command again if it was a passing failure, and if the record is corrupt a person closes it at the console"})
 		case feature.StateBranchGone:
+			if r.PartlyArchived && r.PRState == "open" {
+				// Its branch is in its archive ref: the archive stopped
+				// before marking the record.
+				rest = append(rest, contract.Next{Command: a.scoped("feature", "archive", r.Name),
+					Why: "archiving it stopped partway (its branch is in its archive ref, its record isn't marked); finish it: every step is safe to run again"})
+				continue
+			}
 			rest = append(rest, contract.Next{Command: closeCmd, NeedsHuman: true,
 				Why: "its branch was deleted; a person closes it at the console"})
 		case feature.StateArchived:
