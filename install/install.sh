@@ -86,7 +86,11 @@ main() {
 	check_base
 	dir=${GHOSTBRANCH_INSTALL_DIR:-$HOME/.local/bin}
 	while [ "${#dir}" -gt 1 ] && [ "${dir%/}" != "$dir" ]; do dir=${dir%/}; done
-	case "$dir" in *"'"*) fail "the install folder can't hold a single quote: $dir" ;; esac
+	# The PATH hints print the folder inside echo '…"$dir"…', so it can't
+	# hold either quote, a dollar sign or a backtick.
+	case "$dir" in
+	*"'"* | *'"'* | *'$'* | *'`'*) fail "the install folder can't hold ' \" \$ or \`: $dir" ;;
+	esac
 
 	tmp=$(mktemp -d "${TMPDIR:-/tmp}/ghostbranch-install.XXXXXX")
 	trap 'rm -rf "$tmp"; rm -f "$dir/.ghostbranch.new"' EXIT
