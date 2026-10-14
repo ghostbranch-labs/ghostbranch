@@ -103,3 +103,16 @@ func TestNextAfterAStackWhoseHandOffStopped(t *testing.T) {
 		}
 	}
 }
+
+// feature archive's FEATURE_MOVED (a lost lease, or an archive the branch
+// no longer holds, R17) says so, not feature close's text (review M2).
+func TestNextAfterAMovedArchive(t *testing.T) {
+	t.Parallel()
+	a := testApp("feature archive", "feat-x")
+	err := contract.New(contract.FeatureMoved, "refs/heads/feat-x changed").WithDetails(map[string]any{"feature": "feat-x"})
+	next := a.next(err)
+	if len(next) != 1 || !slices.Equal(next[0].Command, []string{"ghostbranch", "feature", "show", "feat-x", "--repo", "acme/widget"}) ||
+		!strings.Contains(next[0].Why, "archived") || strings.Contains(next[0].Why, "closed") {
+		t.Fatalf("next = %+v", next)
+	}
+}

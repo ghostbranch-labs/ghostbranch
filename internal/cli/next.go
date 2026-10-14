@@ -245,8 +245,11 @@ func (a *app) steps(err error) []contract.Next {
 		case contract.FeatureMoved:
 			if f, _ := ce.Details["feature"].(string); f != "" {
 				why := "the feature changed while it was being closed and nothing was deleted; look at it again before closing it"
-				if a.command == "feature fold" {
+				switch a.command {
+				case "feature fold":
 					why = "the feature or its parent changed while it was being folded, and nothing changed; look at it again before folding it"
+				case "feature archive":
+					why = "the branch moved while it was being archived (or no longer holds its archive), and nothing changed; look at it, then run feature archive again"
 				}
 				return []contract.Next{{Command: a.scoped("feature", "show", f), Why: why}}
 			}
