@@ -403,10 +403,11 @@ func TestGuideTeachesStacks(t *testing.T) {
 		"`ghostbranch feature fold <c> --repo <public> --json`",
 		"`HAS_CHILDREN`", "`feature restack <child> --onto main`",
 		"`public_pr_needs_update`",
-		// F-16/F-31 (R11): how a stack merges, and what a squash loses.
+		// F-16/F-31: how a stack merges, and what a squash loses.
 		"Merging is a maintainer's call, on GitHub.",
-		"on its bottom PR's page, the merge button merges the whole stack",
-		"`gh pr merge` refuses a stacked PR; the API route is `PUT repos/<public>/pulls/<top>/merge-async` with `merge_method=merge`",
+		"on its top PR's page, the merge button merges that PR and every PR below it",
+		"Merging a lower PR lands only part of the stack.",
+		"`gh pr merge` refuses a stacked PR; from a terminal use `PUT repos/<public>/pulls/<top>/merge-async` with `merge_method=merge`",
 		"\"Squash and merge\" makes one commit per PR and loses a `preserve` or `curated` history",
 		"Never merge a PR yourself unless the person told you to.",
 	} {
