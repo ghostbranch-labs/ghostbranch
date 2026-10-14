@@ -47,6 +47,11 @@ archives:
 checksum:
   name_template: checksums.txt
   algorithm: sha256
+  # The install scripts are listed too, so checksums.txt (which is signed)
+  # covers them, and publish.yml's check refuses a changed script.
+  extra_files:
+    - glob: ./install/install.sh
+    - glob: ./install/install.ps1
 
 snapshot:
   version_template: "{{ incpatch .Version }}-devel+{{ .ShortCommit }}"
@@ -83,6 +88,11 @@ release:
   replace_existing_draft: true
   replace_existing_artifacts: true
   prerelease: auto
+  # ghostbranch.site/install.sh and /install.ps1 redirect to these files on
+  # the latest release.
+  extra_files:
+    - glob: ./install/install.sh
+    - glob: ./install/install.ps1
 
 changelog:
   use: git
