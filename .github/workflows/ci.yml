@@ -99,10 +99,11 @@ jobs:
       - name: go test
         run: go test -timeout 40m ./...
 
-  # On a pull request that touches the release config or workflow, or go.mod
+  # On a pull request that touches the release config or workflow, go.mod
   # or go.sum (a dependency can break a darwin or windows build, and CI is
-  # otherwise Linux only): check the config and build a snapshot of all five
-  # platforms (no signing, no SBOMs, nothing published).
+  # otherwise Linux only), or packaging/, install/, npm/ or publish.yml:
+  # check the config and build a snapshot of all five platforms (no signing,
+  # no SBOMs, nothing published).
   goreleaser-check:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -117,7 +118,7 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha }}
         run: |
           files=$(git diff --name-only "$BASE"...HEAD) || exit 1
-          if printf '%s\n' "$files" | grep -qxE '\.goreleaser\.yaml|\.github/workflows/release\.yml|go\.mod|go\.sum'; then
+          if printf '%s\n' "$files" | grep -qxE '\.goreleaser\.yaml|\.github/workflows/(release|publish)\.yml|go\.mod|go\.sum|(packaging|install|npm)/.*'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           fi
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
@@ -136,3 +137,29 @@ jobs:
           distribution: goreleaser
           version: v2.18.3
           args: release --snapshot --clean --skip=sign,sbom
+      # The snapshot's archives go through the same render and npm build that
+      # publish.yml runs on a release. A snapshot version has "+" build
+      # metadata (0.0.1-devel+<sha>), left raw in the rendered URLs; that is
+      # fine because a snapshot is never published (render route refuses any
+      # tag but vX.Y.Z or vX.Y.Z-rc.N).
+      - name: render and build the npm packages from the snapshot
+        if: steps.changed.outputs.run == 'true'
+        run: |
+          v=$(grep -o '"version": *"[^"]*"' dist/metadata.json | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+          go run ./packaging/render render -version "$v" -checksums dist/checksums.txt -out rendered
+          node npm/build.mjs --version "$v" --assets dist --out npm-out
+          for d in npm-out/*/; do (cd "$d" && npm pack --dry-run > /dev/null); done
+          grep -cE '  install\.(sh|ps1)$' dist/checksums.txt | grep -qx 2
+
+  # The npm launcher and build script (Node's own test runner; no
+  # dependencies). The install script tests run in the Go jobs.
+  npm-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: node --test
+        run: node --test npm/build.test.mjs npm/launcher.test.mjs
