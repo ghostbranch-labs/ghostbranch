@@ -6,7 +6,7 @@
 
 Build unreleased features in a private shadow of your open-source repo, running the same CI. Publish with one gated command, after a leak scan and with a person's approval.
 
-Website and docs: <https://example.invalid> (a placeholder until launch).
+Website and docs: <https://ghostbranch.site>.
 
 ## The problem
 
@@ -28,7 +28,7 @@ Ghostbranch is a local-first CLI that people and coding agents both drive, with 
 
 ## Status
 
-Ghostbranch is in beta, with no release yet. The install routes below are placeholders until the first release is published.
+Ghostbranch is in beta.
 
 ## Install
 
@@ -36,10 +36,11 @@ One Go binary for macOS, Windows and Linux. It needs git 2.38 or later on your `
 
 | Route | Command | Note |
 |---|---|---|
-| Homebrew | `brew install ghostbranch-labs/tap/ghostbranch` | Placeholder: the Homebrew tap isn't published yet. |
-| Scoop / winget | `scoop bucket add ghostbranch <BUCKET_URL>`<br>`scoop install ghostbranch`<br>or `winget install <WINGET_ID>` | Placeholder: the Scoop bucket and winget package aren't published yet. |
-| npm | `npm install -g ghostbranch` (also pnpm, yarn and bun) | Placeholder: the npm package isn't published yet. |
-| Install script | `curl -fsSL <INSTALL_SCRIPT_URL> \| sh` | Placeholder: the install script isn't published yet. |
+| Homebrew | `brew install ghostbranch-labs/tap/ghostbranch` | |
+| Scoop | `scoop bucket add ghostbranch https://github.com/ghostbranch-labs/scoop-bucket`<br>`scoop install ghostbranch` | |
+| winget | Coming soon | Coming soon: submitted to `microsoft/winget-pkgs`. |
+| npm | `npm install -g ghostbranch` (also pnpm, yarn and bun) | |
+| Install script | `curl -fsSL https://ghostbranch.site/install.sh \| sh` | |
 | Go | `go install github.com/ghostbranch-labs/ghostbranch/cmd/ghostbranch@latest` | Works once the repository is public. |
 
 Then run `ghostbranch init` in a clone of your public repo. It asks only what it can't work out on its own: the public repo, a GitHub login if there's no token yet, where the private shadow repo lives, whether to install the push guard, and whether to turn on scheduled sync. After a preview and your confirmation, it creates the shadow repo, installs the guard if you said yes, runs `ghostbranch doctor` and walks you through your first feature. Flags or `--json` skip the prompts.
@@ -63,7 +64,7 @@ ghostbranch apply <plan-id>               # a person types the code it shows; th
 ghostbranch sync                          # bring the merge in and close the feature
 ```
 
-Every result ends with **Next**: the command to run after it, and why. `ghostbranch doctor` checks your setup and names the fix for anything that's off. The full walkthrough is in the docs: [Your first feature](https://example.invalid/docs/getting-started/first-feature) (the link works at launch).
+Every result ends with **Next**: the command to run after it, and why. `ghostbranch doctor` checks your setup and names the fix for anything that's off. The full walkthrough is in the docs: [Your first feature](https://ghostbranch.site/docs/getting-started/first-feature).
 
 Coding agents run the same loop with `--json`, and `ghostbranch guide` prints their instructions. Only a person can approve a publish, unless that person has allowed agents to publish with `ghostbranch agents allow`.
 
