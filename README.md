@@ -1,4 +1,10 @@
-# Ghostbranch
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/logo-dark.svg">
+    <img src=".github/logo-light.svg" alt="" width="40" align="center">
+  </picture>
+  Ghostbranch
+</h1>
 
 [![Sponsor](https://img.shields.io/github/sponsors/ayushguptax)](https://github.com/sponsors/ayushguptax)
 

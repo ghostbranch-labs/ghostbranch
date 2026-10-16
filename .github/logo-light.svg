@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- The Ghostbranch mark for light backgrounds: the public repo (solid) and its private shadow (dashed). -->
+  <circle cx="12" cy="12" r="8" fill="#161b21"/>
+  <circle cx="20.5" cy="20.5" r="8" fill="none" stroke="#c63a00" stroke-width="2" stroke-dasharray="3 2.4"/>
+</svg>
