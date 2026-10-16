@@ -28,7 +28,9 @@ Ghostbranch is a local-first CLI that people and coding agents both drive, with 
 
 ## Status
 
-Ghostbranch is in beta.
+Ghostbranch is in beta. Commands, their output and the JSON contract may still change between releases.
+
+Agent runs have been tested with Claude Code. Codex has a skill (`ghostbranch guide --install codex`) but hasn't been tested yet.
 
 ## Install
 
@@ -38,10 +40,11 @@ One Go binary for macOS, Windows and Linux. It needs git 2.38 or later on your `
 |---|---|---|
 | Homebrew | `brew install ghostbranch-labs/tap/ghostbranch` | |
 | Scoop | `scoop bucket add ghostbranch https://github.com/ghostbranch-labs/scoop-bucket`<br>`scoop install ghostbranch` | |
-| winget | Coming soon | Coming soon: submitted to `microsoft/winget-pkgs`. |
+| winget | Coming soon | Coming after the first release. |
 | npm | `npm install -g ghostbranch` (also pnpm, yarn and bun) | |
-| Install script | `curl -fsSL https://ghostbranch.site/install.sh \| sh` | |
-| Go | `go install github.com/ghostbranch-labs/ghostbranch/cmd/ghostbranch@latest` | Works once the repository is public. |
+| Install script | `curl -fsSL https://ghostbranch.site/install.sh \| sh` | macOS and Linux |
+| Install script | `irm https://ghostbranch.site/install.ps1 \| iex` | Windows (PowerShell) |
+| Go | `go install github.com/ghostbranch-labs/ghostbranch/cmd/ghostbranch@latest` | |
 
 Then run `ghostbranch init` in a clone of your public repo. It asks only what it can't work out on its own: the public repo, a GitHub login if there's no token yet, where the private shadow repo lives, whether to install the push guard, and whether to turn on scheduled sync. After a preview and your confirmation, it creates the shadow repo, installs the guard if you said yes, runs `ghostbranch doctor` and walks you through your first feature. Flags or `--json` skip the prompts.
 

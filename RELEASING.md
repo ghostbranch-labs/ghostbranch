@@ -139,8 +139,8 @@ release's copies, so the scripts change only with a release. A copy
 installed in another folder is upgraded by running the script again with
 `GHOSTBRANCH_INSTALL_DIR` set to that folder.
 
-Later work: a winget route is planned as roadmap item 8.1, and running the
-gate as a GitHub Actions workflow as 8.2.
+Later work: a winget route, and running the gate as a GitHub Actions
+workflow.
 
 ### When a publish run fails
 
