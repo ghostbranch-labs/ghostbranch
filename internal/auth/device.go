@@ -126,13 +126,13 @@ func (d DeviceFlow) post(ctx context.Context, path string, form url.Values) (oau
 func refused(code string) error {
 	switch code {
 	case "access_denied":
-		return unavailable("denied", "the login was declined on GitHub; nothing was stored")
+		return unavailable("denied", "the login was declined on GitHub (Cancel was pressed on its page); nothing was stored. Run `ghostbranch login` again and choose Authorize, or use a token instead: pipe it to `ghostbranch login --with-token`, or set GHOSTBRANCH_TOKEN")
 	case "expired_token":
 		return unavailable("expired_code", "the login code expired before it was approved; run `ghostbranch login` again")
 	case "device_flow_disabled":
 		return unavailable("refused", "the Ghostbranch GitHub App has device flow turned off; use `ghostbranch login --with-token`")
 	}
-	return unavailable("refused", "GitHub refused the login (%s)", code)
+	return unavailable("refused", "GitHub refused the login (%s); nothing was stored. Run `ghostbranch login` again later, or use a token instead: pipe it to `ghostbranch login --with-token`, or set GHOSTBRANCH_TOKEN", code)
 }
 
 func noClientID() error {
