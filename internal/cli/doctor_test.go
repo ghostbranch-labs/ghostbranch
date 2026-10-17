@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -16,7 +17,9 @@ import (
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/cli"
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
+	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/keychain"
+	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
 
 func TestDoctorHumanOutput(t *testing.T) {
@@ -283,5 +286,140 @@ func TestDoctorHelpSaysWhatItWrites(t *testing.T) {
 	if code != 0 || strings.Contains(flat, "never writes") ||
 		!strings.Contains(flat, "It changes nothing in your repos, records or keychain and never prompts; it fetches into its local copy of the pair (making it if needed) and refreshes the update check's cache. It isn't ledgered.") {
 		t.Fatalf("exit %d\n%s", code, out)
+	}
+}
+
+// A person reads the plain init command for a repo that isn't set up here,
+// not the --plan forms agents get; --json keeps them.
+func TestDoctorShowsAPersonThePlainInit(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name   string
+		shadow bool
+		args   []string
+		fix    string
+	}{
+		{"--repo, no shadow yet", false, []string{"--repo", "acme/other"}, "ghostbranch init acme/other"},
+		{"--repo, the shadow exists", true, []string{"--repo", "acme/other"}, "ghostbranch init acme/other --adopt"},
+		{"a checkout", false, nil, "ghostbranch init acme/other"},
+		{"a checkout, the shadow exists", true, nil, "ghostbranch init acme/other --adopt"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			te := newTestEnv(t)
+			if tc.shadow {
+				if _, err := te.forge.AddRepo("acme/other-shadow", true); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.args == nil {
+				te.env.CwdRemotes = func() []workspace.Remote {
+					return []workspace.Remote{{Name: "origin", URL: "https://github.com/acme/other.git"}}
+				}
+			}
+			_, out, errOut := te.run(append([]string{"doctor"}, tc.args...)...)
+			if strings.Contains(out+errOut, "--plan") || !strings.Contains(out, "run "+tc.fix+"\n") && !strings.Contains(out, "run "+tc.fix+";") {
+				t.Fatalf("want %q, no --plan:\n%s\n%s", tc.fix, out, errOut)
+			}
+			if !strings.Contains(out, "    fix: "+tc.fix+"\n") {
+				t.Fatalf("no fix line %q:\n%s", tc.fix, out)
+			}
+			if tc.args != nil && !strings.Contains(errOut, "  "+tc.fix+" (a person must run this)") {
+				t.Fatalf("next isn't %q:\n%s", tc.fix, errOut)
+			}
+		})
+	}
+}
+
+// A person whose token lacks permissions gets a pre-filled link for one
+// that has them all, with the repository choice the link can't make. An
+// agent's run never gets it: that token could
+// publish, and an agent must not relay it.
+func TestDoctorLinksAPrefilledToken(t *testing.T) {
+	t.Parallel()
+	link, _ := forge.PairTokenLink("acme/widget", "acme/widget-shadow")
+	for _, tc := range []struct {
+		name   string
+		person bool
+		prep   func(te *testEnv)
+	}{
+		{"a person at a console", true, func(te *testEnv) { te.env.ConsoleUsable = true }},
+		{"no console", false, func(*testEnv) {}},
+		{"an agent at a console", false, func(te *testEnv) {
+			te.env.ConsoleUsable = true
+			te.vars["GHOSTBRANCH_ACTOR"] = "agent:claude-code"
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			te := newTestEnv(t)
+			initOnly(te)
+			tc.prep(te)
+			te.forge.PermsDenied = map[string]map[string]bool{"acme/widget-shadow": {"Actions: read": true}}
+			_, env := te.runJSON("doctor", "--repo", "acme/widget")
+			data, _ := env["data"].(map[string]any)
+			for _, c := range data["checks"].([]any) {
+				m := c.(map[string]any)
+				if m["id"] != "token" {
+					continue
+				}
+				msg, _ := m["message"].(string)
+				if !strings.Contains(msg, "it lacks permissions these commands need") || m["fix"] != "ghostbranch guide" {
+					t.Fatalf("token check %v", m)
+				}
+				for _, want := range []string{link, `choose "Only select repositories", then pick acme/widget and acme/widget-shadow`} {
+					if strings.Contains(msg, want) != tc.person {
+						t.Errorf("person %v, message has %q: %v\n%s", tc.person, want, !tc.person, msg)
+					}
+				}
+				return
+			}
+			t.Fatal("no token check")
+		})
+	}
+}
+
+// shadowLookups counts GetRepo calls for one repo, and fails them when
+// fail is set.
+type shadowLookups struct {
+	forge.Forge
+	repo  string
+	fail  bool
+	calls *int
+}
+
+func (f shadowLookups) GetRepo(ctx context.Context, full string) (forge.Repo, error) {
+	if full == f.repo {
+		*f.calls++
+		if f.fail {
+			return forge.Repo{}, fmt.Errorf("get %s: %w", full, forge.ErrTransient)
+		}
+	}
+	return f.Forge.GetRepo(ctx, full)
+}
+
+// Doctor looks up <repo>-shadow only for a person's plain init line, never
+// for --json; a lookup that fails gives the plain line with an --adopt note.
+func TestDoctorLooksUpTheShadowOnlyForAPerson(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	if _, err := te.forge.AddRepo("acme/other-shadow", true); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	look := shadowLookups{Forge: te.forge, repo: "acme/other-shadow", calls: &calls}
+	te.env.NewForge = func(string) (forge.Forge, error) { return look, nil }
+	te.runJSON("doctor", "--repo", "acme/other")
+	if calls != 0 {
+		t.Fatalf("--json looked up the shadow %d times", calls)
+	}
+	look.fail = true
+	te.env.NewForge = func(string) (forge.Forge, error) { return look, nil }
+	_, out, _ := te.run("doctor", "--repo", "acme/other")
+	if want := "run ghostbranch init acme/other (add --adopt if its shadow repo already exists)\n"; calls != 1 || !strings.Contains(out, want) {
+		t.Fatalf("%d lookups; want %q in:\n%s", calls, want, out)
+	}
+	if !strings.Contains(out, "    fix: ghostbranch init acme/other\n") {
+		t.Fatalf("fix line:\n%s", out)
 	}
 }

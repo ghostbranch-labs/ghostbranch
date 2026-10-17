@@ -87,6 +87,15 @@ func TestLoginWithTheDeviceFlow(t *testing.T) {
 		!strings.Contains(out, `"replaced": false`) {
 		t.Fatalf("first login: %s", out)
 	}
+	// A person reads where to install the app and what to pick: the public
+	// repo only, as init creates the shadow repo.
+	te2 := newTestEnv(t)
+	deviceLogin(te2, authtest.Options{})
+	code, out, errOut = te2.run("login")
+	const install = "Next, install the Ghostbranch app on the account that owns your public repo and pick that repo; ghostbranch init creates the shadow repo: https://github.com/apps/ghostbranch-test/installations/new\n"
+	if code != 0 || !strings.Contains(out, install) {
+		t.Fatalf("human first login: %d\n%s\n%s", code, out, errOut)
+	}
 	// A second login replaces the first and doesn't repeat the install link.
 	srv2, _, _ := deviceLogin(te, authtest.Options{})
 	te.forge.User = forge.User{Login: "octo", ID: 1}

@@ -89,7 +89,7 @@ func (a *app) doctorRun(ctx context.Context, repo string) (*engine.DoctorResult,
 	if err != nil {
 		return nil, err
 	}
-	opt := engine.DoctorOptions{Repo: repo, Getenv: a.env.Getenv}
+	opt := engine.DoctorOptions{Repo: repo, Getenv: a.env.Getenv, ForPerson: !a.jsonOut}
 	if a.env.CwdRemotes != nil {
 		opt.Remotes = a.env.CwdRemotes()
 	}
@@ -171,7 +171,11 @@ func (a *app) doctorNext() []contract.Next {
 		if c.Status == engine.DoctorFail && c.Unregistered != "" {
 			if key := "init\x00" + c.Unregistered; !seen[key] {
 				seen[key] = true
-				out = append(out, a.initNexts(c.Unregistered)...)
+				if !a.jsonOut && len(c.PersonFixArgv) > 1 { // a person runs plain init
+					out = append(out, contract.Next{Command: a.gb(c.PersonFixArgv[1:]...), NeedsHuman: true, Why: c.ID + ": " + c.PersonMessage})
+				} else {
+					out = append(out, a.initNexts(c.Unregistered)...)
+				}
 			}
 			continue
 		}
