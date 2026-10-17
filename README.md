@@ -42,15 +42,66 @@ Agent runs have been tested with Claude Code. Codex has a skill (`ghostbranch gu
 
 One Go binary for macOS, Windows and Linux. It needs git 2.38 or later on your `PATH`.
 
-| Route | Command | Note |
-|---|---|---|
-| Homebrew | `brew install ghostbranch-labs/tap/ghostbranch` | |
-| Scoop | `scoop bucket add ghostbranch https://github.com/ghostbranch-labs/scoop-bucket`<br>`scoop install ghostbranch` | |
-| winget | Coming soon | Coming after the first release. |
-| npm | `npm install -g ghostbranch` (also pnpm, yarn and bun) | |
-| Install script | `curl -fsSL https://ghostbranch.site/install.sh \| sh` | macOS and Linux |
-| Install script | `irm https://ghostbranch.site/install.ps1 \| iex` | Windows (PowerShell) |
-| Go | `go install github.com/ghostbranch-labs/ghostbranch/cmd/ghostbranch@latest` | |
+Pick one route for your system. Each installs the same binary.
+
+### Any system
+
+npm (pnpm, yarn and bun work too):
+
+```sh
+npm install -g ghostbranch
+```
+
+Go:
+
+```sh
+go install github.com/ghostbranch-labs/ghostbranch/cmd/ghostbranch@latest
+```
+
+### macOS
+
+Homebrew:
+
+```sh
+brew install ghostbranch-labs/tap/ghostbranch
+```
+
+Or the install script:
+
+```sh
+curl -fsSL https://ghostbranch.site/install.sh | sh
+```
+
+### Linux
+
+The install script:
+
+```sh
+curl -fsSL https://ghostbranch.site/install.sh | sh
+```
+
+Or Homebrew:
+
+```sh
+brew install ghostbranch-labs/tap/ghostbranch
+```
+
+### Windows
+
+The install script, in PowerShell:
+
+```powershell
+irm https://ghostbranch.site/install.ps1 | iex
+```
+
+Or Scoop:
+
+```powershell
+scoop bucket add ghostbranch https://github.com/ghostbranch-labs/scoop-bucket
+scoop install ghostbranch
+```
+
+winget is coming after the first release.
 
 Then run `ghostbranch init` in a clone of your public repo. It asks only what it can't work out on its own: the public repo, a GitHub login if there's no token yet, where the private shadow repo lives, whether to install the push guard, and whether to turn on scheduled sync. After a preview and your confirmation, it creates the shadow repo, installs the guard if you said yes, runs `ghostbranch doctor` and walks you through your first feature. Flags or `--json` skip the prompts.
 
