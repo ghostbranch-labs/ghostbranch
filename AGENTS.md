@@ -70,7 +70,7 @@ If your person develops Ghostbranch with Ghostbranch itself (a shadow repo), run
 
 These protect the people who use Ghostbranch. Some of them protect their secrets.
 
-- **Don't report a security problem in public.** If you find or suspect a vulnerability, a way around the leak scan, or a flaw in how tokens or approvals are handled, don't open a public issue, pull request or discussion. Tell your person to report it privately, as [`SECURITY.md`](SECURITY.md) explains: through [GitHub's private vulnerability reporting](https://github.com/ghostbranch-labs/ghostbranch/security/advisories/new) or by email to `ayushgupta@tutamail.com`.
+- **Don't report a security problem in public.** If you find or suspect a vulnerability, a way around the leak scan, or a flaw in how tokens or approvals are handled, don't open a public issue, pull request or discussion. Tell your person to report it privately, as [`SECURITY.md`](SECURITY.md) explains: through [GitHub's private vulnerability reporting](https://github.com/ghostbranch-labs/ghostbranch/security/advisories/new) or by email to `ayush.gupta@tutamail.com`.
 - **Don't commit secrets,** not even ones that look fake. Test fixtures that need a key-shaped value build it from parts when the test runs, so the leak scan doesn't see a real-looking key in the source.
 - **Don't weaken a safety check to get a test passing.** That covers the leak scan's patterns, the push guard, and the approval step that keeps publishing with a person. If a test seems to need that, stop and ask your person; it's a design question.
 - **Don't change the JSON contract quietly.** Agents and scripts depend on its field names, exit codes and error codes. A change to the contract bumps its `schema_version` and is called out in the PR.

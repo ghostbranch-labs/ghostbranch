@@ -21,7 +21,7 @@ Instead, please report security issues through one of the following private chan
    Go to the [Security Advisories](https://github.com/ghostbranch-labs/ghostbranch/security/advisories/new) page on `ghostbranch-labs/ghostbranch` and click **"Report a vulnerability"**.
 
 2. **Email:**
-   Send details to **`ayushgupta@tutamail.com`**.
+   Send details to **`ayush.gupta@tutamail.com`**.
 
 ### What to Include
 
