@@ -26,20 +26,23 @@ on:
 permissions:
   contents: read
 
-# Saving Actions minutes on private repos (GitHub Free bills them):
-#  - Every job skips push runs except on the public repo once it is public,
-#    and on a release tag (release.yml calls this workflow from a tag push).
-#    So sync's pushes to the shadow repo's main start nothing, and merges to
-#    main don't re-run what the pull request already ran while the repo is
-#    private. The first two comparisons are the push guard ghostbranch
-#    audit suggests, so the audit stops reporting this file.
-#  - test-arm64 and npm-test also skip on a private repo: the shadow repo's
-#    gates, and everything here until launch. They run once the repo is
-#    public, where minutes are free.
-#  - Pull requests on the public repo skip every job while it is private:
+# When jobs run. Actions minutes are free on a public repo and billed on a
+# private one (GitHub Free), so the jobs skip on private repos:
+#  - Here, on the public repo, every job runs on pull requests and on pushes
+#    to main. Pushes also run on a release tag (release.yml calls this
+#    workflow from a tag push).
+#  - On a private repo, push runs skip. That covers sync's pushes to the
+#    private shadow repo's main, which start nothing. The first two
+#    comparisons are the push guard ghostbranch audit suggests, so the audit
+#    stops reporting this file.
+#  - test-arm64 and npm-test also skip on a private repo for any event, so
+#    they skip on the shadow repo's gate runs too.
+#  - The last clause skips every job on a pull request in a private repo
+#    named ghostbranch. It only matters if this repo is ever private again:
 #    promote publishes exactly the commits the gate already tested in the
 #    shadow repo. The check uses the repo's short name, which the gate's
 #    guard rewrite leaves alone, so gates still run in full.
+#  - goreleaser-check runs on pull requests only.
 
 jobs:
   lint:
