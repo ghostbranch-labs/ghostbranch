@@ -11,6 +11,7 @@ import (
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
+	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/guide"
 )
 
@@ -58,7 +59,9 @@ func TestRenderListsEveryCodeFromTheRegistry(t *testing.T) {
 	// 472: the After publishing section, the archived state, the Never exception and the guard's archived-branch sentence (6.5).
 	// 473: the hand-off follow-ups: how to reach the PR branch, merged_moved, the three archive-blocked cases (6.5 Task 11 review).
 	// 480: all 14 states in the Lifecycle list, and in After publishing waivers add, the two stacking refusals and the long lines rewrapped (6.6).
-	if n := strings.Count(out, "\n"); n > 480 {
+	// 497: the When the person is stuck section (14 lines), login's install wording, and Strict
+	// isolation's pre-filled token link with the repository choice it can't make (Tier 1 setup guidance).
+	if n := strings.Count(out, "\n"); n > 497 {
 		t.Errorf("the guide is %d lines; keep it short (spec: about 150 plus the tables)", n)
 	}
 }
@@ -372,7 +375,7 @@ func TestGuideTeachesSetup(t *testing.T) {
 		"**`ghostbranch doctor --json` checks the setup and changes nothing in your repos or records.**",
 		"`DOCTOR_FAILED` lists the failing checks in `error.details.failed`",
 		"with a `fix` command when there is one.",
-		"When you install the app, pick both the public repo and its shadow repo.",
+		"Then install the app on the account that owns your public repo and pick that repo; `ghostbranch init` creates the shadow repo.",
 		"`init` asks questions only when a person runs it at a terminal; with `--json` it never asks.",
 		"`--guard`/`--no-guard`, `--sync`/`--no-sync`",
 		"For an org's public repo it asks where the shadow repo lives; `--shadow <owner/name>` sets it.",
@@ -551,4 +554,60 @@ func TestStatesMatchTheFeatureReportSchema(t *testing.T) {
 	if !slices.Equal(got, s.Properties.State.Enum) {
 		t.Fatalf("feature.States = %v\nschema enum   = %v", got, s.Properties.State.Enum)
 	}
+}
+
+// Strict isolation gives the agent's token as a pre-filled link, from the
+// same list forge keeps, and says the repository choice the link can't make.
+func TestGuideLinksTheAgentsToken(t *testing.T) {
+	out := guide.Render(contract.Registry())
+	link := forge.TokenLink("ghostbranch-agent-<repo>", "Ghostbranch agent: the shadow repo only", "<shadow-owner>", 30, forge.AgentTokenPermissions)
+	sec := section(t, out, "## Strict isolation (for people)")
+	if !strings.Contains(sec, link) {
+		t.Fatalf("no agent token link %s in:\n%s", link, sec)
+	}
+	if !strings.Contains(strings.Join(strings.Fields(sec), " "), `choose "Only select repositories", then pick only the shadow repo`) {
+		t.Fatalf("no repository choice:\n%s", sec)
+	}
+}
+
+// When the person is stuck: the agent diagnoses, hands over one person-only
+// step at a time, and never touches a token.
+func TestGuideSaysWhatToDoWhenThePersonIsStuck(t *testing.T) {
+	sec := strings.Join(strings.Fields(section(t, guide.Render(contract.Registry()), "## When the person is stuck")), " ")
+	for _, want := range []string{"ghostbranch doctor --json", "ghostbranch explain <CODE> --json", "one step at a time",
+		"`AUTH_MISSING`", "`LOGIN_EXPIRED`", "ghostbranch login", "in their own terminal", "install link", "Strict isolation",
+		"Never ask for, read or paste a token", "never ask for wider access"} {
+		if !strings.Contains(sec, want) {
+			t.Errorf("the section lacks %q:\n%s", want, sec)
+		}
+	}
+	if n := strings.Count(section(t, guide.Render(contract.Registry()), "## When the person is stuck"), "\n"); n > 16 {
+		t.Errorf("the section is %d lines; keep it about 8-12", n)
+	}
+}
+
+// Tokens (for people) gives login's install wording: the public repo's
+// account and that repo; init creates the shadow repo.
+func TestGuideTokensSaysWhatToInstall(t *testing.T) {
+	sec := strings.Join(strings.Fields(section(t, guide.Render(contract.Registry()), "## Tokens (for people)")), " ")
+	if !strings.Contains(sec, "install the app on the account that owns your public repo and pick that repo; `ghostbranch init` creates the shadow repo") {
+		t.Fatalf("install wording:\n%s", sec)
+	}
+	if strings.Contains(sec, "pick both the public repo and its shadow repo") {
+		t.Fatalf("old wording:\n%s", sec)
+	}
+}
+
+// section is the guide from heading to the next "## " heading.
+func section(t *testing.T, out, heading string) string {
+	t.Helper()
+	i := strings.Index(out, "\n"+heading+"\n")
+	if i < 0 {
+		t.Fatalf("no %q section", heading)
+	}
+	rest := out[i+1+len(heading):]
+	if j := strings.Index(rest, "\n## "); j >= 0 {
+		rest = rest[:j]
+	}
+	return rest
 }

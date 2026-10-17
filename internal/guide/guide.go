@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
+	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
 )
 
@@ -40,6 +41,12 @@ type InstallResult struct {
 
 func Skill() string { return skill }
 
+// AgentTokenLink is Strict isolation's pre-filled link for an agent's
+// shadow-only token, with <shadow-owner> and <repo> for the agent to fill.
+func AgentTokenLink() string {
+	return forge.TokenLink("ghostbranch-agent-<repo>", "Ghostbranch agent: the shadow repo only", "<shadow-owner>", 30, forge.AgentTokenPermissions)
+}
+
 func cell(s string) string { return strings.ReplaceAll(s, "|", `\|`) }
 
 // Render returns the guide with its exit and error tables filled from entries.
@@ -62,6 +69,7 @@ func Render(entries []contract.Entry) string {
 	return strings.NewReplacer(
 		"{{EXIT_CODES}}", strings.TrimRight(exits.String(), "\n"),
 		"{{ERROR_CODES}}", strings.TrimRight(errs.String(), "\n"),
+		"{{AGENT_TOKEN_LINK}}", AgentTokenLink(),
 	).Replace(source)
 }
 
