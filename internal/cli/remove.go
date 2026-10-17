@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"strings"
+
 	"github.com/spf13/cobra"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/console"
@@ -14,15 +16,22 @@ import (
 
 func (a *app) removeCmd() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "remove",
 		Short: "Unregister the pair from this machine (needs a person at a console)",
 		Long: `remove takes the pair off this machine: it revokes the pair's agent grants and waivers, deletes
 its plan files and its local mirror, and drops it from the workspace. Nothing on GitHub changes: the
 shadow repo, its branches and features stay, and the ledger keeps its history. Because it drops grants
 and waivers, a person confirms by typing a code at the console; --plan shows what would go. It needs
-no GitHub token.`,
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+no GitHub token. The repo is an argument or --repo (the same thing); without either, it is this
+checkout's pair.`,
+		Use:  "remove [owner/repo]",
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 1 {
+				if a.repo != "" && !strings.EqualFold(a.repo, args[0]) {
+					return contract.New(contract.BadFlag, "remove got two repos, %s and --repo %s; pass one", args[0], a.repo).WithField("repo")
+				}
+				a.repo = args[0]
+			}
 			e, err := a.localEngine()
 			if err != nil {
 				return err
