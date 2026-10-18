@@ -78,7 +78,7 @@
         {
           "id": "doctor",
           "status": "todo",
-          "message": "Ghostbranch runs doctor once setup is done.",
+          "message": "Run ghostbranch doctor once init is done, to check the setup.",
           "url": "",
           "details": {}
         }
@@ -101,11 +101,12 @@
         "ghostbranch",
         "init",
         "acme/widget",
+        "--json",
         "--shadow",
         "octo/widget-shadow"
       ],
-      "why": "or keep the shadow repo on the token's own account: init creates octo/widget-shadow",
-      "needs_human": false,
+      "why": "or, if the person agrees, keep the shadow repo on the token's own account: init creates octo/widget-shadow",
+      "needs_human": true,
       "needs_input": []
     }
   ],
@@ -176,7 +177,7 @@
         {
           "id": "doctor",
           "status": "todo",
-          "message": "Ghostbranch runs doctor once setup is done.",
+          "message": "Run ghostbranch doctor once init is done, to check the setup.",
           "url": "",
           "details": {}
         }

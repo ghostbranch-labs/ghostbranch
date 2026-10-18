@@ -430,6 +430,50 @@ func TestGuidedInitWaitsForAPrivateHandMadeShadowRepo(t *testing.T) {
 	}
 }
 
+// I8 (anti-goal 2): a hand-made shadow repo still not right at the second
+// check stops init with exactly what is still wrong, and the adopt that
+// finishes it; there is no third Enter.
+func TestCreateByHandStopsAfterSecondFailedCheck(t *testing.T) {
+	t.Parallel()
+	const shadow = "acme/widget-shadow"
+	for _, tc := range []struct {
+		name, wrong string
+		first       func(te *testEnv)
+	}{
+		{"never created", shadow + " isn't there yet, or your login can't see it.", func(*testEnv) {}},
+		{"left public", shadow + " is public; make it private in its settings.", func(te *testEnv) { _, _ = te.forge.AddRepo(shadow, false) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			te := newTestEnv(t)
+			te.forge.CreateForbidden = true
+			p := atTerminal(te, "", "", "", "", "", "")
+			waits := 0
+			p.onWait = func() {
+				if waits++; waits == 1 {
+					tc.first(te)
+				}
+			}
+			code, _, errOut := te.run("init", "acme/widget")
+			if code != 1 || !strings.Contains(errOut, "[SHADOW_CREATE_DENIED]") {
+				t.Fatalf("exit %d: %s", code, errOut)
+			}
+			if waits != 2 {
+				t.Fatalf("%d Enters, want 2", waits)
+			}
+			for _, want := range []string{shadow + " was checked twice and still isn't ready: " + tc.wrong,
+				"run ghostbranch init acme/widget --adopt --shadow " + shadow} {
+				if !strings.Contains(errOut, want) {
+					t.Errorf("stderr lacks %q:\n%s", want, errOut)
+				}
+			}
+			if len(registered(te)) != 0 {
+				t.Fatalf("pairs %+v", registered(te))
+			}
+		})
+	}
+}
+
 // flakyForge fails the next GetRepo of one repo as GitHub being unreachable.
 type flakyForge struct {
 	forge.Forge

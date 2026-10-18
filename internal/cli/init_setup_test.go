@@ -738,7 +738,7 @@ func TestPlainInitWrongAccountCode(t *testing.T) {
 			}
 			n := nextCommands(env)
 			if len(n) != 2 || n[0] != "ghostbranch login" || !nextNeedsHuman(env, 0) ||
-				n[1] != "ghostbranch init acme/widget --shadow octo/widget-shadow" || nextNeedsHuman(env, 1) {
+				n[1] != "ghostbranch init acme/widget --json --shadow octo/widget-shadow" || !nextNeedsHuman(env, 1) {
 				t.Fatalf("next %v", env["next"])
 			}
 			if ns, _ := env["next"].([]any); !strings.Contains(ns[0].(map[string]any)["why"].(string), tc.why) {
@@ -746,6 +746,124 @@ func TestPlainInitWrongAccountCode(t *testing.T) {
 			}
 			noWrites(t, te)
 		})
+	}
+}
+
+// TOKEN_WRONG_ACCOUNT's --shadow way on is this run's own init: its flags
+// and workspace kept, any --shadow given replaced, and a person's call.
+func TestPlainInitWrongAccountShadowNextKeepsTheFlags(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	te.vars["GHOSTBRANCH_WORKSPACE"] = "work"
+	te.forge.User.Login, te.forge.Orgs = "octo", nil // acme's own repo
+	code, env := te.runJSON("init", "acme/widget", "--shadow", "acme/widget-shadow", "--no-guard", "--sync")
+	if c, _ := errCode(env); code != 2 || c != "TOKEN_WRONG_ACCOUNT" {
+		t.Fatalf("exit %d: %v", code, env)
+	}
+	n := nextCommands(env)
+	want := "ghostbranch init acme/widget --no-guard --sync --json --workspace work --shadow octo/widget-shadow"
+	if len(n) != 2 || n[0] != "ghostbranch login --workspace work" || !nextNeedsHuman(env, 0) || n[1] != want || !nextNeedsHuman(env, 1) {
+		t.Fatalf("next %v", env["next"])
+	}
+	noWrites(t, te)
+}
+
+// I1: an agent setting up from scratch, with no token at all: init --plan
+// --json is still the whole checklist, with the login step a person's, and
+// next starts the login in the background.
+func TestPlainInitNoTokenGivesLoginStep(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, code string
+		setup      func(te *testEnv)
+	}{
+		{"no token", "AUTH_MISSING", func(te *testEnv) { delete(te.vars, "GHOSTBRANCH_TOKEN") }},
+		{"expired login", "LOGIN_EXPIRED", func(te *testEnv) {
+			delete(te.vars, "GHOSTBRANCH_TOKEN")
+			storeLogin(te, "ghu_test", "", -time.Hour) // no refresh token: expired
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			te := newTestEnv(t)
+			tc.setup(te)
+			code, env := te.runJSON("init", "acme/widget", "--plan")
+			if c, _ := errCode(env); code != 1 || c != tc.code {
+				t.Fatalf("exit %d: %v", code, env)
+			}
+			status, ids := setupSteps(t, env)
+			if !slices.Equal(ids, engine.SetupStepIDs) || status["login"] != "needs_human" || status["shadow"] != "todo" || status["doctor"] != "todo" {
+				t.Fatalf("steps %v", status)
+			}
+			if steps, _ := errDetails(env)["steps"].([]any); len(steps) != len(engine.SetupStepIDs) {
+				t.Fatalf("details.steps %v", errDetails(env)["steps"])
+			}
+			if n := nextCommands(env); len(n) != 1 || n[0] != "ghostbranch login --json --non-interactive" || !nextNeedsHuman(env, 0) {
+				t.Fatalf("next %v", env["next"])
+			}
+			ns, _ := env["next"].([]any)
+			if why, _ := ns[0].(map[string]any)["why"].(string); !strings.Contains(why, "in the background") || !strings.Contains(why, "user_code") {
+				t.Fatalf("why %q", why)
+			}
+			noWrites(t, te)
+		})
+	}
+}
+
+// I2: the login step names where the token came from, so an agent can
+// tell a gh or env token from the person's Ghostbranch login.
+func TestPlainInitLoginStepNamesTheTokenSource(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		source string
+		setup  func(te *testEnv)
+	}{
+		{"login", func(te *testEnv) { appLogin(te); personal(te); installApp(te) }},
+		{"GH_TOKEN", func(te *testEnv) { delete(te.vars, "GHOSTBRANCH_TOKEN"); te.vars["GH_TOKEN"] = "gh-env-token" }},
+		{"gh auth token", func(te *testEnv) {
+			delete(te.vars, "GHOSTBRANCH_TOKEN")
+			te.env.GHToken = func() (string, error) { return "gh-cli-token", nil }
+		}},
+	} {
+		t.Run(tc.source, func(t *testing.T) {
+			t.Parallel()
+			te := newTestEnv(t)
+			tc.setup(te)
+			code, env := te.runJSON("init", "acme/widget", "--plan")
+			if code != 0 {
+				t.Fatalf("exit %d: %v", code, env)
+			}
+			d, _ := env["data"].(map[string]any)
+			s, _ := d["setup"].(map[string]any)
+			steps, _ := s["steps"].([]any)
+			login, _ := steps[0].(map[string]any)
+			det, _ := login["details"].(map[string]any)
+			if login["id"] != "login" || login["status"] != "done" || det["source"] != tc.source {
+				t.Fatalf("login step %v", login)
+			}
+		})
+	}
+}
+
+// I3: plain init doesn't run doctor, so its doctor step says to, and next
+// runs it.
+func TestPlainInitSuccessNextRunsDoctor(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	code, env := te.runJSON("init", "acme/widget")
+	if code != 0 {
+		t.Fatalf("exit %d: %v", code, env)
+	}
+	if n := nextCommands(env); !slices.Contains(n, "ghostbranch doctor --json --repo acme/widget") {
+		t.Fatalf("next %v", env["next"])
+	}
+	d, _ := env["data"].(map[string]any)
+	s, _ := d["setup"].(map[string]any)
+	steps, _ := s["steps"].([]any)
+	for _, st := range steps {
+		if m, _ := st.(map[string]any); m["id"] == "doctor" && (m["status"] != "todo" || !strings.Contains(m["message"].(string), "Run ghostbranch doctor")) {
+			t.Fatalf("doctor step %v", m)
+		}
 	}
 }
 

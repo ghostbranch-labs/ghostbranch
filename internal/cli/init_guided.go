@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/auth"
@@ -86,18 +87,22 @@ func (a *app) plainInit(ctx context.Context, public string, f initFlags) error {
 	if guardOn && !in {
 		return guardFlagErr(public)
 	}
+	so := engine.SetupOptions{Public: public, Shadow: f.shadow, Adopt: f.adopt, InstallURL: a.installURL()}
 	e, err := a.engine(ctx)
+	if ce := contract.From(err); ce != nil && (ce.Code == contract.AuthMissing || ce.Code == contract.LoginExpired) {
+		return a.loggedOutInit(ctx, so, in, installed, guardOn, ce)
+	}
 	if err != nil {
 		return err
 	}
 	if _, err := e.InitPair(public, f.shadow); err != nil {
 		return err
 	}
-	so := engine.SetupOptions{Public: public, Shadow: f.shadow, Adopt: f.adopt, InstallURL: a.installURL()}
 	setup, err := a.setupCheck(ctx, e, so, in, installed, guardOn)
 	if err != nil {
 		return err
 	}
+	plainDoctorStep(setup)
 	if stop := setup.FirstStop(); stop != nil {
 		return a.setupStopped(e, so, setup, stop, installed)
 	}
@@ -122,10 +127,50 @@ func (a *app) plainInit(ctx context.Context, public string, f initFlags) error {
 		// The checklist again, now that init is done; the one from before
 		// stands if GitHub can't be read.
 		if s, serr := a.setupCheck(ctx, e, so, in, res.GuardInstalled, guardOn); serr == nil {
+			plainDoctorStep(s)
 			res.Setup = s
 		}
 	}
 	return done(a, res, w, err)
+}
+
+// loggedOutInit is plain init with no token (AUTH_MISSING) or an expired
+// login (LOGIN_EXPIRED): the checklist worked out without one, so an agent
+// setting up from scratch sees every step, and the code with
+// details.steps. Nothing is written.
+func (a *app) loggedOutInit(ctx context.Context, so engine.SetupOptions, in, installed, guardOn bool, ce *contract.Error) error {
+	ws, err := a.openWorkspace()
+	if err != nil {
+		return err
+	}
+	e := &engine.Engine{WS: ws, Now: a.env.Now}
+	p, err := e.InitPair(so.Public, so.Shadow)
+	if err != nil {
+		return err
+	}
+	s, err := a.setupCheck(ctx, e, so, in, installed, guardOn)
+	if err != nil {
+		return err
+	}
+	plainDoctorStep(s)
+	d := map[string]any{}
+	for k, v := range ce.Details {
+		d[k] = v
+	}
+	d["steps"] = s.Steps
+	res := &engine.InitResult{Public: p.Public, Shadow: p.Shadow, MirroredBranches: []string{}, MirroredTags: []string{},
+		GuardInstalled: installed, Setup: s}
+	return done(a, res, nil, ce.WithDetails(d))
+}
+
+// plainDoctorStep makes s's doctor step true for plain init, which doesn't
+// run doctor (guided init does): the caller runs it once init is done.
+func plainDoctorStep(s *engine.Setup) {
+	for i := range s.Steps {
+		if s.Steps[i].ID == "doctor" {
+			s.Steps[i].Status, s.Steps[i].Message = engine.SetupTodo, "Run ghostbranch doctor once init is done, to check the setup."
+		}
+	}
 }
 
 // setupCheck is e.SetupCheck with the guard step for this directory, which
@@ -639,10 +684,12 @@ func newRepoURL(full string) string {
 
 // createByHand is the way on when GitHub won't let the login create the
 // shadow repo: the person creates it, presses Enter, and init adopts it
-// once it exists, is private and isn't a fork. A lookup GitHub didn't answer
-// waits for Enter again. An app login sees only the repos of the accounts
-// the app is installed on (and, there, those it was given), so with one the
-// steps and the not-there line give the app's install link.
+// once it exists, is private and isn't a fork. A check that fails (a lookup
+// GitHub didn't answer too) says why and waits for Enter again, once: after
+// setupRechecks checks it stops with what is still wrong. An app login sees
+// only the repos of the accounts the app is installed on (and, there, those
+// it was given), so with one the steps and the not-there line give the
+// app's install link.
 func createByHand(ctx context.Context, ask prompt.Asker, f forge.Forge, o engine.InitOptions, s setup) (engine.InitOptions, error) {
 	shadow := shadowOf(o)
 	owner, _, _ := forge.SplitName(shadow)
@@ -666,30 +713,54 @@ func createByHand(ctx context.Context, ask prompt.Asker, f forge.Forge, o engine
 	default:
 		ask.Say("  2. Give your token access to it: " + tokenAccess(o.Public, shadow, s.source))
 	}
-	for {
+	for check := 1; ; check++ {
 		if err := ask.Wait(ctx, "Press Enter once "+shadow+" exists."); err != nil {
 			return o, err
 		}
 		sh, err := f.GetRepo(ctx, shadow)
+		var wrong []string
 		switch {
 		case errors.Is(err, forge.ErrNotFound):
-			for _, l := range notYet {
-				ask.Say(l)
-			}
+			wrong = notYet
 		case errors.Is(err, forge.ErrTransient):
-			ask.Say("couldn't reach GitHub; press Enter to try again")
+			wrong = []string{"couldn't reach GitHub to check " + shadow + "."}
 		case err != nil:
 			// Not transient (that case waits again), so not retryable.
 			return o, contract.Wrap(contract.ForgeError, err, "look up %s", shadow)
 		case sh.Fork:
-			ask.Say(shadow + " is a fork; a shadow repo can't be one.")
+			wrong = []string{shadow + " is a fork; a shadow repo can't be one."}
 		case !sh.Private:
-			ask.Say(shadow + " is public; make it private in its settings.")
+			wrong = []string{shadow + " is public; make it private in its settings."}
 		default:
 			o.Shadow, o.Adopt = shadow, true
 			return o, nil
 		}
+		if check == setupRechecks {
+			// No third ask (anti-goal 2): stop with what is still wrong.
+			return o, handShadowStopped(o.Public, shadow, wrong)
+		}
+		if errors.Is(err, forge.ErrTransient) {
+			wrong = []string{"couldn't reach GitHub; press Enter to try again"}
+		}
+		for _, l := range wrong {
+			ask.Say(l)
+		}
 	}
+}
+
+// handShadowStopped is SHADOW_CREATE_DENIED once a hand-made shadow repo
+// still isn't right after its second check: what is still wrong, and the
+// adopt that finishes the setup once it is fixed.
+func handShadowStopped(public, shadow string, wrong []string) error {
+	adopt := "ghostbranch init " + public + " --adopt --shadow " + shadow
+	wrong = slices.Clone(wrong)
+	for i := range wrong {
+		wrong[i] = strings.TrimPrefix(wrong[i], "- ")
+	}
+	steps := append(slices.Clone(wrong), "Run "+adopt+".")
+	return contract.New(contract.ShadowCreateDenied, "%s was checked twice and still isn't ready: %s Once that is fixed, run %s",
+		shadow, strings.Join(wrong, " "), adopt).
+		WithDetails(map[string]any{"public": public, "shadow": shadow, "explicit_shadow": true, "steps": steps})
 }
 
 // tokenAccess is how a token (not the app) reaches a shadow repo made by

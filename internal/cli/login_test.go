@@ -186,6 +186,48 @@ func TestLoginJSONNoConsoleWritesDeviceCodeFirst(t *testing.T) {
 	}
 }
 
+// I7: an agent's background login that ends without an approval is run
+// again the same way, in the background, with a new code to relay; at a
+// console it stays a person's login.
+func TestLoginJSONStreamingFailureRunsItAgainInTheBackground(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		o    authtest.Options
+	}{
+		{"expired_code", authtest.Options{ExpiredCode: true}},
+		{"denied", authtest.Options{Deny: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			te := newTestEnv(t)
+			deviceLogin(te, tc.o)
+			code, out, errOut := te.run("login", "--json", "--non-interactive")
+			lines := strings.Split(strings.TrimSpace(out), "\n")
+			var env map[string]any
+			if err := json.Unmarshal([]byte(lines[len(lines)-1]), &env); err != nil {
+				t.Fatalf("%v\n%s\n%s", err, out, errOut)
+			}
+			if c, r := errCode(env); code != 1 || c != "LOGIN_UNAVAILABLE" || r != tc.name {
+				t.Fatalf("exit %d: %v", code, env)
+			}
+			ns, _ := env["next"].([]any)
+			n := nextCommands(env)
+			if len(n) != 1 || n[0] != "ghostbranch login --json --non-interactive" || !nextNeedsHuman(env, 0) ||
+				!strings.Contains(ns[0].(map[string]any)["why"].(string), "relay the new code") {
+				t.Fatalf("next %v", env["next"])
+			}
+			// At a console: a person runs login in their own terminal.
+			te2 := newTestEnv(t)
+			deviceLogin(te2, tc.o)
+			_, env = te2.runJSON("login")
+			if n := nextCommands(env); len(n) != 1 || n[0] != "ghostbranch login" || !nextNeedsHuman(env, 0) {
+				t.Fatalf("console next %v", env["next"])
+			}
+		})
+	}
+}
+
 func TestLoginRefusals(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {

@@ -90,12 +90,10 @@ func (e *Engine) SetupCheck(ctx context.Context, opt SetupOptions) (*Setup, erro
 		set("login", SetupNeedsHuman, "", nil, "log in with ghostbranch login")
 		set("account", SetupTodo, "", nil, "Ghostbranch checks the token's account once you log in.")
 		set("shadow", SetupTodo, "", nil, "Ghostbranch checks %s once you log in.", p.Shadow)
+		// ghostbranch login is an app login, so the app steps come once
+		// the person has logged in.
 		for _, id := range []string{"app_installed", "app_access"} {
-			if appSteps {
-				set(id, SetupTodo, "", nil, "Ghostbranch checks the Ghostbranch app once you log in.")
-			} else {
-				set(id, SetupSkipped, "", nil, "Only an app login can see where the Ghostbranch app is installed.")
-			}
+			set(id, SetupTodo, "", nil, "Ghostbranch checks the Ghostbranch app once you log in.")
 		}
 		return ordered(steps), nil
 	}

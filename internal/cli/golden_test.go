@@ -159,6 +159,7 @@ func TestGoldenContract(t *testing.T) {
 		}, []string{"init", "acme/widget", "--plan"}, 2},
 		{"init_app_not_installed", func(te *testEnv) { appLogin(te); personal(te) }, []string{"init", "acme/widget"}, contract.AppNotInstalled.Exit()},
 		{"init_token_wrong_account", func(te *testEnv) { te.forge.User.Login, te.forge.Orgs = "octo", nil }, []string{"init", "acme/widget"}, contract.TokenWrongAccount.Exit()},
+		{"init_plan_no_token", func(te *testEnv) { delete(te.vars, "GHOSTBRANCH_TOKEN") }, []string{"init", "acme/widget", "--plan"}, contract.AuthMissing.Exit()},
 		{"sync_noop", initOnly, []string{"sync"}, 0},
 		{"sync_fast_forward", func(te *testEnv) {
 			initOnly(te)

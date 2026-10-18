@@ -102,7 +102,7 @@
         {
           "id": "doctor",
           "status": "todo",
-          "message": "Ghostbranch runs doctor once setup is done.",
+          "message": "Run ghostbranch doctor once init is done, to check the setup.",
           "url": "",
           "details": {}
         }
@@ -115,6 +115,19 @@
       "message": "acme/widget-shadow is private, so its Actions minutes are billed"
     }
   ],
-  "next": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "doctor",
+        "--json",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "init is done; doctor checks the setup",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
   "error": null
 }

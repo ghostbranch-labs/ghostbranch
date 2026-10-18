@@ -323,6 +323,13 @@ func TestSetupNoToken(t *testing.T) {
 	if got := statuses(s); got["account"] != "todo" || got["shadow"] != "todo" || got["app_installed"] != "todo" {
 		t.Fatalf("statuses = %v", got)
 	}
+	// No login at all: the login to come is ghostbranch login's app login,
+	// so the app steps are still to come, not skipped.
+	h2 := setupHarness(t, "acme", false)
+	h2.eng.Token, h2.eng.Forge, h2.eng.AppLogin = "", nil, false
+	if got := statuses(h2.setup(engine.SetupOptions{Public: publicName})); got["app_installed"] != "todo" || got["app_access"] != "todo" {
+		t.Fatalf("no login: statuses = %v", got)
+	}
 }
 
 // An app login GitHub refuses to list installations for (an expired

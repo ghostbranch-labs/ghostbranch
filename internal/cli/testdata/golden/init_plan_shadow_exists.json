@@ -77,7 +77,7 @@
         {
           "id": "doctor",
           "status": "todo",
-          "message": "Ghostbranch runs doctor once setup is done.",
+          "message": "Run ghostbranch doctor once init is done, to check the setup.",
           "url": "",
           "details": {}
         }
@@ -151,7 +151,7 @@
         {
           "id": "doctor",
           "status": "todo",
-          "message": "Ghostbranch runs doctor once setup is done.",
+          "message": "Run ghostbranch doctor once init is done, to check the setup.",
           "url": "",
           "details": {}
         }

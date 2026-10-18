@@ -145,7 +145,9 @@ func TestNextSuggestsTheGuardInAnUnguardedCheckout(t *testing.T) {
 	te.env.GuardState = func(public string) (bool, bool) { return public == "acme/widget", false }
 	_, env := te.runJSON("init", "acme/widget")
 	n := nextOf(t, env)
-	if len(n) != 1 || !reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "guard", "install"}) || n[0]["needs_human"] != true {
+	// Then doctor: plain init doesn't run it.
+	if len(n) != 2 || !reflect.DeepEqual(argv(n[0]), []string{"ghostbranch", "guard", "install"}) || n[0]["needs_human"] != true ||
+		!reflect.DeepEqual(argv(n[1]), []string{"ghostbranch", "doctor", "--json", "--repo", "acme/widget"}) {
 		t.Fatalf("%v", n)
 	}
 	te.env.GuardState = func(string) (bool, bool) { return true, true }
