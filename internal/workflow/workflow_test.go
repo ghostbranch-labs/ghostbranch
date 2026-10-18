@@ -173,6 +173,13 @@ func TestRunsOnPR(t *testing.T) {
 		"on: [workflow_dispatch]":                               false,
 		"on:\n  schedule:\n    - cron: '0 0 * * *'\n":           false,
 		"name: no trigger":                                      false,
+		// An anchor reused as on:, and << merge keys under on:, read as written.
+		"x-triggers: &triggers [pull_request]\non: *triggers":                               true,
+		"x-common: &common\n  pull_request: {}\non:\n  <<: *common\n  workflow_dispatch:\n": true,
+		"x-push: &push\n  branches: [main]\non:\n  push:\n    <<: *push\n":                  false,
+		"x-manual: &manual\n  workflow_dispatch: {}\non:\n  <<: [*manual]\n":                false,
+		// A merge of a list can't be folded: counted as running.
+		"x-list: &list [workflow_dispatch]\non:\n  <<: *list\n": true,
 	} {
 		f, err := Parse("w.yml", []byte(on+"\njobs: {}\n"), names)
 		if err != nil {

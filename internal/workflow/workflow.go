@@ -51,6 +51,10 @@ type File struct {
 	PushGuarded bool
 	push        *pushFilter
 	onPR        bool // on: has pull_request or pull_request_target
+	// onUnknown: on: couldn't be read for certain (an alias it can't
+	// follow, a merge of something not a map, an unexpected node), so
+	// RunsOnPR errs toward running.
+	onUnknown bool
 }
 
 // IsWorkflowPath reports whether GitHub Actions reads path as a workflow:
@@ -174,8 +178,16 @@ func Parse(path string, src []byte, n Names) (File, error) {
 			}
 		}
 	}
-	f.push = parsePush(get(r, "on"))
-	f.onPR = hasEvent(get(r, "on"), "pull_request", "pull_request_target")
+	// on: is read with aliases followed and << merge keys folded in, so
+	// on: *triggers or a <<: *common under it reads as written.
+	er, ok := expand(r, 0)
+	on := get(er, "on")
+	if !ok || (on != nil && on.Kind != yaml.ScalarNode && on.Kind != yaml.SequenceNode && on.Kind != yaml.MappingNode) {
+		f.onUnknown = true
+		return f, nil
+	}
+	f.push = parsePush(on)
+	f.onPR = hasEvent(on, "pull_request", "pull_request_target")
 	return f, nil
 }
 
@@ -193,6 +205,76 @@ func walk(n *yaml.Node, fn func(string)) {
 			walk(c, fn)
 		}
 	}
+}
+
+// maxExpandDepth bounds expand, which also stops an alias loop.
+const maxExpandDepth = 64
+
+// expand returns a copy of n with aliases followed and << merge keys folded
+// into their mapping, the mapping's own keys winning, as YAML 1.1 merges
+// do. ok is false when it meets what it can't resolve: a dangling alias, a
+// merge of something that isn't a mapping, or nesting past maxExpandDepth.
+func expand(n *yaml.Node, depth int) (*yaml.Node, bool) {
+	if n == nil {
+		return nil, true
+	}
+	if depth > maxExpandDepth {
+		return nil, false
+	}
+	switch n.Kind {
+	case yaml.AliasNode:
+		if n.Alias == nil {
+			return nil, false
+		}
+		return expand(n.Alias, depth+1)
+	case yaml.SequenceNode, yaml.DocumentNode:
+		out := *n
+		out.Content = make([]*yaml.Node, 0, len(n.Content))
+		for _, c := range n.Content {
+			e, ok := expand(c, depth+1)
+			if !ok {
+				return nil, false
+			}
+			out.Content = append(out.Content, e)
+		}
+		return &out, true
+	case yaml.MappingNode:
+		out := *n
+		out.Content = nil
+		own := map[string]bool{}
+		var merged []*yaml.Node
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			k := n.Content[i]
+			v, ok := expand(n.Content[i+1], depth+1)
+			if !ok {
+				return nil, false
+			}
+			if k.Kind == yaml.ScalarNode && k.Tag == "!!merge" {
+				srcs := []*yaml.Node{v}
+				if v.Kind == yaml.SequenceNode {
+					srcs = v.Content
+				}
+				for _, src := range srcs {
+					if src.Kind != yaml.MappingNode {
+						return nil, false
+					}
+					merged = append(merged, src.Content...)
+				}
+				continue
+			}
+			own[k.Value] = true
+			out.Content = append(out.Content, k, v)
+		}
+		// Among merged maps the first to name a key wins.
+		for i := 0; i+1 < len(merged); i += 2 {
+			if k := merged[i]; !own[k.Value] {
+				own[k.Value] = true
+				out.Content = append(out.Content, k, merged[i+1])
+			}
+		}
+		return &out, true
+	}
+	return n, true
 }
 
 // hasEvent reports whether on: names any of events, in any of its three
@@ -226,7 +308,7 @@ func hasEvent(on *yaml.Node, events ...string) bool {
 // branch: it triggers on pull_request or pull_request_target (whatever
 // their filters), or on a push to branch, since the gate pushes it.
 func (f File) RunsOnPR(branch string) bool {
-	return f.onPR || f.PushTriggered([]string{branch})
+	return f.onUnknown || f.onPR || f.PushTriggered([]string{branch})
 }
 
 // pushFilter is a workflow's on.push trigger.

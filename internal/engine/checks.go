@@ -163,9 +163,10 @@ func (e *Engine) waitChecks(ctx context.Context, repo, sha string, cfg config.Ga
 			}
 			return checkOutcome{}, forgeErr(err, "list checks on %s", short(sha))
 		}
+		now := e.Now()
 		if o.step != nil {
 			if len(checks) == 0 {
-				o.step.Update(startText(cfg, o, appearTimeout(cfg, o.noWorkflows)-e.Now().Sub(start)))
+				o.step.Update(startText(cfg, o, appearTimeout(cfg, o.noWorkflows)-now.Sub(start)))
 			} else {
 				n := 0
 				for _, c := range checks {
@@ -176,7 +177,6 @@ func (e *Engine) waitChecks(ctx context.Context, repo, sha string, cfg config.Ga
 				o.step.Update(fmt.Sprintf("Waiting for CI (%d of %d checks done)", n, len(checks)))
 			}
 		}
-		now := e.Now()
 		if len(checks) != last {
 			last, stableSince = len(checks), now
 		}

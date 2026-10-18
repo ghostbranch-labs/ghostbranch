@@ -114,7 +114,7 @@ func outcomeErr(out checkOutcome, pr int, cfg config.Gate, shadow string, workfl
 		if known && len(wf) == 0 {
 			return contract.New(contract.NoCI,
 				"no checks appeared on shadow PR #%d within %s, and the gate candidate has no workflow under .github/workflows that runs on this PR: add CI to the public repo, or, if your CI is an external app, install it on %s",
-				pr, appearTimeout(cfg, true), shadow).WithDetails(map[string]any{"reason": "no_workflow", "no_workflows": true, "shadow_pr": pr})
+				pr, shortDur(appearTimeout(cfg, true)), shadow).WithDetails(map[string]any{"reason": "no_workflow", "no_workflows": true, "shadow_pr": pr})
 		}
 		// An unreadable candidate gives no reason: which one holds is unknown.
 		details := map[string]any{"shadow_pr": pr}
@@ -122,7 +122,7 @@ func outcomeErr(out checkOutcome, pr int, cfg config.Gate, shadow string, workfl
 			details["reason"], details["no_workflows"] = "actions_disabled_or_untriggered", false
 		}
 		return contract.New(contract.NoCI,
-			"no checks appeared on shadow PR #%d within %s; check that Actions is enabled in %s, or no workflow triggers on pull_request", pr, cfg.CIAppearTimeout, shadow).
+			"no checks appeared on shadow PR #%d within %s; check that Actions is enabled in %s, or no workflow triggers on pull_request", pr, shortDur(cfg.CIAppearTimeout), shadow).
 			WithDetails(details)
 	case feature.ChecksTimeout:
 		return contract.New(contract.CITimeout, "checks did not finish within %s", cfg.CITimeout)
@@ -135,6 +135,12 @@ func outcomeErr(out checkOutcome, pr int, cfg config.Gate, shadow string, workfl
 // Ghostbranch's own (ghostbranch-*.yml). A file that doesn't parse counts
 // as running, so a doubt keeps the full wait. known is false when C can't
 // be read. The CI wait and NO_CI's reason both use it, so they agree.
+//
+// Reading the candidate is an approximation: GitHub runs a
+// pull_request_target workflow from the base branch's copy (the shadow
+// repo's main), not the PR's, so this is a known approximation: the two
+// differ only when the feature itself adds, drops or changes such a
+// workflow, since the candidate starts from public main.
 func prWorkflows(ctx context.Context, g *gitx.Git, names workflow.Names, C, branch string) (files []string, known bool) {
 	es, err := g.ListTree(ctx, C)
 	if err != nil {
