@@ -61,7 +61,8 @@ func TestRenderListsEveryCodeFromTheRegistry(t *testing.T) {
 	// 480: all 14 states in the Lifecycle list, and in After publishing waivers add, the two stacking refusals and the long lines rewrapped (6.6).
 	// 497: the When the person is stuck section (14 lines), login's install wording, and Strict
 	// isolation's pre-filled token link with the repository choice it can't make (Tier 1 setup guidance).
-	if n := strings.Count(out, "\n"); n > 497 {
+	// 522: 8.7's Setting up a repo for a person section (13 lines), four stuck rows for the new codes and the login exception.
+	if n := strings.Count(out, "\n"); n > 522 {
 		t.Errorf("the guide is %d lines; keep it short (spec: about 150 plus the tables)", n)
 	}
 }
@@ -581,8 +582,8 @@ func TestGuideSaysWhatToDoWhenThePersonIsStuck(t *testing.T) {
 			t.Errorf("the section lacks %q:\n%s", want, sec)
 		}
 	}
-	if n := strings.Count(section(t, guide.Render(contract.Registry()), "## When the person is stuck"), "\n"); n > 16 {
-		t.Errorf("the section is %d lines; keep it about 8-12", n)
+	if n := strings.Count(section(t, guide.Render(contract.Registry()), "## When the person is stuck"), "\n"); n > 20 {
+		t.Errorf("the section is %d lines; keep it about 8-16", n)
 	}
 }
 
@@ -610,4 +611,23 @@ func section(t *testing.T, out, heading string) string {
 		rest = rest[:j]
 	}
 	return rest
+}
+
+// Setting up a repo for a person (8.7): the plan, the steps, the login in the
+// background, no gh login, the agent's own token, and the four new stuck codes.
+func TestGuideSetupSection(t *testing.T) {
+	out := guide.Render(contract.Registry())
+	sec := strings.Join(strings.Fields(section(t, out, "## Setting up a repo for a person")), " ")
+	for _, want := range []string{"init <repo> --plan --json", "data.setup.steps", "needs_human", "login --json", "in the background",
+		"user_code", "verification_uri", "Never offer gh", "agents token", "GHOSTBRANCH_TOKEN", "agents status --json", "token_can_publish"} {
+		if !strings.Contains(sec, want) {
+			t.Errorf("the section lacks %q:\n%s", want, sec)
+		}
+	}
+	stuck := strings.Join(strings.Fields(section(t, out, "## When the person is stuck")), " ")
+	for _, code := range []string{"APP_NOT_INSTALLED", "APP_CANT_SEE_REPO", "TOKEN_WRONG_ACCOUNT", "AGENT_TOKEN_REFUSED"} {
+		if !strings.Contains(stuck, "`"+code+"`") {
+			t.Errorf("the stuck list lacks %s", code)
+		}
+	}
 }

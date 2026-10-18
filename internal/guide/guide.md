@@ -96,6 +96,22 @@ main, green CI, and a leak scan of exactly what will be published.
    scheduled sync, whether they need a `GHOSTBRANCH_SYNC_TOKEN` secret (see *Keeping up with public*).
    Guarded jobs run in the shadow repo on unreleased code: never deploy or publish credentials there.
 
+## Setting up a repo for a person
+
+1. Run `ghostbranch init <repo> --plan --json` and read `data.setup.steps` (`login`, `account`,
+   `app_installed`, `shadow`, `app_access`, `pair`, `guard`, `doctor`; each `done`, `needs_human`,
+   `blocked`, `todo` or `skipped`). It exits 2 on a stop, with that step's code and a `next` that runs it again.
+2. Do the `todo` steps yourself. For each `needs_human` step, give the person its message and `url`, one
+   at a time, then run the command again to check.
+3. Not logged in? Run `ghostbranch login --json` **in the background** and relay its first line
+   (`{"type":"device_code"}`: its `user_code` and `verification_uri`) to the person. It waits up to about
+   15 minutes and ends with the login result; if it times out, run it again. Never offer gh's login.
+   `GHOSTBRANCH_NO_GH=1` turns off the `gh auth token` fallback.
+4. When setup is done, ask once: your own shadow-only token (**recommended**) or the person's login.
+   For a token the person runs `ghostbranch agents token` at their console (or `agents token --json`,
+   which returns `link`, `select` and `set_line` and reads no token), then restarts you in a shell with
+   `GHOSTBRANCH_TOKEN` set. Check it: `ghostbranch agents status --json` must show `token_can_publish` `"false"`.
+
 ## When the person is stuck
 
 A login, the app's install and tokens are the person's to do. Help them one step at a time:
@@ -107,6 +123,10 @@ A login, the app's install and tokens are the person's to do. Help them one step
 - `AUTH_MISSING` or `LOGIN_EXPIRED`: the person runs `ghostbranch login` in their own terminal.
 - The app can't see a repo (`doctor` says it doesn't exist or the token can't see it): give the install
   link, `https://github.com/apps/ghostbranch-cli/installations/new`, and ask them to add that repo.
+- `APP_NOT_INSTALLED`: give each `error.details.accounts[].install_url` with its account; they install the app there.
+- `APP_CANT_SEE_REPO`: give `configure_url` and the `repos` to add to the app's access.
+- `TOKEN_WRONG_ACCOUNT`: the token is for another account than `owner`; they use the right one, or pass `--shadow <owner/name>` as `next` says.
+- `AGENT_TOKEN_REFUSED`: `agents token` refused the token; show `details.link` and have them make a shadow-only one.
 - A token for you: the pre-filled link in *Strict isolation*, with exactly its permissions.
 - Never ask for, read or paste a token, and never ask for wider access.
 
@@ -315,7 +335,7 @@ A login, the app's install and tokens are the person's to do. Help them one step
 - Never create or delete repos (other than through `ghostbranch init`), or change repo settings, tokens
   or secrets yourself; those are the person's.
 - Never run `ghostbranch login` or `ghostbranch logout`, or rely on the person's stored login: use the
-  token you were given. If `doctor` or `agents status` warns `AGENT_ON_PERSON_LOGIN`, tell the person.
+  token you were given. The one exception is `login --json` to sign the person in during setup. If `doctor` or `agents status` warns `AGENT_ON_PERSON_LOGIN`, tell the person.
 
 You may *suggest* these to the person, never run them yourself:
 
