@@ -90,7 +90,7 @@ func TestEnvelopeSchemaMatchesTheContract(t *testing.T) {
 		}
 	}
 	for name, want := range map[string]string{"feature.schema.json": contract.RecordVersion, "grants.schema.json": contract.RecordVersion,
-		"plan.schema.json": contract.RecordVersion, "waivers.schema.json": contract.RecordVersion, "wait-event.schema.json": contract.SchemaVersion} {
+		"plan.schema.json": contract.RecordVersion, "waivers.schema.json": contract.RecordVersion, "wait-event.schema.json": contract.SchemaVersion, "login-event.schema.json": contract.SchemaVersion} {
 		var r struct {
 			Properties struct {
 				SchemaVersion struct {

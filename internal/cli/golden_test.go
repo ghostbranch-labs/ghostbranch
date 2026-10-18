@@ -52,11 +52,15 @@ var (
 
 // normalize replaces the temp dir with <ROOT> and uses / in those paths, so
 // goldens match on every OS.
+// loopbackPort is a fake server's random port, as in the device_code line.
+var loopbackPort = regexp.MustCompile(`127\.0\.0\.1:\d+`)
+
 func normalize(out, root string) string {
 	esc, _ := json.Marshal(root)
 	out = strings.ReplaceAll(out, strings.Trim(string(esc), `"`), "<ROOT>")
 	out = strings.ReplaceAll(out, filepath.ToSlash(root), "<ROOT>")
 	out = rootPath.ReplaceAllStringFunc(out, func(s string) string { return strings.ReplaceAll(s, `\\`, "/") })
+	out = loopbackPort.ReplaceAllString(out, "127.0.0.1:<PORT>")
 	out = pidNumber.ReplaceAllString(out, "pid <PID>")
 	out = pidField.ReplaceAllString(out, `"pid": "<PID>"`)
 	return normalizeSHAs(out)
@@ -432,7 +436,10 @@ jobs:
 			te.forge.User = forge.User{Login: "octo", ID: 1}
 			te.env.Stdin = strings.NewReader("ghp_test_golden\n")
 		}, []string{"login", "--with-token"}, 0},
-		{"login_no_console", nil, []string{"login"}, 1},
+		{"login_device_no_console", func(te *testEnv) {
+			deviceLogin(te, authtest.Options{Pending: 1})
+			te.env.ConsoleUsable = false
+		}, []string{"login"}, 0},
 		{"login_device", func(te *testEnv) { deviceLogin(te, authtest.Options{Pending: 1}) }, []string{"login"}, 0},
 		{"logout", func(te *testEnv) { storeLogin(te, "ghu_test_x", "ghr_test_x", 8*time.Hour) }, []string{"logout"}, 0},
 		{"auth_status_login", func(te *testEnv) {
@@ -506,7 +513,10 @@ jobs:
 			}
 			last := []byte(out)
 			if args[0] == "wait" {
-				last = waitStream(t, out)
+				last = waitStream(t, out, "wait-event.schema.json")
+			}
+			if args[0] == "login" && s.name == "login_device_no_console" {
+				last = waitStream(t, out, "login-event.schema.json")
 			}
 			testutil.ValidateSchema(t, "envelope.schema.json", last)
 			var env struct {
@@ -540,7 +550,7 @@ jobs:
 // waitStream checks wait --json's stdout: NDJSON, one complete JSON value
 // per line, every value but the last a job event. It returns the last
 // value, the envelope.
-func waitStream(t *testing.T, out string) []byte {
+func waitStream(t *testing.T, out, eventSchema string) []byte {
 	t.Helper()
 	dec := json.NewDecoder(strings.NewReader(out))
 	var values []json.RawMessage
@@ -565,7 +575,7 @@ func waitStream(t *testing.T, out string) []byte {
 		}
 	}
 	for _, v := range values[:len(values)-1] {
-		testutil.ValidateSchema(t, "wait-event.schema.json", v)
+		testutil.ValidateSchema(t, eventSchema, v)
 	}
 	return values[len(values)-1]
 }

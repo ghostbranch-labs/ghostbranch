@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -17,6 +18,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/auth/authtest"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/keychain"
+	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
 )
 
 // consoleLog is a console device that records what is shown on it; login
@@ -116,13 +118,71 @@ func TestLoginNeedsAConsole(t *testing.T) {
 	opened := false
 	te.env.ConsoleUsable = false
 	te.env.OpenConsole = func() (io.ReadWriteCloser, error) { opened = true; return nil, errors.New("no console") }
-	code, env := te.runJSON("login")
-	if c, r := errCode(env); code != 1 || c != "LOGIN_UNAVAILABLE" || r != "no_console" || opened || len(srv.Forms()) != 0 {
-		t.Fatalf("%d %v (console opened: %v, requests: %d)", code, env, opened, len(srv.Forms()))
+	code, _, errOut := te.run("login")
+	if code != 1 || !strings.Contains(errOut, "LOGIN_UNAVAILABLE") || opened || len(srv.Forms()) != 0 {
+		t.Fatalf("%d %s (console opened: %v, requests: %d)", code, errOut, opened, len(srv.Forms()))
 	}
 	te.env.ConsoleUsable = true
-	if code, env := te.runJSON("login", "--non-interactive"); code != 1 {
-		t.Fatalf("--non-interactive: %d %v", code, env)
+	if code, _, _ := te.run("login", "--non-interactive"); code != 1 {
+		t.Fatalf("--non-interactive: %d", code)
+	}
+}
+
+func TestLoginNoJSONNoConsoleStillRefuses(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	srv, _, _ := deviceLogin(te, authtest.Options{})
+	te.env.ConsoleUsable = false
+	code, out, errOut := te.run("login")
+	if code != 1 || len(srv.Forms()) != 0 || !strings.Contains(errOut+out, "LOGIN_UNAVAILABLE") {
+		t.Fatalf("%d (requests: %d)\n%s\n%s", code, len(srv.Forms()), out, errOut)
+	}
+	te.env.ConsoleUsable = true
+	if code, _, _ := te.run("login", "--non-interactive"); code != 1 || len(srv.Forms()) != 0 {
+		t.Fatalf("--non-interactive: %d (requests: %d)", code, len(srv.Forms()))
+	}
+}
+
+func TestLoginJSONNoConsoleWritesDeviceCodeFirst(t *testing.T) {
+	t.Parallel()
+	for _, nonInteractive := range []bool{false, true} {
+		te := newTestEnv(t)
+		srv, con, opened := deviceLogin(te, authtest.Options{Pending: 1})
+		args := []string{"login", "--json"}
+		if nonInteractive {
+			args = append(args, "--non-interactive")
+		} else {
+			te.env.ConsoleUsable = false
+		}
+		code, out, errOut := te.run(args...)
+		if code != 0 {
+			t.Fatalf("%d\n%s\n%s", code, out, errOut)
+		}
+		lines := strings.Split(strings.TrimSpace(out), "\n")
+		if len(lines) != 2 {
+			t.Fatalf("want 2 lines, got %d:\n%s", len(lines), out)
+		}
+		testutil.ValidateSchema(t, "login-event.schema.json", []byte(lines[0]))
+		var ev map[string]any
+		if err := json.Unmarshal([]byte(lines[0]), &ev); err != nil {
+			t.Fatal(err)
+		}
+		if ev["type"] != "device_code" || ev["user_code"] != authtest.UserCode || ev["verification_uri"] != srv.URL+"/login/device" {
+			t.Fatalf("event: %v", ev)
+		}
+		if strings.Contains(out+errOut, authtest.DeviceCode) {
+			t.Fatalf("the device code left the process:\n%s\n%s", out, errOut)
+		}
+		var env map[string]any
+		if err := json.Unmarshal([]byte(lines[1]), &env); err != nil || env["ok"] != true {
+			t.Fatalf("last line: %v %s", err, lines[1])
+		}
+		if con.String() != "" || len(*opened) != 0 {
+			t.Fatalf("no console or browser is used: %q %v", con.String(), *opened)
+		}
+		if l, _ := auth.LoadLogin(te.env.Keychain); l == nil || l.Token != srv.AccessToken(1) {
+			t.Fatalf("stored: %v", l)
+		}
 	}
 }
 
