@@ -274,11 +274,27 @@ func TestPromptDefaultInWords(t *testing.T) {
 func TestStyledBoldsQuestionsButNotErrors(t *testing.T) {
 	t.Parallel()
 	a, d := onDevice(t, "")
-	a = prompt.Styled(a, func(s string) string { return "<b>" + s + "</b>" })
+	a = prompt.Styled(a, func(s string) string { return "<b>" + s + "</b>" }, func(s string) string { return "<a>" + s + "</a>" })
 	if _, err := a.YesNo(t.Context(), "Go on?", true); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(d.shown(), "<b>Go on? [Y/n, Enter = yes]</b> ") {
 		t.Fatalf("shown %q", d.shown())
+	}
+}
+
+func TestStyledWaitShowsAttentionButErrorsStayPlain(t *testing.T) {
+	t.Parallel()
+	a, d := onDevice(t, "")
+	a = prompt.Styled(a, strings.ToUpper, func(s string) string { return "<a>" + s + "</a>" })
+	if err := a.Wait(t.Context(), "Press Enter"); err != nil || !strings.Contains(d.shown(), "<a>Press Enter</a> ") {
+		t.Fatalf("shown %q %v", d.shown(), err)
+	}
+	// The console closes before an answer: the error quotes plain text.
+	a, _ = onDevice(t)
+	a = prompt.Styled(a, strings.ToUpper, func(s string) string { return "\x1b[1m" + s + "\x1b[0m" })
+	err := a.Wait(t.Context(), "Press Enter")
+	if err == nil || strings.Contains(err.Error(), "\x1b") || !strings.Contains(err.Error(), "Press Enter") {
+		t.Fatalf("error %v", err)
 	}
 }

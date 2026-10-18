@@ -1251,6 +1251,9 @@ func TestGuidedInitChecksAgainForAPersonalShadow(t *testing.T) {
 		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
 	}
 	hasPrefixes(t, p.asked, whereQ, "Create the private repo octo/widget-shadow", installed, "Turn on scheduled sync?", "Make these changes now?")
+	if !slices.Contains(p.said, `    2. Choose octo, then "Only select repositories", then pick any one of your repos for now (GitHub needs one); init adds octo/widget-shadow when it creates it`) {
+		t.Fatalf("no plain wording for an account with no repo to pick: %q", p.said)
+	}
 	if !slices.Contains(p.said, "! Install the Ghostbranch app on octo") || !slices.Contains(p.said, "    1. Open "+installLink) || len(createdAtWait) != 0 {
 		t.Fatalf("said %q; created %v at the wait", p.said, createdAtWait)
 	}

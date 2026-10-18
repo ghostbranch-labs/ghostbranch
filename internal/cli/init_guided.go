@@ -316,7 +316,7 @@ func tokenUser(ctx context.Context, e *engine.Engine) string {
 // login in this run (justLoggedIn) it says nothing when the login line
 // already named the account.
 func sayAccount(ask prompt.Asker, e *engine.Engine, user string, justLoggedIn bool) {
-	if user != "" && justLoggedIn {
+	if user != "" && justLoggedIn && e.TokenSource == "login" {
 		return
 	}
 	if user == "" {
@@ -435,7 +435,7 @@ func (a *app) guidedSetup(ctx context.Context, ask prompt.Asker, e *engine.Engin
 			}
 			enter = "Press Enter once it's done."
 		}
-		if err := ask.Wait(ctx, attention(st, enter)); err != nil {
+		if err := ask.Wait(ctx, enter); err != nil {
 			return nil, "", err
 		}
 		rechecks[stop.ID]++
@@ -495,11 +495,13 @@ func (a *app) stopInstructions(ctx context.Context, e *engine.Engine, so engine.
 			case len(pick) > 0:
 				choose += ", then pick " + strings.Join(pick, " and ")
 			default:
-				choose += " and pick any repo"
+				choose += ", then pick any one of your repos for now (GitHub needs one); init adds " + p.Shadow + " when it creates it"
 			}
 			say(choose)
 			if !shadowExists && strings.EqualFold(name, shadowOwner) {
-				say("       (init creates " + p.Shadow + " next; the app gets it automatically)")
+				if len(pick) > 0 {
+					say("       (init creates " + p.Shadow + " next; the app gets it automatically)")
+				}
 			}
 			say("    3. Click Install, then come back here")
 			if isOrg(ctx, e, name, p.Public, p.Shadow) {
@@ -1036,7 +1038,7 @@ func (a *app) guidedInit(ctx context.Context, args []string, f initFlags) error 
 		return contract.Wrap(contract.MissingInput, err,
 			"init has questions and the console can't be opened; answer them with flags: <owner/repo>, --shadow or --adopt, --guard or --no-guard, --sync or --no-sync")
 	}
-	ask = pausingAsker{inner: prompt.Styled(ask, a.styler(a.env.StderrColor).Bold), p: a.reporter()}
+	ask = pausingAsker{inner: prompt.Styled(ask, a.styler(a.env.StderrColor).Bold, func(t string) string { return attention(a.styler(a.env.StderrColor), t) }), p: a.reporter()}
 	for _, l := range intro {
 		ask.Say(l)
 	}

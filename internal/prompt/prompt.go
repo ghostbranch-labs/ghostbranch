@@ -35,12 +35,13 @@ const MaxTries = 3
 
 var ErrNoConsole = errors.New("prompt: no usable console")
 
-// Styled returns a with its questions shown through bold (a colour on a
-// terminal, nothing otherwise). Only the console device styles; any other
-// Asker comes back unchanged. The text of an error never holds the styling.
-func Styled(a Asker, bold func(string) string) Asker {
-	if d, ok := a.(*device); ok && bold != nil {
-		return &device{dev: d.dev, bold: bold}
+// Styled returns a with its questions shown through bold and its Enter
+// prompts through attention (colours on a terminal, nothing otherwise). Only
+// the console device styles; any other Asker comes back unchanged. The text
+// of an error never holds the styling.
+func Styled(a Asker, bold, attention func(string) string) Asker {
+	if d, ok := a.(*device); ok && bold != nil && attention != nil {
+		return &device{dev: d.dev, bold: bold, attention: attention}
 	}
 	return a
 }
@@ -69,9 +70,10 @@ func OnConsole(usable bool, open func() (io.ReadWriteCloser, error)) (Asker, err
 type device struct {
 	dev io.ReadWriteCloser
 	// bold styles a question as it is shown (nil: as is).
-	bold  func(string) string
-	once  sync.Once
-	lines chan string
+	bold      func(string) string
+	attention func(string) string
+	once      sync.Once
+	lines     chan string
 }
 
 func (d *device) start() {
@@ -130,7 +132,12 @@ func (d *device) Text(ctx context.Context, q, def string) (string, error) {
 }
 
 func (d *device) Wait(ctx context.Context, message string) error {
-	_, err := d.ask(ctx, message+" ")
+	text := message + " "
+	shown := text
+	if d.attention != nil {
+		shown = d.attention(message) + " "
+	}
+	_, err := d.show(ctx, text, shown)
 	return err
 }
 
