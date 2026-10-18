@@ -808,9 +808,15 @@ func (d *doctorRun) appCheck(ctx context.Context) DoctorCheck {
 	det := map[string]any{"installed": inst.Status == SetupDone, "selection": selection, "accounts": accounts}
 	for _, st := range []SetupStep{inst, acc} {
 		if st.Status == SetupNeedsHuman || st.Status == SetupBlocked {
-			c := DoctorCheck{Status: DoctorFail, Message: st.Message, Details: det, Fix: st.URL}
-			return c
+			// Fix is the link to open, not a command: no FixArgv, so
+			// DOCTOR_FAILED's next gets nothing from this check.
+			return DoctorCheck{Status: DoctorFail, Message: st.Message, Details: det, Fix: st.URL}
 		}
+	}
+	if acc.Status != SetupDone {
+		// Not proved: the app_access step couldn't check both repos (the
+		// shadow doesn't exist yet, say). Its message says what it knows.
+		return DoctorCheck{Status: DoctorWarn, Details: det, Message: acc.Message}
 	}
 	return DoctorCheck{Status: DoctorOK, Details: det,
 		Message: fmt.Sprintf("the Ghostbranch app is installed and can see %s and %s", d.pair.Public, d.pair.Shadow)}

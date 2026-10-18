@@ -36,7 +36,7 @@
         "id": { "$ref": "common.schema.json#/$defs/checkId" },
         "status": { "enum": ["ok", "warn", "fail", "skipped"] },
         "message": { "type": "string", "minLength": 1 },
-        "fix": { "description": "a command that fixes it, for reading; empty when there is none to run. error.next carries the failing checks' fixes as argv", "type": "string" },
+        "fix": { "description": "a command that fixes it, or for the app check, the link to open; for reading; empty when there is none. error.next carries the failing checks' fix commands as argv; a failing app check's link adds nothing to it", "type": "string" },
         "details": {
           "description": "the check's findings; open, so a later version may add fields. tools: git, git_minimum, version, commit. token: source, kind, account, can_publish, expires, refresh_expires, agent_on_person_login, groups. app: installed, selection, accounts. pair: public, shadow, public_private, shadow_private, behind, overlay_status. guard: checkout, hooks_dir, installed, workspace, remotes, publics. state: workspace, dir, features. ci: guards, secrets_listed, missing_secrets, push_triggers.",
           "type": "object",

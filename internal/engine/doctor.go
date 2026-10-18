@@ -65,9 +65,11 @@ type DoctorOptions struct {
 	InstallURL string
 }
 
-// DoctorCheck is one check's finding. Fix is a command that fixes it, or
-// "" when there is none to run; FixArgv is that command as argv (nil with
-// no fix), for next. Fix is FixArgv joined with spaces, for reading only.
+// DoctorCheck is one check's finding. Fix is a command that fixes it, or,
+// for the app check, the link to open; "" when there is none. FixArgv is
+// the command as argv (nil with no command), for next; Fix is FixArgv
+// joined with spaces, for reading only. The app check's link has no
+// FixArgv, so a failing app check adds nothing to DOCTOR_FAILED's next.
 type DoctorCheck struct {
 	ID      string         `json:"id"`
 	Status  string         `json:"status"`

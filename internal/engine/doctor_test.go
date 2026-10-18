@@ -22,6 +22,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
+	"github.com/ghostbranch-labs/ghostbranch/internal/forge/fake"
 	"github.com/ghostbranch-labs/ghostbranch/internal/guard"
 	"github.com/ghostbranch-labs/ghostbranch/internal/keychain"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
@@ -806,6 +807,33 @@ func TestDoctorAppCheckOK(t *testing.T) {
 	}
 	if c["app"].Fix != "" || c["app"].FixArgv != nil {
 		t.Fatalf("fix %q %v", c["app"].Fix, c["app"].FixArgv)
+	}
+}
+
+// unseenShadow is the fake forge with the shadow repo not found, as when
+// it was deleted or the token can't see it.
+type unseenShadow struct{ *fake.Forge }
+
+func (f unseenShadow) GetRepo(ctx context.Context, full string) (forge.Repo, error) {
+	if full == shadowName {
+		return forge.Repo{}, fmt.Errorf("repo %s: %w", full, forge.ErrNotFound)
+	}
+	return f.Forge.GetRepo(ctx, full)
+}
+
+// The app check is ok only once app_access is done: with the shadow repo
+// unseen it can't say the app sees both repos.
+func TestDoctorAppCheckNotOKWhileTheShadowIsUnseen(t *testing.T) {
+	t.Parallel()
+	h := appLoginHarness(t, "all", true)
+	h.eng.Forge = unseenShadow{h.forge}
+	_, c := h.doctor(appDoctorOpts())
+	if c["app"].Status == engine.DoctorOK || strings.Contains(c["app"].Message, "can see "+publicName+" and "+shadowName) {
+		t.Fatalf("app %+v", c["app"])
+	}
+	wantStatus(t, c["app"], engine.DoctorWarn)
+	if !strings.Contains(c["app"].Message, shadowName) || c["app"].FixArgv != nil {
+		t.Fatalf("app %+v", c["app"])
 	}
 }
 
