@@ -68,10 +68,11 @@ type waitOpts struct {
 
 // appearTimeout is how long the gate waits for a first check: the short
 // ci_appear_timeout_no_workflows when no workflow runs on the PR, since
-// only another CI service could still report.
+// only another CI service could still report. It is never longer than
+// ci_appear_timeout.
 func appearTimeout(cfg config.Gate, noWorkflows bool) time.Duration {
 	if noWorkflows {
-		return cfg.CIAppearTimeoutNoWorkflows
+		return min(cfg.CIAppearTimeoutNoWorkflows, cfg.CIAppearTimeout)
 	}
 	return cfg.CIAppearTimeout
 }
@@ -81,7 +82,7 @@ func appearTimeout(cfg config.Gate, noWorkflows bool) time.Duration {
 func startText(cfg config.Gate, o waitOpts, left time.Duration) string {
 	if o.noWorkflows {
 		return fmt.Sprintf("Waiting up to %s for CI to start: %s has no workflow that runs on this PR (another CI service may still report)",
-			shortDur(cfg.CIAppearTimeoutNoWorkflows), o.shadow)
+			shortDur(appearTimeout(cfg, true)), o.shadow)
 	}
 	if left >= time.Minute {
 		left = left.Truncate(time.Minute)

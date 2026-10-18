@@ -899,6 +899,24 @@ func TestGateNoWorkflowsTimeoutOverride(t *testing.T) {
 	}
 }
 
+// The no-workflow wait is never longer than the normal one: with
+// gate.ci_appear_timeout 30s (under the 1m default for no workflows), the
+// wait is 30s.
+func TestGateNoWorkflowsWaitNotLongerThanAppearTimeout(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	testutil.Commit(t, h.pubGit, "main", "drop CI", map[string]string{".github/workflows/ci.yml": testutil.Delete})
+	h.init()
+	h.setConfig("  ci_appear_timeout: 10m\n", "  ci_appear_timeout: 30s\n")
+	took, _, waiting, ce := ciWait(t, h)
+	if took < 30*time.Second || took > 40*time.Second {
+		t.Fatalf("waited %s, want about 30s", took)
+	}
+	if !strings.Contains(ce.Message, "within 30s,") || waiting.CIAppearTimeout != "30s" {
+		t.Fatalf("error = %+v\nwaiting = %+v", ce, waiting)
+	}
+}
+
 // wait on a settled no-workflow job re-reads the candidate with the same
 // check and says the same, for a workflow that only runs by hand.
 func TestWaitRereadsSettledNoWorkflowRecord(t *testing.T) {

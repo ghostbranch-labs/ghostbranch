@@ -978,3 +978,27 @@ func TestDoctorChecksApprovedOK(t *testing.T) {
 		t.Fatalf("gate %+v", gate)
 	}
 }
+
+// unknownChecks is the fake forge whose probe can't tell whether the token
+// reads check runs on the shadow, as for an empty shadow.
+type unknownChecks struct{ *fake.Forge }
+
+func (f unknownChecks) ProbePermissions(ctx context.Context, full string) (forge.RepoPermissions, error) {
+	p, err := f.Forge.ProbePermissions(ctx, full)
+	if err == nil && full == shadowName {
+		p.Have[forge.PermChecksRead] = forge.AccessUnknown
+	}
+	return p, err
+}
+
+// When the probe can't tell, the app check stays ok, with no warning.
+func TestDoctorChecksUnknownAccessOK(t *testing.T) {
+	t.Parallel()
+	h := appLoginHarness(t, "all", true)
+	h.eng.Forge = unknownChecks{h.forge}
+	_, c := h.doctor(appDoctorOpts())
+	wantStatus(t, c["app"], engine.DoctorOK)
+	if strings.Contains(c["app"].Message, "check runs") {
+		t.Fatalf("app %+v", c["app"])
+	}
+}

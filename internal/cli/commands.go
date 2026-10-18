@@ -204,7 +204,7 @@ func (a *app) featureStartCmd() *cobra.Command {
 		Use:   "start <name>",
 		Short: "Start a feature branch in the shadow repo",
 		Long: `feature start creates <name> from shadow main in the shadow repo and records it as a feature. With --from <feature> it starts at that feature's tip instead and records it as the parent, stacking the new feature on it.
-Run in a checkout of the public repo, it then adds a remote named shadow for the shadow repo (if no remote reaches it), fetches it, and switches to <name>, tracking shadow/<name>. It never rewrites a remote: a shadow remote that points elsewhere is left alone. With uncommitted changes, or a local branch called <name>, it fetches but doesn't switch. Elsewhere, or with --no-checkout, it prints the commands instead.`,
+Run in a checkout of the public repo, it then adds a remote named shadow for the shadow repo (if no remote reaches it), fetches it, and switches to <name>, tracking shadow/<name>. It never rewrites a remote: a shadow remote that points elsewhere is left alone. With uncommitted changes, a local branch called <name>, or a detached HEAD with commits not on any branch, it fetches but doesn't switch. Elsewhere, or with --no-checkout, it prints the commands instead.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			e, err := a.engine(cmd.Context())

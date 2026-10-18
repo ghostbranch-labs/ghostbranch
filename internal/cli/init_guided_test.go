@@ -1188,6 +1188,14 @@ func TestGuidedInitNothingToChangeAsksNothing(t *testing.T) {
 	if !slices.Contains(p.said, "Checking the setup (ghostbranch doctor)…") {
 		t.Fatalf("doctor did not run: %q", p.said)
 	}
+	if !slices.Contains(p.said, "  (nothing to change)") {
+		t.Fatalf("said %q, want the empty preview line", p.said)
+	}
+	for _, s := range p.said {
+		if strings.HasPrefix(s, "Setting up") {
+			t.Fatalf("said %q after Nothing to change", s)
+		}
+	}
 	wantPair(t, te, "acme/widget-shadow")
 }
 
@@ -1228,6 +1236,12 @@ func TestGuidedInitGuardToInstallStillAsks(t *testing.T) {
 		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
 	}
 	hasPrefixes(t, p.asked, "Install the push guard in this checkout?", "Make these changes now?")
+	if slices.Contains(p.said, "  (nothing to change)") {
+		t.Fatalf("said %q: the preview has a guard line, so nothing is not true", p.said)
+	}
+	if !slices.Contains(p.said, "  - install the push guard in this checkout") {
+		t.Fatalf("said %q, want the guard line", p.said)
+	}
 	if _, err := os.Stat(hook); err != nil {
 		t.Fatalf("guard not installed: %v", err)
 	}

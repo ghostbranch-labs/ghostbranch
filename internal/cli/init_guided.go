@@ -1142,7 +1142,10 @@ func (a *app) guidedInit(ctx context.Context, args []string, f initFlags) error 
 		lines = pv.Preview.Describe()
 	}
 	nothing := len(lines) == 0
-	if nothing {
+	// Nothing to confirm when the preview is empty and no guard or sync
+	// line follows; only then is "(nothing to change)" true of the block.
+	skipConfirm := nothing && !guardOn && o.Schedule != engine.DefaultSyncSchedule
+	if skipConfirm {
 		ask.Say("  (nothing to change)")
 	}
 	for _, l := range lines {
@@ -1158,14 +1161,16 @@ func (a *app) guidedInit(ctx context.Context, args []string, f initFlags) error 
 	if a.dryRun {
 		return done(a, pv, nil, nil)
 	}
-	if nothing && !guardOn && o.Schedule != engine.DefaultSyncSchedule {
+	if skipConfirm {
 		ask.Say("Nothing to change: " + pv.Public + " is already set up with " + pv.Shadow + ".")
 	} else if ok, err := ask.YesNo(ctx, "Make these changes now?", true); err != nil {
 		return err
 	} else if !ok {
 		return contract.New(contract.Interrupted, "init stopped at the summary; nothing was changed")
 	}
-	ask.Say("Setting up " + public + "…")
+	if !skipConfirm {
+		ask.Say("Setting up " + public + "…")
+	}
 	res, w, err := e.Init(ctx, o)
 	if createDenied(err) {
 		var w2 []contract.Warning

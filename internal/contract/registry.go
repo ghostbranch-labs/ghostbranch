@@ -106,7 +106,7 @@ var errorDocs = map[Code]Doc{
 	ChecksFailed:     {Summary: "CI failed on the gate candidate.", WhatToDo: "Fix the failing checks listed in details.failed, push to the feature branch, and gate again."},
 	NoCI: {Summary: "No CI checks appeared on the gate candidate (error.details.reason).",
 		Causes: []string{"no_workflow: the candidate has no workflow under .github/workflows that runs on the PR (error.details.no_workflows is true; the gate waited gate.ci_appear_timeout_no_workflows), and no CI app posts checks",
-			"actions_disabled_or_untriggered: Actions is disabled in the shadow repo, or no workflow triggers on pull_request",
+			"actions_disabled_or_untriggered: Actions is disabled in the shadow repo, or the PR doesn't match the workflows' pull_request filters",
 			"no reason: the gate candidate couldn't be read, so which of the two holds is unknown"},
 		WhatToDo: "For no_workflow, add CI to the public repo, or, if CI is an external app, install it on the shadow repo. Otherwise enable Actions in the shadow repo or add a pull_request trigger. Then gate again."},
 	CITimeout: {Summary: "CI did not finish in time.", WhatToDo: "Gate again, or raise gate.ci_timeout in .ghostbranch.yml."},
