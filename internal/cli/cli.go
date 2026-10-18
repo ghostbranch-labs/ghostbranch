@@ -193,6 +193,7 @@ type app struct {
 	args           []string
 	pairFull       workspace.Pair
 	shadowRemote   string
+	login          string     // the GitHub login Ghostbranch signed in as, when known without asking GitHub again
 	startName      string     // feature start's name argument, for next
 	startFrom      string     // feature start's --from, for next
 	versionFlag    bool       // ghostbranch --version ran: the command is version
@@ -555,6 +556,7 @@ func (a *app) engine(ctx context.Context) (*engine.Engine, error) {
 		actor = "human:unknown"
 		if u, err := f.CurrentUser(ctx); err == nil {
 			actor = "human:" + u.Login
+			a.login = u.Login
 		} else {
 			a.warnings = append(a.warnings, contract.Warning{Code: contract.ActorUnknown,
 				Message: "GHOSTBRANCH_ACTOR is unset and the GitHub login could not be read, so the ledger records human:unknown; set GHOSTBRANCH_ACTOR, for example agent:claude-code"})
@@ -568,6 +570,9 @@ func (a *app) engine(ctx context.Context) (*engine.Engine, error) {
 	if source == "login" && a.env.Keychain != nil {
 		if l, err := auth.LoadLogin(a.env.Keychain); err == nil && l != nil {
 			e.AppLogin = l.Kind == "app"
+			if l.Account != "" {
+				a.login = l.Account
+			}
 		}
 	}
 	if a.env.ConsoleUsable && !a.nonInteractive {

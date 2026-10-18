@@ -25,7 +25,7 @@
           "required": ["status", "reason", "remote"],
           "properties": {
             "status": { "description": "switched: on the branch now, tracking <remote>/<name>; fetched_only: fetched, not switched; skipped: not fetched", "enum": ["switched", "fetched_only", "skipped"] },
-            "reason": { "description": "why it didn't switch; empty when switched", "enum": ["", "not_a_checkout", "dirty_tree", "remote_differs", "no_checkout_flag", "branch_exists_locally", "fetch_failed", "switch_failed"] },
+            "reason": { "description": "why it didn't switch; empty when switched", "enum": ["", "not_a_checkout", "dirty_tree", "remote_differs", "no_checkout_flag", "branch_exists_locally", "fetch_failed", "switch_failed", "detached_commits"] },
             "remote": { "description": "the checkout's remote for the shadow repo (for remote_differs, the remote named shadow that points elsewhere); empty when no checkout was looked at", "type": "string" }
           }
         }

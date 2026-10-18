@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/cli/style"
@@ -47,21 +49,22 @@ func (a *app) checkOutFeature(ctx context.Context, p workspace.Pair, res *engine
 	remote, free := shadowRemoteIn(remotes, p.Shadow)
 	res.SetCheckout(checkoutArgv(name, p.Shadow, remote, free, true))
 	a.shadowRemote = pushRemote(remote, free, true)
+	local := &engine.LocalCheckout{Remote: remoteShadow, Shadow: p.Shadow, Login: a.login}
+	res.Local = local
 	if remote == "" {
 		if have, taken := remotes[remoteShadow]; taken {
-			res.Local = &engine.LocalCheckout{Status: engine.LocalSkipped, Reason: engine.ReasonRemoteDiffers, Remote: remoteShadow, Shadow: p.Shadow, HaveURL: have}
+			local.Status, local.Reason, local.HaveURL = engine.LocalSkipped, engine.ReasonRemoteDiffers, redactURLs(have)
 			return
 		}
 		if _, err := localGit(ctx, co.Top, "remote", "add", remoteShadow, shadowURL(p.Shadow)); err != nil {
-			res.Local = &engine.LocalCheckout{Status: engine.LocalSkipped, Reason: engine.ReasonFetchFailed, Remote: remoteShadow, Shadow: p.Shadow, GitError: err.Error()}
+			local.Status, local.Reason, local.GitError, local.AddFailed = engine.LocalSkipped, engine.ReasonFetchFailed, err.Error(), true
 			return
 		}
-		remote = remoteShadow
+		remote, local.Added = remoteShadow, true
 		res.SetCheckout(checkoutArgv(name, p.Shadow, remote, free, true))
 		a.shadowRemote = remote
 	}
-	local := &engine.LocalCheckout{Remote: remote, Shadow: p.Shadow}
-	res.Local = local
+	local.Remote = remote
 	if _, err := localGit(ctx, co.Top, "fetch", remote); err != nil {
 		local.Status, local.Reason, local.GitError = engine.LocalSkipped, engine.ReasonFetchFailed, err.Error()
 		local.NotFound = strings.Contains(strings.ToLower(err.Error()), "not found")
@@ -75,25 +78,58 @@ func (a *app) checkOutFeature(ctx context.Context, p workspace.Pair, res *engine
 	// Untracked files count too: they are work nobody committed yet.
 	if st, err := localGit(ctx, co.Top, "status", "--porcelain"); err != nil || st != "" {
 		local.Reason = engine.ReasonDirtyTree
+		local.UntrackedOnly = err == nil && untrackedOnly(st)
 		return
+	}
+	// A detached HEAD may carry commits no branch, tag or remote reaches
+	// (a hand-off PR's fix, say): switching away would strand them.
+	if _, err := localGit(ctx, co.Top, "symbolic-ref", "--quiet", "HEAD"); err != nil {
+		n, err := localGit(ctx, co.Top, "rev-list", "--count", "HEAD", "--not", "--branches", "--tags", "--remotes")
+		if err != nil || n != "0" {
+			local.Reason = engine.ReasonDetachedCommits
+			local.DetachedHead, _ = localGit(ctx, co.Top, "rev-parse", "HEAD")
+			local.DetachedCommits, _ = strconv.Atoi(n)
+			return
+		}
 	}
 	if _, err := localGit(ctx, co.Top, "switch", "--quiet", "--create", name, "--track", remote+"/"+name); err != nil {
 		local.Reason, local.GitError = engine.ReasonSwitchFailed, err.Error()
 		return
 	}
-	local.Status = engine.LocalSwitched
+	local.Status, local.Reason = engine.LocalSwitched, ""
 }
+
+// untrackedOnly says git status --porcelain lists only untracked files.
+func untrackedOnly(porcelain string) bool {
+	for _, l := range strings.Split(porcelain, "\n") {
+		if !strings.HasPrefix(l, "?? ") {
+			return false
+		}
+	}
+	return true
+}
+
+// userinfo is the user[:password]@ part of a URL with a scheme, where a
+// token may sit.
+var userinfo = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^/@\s]*@`)
+
+// redactURLs drops the userinfo from every URL in s, so a token in a
+// remote's URL never reaches the output.
+func redactURLs(s string) string { return userinfo.ReplaceAllString(s, "${1}") }
 
 // remoteShadow is the remote name feature start adds for the shadow repo.
 const remoteShadow = "shadow"
 
 func shadowURL(shadow string) string { return "https://github.com/" + shadow + ".git" }
 
-// setURL is the command that has git sign in to GitHub as the shadow
-// repo's owner for remote only, leaving every other remote as it was.
-func setURL(remote, shadow string) string {
-	owner, _, _ := strings.Cut(shadow, "/")
-	return "git remote set-url " + remote + " https://" + owner + "@github.com/" + shadow + ".git"
+// setURL is the command that has git sign in to GitHub as login for
+// remote only, leaving every other remote as it was. With no login known
+// it says where the person's own login goes.
+func setURL(remote, shadow, login string) string {
+	if login == "" || !safeRemoteName.MatchString(login) {
+		login = "<your-github-login>"
+	}
+	return "git remote set-url " + remote + " https://" + login + "@github.com/" + shadow + ".git"
 }
 
 // publicCheckout is the checkout feature start runs in, with its remotes,
@@ -155,7 +191,7 @@ func localGit(ctx context.Context, dir string, args ...string) (string, error) {
 		if msg == "" {
 			msg = err.Error()
 		}
-		return "", errors.New(msg)
+		return strings.TrimSpace(out.String()), errors.New(redactURLs(msg))
 	}
 	return strings.TrimSpace(out.String()), nil
 }
@@ -171,19 +207,24 @@ func featureStartText(b *strings.Builder, v *engine.FeatureStartResult, st style
 		fmt.Fprintf(b, "Started feature %s from shadow main %s.\n", v.Name, short(v.Base))
 	}
 	l := v.Local
-	push := ""
-	if l != nil {
-		push = "git push " + l.Remote + " " + v.Name
-	}
 	line := func(s string) { b.WriteString(s + "\n") }
+	if l == nil || l.Reason == engine.ReasonNotACheckout || l.Reason == engine.ReasonNoCheckoutFlag {
+		line("Check it out with: " + v.CheckoutHint)
+		return
+	}
+	if l.Added {
+		line("Added remote " + l.Remote + " (" + shadowURL(l.Shadow) + ").")
+	}
+	push := "git push " + l.Remote + " " + v.Name
 	switch {
-	case l == nil || l.Reason == engine.ReasonNotACheckout || l.Reason == engine.ReasonNoCheckoutFlag:
-		fmt.Fprintf(b, "Check it out with: %s\n", v.CheckoutHint)
 	case l.Status == engine.LocalSwitched:
 		line(fmt.Sprintf("Switched to %s (from %s). ", v.Name, from) + attention(st, "Commit here, then: "+push))
 	case l.Reason == engine.ReasonDirtyTree:
 		line("Fetched " + l.Remote + ", but this checkout has uncommitted changes, so it stays on its branch.")
-		line(attention(st, "To work on "+v.Name+": commit or stash first, then `git switch "+v.Name+"`. Commit there, then: "+push))
+		line(attention(st, "To work on "+v.Name+": "+stashFirst(l, v.Name)+". Commit there, then: "+push))
+	case l.Reason == engine.ReasonDetachedCommits:
+		line(fmt.Sprintf("Fetched %s, but HEAD is detached at %s with %d commit(s) no branch has, so it stays there.", l.Remote, short(l.DetachedHead), l.DetachedCommits))
+		line(attention(st, "To work on "+v.Name+": "+keepDetached(v.Name)+". Commit there, then: "+push))
 	case l.Reason == engine.ReasonBranchExistsLocally:
 		line("Fetched " + l.Remote + ", but a local branch " + v.Name + " already exists; Ghostbranch left it alone.")
 		line(attention(st, "Compare it with "+l.Remote+"/"+v.Name+" and switch to the one you mean to work on. Commit there, then: "+push))
@@ -193,10 +234,13 @@ func featureStartText(b *strings.Builder, v *engine.FeatureStartResult, st style
 	case l.Reason == engine.ReasonRemoteDiffers:
 		line("This checkout's remote " + l.Remote + " points at " + oneLine(l.HaveURL) + ", not " + shadowURL(l.Shadow) + "; Ghostbranch left it alone.")
 		line(attention(st, "Check it out with: "+v.CheckoutHint))
+	case l.AddFailed:
+		line("git remote add " + l.Remote + " failed: " + gitLine(l.GitError))
+		line(attention(st, "Check it out with: "+v.CheckoutHint))
+		line("The branch exists in the shadow repo either way.")
 	case l.NotFound:
-		owner, _, _ := strings.Cut(l.Shadow, "/")
-		line("git fetch " + l.Remote + " says the repository was not found. git may be signed in to GitHub as a different GitHub account than " + owner + ", which owns the shadow repo; Ghostbranch's own login doesn't cover git.")
-		line(attention(st, "Use the right account for this remote only: "+setURL(l.Remote, l.Shadow)))
+		line("git fetch " + l.Remote + " says the repository was not found. " + accountTrap(l) + "; Ghostbranch's own login doesn't cover git.")
+		line(attention(st, "Use the right account for this remote only: "+setURL(l.Remote, l.Shadow, l.Login)))
 		line(attention(st, "Then: git fetch "+l.Remote+" && git switch "+v.Name))
 		line("The branch exists in the shadow repo either way.")
 	default: // fetch_failed for another reason
@@ -204,6 +248,25 @@ func featureStartText(b *strings.Builder, v *engine.FeatureStartResult, st style
 		line(attention(st, "Once git can reach the shadow repo: git fetch "+l.Remote+" && git switch "+v.Name))
 		line("The branch exists in the shadow repo either way.")
 	}
+}
+
+// accountTrap is why git may not find a private shadow repo that exists.
+func accountTrap(l *engine.LocalCheckout) string {
+	return "git may be signed in to GitHub as a different GitHub account than the one that can see " + l.Shadow
+}
+
+// stashFirst is how to set uncommitted work aside before switching to name.
+func stashFirst(l *engine.LocalCheckout, name string) string {
+	if l.UntrackedOnly {
+		return "commit the untracked files, or stash them with `git stash --include-untracked`, then `git switch " + name + "`"
+	}
+	return "commit or stash first, then `git switch " + name + "`"
+}
+
+// keepDetached is how to keep a detached HEAD's commits before switching
+// to name.
+func keepDetached(name string) string {
+	return "keep them on a branch first (`git switch -c <branch-name>`), then `git switch " + name + "`"
 }
 
 // startWhy is how next's gate step after feature start begins: what is
@@ -216,15 +279,20 @@ func startWhy(r *engine.FeatureStartResult) string {
 	case l.Status == engine.LocalSwitched:
 		return "feature start switched this checkout to " + name + ", tracking " + l.Remote + "/" + name + "; commit there, "
 	case l.Reason == engine.ReasonDirtyTree:
-		return "this checkout has uncommitted changes, so feature start fetched " + l.Remote + " but didn't switch: commit or stash first, then `git switch " + name + "`; commit on " + name + ", "
+		return "this checkout has uncommitted changes, so feature start fetched " + l.Remote + " but didn't switch: " + stashFirst(l, name) + "; commit on " + name + ", "
+	case l.Reason == engine.ReasonDetachedCommits:
+		return fmt.Sprintf("HEAD is detached at %s with %d commit(s) no branch has, so feature start fetched %s but didn't switch: %s; commit on %s, ",
+			short(l.DetachedHead), l.DetachedCommits, l.Remote, keepDetached(name), name)
 	case l.Reason == engine.ReasonBranchExistsLocally:
 		return "a local branch " + name + " already exists, so feature start fetched " + l.Remote + " but left it alone: compare it with " + l.Remote + "/" + name + " and switch to the one to work on; commit on " + name + ", "
 	case l.Reason == engine.ReasonSwitchFailed:
 		return "feature start fetched " + l.Remote + " but git switch failed (" + gitLine(l.GitError) + "): fix that, then `git switch " + name + "`; commit on " + name + ", "
 	case l.Reason == engine.ReasonRemoteDiffers:
 		return "this checkout's remote " + l.Remote + " points at " + oneLine(l.HaveURL) + ", not " + shadowURL(l.Shadow) + ", so feature start left it alone: check out with `" + r.CheckoutHint + "`, commit on " + name + ", "
+	case l.AddFailed:
+		return "git remote add " + l.Remote + " failed (" + gitLine(l.GitError) + "): check out with `" + r.CheckoutHint + "`, commit on " + name + ", "
 	case l.NotFound:
-		return "git fetch " + l.Remote + " said the repository was not found: git may be signed in to GitHub as a different account than the shadow repo's owner. A person runs `" + setURL(l.Remote, l.Shadow) + "` (that remote only), then `git fetch " + l.Remote + " && git switch " + name + "`; commit on " + name + ", "
+		return "git fetch " + l.Remote + " said the repository was not found: " + accountTrap(l) + ". A person runs `" + setURL(l.Remote, l.Shadow, l.Login) + "` (that remote only), then `git fetch " + l.Remote + " && git switch " + name + "`; commit on " + name + ", "
 	default:
 		return "git fetch " + l.Remote + " failed (" + gitLine(l.GitError) + "); once git can reach the shadow repo, `git fetch " + l.Remote + " && git switch " + name + "`; commit on " + name + ", "
 	}

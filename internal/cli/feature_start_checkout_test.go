@@ -87,6 +87,9 @@ func TestFeatureStartSwitchesInACheckout(t *testing.T) {
 	if u := gitOut(t, dir, "config", "remote.shadow.url"); u != "https://github.com/acme/widget-shadow.git" {
 		t.Fatalf("shadow remote is %s", u)
 	}
+	if !strings.Contains(out, "Added remote shadow (https://github.com/acme/widget-shadow.git).") {
+		t.Fatalf("stdout does not say the remote was added:\n%s", out)
+	}
 	sha := gitOut(t, dir, "rev-parse", "HEAD")
 	want := "Switched to feat-x (from shadow main " + sha[:12] + "). Commit here, then: git push shadow feat-x"
 	if !strings.Contains(out, want) {
@@ -218,7 +221,10 @@ func snapshot(t *testing.T, dir string) map[string]string {
 
 func TestFeatureStartDirtyTreeFetchesOnly(t *testing.T) {
 	t.Parallel()
-	for _, tc := range []struct{ name, file string }{{"modified", "README.md"}, {"untracked", "notes.txt"}} {
+	for _, tc := range []struct{ name, file, says string }{
+		{"modified", "README.md", "commit or stash first, then `git switch feat-x`"},
+		{"untracked", "notes.txt", "stash them with `git stash --include-untracked`, then `git switch feat-x`"},
+	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			te := newTestEnv(t)
@@ -245,7 +251,7 @@ func TestFeatureStartDirtyTreeFetchesOnly(t *testing.T) {
 				t.Fatal("the checkout moved")
 			}
 			gitOut(t, dir, "rev-parse", "--verify", "shadow/feat-x") // fetched
-			if !strings.Contains(out, "commit or stash first, then `git switch feat-x`") {
+			if !strings.Contains(out, tc.says) {
 				t.Fatalf("stdout:\n%s", out)
 			}
 			_, _, local := startInNamed(te, "feat-y")
@@ -344,7 +350,9 @@ func TestFeatureStartFetchNotFoundExplainsTheAccount(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("a failed fetch is a warning, not an error: exit %d\n%s\n%s", code, out, errOut)
 	}
-	for _, want := range []string{"a different GitHub account than acme", "git remote set-url shadow https://acme@github.com/acme/widget-shadow.git", "The branch exists in the shadow repo"} {
+	// acme is an organization: the URL names the login Ghostbranch signed
+	// in as (octo), never the org nobody can sign in as.
+	for _, want := range []string{"a different GitHub account than the one that can see acme/widget-shadow", "git remote set-url shadow https://octo@github.com/acme/widget-shadow.git", "The branch exists in the shadow repo"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("stdout lacks %q:\n%s", want, out)
 		}
@@ -355,11 +363,134 @@ func TestFeatureStartFetchNotFoundExplainsTheAccount(t *testing.T) {
 	_, env, local := startInNamed(te, "feat-y")
 	wantLocal(t, local, "skipped", "fetch_failed", "shadow")
 	next, _ := env["next"].([]any)
-	if len(next) == 0 || !strings.Contains(next[0].(map[string]any)["why"].(string), "git remote set-url shadow https://acme@github.com/acme/widget-shadow.git") {
+	if len(next) == 0 || !strings.Contains(next[0].(map[string]any)["why"].(string), "git remote set-url shadow https://octo@github.com/acme/widget-shadow.git") {
 		t.Fatalf("next = %v", next)
 	}
 	if env["ok"] != true {
 		t.Fatalf("envelope: %v", env)
+	}
+	if strings.Contains(out, "https://acme@") {
+		t.Fatalf("the org is named as the login:\n%s", out)
+	}
+	// With GHOSTBRANCH_ACTOR set, Ghostbranch never asked GitHub who it is:
+	// the person fills in their own login.
+	te.vars["GHOSTBRANCH_ACTOR"] = "agent:test"
+	_, out, _ = te.run("feature", "start", "feat-z")
+	if !strings.Contains(out, "git remote set-url shadow https://<your-github-login>@github.com/acme/widget-shadow.git") {
+		t.Fatalf("no placeholder:\n%s", out)
+	}
+}
+
+func TestFeatureStartOtherFetchFailure(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	t.Cleanup(srv.Close)
+	te := newTestEnv(t)
+	initOnly(te)
+	dir := publicCheckout(te, srv.URL+"/acme/")
+	code, out, errOut := te.run("feature", "start", "feat-x")
+	if code != 0 {
+		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
+	}
+	for _, want := range []string{"git fetch shadow failed: ", "Once git can reach the shadow repo: git fetch shadow && git switch feat-x"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("stdout lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "set-url") || head(t, dir) != "main" {
+		t.Fatalf("not a not-found, or switched:\n%s", out)
+	}
+	_, _, local := startInNamed(te, "feat-y")
+	wantLocal(t, local, "skipped", "fetch_failed", "shadow")
+}
+
+// A detached HEAD whose commits nothing else reaches stays where it is: a
+// switch would strand them.
+func TestFeatureStartKeepsDetachedCommits(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	dir := publicCheckout(te)
+	gitOut(t, dir, "switch", "-q", "--detach", "HEAD")
+	gitOut(t, dir, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "fix on a detached HEAD")
+	sha := gitOut(t, dir, "rev-parse", "HEAD")
+	code, out, errOut := te.run("feature", "start", "feat-x")
+	if code != 0 {
+		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
+	}
+	if gitOut(t, dir, "rev-parse", "HEAD") != sha || head(t, dir) != "HEAD" {
+		t.Fatal("HEAD moved")
+	}
+	for _, want := range []string{"detached at " + sha[:12] + " with 1 commit(s)", "git switch -c <branch-name>"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("stdout lacks %q:\n%s", want, out)
+		}
+	}
+	_, _, local := startInNamed(te, "feat-y")
+	wantLocal(t, local, "fetched_only", "detached_commits", "shadow")
+}
+
+func TestFeatureStartSwitchFailed(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	dir := publicCheckout(te)
+	// A merge in progress on a clean tree: git switch refuses.
+	gitOut(t, dir, "branch", "side")
+	gitOut(t, dir, "switch", "-q", "side")
+	gitOut(t, dir, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "side")
+	gitOut(t, dir, "switch", "-q", "main")
+	gitOut(t, dir, "merge", "-q", "--no-ff", "--no-commit", "side")
+	code, env, local := startIn(te)
+	if code != 0 {
+		t.Fatalf("exit %d: %v", code, env)
+	}
+	wantLocal(t, local, "fetched_only", "switch_failed", "shadow")
+	if head(t, dir) != "main" {
+		t.Fatal("switched")
+	}
+}
+
+func TestFeatureStartRemoteAddFailed(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	dir := publicCheckout(te)
+	// A shadow remote with no URL: not a remote Ghostbranch can read, and
+	// git remote add says it exists.
+	gitOut(t, dir, "config", "remote.shadow.fetch", "+refs/heads/*:refs/remotes/shadow/*")
+	code, out, errOut := te.run("feature", "start", "feat-x")
+	if code != 0 {
+		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
+	}
+	if !strings.Contains(out, "git remote add shadow failed: ") || strings.Contains(out, "git fetch shadow failed") {
+		t.Fatalf("stdout:\n%s", out)
+	}
+	_, _, local := startInNamed(te, "feat-y")
+	wantLocal(t, local, "skipped", "fetch_failed", "shadow")
+}
+
+// A token in a remote's URL never reaches the output.
+func TestFeatureStartRedactsRemoteURLs(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	dir := publicCheckout(te)
+	gitOut(t, dir, "remote", "add", "shadow", "https://user:ghp_secret@github.com/acme/other.git")
+	code, out, errOut := te.run("feature", "start", "feat-x")
+	if code != 0 || !strings.Contains(out, "points at https://github.com/acme/other.git,") {
+		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
+	}
+	code, raw, _ := te.run("feature", "start", "feat-y", "--json")
+	if code != 0 || !strings.Contains(raw, `"remote_differs"`) {
+		t.Fatalf("exit %d\n%s", code, raw)
+	}
+	for _, o := range []string{out, errOut, raw} {
+		if strings.Contains(o, "ghp_secret") || strings.Contains(o, "user:") {
+			t.Fatalf("the token leaked:\n%s", o)
+		}
 	}
 }
 

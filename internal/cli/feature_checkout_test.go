@@ -100,3 +100,18 @@ func TestShadowRemoteOutsideACheckout(t *testing.T) {
 		t.Errorf("got (%q, %v)", remote, in)
 	}
 }
+
+func TestRedactURLs(t *testing.T) {
+	t.Parallel()
+	for in, want := range map[string]string{
+		"https://user:ghp_x@github.com/o/r.git":            "https://github.com/o/r.git",
+		"https://octo@github.com/o/r.git":                  "https://github.com/o/r.git",
+		"ssh://git@github.com/o/r":                         "ssh://github.com/o/r",
+		"fatal: repository 'https://t:x@h/o/r/' not found": "fatal: repository 'https://h/o/r/' not found",
+		"git@github.com:o/r.git":                           "git@github.com:o/r.git",
+	} {
+		if got := redactURLs(in); got != want {
+			t.Errorf("%q: got %q, want %q", in, got, want)
+		}
+	}
+}

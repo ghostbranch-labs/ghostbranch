@@ -35,14 +35,24 @@ type LocalCheckout struct {
 	Status string `json:"status"` // LocalSwitched, LocalFetchedOnly or LocalSkipped
 	Reason string `json:"reason"` // one of the Reason constants; "" when switched
 	Remote string `json:"remote"` // the checkout's remote for the shadow repo; "" when none was looked at
-	// For the human text and next: the shadow repo (owner/name), the URL a
-	// remote named shadow has when it is another repo's
-	// (ReasonRemoteDiffers), git's message when fetch or switch failed, and
-	// whether fetch said the repo wasn't found.
-	Shadow   string `json:"-"`
-	HaveURL  string `json:"-"`
-	GitError string `json:"-"`
-	NotFound bool   `json:"-"`
+	// For the human text and next, never in JSON: the shadow repo
+	// (owner/name); the URL a remote named shadow has when it is another
+	// repo's (ReasonRemoteDiffers); git's message when a git step failed;
+	// whether fetch said the repo wasn't found; whether feature start added
+	// the remote, or failed to; whether the uncommitted work is only
+	// untracked files; the detached HEAD's commit and how many commits only
+	// it reaches (ReasonDetachedCommits); and the GitHub login Ghostbranch
+	// signed in as, when known. URLs and git's messages have no userinfo.
+	Shadow          string `json:"-"`
+	HaveURL         string `json:"-"`
+	GitError        string `json:"-"`
+	NotFound        bool   `json:"-"`
+	Added           bool   `json:"-"`
+	AddFailed       bool   `json:"-"`
+	UntrackedOnly   bool   `json:"-"`
+	DetachedHead    string `json:"-"`
+	DetachedCommits int    `json:"-"`
+	Login           string `json:"-"`
 }
 
 // LocalCheckout.Status values.
@@ -61,6 +71,7 @@ const (
 	ReasonBranchExistsLocally = "branch_exists_locally"
 	ReasonFetchFailed         = "fetch_failed"
 	ReasonSwitchFailed        = "switch_failed"
+	ReasonDetachedCommits     = "detached_commits"
 )
 
 // GateFirst is the feature below the new one, in its stack, that next
