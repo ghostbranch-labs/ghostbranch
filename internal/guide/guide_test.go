@@ -567,7 +567,7 @@ func TestStatesMatchTheFeatureReportSchema(t *testing.T) {
 // same list forge keeps, and says the repository choice the link can't make.
 func TestGuideLinksTheAgentsToken(t *testing.T) {
 	out := guide.Render(contract.Registry())
-	link := forge.TokenLink("ghostbranch-agent-<repo>", "Ghostbranch agent: the shadow repo only", "<shadow-owner>", 30, forge.AgentTokenPermissions)
+	link := forge.TokenLink("ghostbranch-agent-<repo>", "Ghostbranch agent: the shadow repo only", "<shadow-owner>", 30, forge.AgentTokenLinkPermissions)
 	sec := section(t, out, "## Strict isolation (for people)")
 	if !strings.Contains(sec, link) {
 		t.Fatalf("no agent token link %s in:\n%s", link, sec)

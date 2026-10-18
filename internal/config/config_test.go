@@ -463,3 +463,24 @@ func TestEmptySectionsMeanTheDefaults(t *testing.T) {
 		}
 	}
 }
+
+// gate.ci_appear_timeout_no_workflows is the shorter wait for CI to start
+// when the candidate has no workflow that runs on the PR: 1m by default, a
+// positive duration when set.
+func TestConfigNoWorkflowsTimeout(t *testing.T) {
+	base := "version: 1\npublic: a/b\nshadow: a/b-shadow\n"
+	cfg, _, err := config.Parse([]byte(base))
+	if err != nil || cfg.Gate.CIAppearTimeoutNoWorkflows != time.Minute {
+		t.Fatalf("default = %v, %v", cfg.Gate.CIAppearTimeoutNoWorkflows, err)
+	}
+	cfg, warns, err := config.Parse([]byte(base + "gate:\n  ci_appear_timeout_no_workflows: 90s\n"))
+	if err != nil || len(warns) != 0 || cfg.Gate.CIAppearTimeoutNoWorkflows != 90*time.Second {
+		t.Fatalf("90s = %v, %v, %v", cfg.Gate.CIAppearTimeoutNoWorkflows, warns, err)
+	}
+	for _, bad := range []string{"soon", "0s", "-1m", "5"} {
+		_, _, err := config.Parse([]byte(base + "gate:\n  ci_appear_timeout_no_workflows: " + bad + "\n"))
+		if ce := contract.From(err); ce == nil || ce.Code != contract.ConfigInvalid || ce.Field != "gate.ci_appear_timeout_no_workflows" {
+			t.Errorf("%s: want CONFIG_INVALID on the key, got %+v", bad, ce)
+		}
+	}
+}

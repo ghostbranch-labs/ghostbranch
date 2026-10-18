@@ -3,6 +3,7 @@ package forge
 import (
 	"context"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -18,6 +19,7 @@ const (
 	PermActionsRead    = "Actions: read"
 	PermActionsWrite   = "Actions: write"
 	PermStatusesRead   = "Commit statuses: read"
+	PermChecksRead     = "Checks: read"
 	PermWorkflowsWrite = "Workflows: write"
 	PermAdminWrite     = "Administration: write"
 	PermSecretsRead    = "Secrets: read"
@@ -63,18 +65,34 @@ var (
 	PersonTokenPermissions = []string{PermContentsWrite, PermPullsWrite, PermWorkflowsWrite, PermActionsRead, PermStatusesRead, PermAdminWrite}
 )
 
+// WantedTokenPermissions are wanted, not needed: the token links ask for
+// them, but a token without them still works. Checks: read lets the gate
+// see check runs from apps other than GitHub Actions; without it the gate
+// reads workflow runs instead, and warns.
+var WantedTokenPermissions = []string{PermChecksRead}
+
+// AgentTokenLinkPermissions and PersonTokenLinkPermissions are what the
+// pre-filled token links ask for: the needed permissions and the wanted
+// ones.
+var (
+	AgentTokenLinkPermissions  = slices.Concat(AgentTokenPermissions, WantedTokenPermissions)
+	PersonTokenLinkPermissions = slices.Concat(PersonTokenPermissions, WantedTokenPermissions)
+)
+
 // tokenFormParams are the query parameters of GitHub's fine-grained token
 // form, by the permission's name above, in the order TokenLink writes them.
-// All six names (contents, pull_requests, workflows, actions, statuses and
+// Six names (contents, pull_requests, workflows, actions, statuses and
 // administration) were checked on GitHub's real form on 2026-10-17: each
-// pre-filled the permission it names. Metadata (always read) and Secrets
-// have none here.
+// pre-filled the permission it names. checks hasn't been checked on the
+// real form yet; the owner checks it by hand. Metadata (always read) and
+// Secrets have none here.
 var tokenFormParams = []struct{ perm, param string }{
 	{"Contents", "contents"},
 	{"Pull requests", "pull_requests"},
 	{"Workflows", "workflows"},
 	{"Actions", "actions"},
 	{"Commit statuses", "statuses"},
+	{"Checks", "checks"},
 	{"Administration", "administration"},
 }
 
@@ -122,5 +140,5 @@ func PairTokenLink(public, shadow string) (link, repos string) {
 	if !strings.EqualFold(owner, pubOwner) {
 		repos, desc = shadow, "Ghostbranch: "+shadow
 	}
-	return TokenLink("ghostbranch-"+name, desc, owner, 90, PersonTokenPermissions), repos
+	return TokenLink("ghostbranch-"+name, desc, owner, 90, PersonTokenLinkPermissions), repos
 }

@@ -935,3 +935,46 @@ func TestDoctorV01PairUnchanged(t *testing.T) {
 		t.Fatalf("summary %+v", s)
 	}
 }
+
+// An install that hasn't approved the app's Checks: read: the check-runs
+// probe is refused on the shadow, and the app check warns, with the
+// install's settings page as the fix.
+func TestDoctorChecksNotApprovedWarns(t *testing.T) {
+	t.Parallel()
+	h := appLoginHarness(t, "all", true)
+	h.forge.PermsDenied = map[string]map[string]bool{shadowName: {forge.PermChecksRead: true}}
+	_, c := h.doctor(appDoctorOpts())
+	wantStatus(t, c["app"], engine.DoctorWarn)
+	const url = "https://github.com/organizations/acme/settings/installations/7"
+	want := "The Ghostbranch app can't read check runs on " + shadowName +
+		" yet, so the gate can't see CI from other apps. An owner of acme approves the app's new permission at " + url
+	if c["app"].Message != want {
+		t.Fatalf("message\n%s\nwant\n%s", c["app"].Message, want)
+	}
+	if c["app"].Fix != url || c["app"].FixArgv != nil {
+		t.Fatalf("fix %q %v", c["app"].Fix, c["app"].FixArgv)
+	}
+	if c["app"].Details["installed"] != true {
+		t.Fatalf("details %+v", c["app"].Details)
+	}
+	// Wanted, not needed: the token check doesn't fail for it.
+	if c["token"].Status == engine.DoctorFail {
+		t.Fatalf("token %+v", c["token"])
+	}
+}
+
+// Approved (the probe reads check runs), the app check is ok; so it is
+// when the probe can't tell, as for an empty shadow.
+func TestDoctorChecksApprovedOK(t *testing.T) {
+	t.Parallel()
+	h := appLoginHarness(t, "all", true)
+	_, c := h.doctor(appDoctorOpts())
+	wantStatus(t, c["app"], engine.DoctorOK)
+	if strings.Contains(c["app"].Message, "check runs") {
+		t.Fatalf("app %+v", c["app"])
+	}
+	gate := c["token"].Details["groups"].(map[string]engine.GroupAccess)["gate"]
+	if len(gate.Missing) != 0 || len(gate.Optional) != 0 {
+		t.Fatalf("gate %+v", gate)
+	}
+}

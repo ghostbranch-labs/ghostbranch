@@ -1,8 +1,11 @@
 package workflow
 
 import (
+	"fmt"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 )
 
 var names = Names{Public: "acme/widget", Shadow: "acme/widget-shadow"}
@@ -159,6 +162,38 @@ func TestPushTriggers(t *testing.T) {
 	}
 }
 
+// A gate PR runs a workflow triggered on pull_request or
+// pull_request_target, or on a push its head branch matches.
+func TestRunsOnPR(t *testing.T) {
+	for on, want := range map[string]bool{
+		"on: pull_request":                             true,
+		"on: [pull_request_target]":                    true,
+		"on:\n  pull_request:\n    branches: [main]\n": true,
+		"on: push": true,
+		"on:\n  push:\n    branches: ['ghostbranch-gate/**']\n": true,
+		"on:\n  push:\n    branches: [main]\n":                  false,
+		"on:\n  push:\n    tags: ['v*']\n":                      false,
+		"on: [workflow_dispatch]":                               false,
+		"on:\n  schedule:\n    - cron: '0 0 * * *'\n":           false,
+		"name: no trigger":                                      false,
+		// An anchor reused as on:, and << merge keys under on:, read as written.
+		"x-triggers: &triggers [pull_request]\non: *triggers":                               true,
+		"x-common: &common\n  pull_request: {}\non:\n  <<: *common\n  workflow_dispatch:\n": true,
+		"x-push: &push\n  branches: [main]\non:\n  push:\n    <<: *push\n":                  false,
+		"x-manual: &manual\n  workflow_dispatch: {}\non:\n  <<: [*manual]\n":                false,
+		// A merge of a list can't be folded: counted as running.
+		"x-list: &list [workflow_dispatch]\non:\n  <<: *list\n": true,
+	} {
+		f, err := Parse("w.yml", []byte(on+"\njobs: {}\n"), names)
+		if err != nil {
+			t.Fatalf("%q: %v", on, err)
+		}
+		if got := f.RunsOnPR("ghostbranch-gate/feat-x"); got != want {
+			t.Errorf("%q: got %v", on, got)
+		}
+	}
+}
+
 func TestPushGuarded(t *testing.T) {
 	const guard = "github.event_name != 'push' || github.repository == 'acme/widget'"
 	job := func(id, cond string) string {
@@ -200,5 +235,43 @@ func TestParseBadYAML(t *testing.T) {
 	f, err := Parse("w.yml", []byte("- just\n- a list\n"), names)
 	if err != nil || len(f.Guards) != 0 {
 		t.Fatalf("a non-mapping document: %+v %v", f, err)
+	}
+}
+
+// bomb is a "billion laughs" chain: nine levels of ten aliases each, which
+// would be 10^9 nodes if copied out. Its anchors are named <p>0 to <p>9.
+func bomb(p, indent string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s%s0: &%s0 [lol, lol, lol, lol, lol, lol, lol, lol, lol, lol]\n", indent, p, p)
+	for i := 1; i <= 9; i++ {
+		fmt.Fprintf(&b, "%s%s%d: &%s%d [%s]\n", indent, p, i, p, i, strings.TrimSuffix(strings.Repeat("*"+p+fmt.Sprint(i-1)+", ", 10), ", "))
+	}
+	return b.String()
+}
+
+// An alias bomb parses fast whether it sits outside on: or inside it. One
+// that on: reads can't be resolved within the budget, so it counts as
+// running; one only under jobs: costs nothing and leaves on: as written.
+func TestParseAliasBomb(t *testing.T) {
+	for name, c := range map[string]struct {
+		src  string
+		want bool
+	}{
+		"anchors outside on:, used by on:": {bomb("x", "") + "on:\n  pull_request: *x9\njobs: {}\n", true},
+		"anchors inside on:":               {"on:\n" + bomb("x", "  ") + "  workflow_dispatch: *x9\njobs: {}\n", true},
+		"anchors only under jobs:":         {bomb("x", "") + "on: [workflow_dispatch]\njobs:\n  build:\n    steps: *x9\n", false},
+	} {
+		start := time.Now()
+		f, err := Parse("w.yml", []byte(c.src), names)
+		took := time.Since(start)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if took > time.Second {
+			t.Errorf("%s: Parse took %s", name, took)
+		}
+		if got := f.RunsOnPR("ghostbranch-gate/feat-x"); got != c.want {
+			t.Errorf("%s: RunsOnPR = %v, want %v", name, got, c.want)
+		}
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/config"
@@ -37,6 +38,10 @@ type JobEvent struct {
 	ShadowPR    int    `json:"shadow_pr,omitempty"`
 	ShadowPRURL string `json:"shadow_pr_url,omitempty"`
 	CITimeout   string `json:"ci_timeout,omitempty"`
+	// NoWorkflows is true when the candidate has no workflow that runs on
+	// its PR, so the wait for CI to start is CIAppearTimeout's short form.
+	NoWorkflows     *bool  `json:"no_workflows,omitempty"`
+	CIAppearTimeout string `json:"ci_appear_timeout,omitempty"`
 	// check
 	Name       string `json:"name,omitempty"`
 	Status     string `json:"status,omitempty"`
@@ -54,6 +59,46 @@ type waitOpts struct {
 	job             string
 	emit            func(JobEvent)
 	step            progress.Step // step shows the wait (nil: none)
+	// noWorkflows: the candidate has no workflow that runs on its PR, so
+	// the wait for a first check is the short one; shadow names the repo
+	// in the step.
+	noWorkflows bool
+	shadow      string
+}
+
+// appearTimeout is how long the gate waits for a first check: the short
+// ci_appear_timeout_no_workflows when no workflow runs on the PR, since
+// only another CI service could still report.
+func appearTimeout(cfg config.Gate, noWorkflows bool) time.Duration {
+	if noWorkflows {
+		return cfg.CIAppearTimeoutNoWorkflows
+	}
+	return cfg.CIAppearTimeout
+}
+
+// startText is the CI step while no check has appeared: why the gate
+// waits, and for how long. left is the time left to start.
+func startText(cfg config.Gate, o waitOpts, left time.Duration) string {
+	if o.noWorkflows {
+		return fmt.Sprintf("Waiting up to %s for CI to start: %s has no workflow that runs on this PR (another CI service may still report)",
+			shortDur(cfg.CIAppearTimeoutNoWorkflows), o.shadow)
+	}
+	if left >= time.Minute {
+		left = left.Truncate(time.Minute)
+	}
+	return fmt.Sprintf("Waiting for CI to start (up to %s, %s left)", shortDur(cfg.CIAppearTimeout), shortDur(max(left, 0)))
+}
+
+// shortDur is d to the second without zero tails: 10m, 1h, 1m30s, 45s.
+func shortDur(d time.Duration) string {
+	s := d.Round(time.Second).String()
+	if strings.HasSuffix(s, "m0s") {
+		s = strings.TrimSuffix(s, "0s")
+	}
+	if strings.HasSuffix(s, "h0m") {
+		s = strings.TrimSuffix(s, "0m")
+	}
+	return s
 }
 
 func (e *Engine) event(o waitOpts, ev JobEvent) {
@@ -118,9 +163,10 @@ func (e *Engine) waitChecks(ctx context.Context, repo, sha string, cfg config.Ga
 			}
 			return checkOutcome{}, forgeErr(err, "list checks on %s", short(sha))
 		}
+		now := e.Now()
 		if o.step != nil {
 			if len(checks) == 0 {
-				o.step.Update("Waiting for CI to start")
+				o.step.Update(startText(cfg, o, appearTimeout(cfg, o.noWorkflows)-now.Sub(start)))
 			} else {
 				n := 0
 				for _, c := range checks {
@@ -131,7 +177,6 @@ func (e *Engine) waitChecks(ctx context.Context, repo, sha string, cfg config.Ga
 				o.step.Update(fmt.Sprintf("Waiting for CI (%d of %d checks done)", n, len(checks)))
 			}
 		}
-		now := e.Now()
 		if len(checks) != last {
 			last, stableSince = len(checks), now
 		}
@@ -145,7 +190,7 @@ func (e *Engine) waitChecks(ctx context.Context, repo, sha string, cfg config.Ga
 		done, failed := summarize(checks)
 		var out *checkOutcome
 		switch {
-		case !seen && now.Sub(start) >= cfg.CIAppearTimeout:
+		case !seen && now.Sub(start) >= appearTimeout(cfg, o.noWorkflows):
 			out = &checkOutcome{status: feature.ChecksNoCI, failed: []string{}}
 		// At ci_timeout, checks that have all completed report their outcome
 		// even if the settle window has not elapsed: there is no more time

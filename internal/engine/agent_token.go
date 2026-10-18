@@ -41,7 +41,7 @@ type AgentsTokenResult struct {
 func AgentTokenLink(p workspace.Pair) string {
 	owner, _, _ := forge.SplitName(p.Shadow)
 	_, name, _ := forge.SplitName(p.Public)
-	return forge.TokenLink("ghostbranch-agent-"+name, "Ghostbranch agent: "+p.Shadow, owner, 30, forge.AgentTokenPermissions)
+	return forge.TokenLink("ghostbranch-agent-"+name, "Ghostbranch agent: "+p.Shadow, owner, 30, forge.AgentTokenLinkPermissions)
 }
 
 // AgentTokenSetLines are the lines that set the agent's token, per shell,

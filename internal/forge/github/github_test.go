@@ -845,6 +845,10 @@ func TestProbePermissionsOnlyReads(t *testing.T) {
 			_, _ = w.Write([]byte(`{"message": "Resource not accessible by personal access token"}`))
 		case "/repos/acme/widget-shadow/commits/main/status":
 			writeJSON(w, map[string]any{"state": "success"})
+		case "/repos/acme/widget-shadow/commits/main/check-runs":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"message": "Resource not accessible by integration"}`))
 		case "/repos/acme/widget-shadow/actions/secrets":
 			writeJSON(w, map[string]any{"total_count": 0, "secrets": []any{}})
 		case "/acme/widget-shadow.git/info/refs":
@@ -866,8 +870,8 @@ func TestProbePermissionsOnlyReads(t *testing.T) {
 	}
 	want := map[string]string{
 		forge.PermMetadataRead: forge.AccessYes, forge.PermContentsRead: forge.AccessYes, forge.PermPullsRead: forge.AccessYes,
-		forge.PermActionsRead: forge.AccessNo, forge.PermStatusesRead: forge.AccessYes, forge.PermSecretsRead: forge.AccessYes,
-		forge.PermContentsWrite: forge.AccessYes,
+		forge.PermActionsRead: forge.AccessNo, forge.PermStatusesRead: forge.AccessYes, forge.PermChecksRead: forge.AccessNo,
+		forge.PermSecretsRead: forge.AccessYes, forge.PermContentsWrite: forge.AccessYes,
 	}
 	if !reflect.DeepEqual(got.Have, want) || got.Accepted[forge.PermActionsRead] != "actions=read" {
 		t.Fatalf("got %+v", got)

@@ -419,6 +419,12 @@ jobs:
 		{"gate_detach", withFeature, []string{"gate", "feat-x", "--detach"}, 0},
 		{"wait", func(te *testEnv) { withFeature(te); te.mustRun("gate", "feat-x", "--detach") }, []string{"wait", "<JOB>"}, 0},
 		{"wait_finished", func(te *testEnv) { withFeature(te); te.mustRun("gate", "feat-x") }, []string{"wait", "<JOB>"}, 0},
+		{"wait_no_workflows", func(te *testEnv) {
+			testutil.Commit(te.t, te.pubGit, "main", "drop CI", map[string]string{".github/workflows/ci.yml": testutil.Delete})
+			te.forge.Checks = func(string, string) []forge.Check { return nil }
+			withFeature(te)
+			te.mustRun("gate", "feat-x", "--detach")
+		}, []string{"wait", "<JOB>"}, contract.NoCI.Exit()},
 		{"wait_stale", func(te *testEnv) {
 			withFeature(te)
 			te.mustRun("gate", "feat-x", "--detach")

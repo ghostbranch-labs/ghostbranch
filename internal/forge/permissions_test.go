@@ -2,6 +2,7 @@ package forge_test
 
 import (
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 
@@ -38,5 +39,24 @@ func TestTokenLinkKeepsPlaceholders(t *testing.T) {
 	}
 	if !strings.HasSuffix(got, "&contents=write&pull_requests=write&workflows=write&actions=read&statuses=read") {
 		t.Fatalf("agent permissions: %s", got)
+	}
+}
+
+// Checks: read is wanted, not needed: both pre-filled links ask for it, and
+// the needed lists, which a token is refused for lacking, don't name it.
+func TestTokenLinkIncludesChecks(t *testing.T) {
+	t.Parallel()
+	pair, _ := forge.PairTokenLink("acme/widget", "acme/widget-shadow")
+	if !strings.HasSuffix(pair, "&actions=read&statuses=read&checks=read&administration=write") {
+		t.Fatalf("pair link: %s", pair)
+	}
+	agent := forge.TokenLink("ghostbranch-agent-widget", "", "acme", 30, forge.AgentTokenLinkPermissions)
+	if !strings.HasSuffix(agent, "&actions=read&statuses=read&checks=read") {
+		t.Fatalf("agent link: %s", agent)
+	}
+	for _, perms := range [][]string{forge.AgentTokenPermissions, forge.PersonTokenPermissions} {
+		if slices.Contains(perms, forge.PermChecksRead) {
+			t.Fatalf("Checks: read is needed in %v", perms)
+		}
 	}
 }

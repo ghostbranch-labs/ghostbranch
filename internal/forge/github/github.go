@@ -681,6 +681,10 @@ func (c *Client) ProbePermissions(ctx context.Context, full string) (forge.RepoP
 	note(forge.PermActionsRead, resp, err)
 	_, resp, err = c.c.Repositories.GetCombinedStatus(ctx, owner, name, r.GetDefaultBranch(), &one)
 	note(forge.PermStatusesRead, resp, err)
+	// The default branch's head is a commit every repo with commits has; an
+	// empty repo answers 404 or 422, which leaves Checks: read unknown.
+	_, resp, err = c.c.Checks.ListCheckRunsForRef(ctx, owner, name, r.GetDefaultBranch(), &gh.ListCheckRunsOptions{ListOptions: one})
+	note(forge.PermChecksRead, resp, err)
 	_, resp, err = c.c.Actions.ListRepoSecrets(ctx, owner, name, &one)
 	note(forge.PermSecretsRead, resp, err)
 	if ctx.Err() != nil {

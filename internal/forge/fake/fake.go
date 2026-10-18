@@ -603,7 +603,7 @@ func (f *Forge) ProbePermissions(_ context.Context, full string) (forge.RepoPerm
 		return out, nil
 	}
 	for _, p := range []string{forge.PermMetadataRead, forge.PermContentsRead, forge.PermPullsRead,
-		forge.PermActionsRead, forge.PermStatusesRead, forge.PermSecretsRead} {
+		forge.PermActionsRead, forge.PermStatusesRead, forge.PermChecksRead, forge.PermSecretsRead} {
 		out.Have[p] = forge.AccessYes
 		if f.PermsDenied[full][p] {
 			out.Have[p] = forge.AccessNo

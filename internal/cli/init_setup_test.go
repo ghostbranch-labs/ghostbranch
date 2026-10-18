@@ -431,7 +431,7 @@ func TestGuidedInitGivesATokenTheTokenFix(t *testing.T) {
 			if strings.Contains(all, "App's repositories") || strings.Contains(all, "app's repositories") {
 				t.Fatalf("app advice for a token: %q", p.said)
 			}
-			link := forge.TokenLink("ghostbranch-widget", "Ghostbranch: acme/widget and acme/widget-shadow", "acme", 90, forge.PersonTokenPermissions)
+			link := forge.TokenLink("ghostbranch-widget", "Ghostbranch: acme/widget and acme/widget-shadow", "acme", 90, forge.PersonTokenLinkPermissions)
 			for _, want := range []string{link, `choose "Only select repositories", then pick acme/widget and acme/widget-shadow`, tc.store} {
 				if !strings.Contains(all, want) {
 					t.Errorf("never said %q: %q", want, p.said)

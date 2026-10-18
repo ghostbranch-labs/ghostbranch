@@ -153,6 +153,7 @@ type doctorRun struct {
 	pc           *pairCtx
 	cfg          config.Config
 	O            string
+	shadowChecks string // Checks: read on the shadow, from the token check's probe: forge.AccessNo only when GitHub refused it
 }
 
 // Doctor checks this machine's setup and, when there is one, the pair. It

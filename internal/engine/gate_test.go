@@ -722,7 +722,7 @@ func TestNoCIMessageNamesMissingWorkflow(t *testing.T) {
 		dropCI       bool
 		reason, says string
 	}{
-		{"no workflow at all", true, "no_workflow", "the gate candidate has no workflow under .github/workflows (public main has none)"},
+		{"no workflow at all", true, "no_workflow", "the gate candidate has no workflow under .github/workflows that runs on this PR"},
 		{"a workflow that never ran", false, "actions_disabled_or_untriggered", "or no workflow triggers on pull_request"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -746,5 +746,201 @@ func TestNoCIMessageNamesMissingWorkflow(t *testing.T) {
 				t.Fatalf("wait: %+v", ce)
 			}
 		})
+	}
+}
+
+// ciWait gates feat-x detached and waits on the job with no checks ever
+// appearing, as a person would see it: the steps, the waiting event and
+// how long the wait took on the fake clock.
+func ciWait(t *testing.T, h *harness) (time.Duration, *progress.Recorder, engine.JobEvent, *contract.Error) {
+	t.Helper()
+	h.eng.PollInterval = 5 * time.Second // 10m of polls, not 600
+	h.forge.Checks = func(string, string) []forge.Check { return nil }
+	h.startFeature("feat-x", map[string]string{"x.txt": "x\n"})
+	start := h.clock.Now()
+	res, _, err := h.eng.GateDetached(h.ctx, h.pair, "feat-x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := &progress.Recorder{}
+	h.eng.Progress = rec
+	var waiting engine.JobEvent
+	_, _, err = h.eng.Wait(h.ctx, h.pair, ciJob(res), engine.WaitOptions{Events: func(ev engine.JobEvent) {
+		if ev.Type == engine.EventWaiting {
+			waiting = ev
+		}
+	}})
+	return h.clock.Now().Sub(start), rec, waiting, wantCode(t, err, contract.NoCI)
+}
+
+const noWorkflowStep = "Waiting up to 1m for CI to start: " + shadowName + " has no workflow that runs on this PR (another CI service may still report)"
+
+// #36: a candidate with no workflow at all waits gate.ci_appear_timeout_no_workflows
+// (1m), not the full ci_appear_timeout, and the step and the event say why.
+func TestGateNoWorkflowsShortWait(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	testutil.Commit(t, h.pubGit, "main", "drop CI", map[string]string{".github/workflows/ci.yml": testutil.Delete})
+	h.init()
+	took, rec, waiting, ce := ciWait(t, h)
+	if took < time.Minute || took > time.Minute+10*time.Second {
+		t.Fatalf("waited %s, want about 1m", took)
+	}
+	if ce.Details["reason"] != "no_workflow" || ce.Details["no_workflows"] != true || !strings.Contains(ce.Message, "within 1m,") {
+		t.Fatalf("error = %+v", ce)
+	}
+	if !slices.Contains(rec.Steps(), noWorkflowStep) {
+		t.Fatalf("steps:\n%s", rec.String())
+	}
+	if waiting.NoWorkflows == nil || !*waiting.NoWorkflows || waiting.CIAppearTimeout != "1m0s" {
+		t.Fatalf("waiting event = %+v", waiting)
+	}
+}
+
+// A candidate whose workflows never run on its PR waits briefly too: only
+// workflow_dispatch, or a push filter the gate branch doesn't match.
+func TestGateNoPRWorkflowShortWait(t *testing.T) {
+	t.Parallel()
+	for name, wf := range map[string]string{
+		"workflow_dispatch only": "name: ci\non: [workflow_dispatch]\n",
+		"push to main only":      "name: ci\non:\n  push:\n    branches: [main]\n  workflow_dispatch:\n",
+		"tags only":              "name: ci\non:\n  push:\n    tags: ['v*']\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			h := newHarness(t)
+			testutil.Commit(t, h.pubGit, "main", "manual CI", map[string]string{".github/workflows/ci.yml": wf})
+			h.init()
+			took, rec, waiting, ce := ciWait(t, h)
+			if took < time.Minute || took > time.Minute+10*time.Second {
+				t.Fatalf("waited %s, want about 1m", took)
+			}
+			if ce.Details["reason"] != "no_workflow" || ce.Details["no_workflows"] != true || !strings.Contains(ce.Message, "no workflow under .github/workflows that runs on this PR") {
+				t.Fatalf("error = %+v", ce)
+			}
+			if !slices.Contains(rec.Steps(), noWorkflowStep) || waiting.NoWorkflows == nil || !*waiting.NoWorkflows {
+				t.Fatalf("steps:\n%s\nwaiting = %+v", rec.String(), waiting)
+			}
+		})
+	}
+}
+
+// A workflow that runs on the PR (pull_request, pull_request_target, or a
+// push the gate branch matches) keeps the full ci_appear_timeout.
+func TestGateWithWorkflowsFullWait(t *testing.T) {
+	t.Parallel()
+	for name, wf := range map[string]string{
+		"pull_request":        "name: ci\non: [pull_request]\n",
+		"pull_request_target": "name: ci\non:\n  pull_request_target:\n    types: [opened]\n",
+		"push":                "name: ci\non: push\n",
+		"push to any branch":  "name: ci\non:\n  push:\n    branches: ['**']\n",
+		"not yaml":            "name: ci\non: [\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			h := newHarness(t)
+			testutil.Commit(t, h.pubGit, "main", "CI", map[string]string{".github/workflows/ci.yml": wf})
+			h.init()
+			took, rec, waiting, ce := ciWait(t, h)
+			if took < 10*time.Minute || took > 10*time.Minute+10*time.Second {
+				t.Fatalf("waited %s, want about 10m", took)
+			}
+			if ce.Details["reason"] != "actions_disabled_or_untriggered" || ce.Details["no_workflows"] != false || !strings.Contains(ce.Message, "within 10m;") {
+				t.Fatalf("error = %+v", ce)
+			}
+			if slices.Contains(rec.Steps(), noWorkflowStep) || waiting.NoWorkflows == nil || *waiting.NoWorkflows || waiting.CIAppearTimeout != "10m0s" {
+				t.Fatalf("steps:\n%s\nwaiting = %+v", rec.String(), waiting)
+			}
+		})
+	}
+}
+
+// While no check has appeared, the step counts down the time left to start.
+func TestGateWaitShowsTimeLeft(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.startFeature("feat-x", map[string]string{"x.txt": "x\n"})
+	h.eng.PollInterval = 5 * time.Second
+	start := h.clock.Now()
+	h.forge.Checks = func(string, string) []forge.Check {
+		if h.clock.Now().Sub(start) < 3*time.Minute {
+			return nil
+		}
+		return []forge.Check{{Name: "ci", Status: "completed", Conclusion: "success"}}
+	}
+	rec := &progress.Recorder{}
+	h.eng.Progress = rec
+	if _, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"Waiting for CI to start (up to 10m, 10m left)", "Waiting for CI to start (up to 10m, 8m left)", "Waiting for CI to start (up to 10m, 7m left)", "Waiting for CI (1 of 1 checks done)"}
+	if !inOrder(rec.Updates(), want) {
+		t.Fatalf("CI updates:\n%s", rec.String())
+	}
+}
+
+func ciJob(res *engine.GateResult) string { return "gate/feat-x/" + res.Candidate[:12] }
+
+// A gate.ci_appear_timeout_no_workflows override sets the short wait.
+func TestGateNoWorkflowsTimeoutOverride(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	testutil.Commit(t, h.pubGit, "main", "drop CI", map[string]string{".github/workflows/ci.yml": testutil.Delete})
+	h.init()
+	h.setConfig("  ci_appear_timeout: 10m\n", "  ci_appear_timeout: 10m\n  ci_appear_timeout_no_workflows: 90s\n")
+	took, rec, waiting, ce := ciWait(t, h)
+	if took < 90*time.Second || took > 100*time.Second {
+		t.Fatalf("waited %s, want about 90s", took)
+	}
+	step := "Waiting up to 1m30s for CI to start: " + shadowName + " has no workflow that runs on this PR (another CI service may still report)"
+	if !strings.Contains(ce.Message, "within 1m30s,") || waiting.CIAppearTimeout != "1m30s" || !slices.Contains(rec.Steps(), step) {
+		t.Fatalf("error = %+v\nwaiting = %+v\nsteps:\n%s", ce, waiting, rec.String())
+	}
+}
+
+// wait on a settled no-workflow job re-reads the candidate with the same
+// check and says the same, for a workflow that only runs by hand.
+func TestWaitRereadsSettledNoWorkflowRecord(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	testutil.Commit(t, h.pubGit, "main", "manual CI", map[string]string{".github/workflows/ci.yml": "name: ci\non: [workflow_dispatch]\n"})
+	h.init()
+	_, _, _, _ = ciWait(t, h) // settles the job as NO_CI
+	m := h.meta("feat-x")
+	if m.Gate == nil || m.Gate.Pending() || m.Gate.Checks != feature.ChecksNoCI {
+		t.Fatalf("gate record = %+v", m.Gate)
+	}
+	_, _, err := h.eng.Wait(h.ctx, h.pair, "gate/feat-x/"+m.Gate.Candidate[:12], engine.WaitOptions{})
+	ce := wantCode(t, err, contract.NoCI)
+	if ce.Details["reason"] != "no_workflow" || ce.Details["no_workflows"] != true || !strings.Contains(ce.Message, "within 1m,") {
+		t.Fatalf("wait: %+v", ce)
+	}
+}
+
+// Checks: read is wanted, not needed: a token without it passes the gate as
+// before, with today's CHECKS_LIMITED warning, and doctor lists it as an
+// optional permission of the gate, not a missing one.
+func TestGateWithoutChecksStillWorks(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.asApp()
+	h.forge.PermsDenied = map[string]map[string]bool{shadowName: {forge.PermChecksRead: true}}
+	h.forge.LimitedChecks = true // what the client does on a check-runs 403
+	_, c := h.doctor(doctorOpts())
+	wantStatus(t, c["token"], engine.DoctorOK)
+	gate := c["token"].Details["groups"].(map[string]engine.GroupAccess)["gate"]
+	if len(gate.Missing) != 0 || !slices.Equal(gate.Optional, []string{forge.PermChecksRead + " on " + shadowName}) {
+		t.Fatalf("gate %+v", gate)
+	}
+
+	h.startFeature("feat-x", map[string]string{"feature.txt": "new\n"})
+	res, warns, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
+	if err != nil || res.Checks != feature.ChecksPassed {
+		t.Fatalf("gate = %+v %v", res, err)
+	}
+	if !slices.ContainsFunc(warns, func(w contract.Warning) bool { return w.Code == contract.ChecksLimited }) {
+		t.Fatalf("no CHECKS_LIMITED warning in %+v", warns)
 	}
 }
