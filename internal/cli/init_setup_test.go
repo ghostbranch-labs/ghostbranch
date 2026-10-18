@@ -600,21 +600,63 @@ func TestPlainInitPlanJSONHasSetup(t *testing.T) {
 	noWrites(t, te)
 }
 
-// A plan with a stop is still a plan: the checklist says what needs a
-// person, exit 0, and nothing is written.
+// A plan with a stop writes nothing and is still the stop's code, with the
+// checklist in data.setup.
 func TestPlainInitPlanWithAStopWritesNothing(t *testing.T) {
 	t.Parallel()
 	te := newTestEnv(t)
 	appLogin(te)
 	personal(te)
 	code, env := te.runJSON("init", "acme/widget", "--plan")
-	if code != 0 || env["error"] != nil {
+	if c, _ := errCode(env); code != 2 || c != "APP_NOT_INSTALLED" {
 		t.Fatalf("exit %d: %v", code, env)
+	}
+	if n := nextCommands(env); len(n) != 1 || n[0] != "ghostbranch init acme/widget --plan --json" || !nextNeedsHuman(env, 0) {
+		t.Fatalf("next %v", env["next"])
 	}
 	if status, _ := setupSteps(t, env); status["app_installed"] != "needs_human" {
 		t.Fatalf("steps %v", status)
 	}
 	noWrites(t, te)
+}
+
+// v0.1.1's BAD_FLAG (field adopt) for the shadow repo stays, under --plan too.
+func TestPlainInitPlanShadowExistsIsBadFlag(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	if _, err := te.forge.AddRepo("acme/widget-shadow", true); err != nil {
+		t.Fatal(err)
+	}
+	code, env := te.runJSON("init", "acme/widget", "--plan")
+	wantBadAdopt(t, env, code, "acme/widget-shadow already exists; pass --adopt")
+	if status, _ := setupSteps(t, env); status["shadow"] != "needs_human" {
+		t.Fatalf("steps %v", status)
+	}
+	if len(registered(te)) != 0 {
+		t.Fatalf("registered %v", registered(te))
+	}
+}
+
+func TestPlainInitAdoptPlanMissingShadowIsBadFlag(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	code, env := te.runJSON("init", "acme/widget", "--adopt", "--plan")
+	wantBadAdopt(t, env, code, "acme/widget-shadow does not exist; drop --adopt")
+	if status, _ := setupSteps(t, env); status["shadow"] != "needs_human" {
+		t.Fatalf("steps %v", status)
+	}
+	noWrites(t, te)
+}
+
+func wantBadAdopt(t *testing.T, env map[string]any, code int, msg string) {
+	t.Helper()
+	e, _ := env["error"].(map[string]any)
+	if c, _ := errCode(env); code != 2 || c != "BAD_FLAG" || e["field"] != "adopt" || !strings.Contains(e["message"].(string), msg) {
+		t.Fatalf("exit %d: %v", code, env["error"])
+	}
+	if steps, _ := errDetails(env)["steps"].([]any); len(steps) != len(engine.SetupStepIDs) {
+		t.Fatalf("details.steps %v", errDetails(env)["steps"])
+	}
 }
 
 func TestPlainInitAppNotInstalledStopsBeforeWrite(t *testing.T) {

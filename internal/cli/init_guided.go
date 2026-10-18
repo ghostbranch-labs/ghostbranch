@@ -77,8 +77,8 @@ func guardFlagErr(public string) error {
 
 // plainInit is init without questions: today's init, plus the guard and
 // sync flags. It works out the setup checklist first and, on a stop, writes
-// nothing: --plan returns the checklist, otherwise the stop's code. On
-// success data.setup is the checklist worked out again.
+// nothing and returns the stop's code (with --plan too), with the checklist
+// in data.setup. On success data.setup is the checklist worked out again.
 func (a *app) plainInit(ctx context.Context, public string, f initFlags) error {
 	a.ran = true
 	in, installed := a.guardHere(public)
@@ -102,9 +102,6 @@ func (a *app) plainInit(ctx context.Context, public string, f initFlags) error {
 	if stop := setup.FirstStop(); stop != nil {
 		res := &engine.InitResult{Public: p.Public, Shadow: p.Shadow, MirroredBranches: []string{}, MirroredTags: []string{},
 			GuardInstalled: installed, Setup: setup}
-		if a.dryRun {
-			return done(a, res, nil, nil)
-		}
 		return done(a, res, nil, setup.StopError(stop))
 	}
 	res, w, err := e.Init(ctx, engine.InitOptions{Public: public, Shadow: f.shadow, Adopt: f.adopt, Schedule: schedule(f.sync)})

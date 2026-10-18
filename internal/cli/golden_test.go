@@ -148,6 +148,11 @@ func TestGoldenContract(t *testing.T) {
 		{"init_dry_run", nil, []string{"init", "acme/widget", "--dry-run"}, 0},
 		{"init_create_denied", func(te *testEnv) { te.forge.CreateForbidden = true }, []string{"init", "acme/widget"}, 1},
 		{"init_plan_setup", func(te *testEnv) { appLogin(te); personal(te); installApp(te) }, []string{"init", "acme/widget", "--plan"}, 0},
+		{"init_plan_shadow_exists", func(te *testEnv) {
+			if _, err := te.forge.AddRepo("acme/widget-shadow", true); err != nil {
+				te.t.Fatal(err)
+			}
+		}, []string{"init", "acme/widget", "--plan"}, 2},
 		{"init_app_not_installed", func(te *testEnv) { appLogin(te); personal(te) }, []string{"init", "acme/widget"}, contract.AppNotInstalled.Exit()},
 		{"init_token_wrong_account", func(te *testEnv) { te.forge.User.Login, te.forge.Orgs = "octo", nil }, []string{"init", "acme/widget"}, contract.TokenWrongAccount.Exit()},
 		{"sync_noop", initOnly, []string{"sync"}, 0},
