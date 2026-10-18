@@ -313,7 +313,8 @@ func TestResolveSkipsGHWhenNoGH(t *testing.T) {
 	t.Parallel()
 	gh := func() (string, error) { return "gho_test_gh", nil }
 	_, _, err := auth.Resolve(t.Context(), auth.Source{Getenv: vars(map[string]string{"GHOSTBRANCH_NO_GH": "1"}), GH: gh, Store: keychain.NewFake()})
-	if code(err) != contract.AuthMissing || !strings.Contains(contract.From(err).Message, "(the gh fallback is off: GHOSTBRANCH_NO_GH is set)") {
+	if code(err) != contract.AuthMissing || !strings.Contains(contract.From(err).Message, "(the gh fallback is off: GHOSTBRANCH_NO_GH is set)") ||
+		strings.Contains(contract.From(err).Message, "gh auth login") {
 		t.Fatalf("NO_GH=1: %v", err)
 	}
 	if !auth.NoGH(vars(map[string]string{"GHOSTBRANCH_NO_GH": " YES "})) || auth.NoGH(vars(map[string]string{"GHOSTBRANCH_NO_GH": "0"})) || auth.NoGH(vars(nil)) {

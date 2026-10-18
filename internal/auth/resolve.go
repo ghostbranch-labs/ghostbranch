@@ -71,7 +71,7 @@ func Resolve(ctx context.Context, src Source) (string, string, error) {
 		}
 	}
 	if noGH {
-		return "", "", contract.New(contract.AuthMissing, "no GitHub token: run `ghostbranch login`, or set GHOSTBRANCH_TOKEN or GH_TOKEN, or run `gh auth login` (the gh fallback is off: GHOSTBRANCH_NO_GH is set)")
+		return "", "", contract.New(contract.AuthMissing, "no GitHub token: run `ghostbranch login`, or set GHOSTBRANCH_TOKEN or GH_TOKEN (the gh fallback is off: GHOSTBRANCH_NO_GH is set)")
 	}
 	return "", "", contract.New(contract.AuthMissing, "no GitHub token: run `ghostbranch login`, or set GHOSTBRANCH_TOKEN or GH_TOKEN, or run `gh auth login`")
 }
