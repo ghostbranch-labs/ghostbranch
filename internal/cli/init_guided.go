@@ -1136,37 +1136,39 @@ func (a *app) guidedInit(ctx context.Context, args []string, f initFlags) error 
 	if err != nil {
 		return done(a, pv, nil, err)
 	}
-	ask.Say("This will:")
 	lines := []string{}
 	if pv.Preview != nil {
 		lines = pv.Preview.Describe()
 	}
-	nothing := len(lines) == 0
 	// Nothing to confirm when the preview is empty and no guard or sync
-	// line follows; only then is "(nothing to change)" true of the block.
-	skipConfirm := nothing && !guardOn && o.Schedule != engine.DefaultSyncSchedule
+	// line follows: say so once, without a "This will:" block.
+	skipConfirm := len(lines) == 0 && !guardOn && o.Schedule != engine.DefaultSyncSchedule
 	if skipConfirm {
-		ask.Say("  (nothing to change)")
-	}
-	for _, l := range lines {
-		ask.Say("  - " + l)
-	}
-	if guardOn {
-		ask.Say("  - install the push guard in this checkout")
-	}
-	if o.Schedule == engine.DefaultSyncSchedule {
-		ask.Say("  - turn on scheduled sync (" + engine.DefaultSyncSchedule + ")")
+		ask.Say("Nothing to change: " + pv.Public + " is already set up with " + pv.Shadow + ".")
+	} else {
+		ask.Say("This will:")
+		for _, l := range lines {
+			ask.Say("  - " + l)
+		}
+		if guardOn {
+			ask.Say("  - install the push guard in this checkout")
+		}
+		if o.Schedule == engine.DefaultSyncSchedule {
+			ask.Say("  - turn on scheduled sync (" + engine.DefaultSyncSchedule + ")")
+		}
 	}
 	a.pairFull = workspace.Pair{Public: pv.Public, Shadow: pv.Shadow}
 	if a.dryRun {
 		return done(a, pv, nil, nil)
 	}
-	if skipConfirm {
-		ask.Say("Nothing to change: " + pv.Public + " is already set up with " + pv.Shadow + ".")
-	} else if ok, err := ask.YesNo(ctx, "Make these changes now?", true); err != nil {
-		return err
-	} else if !ok {
-		return contract.New(contract.Interrupted, "init stopped at the summary; nothing was changed")
+	if !skipConfirm {
+		ok, err := ask.YesNo(ctx, "Make these changes now?", true)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return contract.New(contract.Interrupted, "init stopped at the summary; nothing was changed")
+		}
 	}
 	if !skipConfirm {
 		ask.Say("Setting up " + public + "…")

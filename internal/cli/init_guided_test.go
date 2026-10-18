@@ -1188,10 +1188,10 @@ func TestGuidedInitNothingToChangeAsksNothing(t *testing.T) {
 	if !slices.Contains(p.said, "Checking the setup (ghostbranch doctor)…") {
 		t.Fatalf("doctor did not run: %q", p.said)
 	}
-	if !slices.Contains(p.said, "  (nothing to change)") {
-		t.Fatalf("said %q, want the empty preview line", p.said)
-	}
 	for _, s := range p.said {
+		if s == "This will:" || strings.Contains(s, "(nothing to change)") {
+			t.Fatalf("said %q, want no preview block", s)
+		}
 		if strings.HasPrefix(s, "Setting up") {
 			t.Fatalf("said %q after Nothing to change", s)
 		}
