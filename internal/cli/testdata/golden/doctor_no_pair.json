@@ -30,6 +30,13 @@
         }
       },
       {
+        "id": "app",
+        "status": "skipped",
+        "message": "not an app login, so there is no Ghostbranch app to check",
+        "fix": "",
+        "details": {}
+      },
+      {
         "id": "pair",
         "status": "skipped",
         "message": "not in a checkout of a registered public repo; pass --repo <owner/repo> to check a pair",

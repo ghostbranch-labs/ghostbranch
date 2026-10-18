@@ -21,15 +21,16 @@ func (a *app) doctorCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "doctor",
 		Short: "Check this machine's setup and the pair, and name each fix; changes nothing",
-		Long: `doctor runs six checks, in order: tools (git and this binary), token (its source, account,
-expiry, whether it can publish, and the permissions each command group needs), pair (both repos,
+		Long: `doctor runs seven checks, in order: tools (git and this binary), token (its source, account,
+expiry, whether it can publish, and the permissions each command group needs), app (for an app
+login: the Ghostbranch app is installed and can see the pair's repos), pair (both repos,
 the overlay and its config, shadow main, the managed files), guard (the pre-push hook in this
 checkout), state (this machine's records) and ci (the audit's summary). Each is ok, warn, fail or
 skipped, and names the command that fixes it. It changes nothing in your repos, records or
 keychain and never prompts; it fetches into its local copy of the pair (making it if needed) and
 refreshes the update check's cache. It isn't ledgered.
-In a checkout of a pair it checks that pair; --repo names another; with neither it skips the
-checks that need a pair. It exits 0 unless a check fails (DOCTOR_FAILED, details.failed).`,
+In a checkout of a pair it checks that pair; --repo names another; with neither, outside a checkout, it uses the
+workspace's only pair, and with several it skips the checks that need a pair. It exits 0 unless a check fails (DOCTOR_FAILED, details.failed).`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			// The fresh look runs here, not in doctorRun: guided init calls
@@ -89,7 +90,7 @@ func (a *app) doctorRun(ctx context.Context, repo string) (*engine.DoctorResult,
 	if err != nil {
 		return nil, err
 	}
-	opt := engine.DoctorOptions{Repo: repo, Getenv: a.env.Getenv, ForPerson: !a.jsonOut}
+	opt := engine.DoctorOptions{Repo: repo, Getenv: a.env.Getenv, ForPerson: !a.jsonOut, InstallURL: a.installURL()}
 	if a.env.CwdRemotes != nil {
 		opt.Remotes = a.env.CwdRemotes()
 	}
@@ -111,11 +112,12 @@ func (a *app) doctorRun(ctx context.Context, repo string) (*engine.DoctorResult,
 	if source == "login" { // never when GHOSTBRANCH_TOKEN is set: it comes first
 		opt.Login, _ = auth.LoadLogin(a.env.Keychain)
 	}
+	appLogin := opt.Login != nil && opt.Login.Kind == "app"
 	// DryRun: every engine write path refuses a dry run. Doctor makes none;
 	// this keeps it so.
 	e := &engine.Engine{Actor: actor, Token: token, TokenSource: source,
 		LooksLikeAgent: auth.LooksLikeAgent(a.env.Getenv, a.env.ConsoleUsable), Now: a.env.Now, Sleep: a.env.Sleep, Rand: a.env.Rand, DryRun: true,
-		Progress: a.reporter()}
+		Progress: a.reporter(), AppLogin: appLogin}
 	if token != "" {
 		f, err := a.env.NewForge(token)
 		if err != nil {

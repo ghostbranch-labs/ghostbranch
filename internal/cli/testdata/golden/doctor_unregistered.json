@@ -30,6 +30,13 @@
         }
       },
       {
+        "id": "app",
+        "status": "skipped",
+        "message": "not an app login, so there is no Ghostbranch app to check",
+        "fix": "",
+        "details": {}
+      },
+      {
         "id": "pair",
         "status": "fail",
         "message": "acme/other isn't set up in workspace \"default\": ghostbranch init acme/other --adopt --plan if its shadow repo exists, else ghostbranch init acme/other --plan",

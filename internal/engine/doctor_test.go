@@ -67,7 +67,8 @@ func byID(t *testing.T, res *engine.DoctorResult) map[string]engine.DoctorCheck 
 			t.Errorf("%s stopped: %s", c.ID, c.Message)
 		}
 		// next is built from FixArgv; fix is how it reads.
-		if c.Fix != strings.Join(c.FixArgv, " ") {
+		// The app check's fix is a link, which isn't a command.
+		if c.ID != "app" && c.Fix != strings.Join(c.FixArgv, " ") {
 			t.Errorf("%s: fix %q, argv %q", c.ID, c.Fix, c.FixArgv)
 		}
 	}
@@ -94,7 +95,7 @@ func TestDoctorOnAHealthyPair(t *testing.T) {
 		wantStatus(t, c[id], engine.DoctorOK)
 	}
 	wantStatus(t, c["guard"], engine.DoctorSkipped) // no directory given
-	if s := res.Summary(); s.OK != 5 || s.Skipped != 1 || len(s.Failed) != 0 {
+	if s := res.Summary(); s.OK != 5 || s.Skipped != 2 || len(s.Failed) != 0 {
 		t.Fatalf("summary %+v", s)
 	}
 	d := c["token"].Details
@@ -135,7 +136,11 @@ func TestDoctorOnABrokenSetupReportsEveryCheck(t *testing.T) {
 		}, map[string]string{"tools": ok, "token": fail, "pair": skip, "guard": skip, "state": ok, "ci": skip}},
 		{"offline", func(h *harness, opt *engine.DoctorOptions) { h.asApp(); h.eng.Forge = offline{} },
 			map[string]string{"tools": ok, "token": fail, "pair": fail, "guard": skip, "state": ok, "ci": skip}},
-		{"no pair", func(h *harness, opt *engine.DoctorOptions) { h.asApp(); opt.Repo = "" },
+		{"no pair (two registered, no --repo)", func(h *harness, opt *engine.DoctorOptions) {
+			h.asApp()
+			opt.Repo = ""
+			h.eng.WS.AddPair(workspace.Pair{Public: "acme/other", Shadow: "acme/other-shadow"})
+		},
 			map[string]string{"token": ok, "pair": skip, "guard": skip, "state": ok, "ci": skip}},
 		{"not in a checkout", func(h *harness, opt *engine.DoctorOptions) { h.asApp(); opt.Dir = h.t.TempDir() },
 			map[string]string{"pair": ok, "guard": skip}},
@@ -767,5 +772,138 @@ func TestDoctorCICheck(t *testing.T) {
 				t.Fatalf("fix %q", c["ci"].Fix)
 			}
 		})
+	}
+}
+
+// appLoginHarness is a harness with a registered pair and an app login, the
+// app installed on acme (the pair's owner) with the given selection.
+func appLoginHarness(t *testing.T, selection string, installed bool) *harness {
+	t.Helper()
+	h := newHarness(t)
+	h.init()
+	h.eng.Token, h.eng.TokenSource, h.eng.AppLogin = "ghu_test", "login", true
+	if installed {
+		h.forge.Installations = []forge.Installation{{ID: 7, Account: "acme", AccountType: "Organization", Selection: selection}}
+		h.forge.InstallRepos = map[int64][]string{7: {publicName, shadowName}}
+	}
+	return h
+}
+
+func appDoctorOpts() engine.DoctorOptions {
+	o := doctorOpts()
+	o.InstallURL = "https://github.com/apps/ghostbranch-cli/installations/new"
+	return o
+}
+
+func TestDoctorAppCheckOK(t *testing.T) {
+	t.Parallel()
+	h := appLoginHarness(t, "all", true)
+	_, c := h.doctor(appDoctorOpts())
+	wantStatus(t, c["app"], engine.DoctorOK)
+	d := c["app"].Details
+	if d["installed"] != true || d["selection"] != "all" || d["accounts"] == nil {
+		t.Fatalf("details %+v", d)
+	}
+	if c["app"].Fix != "" || c["app"].FixArgv != nil {
+		t.Fatalf("fix %q %v", c["app"].Fix, c["app"].FixArgv)
+	}
+}
+
+func TestDoctorAppCheckNotInstalled(t *testing.T) {
+	t.Parallel()
+	h := appLoginHarness(t, "", false)
+	_, c := h.doctor(appDoctorOpts())
+	wantStatus(t, c["app"], engine.DoctorFail)
+	if c["app"].Fix != appDoctorOpts().InstallURL || c["app"].FixArgv != nil {
+		t.Fatalf("fix %q %v", c["app"].Fix, c["app"].FixArgv)
+	}
+	if c["app"].Details["installed"] != false || c["app"].Details["selection"] != "" {
+		t.Fatalf("details %+v", c["app"].Details)
+	}
+	if !strings.Contains(c["app"].Message, "acme") {
+		t.Fatalf("message %q", c["app"].Message)
+	}
+}
+
+func TestDoctorAppCheckCantSeeRepo(t *testing.T) {
+	t.Parallel()
+	h := appLoginHarness(t, "selected", true)
+	h.forge.Installations[0].AccountType = forge.OwnerUser // a personal account's selection is its list
+	h.forge.InstallRepos = map[int64][]string{7: {"acme/else"}}
+	_, c := h.doctor(appDoctorOpts())
+	wantStatus(t, c["app"], engine.DoctorFail)
+	if c["app"].Details["installed"] != true || c["app"].Details["selection"] != "selected" || c["app"].Fix == "" {
+		t.Fatalf("app %+v", c["app"])
+	}
+}
+
+func TestDoctorAppSkippedForPAT(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.asApp() // a token from GHOSTBRANCH_TOKEN, not an app login
+	_, c := h.doctor(appDoctorOpts())
+	wantStatus(t, c["app"], engine.DoctorSkipped)
+	h2 := newHarness(t)
+	h2.asApp()
+	_, c = h2.doctor(doctorOpts())
+	wantStatus(t, c["app"], engine.DoctorSkipped)
+}
+
+func TestDoctorSinglePairWithoutRepo(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.asApp()
+	opt := doctorOpts()
+	opt.Repo, opt.Dir = "", h.t.TempDir()
+	_, c := h.doctor(opt)
+	wantStatus(t, c["pair"], engine.DoctorOK)
+	if c["pair"].Details["public"] != publicName {
+		t.Fatalf("pair %+v", c["pair"])
+	}
+}
+
+func TestDoctorTwoPairsWithoutRepoUnchanged(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.asApp()
+	h.eng.WS.AddPair(workspace.Pair{Public: "acme/other", Shadow: "acme/other-shadow"})
+	opt := doctorOpts()
+	opt.Repo = ""
+	_, c := h.doctor(opt)
+	wantStatus(t, c["pair"], engine.DoctorSkipped)
+	if !strings.Contains(c["pair"].Message, "pass --repo") {
+		t.Fatalf("message %q", c["pair"].Message)
+	}
+}
+
+func TestDoctorUnregisteredCheckoutKeepsItsMessage(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.asApp()
+	opt := doctorOpts()
+	opt.Repo = ""
+	opt.Remotes = []workspace.Remote{{Name: "origin", URL: "https://github.com/acme/unknown.git"}}
+	_, c := h.doctor(opt)
+	wantStatus(t, c["pair"], engine.DoctorSkipped)
+	if !strings.Contains(c["pair"].Message, "acme/unknown isn't set up") {
+		t.Fatalf("message %q", c["pair"].Message)
+	}
+}
+
+// A v0.1 pair (any non-app token) passes with the same ok count, plus the
+// app check skipped; with the app installed on all repos it is ok too.
+func TestDoctorV01PairUnchanged(t *testing.T) {
+	t.Parallel()
+	h := appLoginHarness(t, "all", true)
+	res, c := h.doctor(appDoctorOpts())
+	for _, id := range []string{"tools", "token", "app", "pair", "state", "ci"} {
+		wantStatus(t, c[id], engine.DoctorOK)
+	}
+	if s := res.Summary(); s.OK != 6 || len(s.Failed) != 0 {
+		t.Fatalf("summary %+v", s)
 	}
 }

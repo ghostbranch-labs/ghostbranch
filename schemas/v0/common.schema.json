@@ -36,7 +36,7 @@
         }
       }
     },
-    "checkId": { "description": "a doctor check, in the order doctor runs them", "enum": ["tools", "token", "pair", "guard", "state", "ci"] },
+    "checkId": { "description": "a doctor check, in the order doctor runs them", "enum": ["tools", "token", "app", "pair", "guard", "state", "ci"] },
     "tokenKind": { "description": "from the token's prefix: ghu_ app, github_pat_ fine-grained, ghp_ classic, gho_ oauth", "enum": ["app", "fine-grained", "classic", "oauth", "unknown"] },
     "doctorSummary": {
       "description": "doctor's counts by status and the failed check IDs; init's data.doctor",

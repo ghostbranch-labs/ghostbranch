@@ -30,6 +30,13 @@
         }
       },
       {
+        "id": "app",
+        "status": "skipped",
+        "message": "not an app login, so there is no Ghostbranch app to check",
+        "fix": "",
+        "details": {}
+      },
+      {
         "id": "pair",
         "status": "skipped",
         "message": "no GitHub token (see token)",

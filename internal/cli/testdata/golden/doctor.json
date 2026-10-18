@@ -67,6 +67,13 @@
         }
       },
       {
+        "id": "app",
+        "status": "skipped",
+        "message": "not an app login, so there is no Ghostbranch app to check",
+        "fix": "",
+        "details": {}
+      },
+      {
         "id": "pair",
         "status": "ok",
         "message": "acme/widget (public) and acme/widget-shadow (private) are reachable, and the overlay and its config are valid; shadow main and the managed files are current",
