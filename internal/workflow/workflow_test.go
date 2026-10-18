@@ -1,8 +1,11 @@
 package workflow
 
 import (
+	"fmt"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 )
 
 var names = Names{Public: "acme/widget", Shadow: "acme/widget-shadow"}
@@ -232,5 +235,43 @@ func TestParseBadYAML(t *testing.T) {
 	f, err := Parse("w.yml", []byte("- just\n- a list\n"), names)
 	if err != nil || len(f.Guards) != 0 {
 		t.Fatalf("a non-mapping document: %+v %v", f, err)
+	}
+}
+
+// bomb is a "billion laughs" chain: nine levels of ten aliases each, which
+// would be 10^9 nodes if copied out. Its anchors are named <p>0 to <p>9.
+func bomb(p, indent string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s%s0: &%s0 [lol, lol, lol, lol, lol, lol, lol, lol, lol, lol]\n", indent, p, p)
+	for i := 1; i <= 9; i++ {
+		fmt.Fprintf(&b, "%s%s%d: &%s%d [%s]\n", indent, p, i, p, i, strings.TrimSuffix(strings.Repeat("*"+p+fmt.Sprint(i-1)+", ", 10), ", "))
+	}
+	return b.String()
+}
+
+// An alias bomb parses fast whether it sits outside on: or inside it. One
+// that on: reads can't be resolved within the budget, so it counts as
+// running; one only under jobs: costs nothing and leaves on: as written.
+func TestParseAliasBomb(t *testing.T) {
+	for name, c := range map[string]struct {
+		src  string
+		want bool
+	}{
+		"anchors outside on:, used by on:": {bomb("x", "") + "on:\n  pull_request: *x9\njobs: {}\n", true},
+		"anchors inside on:":               {"on:\n" + bomb("x", "  ") + "  workflow_dispatch: *x9\njobs: {}\n", true},
+		"anchors only under jobs:":         {bomb("x", "") + "on: [workflow_dispatch]\njobs:\n  build:\n    steps: *x9\n", false},
+	} {
+		start := time.Now()
+		f, err := Parse("w.yml", []byte(c.src), names)
+		took := time.Since(start)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if took > time.Second {
+			t.Errorf("%s: Parse took %s", name, took)
+		}
+		if got := f.RunsOnPR("ghostbranch-gate/feat-x"); got != c.want {
+			t.Errorf("%s: RunsOnPR = %v, want %v", name, got, c.want)
+		}
 	}
 }
