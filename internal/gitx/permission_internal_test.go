@@ -51,3 +51,15 @@ func TestPushFailureClassifiesRemoteRejected(t *testing.T) {
 		t.Errorf("mixed: got %T %v", err, err)
 	}
 }
+
+// Each refused ref keeps its own reason, so a caller can tell which ref a
+// message such as GH007 belongs to.
+func TestPushFailureKeepsReasonPerRef(t *testing.T) {
+	t.Parallel()
+	err := pushFailure("!\ta:refs/heads/a\t[remote rejected] (pre-receive hook declined)\n"+
+		"!\tb:refs/heads/b\t[remote rejected] (other)\n", "")
+	r, ok := err.(*RefusedError)
+	if !ok || len(r.RefReasons) != 2 || r.RefReasons[0] != "pre-receive hook declined" || r.RefReasons[1] != "other" {
+		t.Fatalf("got %T %+v", err, err)
+	}
+}

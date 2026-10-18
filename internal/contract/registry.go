@@ -133,7 +133,7 @@ var errorDocs = map[Code]Doc{
 	PushRefused: {Summary: "The remote repo refused the push.",
 		Causes: []string{"the token lacks a permission the push needs, for example Workflows write (fine-grained) or the workflow scope (gh/OAuth) to change .github/workflows files",
 			"a repository ruleset or branch protection (GH013)", "a server-side hook"},
-		WhatToDo:   "Read error.details.reason. Fix the cause (usually a token permission a person grants) and run the command again; retrying unchanged will be refused again.",
+		WhatToDo:   "Read error.details.reason. Fix the cause (usually a token permission a person grants) and run the command again; retrying unchanged will be refused again. When error.details.reason is email_private, GitHub blocked the push because the tip commit (error.details.commit on error.details.branch) has the private email in error.details.email: a person unticks \"Block command line pushes that expose my email\" at error.details.settings_url, or makes a commit with a no-reply address.",
 		NeedsHuman: true},
 	CurateInvalid: {Summary: "The --curate file is malformed, or its groups don't name every feature commit exactly once.",
 		Causes: []string{"not JSON of the form {\"commits\": [{\"from\": [<sha>...], \"message\": \"...\"}]}",

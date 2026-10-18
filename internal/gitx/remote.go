@@ -72,6 +72,8 @@ func (e *RejectedError) Error() string {
 type RefusedError struct {
 	Refs   []string
 	Reason string // the server's reason, e.g. text inside "[remote rejected] (...)"
+	// RefReasons is each ref's own "[remote rejected]" reason, in Refs order.
+	RefReasons []string
 }
 
 func (e *RefusedError) Error() string {
@@ -168,7 +170,7 @@ func pushFailure(stdout, stderr string) error {
 		if said := remoteSaid(stderr); said != "" {
 			reason += ": " + said
 		}
-		return &RefusedError{Refs: refused, Reason: reason}
+		return &RefusedError{Refs: refused, Reason: reason, RefReasons: reasons}
 	}
 	if len(refs) > 0 {
 		return &RejectedError{Refs: refs, Detail: strings.TrimSpace(stdout + "\n" + stderr)}
