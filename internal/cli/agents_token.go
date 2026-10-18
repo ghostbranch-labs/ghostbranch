@@ -59,14 +59,15 @@ func (a *app) agentsToken(ctx context.Context, p workspace.Pair) (*engine.Agents
 	a.reporter().Pause()
 	defer a.reporter().Resume()
 	owner, _, _ := forge.SplitName(p.Shadow)
+	st := a.styler(a.env.StderrColor)
 	say := func(s string) { _, _ = fmt.Fprintln(dev, s) }
-	say(fmt.Sprintf("Make the agent's token on GitHub, for %s: %s", owner, res.Link))
+	say(attention(st, fmt.Sprintf("Make the agent's token on GitHub, for %s: %s", owner, res.Link)))
 	// Only GitHub's own page is ever opened.
 	if a.env.OpenBrowser != nil && strings.HasPrefix(res.Link, "https://github.com/") && a.env.OpenBrowser(res.Link) == nil {
 		say("(It is open in your browser.)")
 	}
-	say("On that page, choose Only select repositories, then " + p.Shadow + ". Keep the permissions the link set.")
-	_, _ = fmt.Fprint(dev, "Paste the new token here (it isn't shown, and Ghostbranch never stores it): ")
+	say(attention(st, "On that page, choose Only select repositories, then "+p.Shadow+". Keep the permissions the link set."))
+	_, _ = fmt.Fprint(dev, attention(st, "Paste the new token here (it isn't shown, and Ghostbranch never stores it):")+" ")
 	c, err := a.checkSecret(ctx, dev, p)
 	say("")
 	if err != nil {

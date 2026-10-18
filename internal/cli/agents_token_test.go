@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -194,5 +195,47 @@ func TestAgentsTokenEmptyIsABadAnswer(t *testing.T) {
 	atSecretPrompt(te, "  ")
 	if code, out, errOut := te.run("agents", "token"); code != 2 || !strings.Contains(errOut, "[BAD_FLAG]") {
 		t.Fatalf("exit %d\n%s%s", code, out, errOut)
+	}
+}
+
+func TestAgentsTokenColourOnlyOnATerminal(t *testing.T) {
+	t.Parallel()
+	run := func(t *testing.T, terminal bool, noColor string, push bool) (shown, out, errOut string) {
+		te := newTestEnv(t)
+		initOnly(te)
+		sp := atSecretPrompt(te, agentToken)
+		if push {
+			te.forge.PushDenied = nil
+		} else {
+			te.forge.PushDenied = map[string]bool{"acme/widget": true}
+		}
+		te.env.StderrColor, te.env.StdoutColor = terminal, terminal
+		if noColor != "" {
+			te.vars["NO_COLOR"] = noColor
+		}
+		_, out, errOut = te.run("agents", "token")
+		return sp.con.String(), out, errOut
+	}
+	const yellow = "\x1b[1m\x1b[93m"
+	shown, out, _ := run(t, true, "", false)
+	for _, want := range []string{yellow + "Make the agent's token", yellow + "On that page, choose", yellow + "Paste the new token here"} {
+		if !strings.Contains(shown, want) {
+			t.Errorf("console lacks %q: %q", want, shown)
+		}
+	}
+	if !strings.Contains(out, "\x1b[92mThis token (account") {
+		t.Errorf("accepted line not green: %q", out)
+	}
+	_, _, errOut := run(t, true, "", true)
+	if !regexp.MustCompile(`\x1b\[91m[^\x1b]*can push to the public repo`).MatchString(errOut) {
+		t.Errorf("no red in the refusal: %q", errOut)
+	}
+	for name, got := range map[string][3]string{"NO_COLOR": func() [3]string { a, b, c := run(t, true, "1", false); return [3]string{a, b, c} }(),
+		"pipe": func() [3]string { a, b, c := run(t, false, "", false); return [3]string{a, b, c} }()} {
+		for _, s := range got {
+			if strings.Contains(s, "\x1b") {
+				t.Errorf("%s: escape code in %q", name, s)
+			}
+		}
 	}
 }

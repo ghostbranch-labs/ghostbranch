@@ -341,7 +341,11 @@ func (a *app) render(err error) int {
 		_, _ = fmt.Fprint(a.env.Stdout, withoutNothing(human(a.result, outSt), env.Error != nil))
 	}
 	if env.Error != nil {
-		_, _ = fmt.Fprintf(a.env.Stderr, "%s %s [%s]\n", errSt.Fail("error:"), env.Error.Message, env.Error.Code)
+		msg := env.Error.Message
+		if env.Error.Code == contract.AgentTokenRefused {
+			msg = errSt.Fail(msg)
+		}
+		_, _ = fmt.Fprintf(a.env.Stderr, "%s %s [%s]\n", errSt.Fail("error:"), msg, env.Error.Code)
 		printSteps(a.env.Stderr, env.Error)
 		printNext(a.env.Stderr, next, errSt)
 	} else {
