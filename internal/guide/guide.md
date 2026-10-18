@@ -100,15 +100,19 @@ main, green CI, and a leak scan of exactly what will be published.
 
 1. Run `ghostbranch init <repo> --plan --json` and read `data.setup.steps` (`login`, `account`,
    `app_installed`, `shadow`, `app_access`, `pair`, `guard`, `doctor`; each `done`, `needs_human`,
-   `blocked`, `todo` or `skipped`). It exits 2 on a stop, with that step's code and a `next` that runs it again.
+   `blocked`, `todo` or `skipped`). On a stop it writes nothing and returns that step's code (exit 1 for
+   `AUTH_MISSING` and `LOGIN_EXPIRED`, else 2) and a `next` saying what to do.
 2. For each `needs_human` step, give the person its message and `url`, one at a time, then run the
    command again to check. When none is left, run `ghostbranch init <repo> --json` (without `--plan`):
-   it does the `todo` steps.
-3. Not logged in? Run `ghostbranch login --json` **in the background** and relay its first line
-   (`{"type":"device_code"}`: its `user_code` and `verification_uri`) to the person. It waits up to about
-   15 minutes and ends with the login result; if it times out, run it again. Never offer gh's login.
-   `GHOSTBRANCH_NO_GH=1` turns off the `gh auth token` fallback.
-4. When setup is done, ask once: your own shadow-only token (**recommended**) or the person's login.
+   it does the `todo` steps. Then run `ghostbranch doctor --repo <repo> --json` to check the setup.
+3. Setup always uses the person's Ghostbranch login. If the `login` step is `done` but its
+   `details.source` isn't `login`, the token is gh's or an env token's: ask the person about any
+   `GH_TOKEN`, `GITHUB_TOKEN` or `GHOSTBRANCH_TOKEN` set, and run again with `GHOSTBRANCH_NO_GH=1`
+   (it turns off the `gh auth token` fallback), then log in as below. Never offer gh's login.
+4. Not logged in? Run `ghostbranch login --json --non-interactive` **in the background** and relay its
+   first line (`{"type":"device_code"}`: its `user_code` and `verification_uri`) to the person. It waits
+   up to about 15 minutes and ends with the login result; if it times out, run it again.
+5. When setup is done, ask once: your own shadow-only token (**recommended**) or the person's login.
    For a token the person runs `ghostbranch agents token` at their console (or `agents token --json`,
    which returns `link`, `select` and `set_line` and reads no token), then restarts you in a shell with
    `GHOSTBRANCH_TOKEN` set. Check it: `ghostbranch agents status --json` must show `token_can_publish` `"false"`.
@@ -121,7 +125,8 @@ A login, the app's install and tokens are the person's to do. Help them one step
 2. Hand over one person-only fix at a time, with its link. When they say it's done, run `doctor`
    again before you go on.
 
-- `AUTH_MISSING` or `LOGIN_EXPIRED`: the person runs `ghostbranch login` in their own terminal.
+- `AUTH_MISSING` or `LOGIN_EXPIRED`: during setup, start the login as in *Setting up a repo for a
+  person*; otherwise the person runs `ghostbranch login` in their own terminal.
 - The app can't see a repo (`doctor` says it doesn't exist or the token can't see it): give the install
   link, `https://github.com/apps/ghostbranch-cli/installations/new`, and ask them to add that repo.
 - `APP_NOT_INSTALLED`: give each `error.details.accounts[].install_url` with its account; they install the app there.
@@ -336,10 +341,10 @@ A login, the app's install and tokens are the person's to do. Help them one step
 - Never create or delete repos (other than through `ghostbranch init`), or change repo settings, tokens
   or secrets yourself; those are the person's.
 - Never run `ghostbranch logout`, `ghostbranch login --with-token` or an interactive `ghostbranch login`.
-  The one exception is `ghostbranch login --json` in the background, to start the person's sign-in during
-  setup (you relay the code; they approve). Use the person's stored login only for setup, or afterwards if
-  they chose it; otherwise use your own token. If `doctor` or `agents status` warns
-  `AGENT_ON_PERSON_LOGIN`, tell the person.
+  The one exception is `ghostbranch login --json --non-interactive` in the background, to start the
+  person's sign-in during setup (you relay the code; they approve). Use the person's stored login only
+  for setup, or afterwards if they chose it; otherwise use your own token. If `doctor` or
+  `agents status` warns `AGENT_ON_PERSON_LOGIN`, tell the person.
 
 You may *suggest* these to the person, never run them yourself:
 

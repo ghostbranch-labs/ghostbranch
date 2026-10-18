@@ -62,7 +62,8 @@ func TestRenderListsEveryCodeFromTheRegistry(t *testing.T) {
 	// 497: the When the person is stuck section (14 lines), login's install wording, and Strict
 	// isolation's pre-filled token link with the repository choice it can't make (Tier 1 setup guidance).
 	// 525: 8.7's Setting up a repo for a person section (13 lines), four stuck rows for the new codes and the exact login exception.
-	if n := strings.Count(out, "\n"); n > 525 {
+	// 530: 8.7's final review (the person's own login step, doctor after init, AUTH_MISSING during setup).
+	if n := strings.Count(out, "\n"); n > 530 {
 		t.Errorf("the guide is %d lines; keep it short (spec: about 150 plus the tables)", n)
 	}
 }
@@ -382,7 +383,7 @@ func TestGuideTeachesSetup(t *testing.T) {
 		"For an org's public repo it asks where the shadow repo lives; `--shadow <owner/name>` sets it.",
 		"`TOKEN_PERMISSION_MISSING` names the permission and the repo in `error.details.permission` and `error.details.repo`",
 		"Never run `ghostbranch logout`, `ghostbranch login --with-token` or an interactive `ghostbranch login`",
-		"The one exception is `ghostbranch login --json` in the background",
+		"The one exception is `ghostbranch login --json --non-interactive` in the background",
 		"Use the person's stored login only for setup, or afterwards if they chose it",
 		"`GHOSTBRANCH_TOKEN`, then your stored login, then `GH_TOKEN`, `GITHUB_TOKEN`, then `gh auth token`",
 		"With `GHOSTBRANCH_TOKEN` set, the stored login is never read.",
@@ -620,10 +621,24 @@ func section(t *testing.T, out, heading string) string {
 func TestGuideSetupSection(t *testing.T) {
 	out := guide.Render(contract.Registry())
 	sec := strings.Join(strings.Fields(section(t, out, "## Setting up a repo for a person")), " ")
-	for _, want := range []string{"init <repo> --plan --json", "data.setup.steps", "needs_human", "login --json", "in the background",
-		"it does the `todo` steps", "user_code", "verification_uri", "Never offer gh", "agents token", "GHOSTBRANCH_TOKEN", "agents status --json", "token_can_publish"} {
+	for _, want := range []string{"init <repo> --plan --json", "data.setup.steps", "needs_human", "in the background",
+		"it does the `todo` steps", "user_code", "verification_uri", "Never offer gh", "agents token", "GHOSTBRANCH_TOKEN", "agents status --json", "token_can_publish",
+		// The final review's fixes: every stop's next says what to do, doctor after init, the
+		// person's own login (not gh's or an env token), and the login an agent can start.
+		"a `next` saying what to do", "Then run `ghostbranch doctor --repo <repo> --json` to check the setup.",
+		"Setup always uses the person's Ghostbranch login.", "`details.source` isn't `login`", "`GHOSTBRANCH_NO_GH=1`",
+		"`GH_TOKEN`, `GITHUB_TOKEN` or `GHOSTBRANCH_TOKEN`", "Run `ghostbranch login --json --non-interactive` **in the background**"} {
 		if !strings.Contains(sec, want) {
 			t.Errorf("the section lacks %q:\n%s", want, sec)
+		}
+	}
+	if strings.Contains(sec, "a `next` that runs it again") {
+		t.Errorf("not every stop's next runs init again:\n%s", sec)
+	}
+	// The login is always started without a console, so it streams.
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "ghostbranch login --json`") {
+			t.Errorf("a login without --non-interactive: %q", line)
 		}
 	}
 	stuck := strings.Join(strings.Fields(section(t, out, "## When the person is stuck")), " ")
