@@ -101,8 +101,9 @@ main, green CI, and a leak scan of exactly what will be published.
 1. Run `ghostbranch init <repo> --plan --json` and read `data.setup.steps` (`login`, `account`,
    `app_installed`, `shadow`, `app_access`, `pair`, `guard`, `doctor`; each `done`, `needs_human`,
    `blocked`, `todo` or `skipped`). It exits 2 on a stop, with that step's code and a `next` that runs it again.
-2. Do the `todo` steps yourself. For each `needs_human` step, give the person its message and `url`, one
-   at a time, then run the command again to check.
+2. For each `needs_human` step, give the person its message and `url`, one at a time, then run the
+   command again to check. When none is left, run `ghostbranch init <repo> --json` (without `--plan`):
+   it does the `todo` steps.
 3. Not logged in? Run `ghostbranch login --json` **in the background** and relay its first line
    (`{"type":"device_code"}`: its `user_code` and `verification_uri`) to the person. It waits up to about
    15 minutes and ends with the login result; if it times out, run it again. Never offer gh's login.
@@ -334,8 +335,11 @@ A login, the app's install and tokens are the person's to do. Help them one step
 - Never run `ghostbranch waivers add`, edit `waivers.json`, or otherwise hide a leak-scan finding.
 - Never create or delete repos (other than through `ghostbranch init`), or change repo settings, tokens
   or secrets yourself; those are the person's.
-- Never run `ghostbranch login` or `ghostbranch logout`, or rely on the person's stored login: use the
-  token you were given. The one exception is `login --json` to sign the person in during setup. If `doctor` or `agents status` warns `AGENT_ON_PERSON_LOGIN`, tell the person.
+- Never run `ghostbranch logout`, `ghostbranch login --with-token` or an interactive `ghostbranch login`.
+  The one exception is `ghostbranch login --json` in the background, to start the person's sign-in during
+  setup (you relay the code; they approve). Use the person's stored login only for setup, or afterwards if
+  they chose it; otherwise use your own token. If `doctor` or `agents status` warns
+  `AGENT_ON_PERSON_LOGIN`, tell the person.
 
 You may *suggest* these to the person, never run them yourself:
 

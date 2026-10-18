@@ -61,8 +61,8 @@ func TestRenderListsEveryCodeFromTheRegistry(t *testing.T) {
 	// 480: all 14 states in the Lifecycle list, and in After publishing waivers add, the two stacking refusals and the long lines rewrapped (6.6).
 	// 497: the When the person is stuck section (14 lines), login's install wording, and Strict
 	// isolation's pre-filled token link with the repository choice it can't make (Tier 1 setup guidance).
-	// 522: 8.7's Setting up a repo for a person section (13 lines), four stuck rows for the new codes and the login exception.
-	if n := strings.Count(out, "\n"); n > 522 {
+	// 525: 8.7's Setting up a repo for a person section (13 lines), four stuck rows for the new codes and the exact login exception.
+	if n := strings.Count(out, "\n"); n > 525 {
 		t.Errorf("the guide is %d lines; keep it short (spec: about 150 plus the tables)", n)
 	}
 }
@@ -381,7 +381,9 @@ func TestGuideTeachesSetup(t *testing.T) {
 		"`--guard`/`--no-guard`, `--sync`/`--no-sync`",
 		"For an org's public repo it asks where the shadow repo lives; `--shadow <owner/name>` sets it.",
 		"`TOKEN_PERMISSION_MISSING` names the permission and the repo in `error.details.permission` and `error.details.repo`",
-		"Never run `ghostbranch login` or `ghostbranch logout`",
+		"Never run `ghostbranch logout`, `ghostbranch login --with-token` or an interactive `ghostbranch login`",
+		"The one exception is `ghostbranch login --json` in the background",
+		"Use the person's stored login only for setup, or afterwards if they chose it",
 		"`GHOSTBRANCH_TOKEN`, then your stored login, then `GH_TOKEN`, `GITHUB_TOKEN`, then `gh auth token`",
 		"With `GHOSTBRANCH_TOKEN` set, the stored login is never read.",
 		"`ghostbranch login --with-token` stores a token you pipe in on stdin",
@@ -619,7 +621,7 @@ func TestGuideSetupSection(t *testing.T) {
 	out := guide.Render(contract.Registry())
 	sec := strings.Join(strings.Fields(section(t, out, "## Setting up a repo for a person")), " ")
 	for _, want := range []string{"init <repo> --plan --json", "data.setup.steps", "needs_human", "login --json", "in the background",
-		"user_code", "verification_uri", "Never offer gh", "agents token", "GHOSTBRANCH_TOKEN", "agents status --json", "token_can_publish"} {
+		"it does the `todo` steps", "user_code", "verification_uri", "Never offer gh", "agents token", "GHOSTBRANCH_TOKEN", "agents status --json", "token_can_publish"} {
 		if !strings.Contains(sec, want) {
 			t.Errorf("the section lacks %q:\n%s", want, sec)
 		}
