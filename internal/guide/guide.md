@@ -435,7 +435,7 @@ Fine-grained tokens, per command:
 | `init` that creates the shadow repo | Administration write on **all repositories** of the owner (a token can't name a repo that doesn't exist yet), plus the `init --adopt` set; afterwards narrow it to the shadow repo or delete it, and give an agent only its own shadow-only token (see *Strict isolation*) |
 | `init --adopt` (create the empty private repo yourself first) | Shadow: Administration, Contents and Workflows read and write |
 | `sync`, `upgrade` | Shadow: Contents and Workflows write; Actions write (optional: lets `sync` cancel the workflow runs its pushes start) |
-| `feature start`, `gate` | Shadow: Contents, Pull requests and Workflows write; Actions and Commit statuses read |
+| `feature start`, `gate` | Shadow: Contents, Pull requests and Workflows write; Actions and Commit statuses read; Checks read (optional: lets `gate` see CI from apps other than GitHub Actions) |
 | `promote`, `apply` | Public: Contents and Pull requests write (yours, never an agent's) |
 | `audit` | Contents read; optionally Secrets: read, to compare secret names |
 
@@ -450,7 +450,7 @@ other OS users can't read them, but an agent running as you can.
    Workflows read and write; Actions and Commit statuses read. This link fills in the rest (replace
    `<shadow-owner>` and `<repo>`): {{AGENT_TOKEN_LINK}}
    GitHub can't pre-fill the repositories: choose "Only select repositories", then pick only the
-   shadow repo. Actions write is optional: it lets `sync` cancel the runs its pushes start.
+   shadow repo. Actions write is optional: it lets `sync` cancel the runs its pushes start. So is Checks read: it lets `gate` see CI from other apps.
 2. Set it as `GHOSTBRANCH_TOKEN` **only in the agent's environment**.
 3. Make sure the agent's sandbox cannot read your `gh` login or keychain, or `gh auth token` hands it
    your full token.

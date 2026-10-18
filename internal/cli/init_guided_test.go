@@ -797,7 +797,7 @@ func TestGuidedInitAppLoginTexts(t *testing.T) {
 		notYetPAT = "acme/widget-shadow isn't there yet, or your login can't see it."
 	)
 	step2PAT := "  2. Give your token access to it: add acme/widget-shadow (and acme/widget) to its repositories, or make a fine-grained token at " +
-		forge.TokenLink("ghostbranch-widget", "Ghostbranch: acme/widget and acme/widget-shadow", "acme", 90, forge.PersonTokenPermissions) +
+		forge.TokenLink("ghostbranch-widget", "Ghostbranch: acme/widget and acme/widget-shadow", "acme", 90, forge.PersonTokenLinkPermissions) +
 		` (choose "Only select repositories", then pick acme/widget and acme/widget-shadow), then set the new token as GHOSTBRANCH_TOKEN and run ghostbranch init again.`
 	for _, app := range []bool{true, false} {
 		t.Run(map[bool]string{true: "app login", false: "token"}[app], func(t *testing.T) {

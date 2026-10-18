@@ -917,3 +917,30 @@ func TestWaitRereadsSettledNoWorkflowRecord(t *testing.T) {
 		t.Fatalf("wait: %+v", ce)
 	}
 }
+
+// Checks: read is wanted, not needed: a token without it passes the gate as
+// before, with today's CHECKS_LIMITED warning, and doctor lists it as an
+// optional permission of the gate, not a missing one.
+func TestGateWithoutChecksStillWorks(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.asApp()
+	h.forge.PermsDenied = map[string]map[string]bool{shadowName: {forge.PermChecksRead: true}}
+	h.forge.LimitedChecks = true // what the client does on a check-runs 403
+	_, c := h.doctor(doctorOpts())
+	wantStatus(t, c["token"], engine.DoctorOK)
+	gate := c["token"].Details["groups"].(map[string]engine.GroupAccess)["gate"]
+	if len(gate.Missing) != 0 || !slices.Equal(gate.Optional, []string{forge.PermChecksRead + " on " + shadowName}) {
+		t.Fatalf("gate %+v", gate)
+	}
+
+	h.startFeature("feat-x", map[string]string{"feature.txt": "new\n"})
+	res, warns, err := h.eng.Gate(h.ctx, h.pair, "feat-x")
+	if err != nil || res.Checks != feature.ChecksPassed {
+		t.Fatalf("gate = %+v %v", res, err)
+	}
+	if !slices.ContainsFunc(warns, func(w contract.Warning) bool { return w.Code == contract.ChecksLimited }) {
+		t.Fatalf("no CHECKS_LIMITED warning in %+v", warns)
+	}
+}

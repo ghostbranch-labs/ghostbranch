@@ -107,17 +107,21 @@ var permGroups = []struct {
 	{"sync", []permNeed{{true, forge.PermContentsRead, false}, {true, forge.PermPullsRead, false},
 		{false, forge.PermContentsWrite, false}, {false, forge.PermWorkflowsWrite, false}, {false, forge.PermActionsWrite, true}}},
 	{"gate", []permNeed{{false, forge.PermContentsWrite, false}, {false, forge.PermPullsWrite, false},
-		{false, forge.PermWorkflowsWrite, false}, {false, forge.PermActionsRead, false}, {false, forge.PermStatusesRead, false}}},
+		{false, forge.PermWorkflowsWrite, false}, {false, forge.PermActionsRead, false}, {false, forge.PermStatusesRead, false},
+		// Wanted, not needed: without it the gate reads workflow runs
+		// instead of check runs, and warns (CHECKS_LIMITED).
+		{false, forge.PermChecksRead, true}}},
 	{"promote", []permNeed{{true, forge.PermContentsWrite, false}, {true, forge.PermPullsWrite, false}, {false, forge.PermContentsWrite, false}}},
 	{"audit", []permNeed{{false, forge.PermContentsRead, false}, {false, forge.PermSecretsRead, true}}},
 }
 
 var allPermissions = []string{forge.PermMetadataRead, forge.PermContentsRead, forge.PermContentsWrite,
 	forge.PermPullsRead, forge.PermPullsWrite, forge.PermActionsRead, forge.PermActionsWrite,
-	forge.PermStatusesRead, forge.PermWorkflowsWrite, forge.PermAdminWrite, forge.PermSecretsRead}
+	forge.PermStatusesRead, forge.PermChecksRead, forge.PermWorkflowsWrite, forge.PermAdminWrite, forge.PermSecretsRead}
 
 // appPermissions are the Ghostbranch GitHub App's repository permissions
-// (spec § 2.4). Secrets isn't one of them.
+// (spec § 2.4). Secrets isn't one of them. Checks: read is one, but an
+// install approves it separately, so only the probe says whether it has it.
 var appPermissions = map[string]string{
 	forge.PermMetadataRead: forge.AccessYes, forge.PermContentsWrite: forge.AccessYes, forge.PermPullsWrite: forge.AccessYes,
 	forge.PermWorkflowsWrite: forge.AccessYes, forge.PermAdminWrite: forge.AccessYes, forge.PermActionsWrite: forge.AccessYes,
@@ -167,15 +171,15 @@ func accessOf(m map[string]string, perm string) string {
 }
 
 // tokenGroups probes both repos and says, per command group, what the
-// token lacks.
-func (e *Engine) tokenGroups(ctx context.Context, kind string, p workspace.Pair) (map[string]GroupAccess, error) {
+// token lacks. shadow is what the token may do on the shadow repo.
+func (e *Engine) tokenGroups(ctx context.Context, kind string, p workspace.Pair) (groups map[string]GroupAccess, shadow map[string]string, err error) {
 	pp, _ := e.Forge.(forge.PermissionProber)
 	var scopes []string
 	scoped := false
 	if pp != nil && (kind == "classic" || kind == "oauth") {
 		s, ok, err := pp.OAuthScopes(ctx)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		scopes, scoped = s, ok
 	}
@@ -189,7 +193,7 @@ func (e *Engine) tokenGroups(ctx context.Context, kind string, p workspace.Pair)
 		if pp != nil {
 			var err error
 			if probe, err = pp.ProbePermissions(ctx, full); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		}
 		access[public] = repoAccess(kind, scopes, scoped, public, probe)
@@ -218,7 +222,7 @@ func (e *Engine) tokenGroups(ctx context.Context, kind string, p workspace.Pair)
 		}
 		out[g.name] = ga
 	}
-	return out, nil
+	return out, access[false], nil
 }
 
 // permList is "<permission> on <repo> (<groups>)", sorted, comma-joined.
@@ -320,12 +324,13 @@ func (d *doctorRun) token(ctx context.Context) DoctorCheck {
 	}
 	pa := e.canPublish(ctx, d.pair.Public)
 	det["can_publish"] = pa.Can
-	groups, err := e.tokenGroups(ctx, kind, *d.pair)
+	groups, shadow, err := e.tokenGroups(ctx, kind, *d.pair)
 	if err != nil {
 		v.add(DoctorWarn, "its permissions couldn't be probed: "+err.Error())
 		return v.result(head, "", det)
 	}
 	det["groups"] = groups
+	d.shadowChecks = shadow[forge.PermChecksRead]
 	missing, unknown := map[string][]string{}, map[string][]string{}
 	for _, g := range permGroups {
 		for _, p := range groups[g.name].Missing {
@@ -818,6 +823,25 @@ func (d *doctorRun) appCheck(ctx context.Context) DoctorCheck {
 		// shadow doesn't exist yet, say). Its message says what it knows.
 		return DoctorCheck{Status: DoctorWarn, Details: det, Message: acc.Message}
 	}
+	if d.shadowChecks == forge.AccessNo {
+		if inst, ok := d.shadowInstall(ctx); ok {
+			url := inst.ConfigureURL()
+			return DoctorCheck{Status: DoctorWarn, Details: det, Fix: url,
+				Message: fmt.Sprintf("The Ghostbranch app can't read check runs on %s yet, so the gate can't see CI from other apps. An owner of %s approves the app's new permission at %s",
+					d.pair.Shadow, inst.Account, url)}
+		}
+	}
 	return DoctorCheck{Status: DoctorOK, Details: det,
 		Message: fmt.Sprintf("the Ghostbranch app is installed and can see %s and %s", d.pair.Public, d.pair.Shadow)}
+}
+
+// shadowInstall is the Ghostbranch app's install on the shadow repo's
+// owner; ok is false when GitHub won't list the installs.
+func (d *doctorRun) shadowInstall(ctx context.Context) (forge.Installation, bool) {
+	insts, err := d.e.installer().UserInstallations(ctx)
+	if err != nil {
+		return forge.Installation{}, false
+	}
+	owner, _, _ := forge.SplitName(d.pair.Shadow)
+	return installFor(insts, owner)
 }

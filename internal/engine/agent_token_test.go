@@ -172,7 +172,7 @@ func TestCheckAgentTokenAccountError(t *testing.T) {
 
 func TestAgentTokenLinkAndSetLines(t *testing.T) {
 	t.Parallel()
-	want := forge.TokenLink("ghostbranch-agent-widget", "Ghostbranch agent: "+shadowName, "acme", 30, forge.AgentTokenPermissions)
+	want := forge.TokenLink("ghostbranch-agent-widget", "Ghostbranch agent: "+shadowName, "acme", 30, forge.AgentTokenLinkPermissions)
 	if got := engine.AgentTokenLink(tokenPair); got != want {
 		t.Errorf("link = %s\nwant %s", got, want)
 	}

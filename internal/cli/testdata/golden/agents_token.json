@@ -4,7 +4,7 @@
   "ok": true,
   "exit_code": 0,
   "data": {
-    "link": "https://github.com/settings/personal-access-tokens/new?name=ghostbranch-agent-widget&description=Ghostbranch+agent%3A+acme%2Fwidget-shadow&target_name=acme&expires_in=30&contents=write&pull_requests=write&workflows=write&actions=read&statuses=read",
+    "link": "https://github.com/settings/personal-access-tokens/new?name=ghostbranch-agent-widget&description=Ghostbranch+agent%3A+acme%2Fwidget-shadow&target_name=acme&expires_in=30&contents=write&pull_requests=write&workflows=write&actions=read&statuses=read&checks=read",
     "select": "acme/widget-shadow",
     "check": null,
     "set_line": {
