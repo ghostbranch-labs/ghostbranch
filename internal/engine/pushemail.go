@@ -19,13 +19,13 @@ const emailSettingsURL = "https://github.com/settings/emails"
 func explainGH007(ctx context.Context, g *gitx.Git, refspecs []string, refused *gitx.RefusedError, public string) (msg string, details map[string]any, ok bool) {
 	ref := ""
 	for i, r := range refused.Refs {
-		if i < len(refused.RefReasons) && strings.Contains(refused.RefReasons[i], "GH007") {
+		if i < len(refused.RefReasons) && isEmailPrivacy(refused.RefReasons[i]) {
 			ref = r
 			break
 		}
 	}
 	if ref == "" {
-		if !strings.Contains(refused.Reason, "GH007") || len(refused.Refs) == 0 {
+		if !isEmailPrivacy(refused.Reason) || len(refused.Refs) == 0 {
 			return "", nil, false
 		}
 		ref = refused.Refs[0]
@@ -51,15 +51,19 @@ func explainGH007(ctx context.Context, g *gitx.Git, refspecs []string, refused *
 	}
 	subject, email, _ := strings.Cut(out, "\x00")
 	onPublic := false
-	if pub, there, err := g.Resolve(ctx, "refs/remotes/public/main"); err == nil && there {
+	pub, there, err := g.Resolve(ctx, "refs/remotes/public/main")
+	if err != nil {
+		return "", nil, false
+	}
+	if there {
 		if onPublic, err = g.IsAncestor(ctx, tip, pub); err != nil {
 			return "", nil, false
 		}
 	}
 	branch := strings.TrimPrefix(ref, "refs/heads/")
 	var b strings.Builder
-	fmt.Fprintf(&b, "GitHub refused the push because the newest commit on %s (%s, \"%s\")\n", branch, tip[:7], subject)
-	fmt.Fprintf(&b, "has your private email, %s, and your account blocks pushes that expose it.\n", email)
+	fmt.Fprintf(&b, "GitHub refused the push because the newest commit on %s (%s, \"%s\")\n", branch, tip[:7], visible(subject))
+	fmt.Fprintf(&b, "has your private email, %s, and your account blocks pushes that expose it.\n", visible(email))
 	if onPublic {
 		fmt.Fprintf(&b, "That commit is already public in %s; your own commits are fine.\n", public)
 		b.WriteString("Fix one of these:\n")
@@ -73,4 +77,11 @@ func explainGH007(ctx context.Context, g *gitx.Git, refspecs []string, refused *
 	return b.String(), map[string]any{
 		"cause": "email_private", "commit": tip, "email": email, "branch": branch, "settings_url": emailSettingsURL,
 	}, true
+}
+
+// isEmailPrivacy reports whether a refusal reason is GitHub's private-email
+// block: its per-ref reason is "push declined due to email privacy
+// restrictions", and GH007 appears in the "remote:" lines.
+func isEmailPrivacy(reason string) bool {
+	return strings.Contains(reason, "GH007") || strings.Contains(reason, "email privacy restrictions")
 }

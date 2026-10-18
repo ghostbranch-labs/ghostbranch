@@ -2,6 +2,8 @@ package engine
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -114,5 +116,62 @@ func TestExplainGH007LookupFailsLeavesMessage(t *testing.T) {
 		if msg, det, ok := explainGH007(ctx, g, tc.specs, tc.refused, "acme/widget"); ok || msg != "" || det != nil {
 			t.Errorf("%s: got %q %v %v", name, msg, det, ok)
 		}
+	}
+}
+
+// A public commit's subject and email are untrusted: escapes never reach the
+// terminal text, while the JSON details keep the raw values.
+func TestExplainGH007EscapesCommitText(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	g := testutil.BareRepo(t, t.TempDir())
+	tree, err := g.MakeTree(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := gitx.Identity{Name: "t", Email: "me@example.com", When: time.Unix(1700000000, 0)}
+	sha, err := g.CommitTree(ctx, tree, nil, "evil \x1b[31mred\r\x1b[0m", id, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refused := &gitx.RefusedError{Refs: []string{"refs/heads/x"}, Reason: gh007Reason}
+	msg, det, ok := explainGH007(ctx, g, []string{sha + ":refs/heads/x"}, refused, "acme/widget")
+	if !ok || strings.ContainsAny(msg, "\x1b\r") || !strings.Contains(msg, `evil \u001b[31mred\u000d\u001b[0m`) {
+		t.Fatalf("ok=%v msg=%q", ok, msg)
+	}
+	if det["commit"] != sha {
+		t.Fatalf("details = %v", det)
+	}
+}
+
+// GitHub's real per-ref reason is "email privacy restrictions"; GH007 is only
+// in the remote: lines. The second ref is the one explained.
+func TestExplainGH007MatchesGitHubPerRefReason(t *testing.T) {
+	t.Parallel()
+	g, pub, feat := gh007Repo(t, "me@example.com")
+	refused := &gitx.RefusedError{
+		Refs:       []string{"refs/heads/a", "refs/heads/b"},
+		RefReasons: []string{"push declined due to repository rule violations", "push declined due to email privacy restrictions"},
+		Reason:     "x",
+	}
+	msg, _, ok := explainGH007(context.Background(), g, []string{pub + ":refs/heads/a", feat + ":refs/heads/b"}, refused, "acme/widget")
+	if !ok || !strings.Contains(msg, "newest commit on b ("+feat[:7]) {
+		t.Fatalf("ok=%v msg=%s", ok, msg)
+	}
+}
+
+// A git error (not "no such ref") on the public-main lookup keeps the old message.
+func TestExplainGH007PublicMainLookupErrorLeavesMessage(t *testing.T) {
+	t.Parallel()
+	g, _, feat := gh007Repo(t, "me@example.com")
+	if err := g.DeleteRef(context.Background(), "refs/remotes/public/main"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(g.Dir, "packed-refs"), []byte("garbage line\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	refused := &gitx.RefusedError{Refs: []string{"refs/heads/x"}, Reason: gh007Reason}
+	if msg, det, ok := explainGH007(context.Background(), g, []string{feat + ":refs/heads/x"}, refused, "acme/widget"); ok || msg != "" || det != nil {
+		t.Fatalf("got %q %v %v", msg, det, ok)
 	}
 }

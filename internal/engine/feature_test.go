@@ -234,11 +234,11 @@ func TestPushRefusedForPrivateEmailExplainsTheCommit(t *testing.T) {
 	_, _, err := h.eng.FeatureStart(h.ctx, h.pair, "feat-x")
 	ce := wantCode(t, err, contract.PushRefused)
 	if !strings.HasPrefix(ce.Message, "GitHub refused the push because the newest commit on ") ||
-		!strings.Contains(ce.Message, "has your private email, ") {
+		!strings.Contains(ce.Message, "has your private email, ") || !strings.Contains(ce.Message, "That commit is already public in ") {
 		t.Fatalf("message = %q", ce.Message)
 	}
 	if ce.Details["cause"] != "email_private" || !strings.Contains(ce.Details["reason"].(string), "GH007") || ce.Details["remote"] != "shadow" ||
-		ce.Details["settings_url"] != "https://github.com/settings/emails" || ce.Details["commit"] == "" {
+		ce.Details["settings_url"] != "https://github.com/settings/emails" || ce.Details["branch"] != "feat-x" || ce.Details["commit"] == "" {
 		t.Fatalf("details = %v", ce.Details)
 	}
 }
