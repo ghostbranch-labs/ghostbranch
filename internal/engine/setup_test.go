@@ -363,7 +363,7 @@ func TestSetupBadPublicIsBadFlag(t *testing.T) {
 	t.Parallel()
 	h := setupHarness(t, "acme", false)
 	_, err := h.eng.SetupCheck(h.ctx, engine.SetupOptions{Public: "nope"})
-	wantCode(t, err, contract.BadFlag)
+	_ = wantCode(t, err, contract.BadFlag)
 }
 
 func TestSetupCheckIsReadOnly(t *testing.T) {

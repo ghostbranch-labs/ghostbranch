@@ -89,14 +89,9 @@ func (d *device) start() {
 	})
 }
 
-// ask shows text and reads one answer. Lines typed before the question
-// appeared are discarded first: those still in the device (Flush) and those
-// the reader already took (drained, best effort).
-func (d *device) ask(ctx context.Context, text string) (string, error) {
-	return d.show(ctx, text, text)
-}
-
-// show asks with shown on screen; text is what errors quote.
+// show asks with shown on screen; text is what errors quote. Lines typed
+// before the question appeared are discarded first: those still in the device
+// (Flush) and those the reader already took (drained, best effort).
 func (d *device) show(ctx context.Context, text, shown string) (string, error) {
 	console.Flush(d.dev)
 	d.start()
