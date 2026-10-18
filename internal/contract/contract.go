@@ -13,7 +13,7 @@ import (
 
 // SchemaVersion versions the envelope and every result and event schema. It
 // stays 0.x until launch, and 0.x versions may break.
-const SchemaVersion = "0.15"
+const SchemaVersion = "0.16"
 
 // RecordVersion versions what Ghostbranch stores: feature records, plans,
 // grants, waivers, workspace.json and the stored login. It moves only when a
@@ -178,6 +178,21 @@ const (
 	// PR's branch. details: feature, public_pr, branch (the public branch),
 	// archive_ref, pr_state.
 	FeatureArchived Code = "FEATURE_ARCHIVED"
+	// AppNotInstalled means the Ghostbranch GitHub App isn't installed on an
+	// account guided setup needs. details: accounts, each {account,
+	// install_url}.
+	AppNotInstalled Code = "APP_NOT_INSTALLED"
+	// AppCantSeeRepo means the app is installed but can't reach a repo setup
+	// needs. details: configure_url, repos.
+	AppCantSeeRepo Code = "APP_CANT_SEE_REPO"
+	// TokenWrongAccount means the token belongs to a different account than
+	// the repo's owner. details: token_account (the token's account), owner
+	// (the account the shadow repo needs).
+	TokenWrongAccount Code = "TOKEN_WRONG_ACCOUNT"
+	// AgentTokenRefused means the token offered for an agent is too wide or
+	// lacks what agents need. details: reason (can_publish,
+	// missing_permissions, wrong_repo), link.
+	AgentTokenRefused Code = "AGENT_TOKEN_REFUSED"
 )
 
 var exitCodes = map[Code]int{
@@ -214,6 +229,10 @@ var exitCodes = map[Code]int{
 	NoOpenPR:               ExitUsage,
 	PlanNotFound:           ExitUsage,
 	FeatureArchived:        ExitUsage,
+	AppNotInstalled:        ExitUsage,
+	AppCantSeeRepo:         ExitUsage,
+	TokenWrongAccount:      ExitUsage,
+	AgentTokenRefused:      ExitUsage,
 }
 
 // Exit is the process exit code for c.

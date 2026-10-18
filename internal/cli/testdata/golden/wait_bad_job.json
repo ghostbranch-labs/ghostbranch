@@ -1,1 +1,1 @@
-{"schema_version":"0.15","command":"wait","ok":false,"exit_code":2,"data":{},"warnings":[],"next":[],"error":{"code":"BAD_FLAG","message":"\"nope\" is not a job id: want gate/<feature>/<12 hex>, as gate --detach printed it","field":"job","retryable":false,"details":{}}}
+{"schema_version":"0.16","command":"wait","ok":false,"exit_code":2,"data":{},"warnings":[],"next":[],"error":{"code":"BAD_FLAG","message":"\"nope\" is not a job id: want gate/<feature>/<12 hex>, as gate --detach printed it","field":"job","retryable":false,"details":{}}}

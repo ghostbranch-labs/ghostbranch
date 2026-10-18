@@ -432,6 +432,40 @@ func TestNextForAnInterruptedApply(t *testing.T) {
 	}
 }
 
+// I4: TOKEN_WRONG_ACCOUNT's --shadow way on is this run's own init with the
+// shadow swapped in, and names the repo when guided init asked for it.
+func TestWrongAccountShadowNextIsThisRunsInit(t *testing.T) {
+	t.Parallel()
+	ce := contract.New(contract.TokenWrongAccount, "x").WithDetails(map[string]any{"token_account": "octo", "owner": "acme"})
+	for _, tc := range []struct {
+		args []string
+		want []string
+	}{
+		{[]string{"init"}, []string{"ghostbranch", "init", "acme/widget", "--shadow", "octo/widget-shadow"}},
+		{[]string{"init", "acme/widget", "--shadow=acme/x", "--plan", "--json"}, []string{"ghostbranch", "init", "acme/widget", "--plan", "--json", "--shadow", "octo/widget-shadow"}},
+	} {
+		a := testApp("init", tc.args...)
+		a.result = &engine.InitResult{Public: "acme/widget", Shadow: "acme/widget-shadow"}
+		next := a.next(ce)
+		if len(next) != 2 || !slices.Equal(next[1].Command, tc.want) || !next[1].NeedsHuman {
+			t.Fatalf("%v: next = %+v", tc.args, next)
+		}
+	}
+}
+
+// I7: an INTERRUPTED background login (login --json without a console)
+// is run again in the background; other commands keep "run it again".
+func TestNextForAnInterruptedStreamedLogin(t *testing.T) {
+	t.Parallel()
+	a := testApp("login", "login", "--json", "--non-interactive")
+	a.jsonOut, a.ndjson = true, true
+	next := a.next(contract.New(contract.Interrupted, "x"))
+	if len(next) != 1 || !slices.Equal(next[0].Command, []string{"ghostbranch", "login", "--json", "--non-interactive"}) ||
+		!next[0].NeedsHuman || !strings.Contains(next[0].Why, "relay the new code") {
+		t.Fatalf("next = %+v", next)
+	}
+}
+
 // A person's replay names the pair, never a relative --repo: their
 // terminal may not be in this checkout.
 func TestAgainForAPersonReplacesARelativeRepo(t *testing.T) {

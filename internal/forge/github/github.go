@@ -125,6 +125,22 @@ func inaccessible(err error) bool {
 	return errors.As(err, &ge) && strings.HasPrefix(ge.Message, "Resource not accessible by")
 }
 
+// nameTaken reports GitHub's 422 for a repo name that already exists on
+// the account ("name already exists on this account"), which it gives even
+// when the token can't see that repo.
+func nameTaken(resp *gh.Response, err error) bool {
+	var ge *gh.ErrorResponse
+	if statusOf(resp) != http.StatusUnprocessableEntity || !errors.As(err, &ge) {
+		return false
+	}
+	for _, e := range ge.Errors {
+		if strings.Contains(e.Message, "already exists") {
+			return true
+		}
+	}
+	return strings.Contains(ge.Message, "already exists")
+}
+
 // waitAsked reports a 403 that tells the caller to wait (Retry-After or no
 // rate limit left) but that go-github didn't classify as a rate limit, such
 // as an unrecognised secondary limit. It may pass on its own.
@@ -242,6 +258,9 @@ func (c *Client) CreatePrivateRepo(ctx context.Context, full string) (forge.Repo
 	}
 	if err != nil && org != "" && statusOf(resp) == http.StatusNotFound {
 		return forge.Repo{}, fmt.Errorf("%w: create %s: %w", forge.ErrForbidden, full, hostErr(err))
+	}
+	if nameTaken(resp, err) {
+		return forge.Repo{}, fmt.Errorf("%w: create %s: %w", forge.ErrRepoExists, full, hostErr(err))
 	}
 	if err := wrap(ctx, full, resp, err); err != nil {
 		return forge.Repo{}, err
@@ -662,6 +681,10 @@ func (c *Client) ProbePermissions(ctx context.Context, full string) (forge.RepoP
 	note(forge.PermActionsRead, resp, err)
 	_, resp, err = c.c.Repositories.GetCombinedStatus(ctx, owner, name, r.GetDefaultBranch(), &one)
 	note(forge.PermStatusesRead, resp, err)
+	// The default branch's head is a commit every repo with commits has; an
+	// empty repo answers 404 or 422, which leaves Checks: read unknown.
+	_, resp, err = c.c.Checks.ListCheckRunsForRef(ctx, owner, name, r.GetDefaultBranch(), &gh.ListCheckRunsOptions{ListOptions: one})
+	note(forge.PermChecksRead, resp, err)
 	_, resp, err = c.c.Actions.ListRepoSecrets(ctx, owner, name, &one)
 	note(forge.PermSecretsRead, resp, err)
 	if ctx.Err() != nil {

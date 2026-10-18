@@ -11,10 +11,11 @@ main, green CI, and a leak scan of exactly what will be published.
 0. **Always run `ghostbranch sync --repo <public> --json` first**, before `feature start` or resuming
    a feature: features start from shadow main. Sync never writes to public. New repo? *Set up a repo*.
 1. `ghostbranch feature start <name> --repo <public> --json` creates the feature branch in the shadow repo.
-2. Run the commands in `data.checkout`, in order (argvs; `data.checkout_hint` is the same as one shell
-   line). They fetch the branch from the shadow repo (in a checkout of the public repo, usually a remote
-   named `shadow`) and switch to it. Commit there, and push **to the
-   shadow repo only** (`git push shadow <name>`), never to `origin` (a handed-off PR: see *After publishing*).
+   Run in a checkout of the public repo, it also adds the `shadow` remote, fetches it and switches to the branch.
+2. `data.local.status` `switched`: you are on `<name>`. Commit there, then push **to the shadow repo only**
+   (`git push shadow <name>`; `data.local.remote` names the remote), never to `origin` (a handed-off PR: see
+   *After publishing*). `fetched_only` or `skipped` (`data.local.reason` says why): follow `next`, or run
+   `data.checkout` in order (argvs; `data.checkout_hint` is one shell line). It never switches over uncommitted work.
 3. `ghostbranch gate <name> --repo <public> --json` rebases on public main, scans for leaks and runs CI.
 4. `ghostbranch promote <name> --repo <public> --plan --json` publishes in the repo's `promote.default_mode`
    (`preserve` unless set); pass `--mode` to choose. With more than one commit, add
@@ -96,6 +97,27 @@ main, green CI, and a leak scan of exactly what will be published.
    scheduled sync, whether they need a `GHOSTBRANCH_SYNC_TOKEN` secret (see *Keeping up with public*).
    Guarded jobs run in the shadow repo on unreleased code: never deploy or publish credentials there.
 
+## Setting up a repo for a person
+
+1. Run `ghostbranch init <repo> --plan --json` and read `data.setup.steps` (`login`, `account`,
+   `app_installed`, `shadow`, `app_access`, `pair`, `guard`, `doctor`; each `done`, `needs_human`,
+   `blocked`, `todo` or `skipped`). On a stop it writes nothing and returns that step's code (exit 1 for
+   `AUTH_MISSING` and `LOGIN_EXPIRED`, else 2) and a `next` saying what to do.
+2. For each `needs_human` step, give the person its message and `url`, one at a time, then run the
+   command again to check. When none is left, run `ghostbranch init <repo> --json` (without `--plan`):
+   it does the `todo` steps. Then run `ghostbranch doctor --repo <repo> --json` to check the setup.
+3. Setup always uses the person's Ghostbranch login. If the `login` step is `done` but its
+   `details.source` isn't `login`, the token is gh's or an env token's: ask the person about any
+   `GH_TOKEN`, `GITHUB_TOKEN` or `GHOSTBRANCH_TOKEN` set, and run again with `GHOSTBRANCH_NO_GH=1`
+   (it turns off the `gh auth token` fallback), then log in as below. Never offer gh's login.
+4. Not logged in? Run `ghostbranch login --json --non-interactive` **in the background** and relay its
+   first line (`{"type":"device_code"}`: its `user_code` and `verification_uri`) to the person. It waits
+   up to about 15 minutes and ends with the login result; if it times out, run it again.
+5. When setup is done, ask once: your own shadow-only token (**recommended**) or the person's login.
+   For a token the person runs `ghostbranch agents token` at their console (or `agents token --json`,
+   which returns `link`, `select` and `set_line` and reads no token), then restarts you in a shell with
+   `GHOSTBRANCH_TOKEN` set. Check it: `ghostbranch agents status --json` must show `token_can_publish` `"false"`.
+
 ## When the person is stuck
 
 A login, the app's install and tokens are the person's to do. Help them one step at a time:
@@ -104,9 +126,14 @@ A login, the app's install and tokens are the person's to do. Help them one step
 2. Hand over one person-only fix at a time, with its link. When they say it's done, run `doctor`
    again before you go on.
 
-- `AUTH_MISSING` or `LOGIN_EXPIRED`: the person runs `ghostbranch login` in their own terminal.
+- `AUTH_MISSING` or `LOGIN_EXPIRED`: during setup, start the login as in *Setting up a repo for a
+  person*; otherwise the person runs `ghostbranch login` in their own terminal.
 - The app can't see a repo (`doctor` says it doesn't exist or the token can't see it): give the install
   link, `https://github.com/apps/ghostbranch-cli/installations/new`, and ask them to add that repo.
+- `APP_NOT_INSTALLED`: give each `error.details.accounts[].install_url` with its account; they install the app there.
+- `APP_CANT_SEE_REPO`: give `configure_url` and the `repos` to add to the app's access.
+- `TOKEN_WRONG_ACCOUNT`: the token is for another account than `owner`; they use the right one, or pass `--shadow <owner/name>` as `next` says.
+- `AGENT_TOKEN_REFUSED`: `agents token` refused the token; show `details.link` and have them make a shadow-only one.
 - A token for you: the pre-filled link in *Strict isolation*, with exactly its permissions.
 - Never ask for, read or paste a token, and never ask for wider access.
 
@@ -314,8 +341,11 @@ A login, the app's install and tokens are the person's to do. Help them one step
 - Never run `ghostbranch waivers add`, edit `waivers.json`, or otherwise hide a leak-scan finding.
 - Never create or delete repos (other than through `ghostbranch init`), or change repo settings, tokens
   or secrets yourself; those are the person's.
-- Never run `ghostbranch login` or `ghostbranch logout`, or rely on the person's stored login: use the
-  token you were given. If `doctor` or `agents status` warns `AGENT_ON_PERSON_LOGIN`, tell the person.
+- Never run `ghostbranch logout`, `ghostbranch login --with-token` or an interactive `ghostbranch login`.
+  The one exception is `ghostbranch login --json --non-interactive` in the background, to start the
+  person's sign-in during setup (you relay the code; they approve). Use the person's stored login only
+  for setup, or afterwards if they chose it; otherwise use your own token. If `doctor` or
+  `agents status` warns `AGENT_ON_PERSON_LOGIN`, tell the person.
 
 You may *suggest* these to the person, never run them yourself:
 
@@ -406,7 +436,7 @@ Fine-grained tokens, per command:
 | `init` that creates the shadow repo | Administration write on **all repositories** of the owner (a token can't name a repo that doesn't exist yet), plus the `init --adopt` set; afterwards narrow it to the shadow repo or delete it, and give an agent only its own shadow-only token (see *Strict isolation*) |
 | `init --adopt` (create the empty private repo yourself first) | Shadow: Administration, Contents and Workflows read and write |
 | `sync`, `upgrade` | Shadow: Contents and Workflows write; Actions write (optional: lets `sync` cancel the workflow runs its pushes start) |
-| `feature start`, `gate` | Shadow: Contents, Pull requests and Workflows write; Actions and Commit statuses read |
+| `feature start`, `gate` | Shadow: Contents, Pull requests and Workflows write; Actions and Commit statuses read; Checks read (optional: lets `gate` see CI from apps other than GitHub Actions) |
 | `promote`, `apply` | Public: Contents and Pull requests write (yours, never an agent's) |
 | `audit` | Contents read; optionally Secrets: read, to compare secret names |
 
@@ -421,7 +451,7 @@ other OS users can't read them, but an agent running as you can.
    Workflows read and write; Actions and Commit statuses read. This link fills in the rest (replace
    `<shadow-owner>` and `<repo>`): {{AGENT_TOKEN_LINK}}
    GitHub can't pre-fill the repositories: choose "Only select repositories", then pick only the
-   shadow repo. Actions write is optional: it lets `sync` cancel the runs its pushes start.
+   shadow repo. Actions write is optional: it lets `sync` cancel the runs its pushes start. So is Checks read: it lets `gate` see CI from other apps.
 2. Set it as `GHOSTBRANCH_TOKEN` **only in the agent's environment**.
 3. Make sure the agent's sandbox cannot read your `gh` login or keychain, or `gh auth token` hands it
    your full token.

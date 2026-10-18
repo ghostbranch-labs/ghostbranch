@@ -24,7 +24,7 @@ const (
 )
 
 // DoctorCheckIDs are doctor's checks, in the order it runs and reports them.
-var DoctorCheckIDs = []string{"tools", "token", "pair", "guard", "state", "ci"}
+var DoctorCheckIDs = []string{"tools", "token", "app", "pair", "guard", "state", "ci"}
 
 // The oldest git Ghostbranch supports: drift and the gate use git merge-tree
 // --write-tree, new in 2.38. (The guard alone needs 2.31.)
@@ -38,8 +38,9 @@ const (
 // e.Forge (nil then), e.LooksLikeAgent, and e.WS (nil when the workspace
 // couldn't be opened).
 type DoctorOptions struct {
-	// Repo is --repo. Empty means the current checkout's pair; never the
-	// workspace's only pair, so outside a checkout the pair checks skip.
+	// Repo is --repo. Empty means the current checkout's pair, else (outside
+	// any checkout) the workspace's only pair; with none or several, the
+	// pair checks skip.
 	Repo    string
 	Remotes []workspace.Remote // the current checkout's remotes
 	Dir     string             // the current directory; "" when unknown
@@ -60,11 +61,15 @@ type DoctorOptions struct {
 	// then does doctor work out the plain init line for a repo that isn't
 	// set up here (PersonMessage).
 	ForPerson bool
+	// InstallURL is the Ghostbranch app's install page, for the app check.
+	InstallURL string
 }
 
-// DoctorCheck is one check's finding. Fix is a command that fixes it, or
-// "" when there is none to run; FixArgv is that command as argv (nil with
-// no fix), for next. Fix is FixArgv joined with spaces, for reading only.
+// DoctorCheck is one check's finding. Fix is a command that fixes it, or,
+// for the app check, the link to open; "" when there is none. FixArgv is
+// the command as argv (nil with no command), for next; Fix is FixArgv
+// joined with spaces, for reading only. The app check's link has no
+// FixArgv, so a failing app check adds nothing to DOCTOR_FAILED's next.
 type DoctorCheck struct {
 	ID      string         `json:"id"`
 	Status  string         `json:"status"`
@@ -148,6 +153,7 @@ type doctorRun struct {
 	pc           *pairCtx
 	cfg          config.Config
 	O            string
+	shadowChecks string // Checks: read on the shadow, from the token check's probe: forge.AccessNo only when GitHub refused it
 }
 
 // Doctor checks this machine's setup and, when there is one, the pair. It
@@ -169,7 +175,7 @@ func (e *Engine) Doctor(ctx context.Context, opt DoctorOptions) (*DoctorResult, 
 	}()
 	d.findPair()
 	run := map[string]func(context.Context) DoctorCheck{
-		"tools": d.tools, "token": d.token, "pair": d.pairCheck, "guard": d.guard, "state": d.state, "ci": d.ci,
+		"tools": d.tools, "token": d.token, "app": d.appCheck, "pair": d.pairCheck, "guard": d.guard, "state": d.state, "ci": d.ci,
 	}
 	res := &DoctorResult{Checks: []DoctorCheck{}}
 	for _, id := range DoctorCheckIDs {

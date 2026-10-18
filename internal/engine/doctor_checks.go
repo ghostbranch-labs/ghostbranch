@@ -72,6 +72,9 @@ func (d *doctorRun) findPair() {
 	case pub != "":
 		d.checkout = pub
 		d.noPair = fmt.Sprintf("this checkout's repo %s isn't set up in workspace %q: ghostbranch init %s --adopt --plan sets it up if its shadow repo exists, else ghostbranch init %s --plan", pub, e.WS.Name, pub, pub)
+	case d.opt.Repo == "" && len(e.WS.Pairs) == 1:
+		// Outside a checkout, the only pair is the one meant.
+		d.pair = &e.WS.Pairs[0]
 	default:
 		d.noPair = "not in a checkout of a registered public repo; pass --repo <owner/repo> to check a pair"
 	}
@@ -104,17 +107,21 @@ var permGroups = []struct {
 	{"sync", []permNeed{{true, forge.PermContentsRead, false}, {true, forge.PermPullsRead, false},
 		{false, forge.PermContentsWrite, false}, {false, forge.PermWorkflowsWrite, false}, {false, forge.PermActionsWrite, true}}},
 	{"gate", []permNeed{{false, forge.PermContentsWrite, false}, {false, forge.PermPullsWrite, false},
-		{false, forge.PermWorkflowsWrite, false}, {false, forge.PermActionsRead, false}, {false, forge.PermStatusesRead, false}}},
+		{false, forge.PermWorkflowsWrite, false}, {false, forge.PermActionsRead, false}, {false, forge.PermStatusesRead, false},
+		// Wanted, not needed: without it the gate reads workflow runs
+		// instead of check runs, and warns (CHECKS_LIMITED).
+		{false, forge.PermChecksRead, true}}},
 	{"promote", []permNeed{{true, forge.PermContentsWrite, false}, {true, forge.PermPullsWrite, false}, {false, forge.PermContentsWrite, false}}},
 	{"audit", []permNeed{{false, forge.PermContentsRead, false}, {false, forge.PermSecretsRead, true}}},
 }
 
 var allPermissions = []string{forge.PermMetadataRead, forge.PermContentsRead, forge.PermContentsWrite,
 	forge.PermPullsRead, forge.PermPullsWrite, forge.PermActionsRead, forge.PermActionsWrite,
-	forge.PermStatusesRead, forge.PermWorkflowsWrite, forge.PermAdminWrite, forge.PermSecretsRead}
+	forge.PermStatusesRead, forge.PermChecksRead, forge.PermWorkflowsWrite, forge.PermAdminWrite, forge.PermSecretsRead}
 
 // appPermissions are the Ghostbranch GitHub App's repository permissions
-// (spec § 2.4). Secrets isn't one of them.
+// (spec § 2.4). Secrets isn't one of them. Checks: read is one, but an
+// install approves it separately, so only the probe says whether it has it.
 var appPermissions = map[string]string{
 	forge.PermMetadataRead: forge.AccessYes, forge.PermContentsWrite: forge.AccessYes, forge.PermPullsWrite: forge.AccessYes,
 	forge.PermWorkflowsWrite: forge.AccessYes, forge.PermAdminWrite: forge.AccessYes, forge.PermActionsWrite: forge.AccessYes,
@@ -164,15 +171,15 @@ func accessOf(m map[string]string, perm string) string {
 }
 
 // tokenGroups probes both repos and says, per command group, what the
-// token lacks.
-func (e *Engine) tokenGroups(ctx context.Context, kind string, p workspace.Pair) (map[string]GroupAccess, error) {
+// token lacks. shadow is what the token may do on the shadow repo.
+func (e *Engine) tokenGroups(ctx context.Context, kind string, p workspace.Pair) (groups map[string]GroupAccess, shadow map[string]string, err error) {
 	pp, _ := e.Forge.(forge.PermissionProber)
 	var scopes []string
 	scoped := false
 	if pp != nil && (kind == "classic" || kind == "oauth") {
 		s, ok, err := pp.OAuthScopes(ctx)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		scopes, scoped = s, ok
 	}
@@ -186,7 +193,7 @@ func (e *Engine) tokenGroups(ctx context.Context, kind string, p workspace.Pair)
 		if pp != nil {
 			var err error
 			if probe, err = pp.ProbePermissions(ctx, full); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		}
 		access[public] = repoAccess(kind, scopes, scoped, public, probe)
@@ -215,7 +222,7 @@ func (e *Engine) tokenGroups(ctx context.Context, kind string, p workspace.Pair)
 		}
 		out[g.name] = ga
 	}
-	return out, nil
+	return out, access[false], nil
 }
 
 // permList is "<permission> on <repo> (<groups>)", sorted, comma-joined.
@@ -317,12 +324,13 @@ func (d *doctorRun) token(ctx context.Context) DoctorCheck {
 	}
 	pa := e.canPublish(ctx, d.pair.Public)
 	det["can_publish"] = pa.Can
-	groups, err := e.tokenGroups(ctx, kind, *d.pair)
+	groups, shadow, err := e.tokenGroups(ctx, kind, *d.pair)
 	if err != nil {
 		v.add(DoctorWarn, "its permissions couldn't be probed: "+err.Error())
 		return v.result(head, "", det)
 	}
 	det["groups"] = groups
+	d.shadowChecks = shadow[forge.PermChecksRead]
 	missing, unknown := map[string][]string{}, map[string][]string{}
 	for _, g := range permGroups {
 		for _, p := range groups[g.name].Missing {
@@ -769,4 +777,71 @@ func (d *doctorRun) ci(ctx context.Context) DoctorCheck {
 	}
 	return v.result(fmt.Sprintf("%d repo guard(s) the gate rewrites; %s", len(res.Guards), secrets),
 		"; no workflow runs on sync's pushes", det)
+}
+
+// appCheck is the Ghostbranch app's install and access for the pair, read
+// from SetupCheck's two app steps. It is skipped for any token but an app
+// login, and with no pair.
+func (d *doctorRun) appCheck(ctx context.Context) DoctorCheck {
+	e := d.e
+	switch {
+	case !e.AppLogin || e.TokenSource != sourceLogin:
+		return skipped("not an app login, so there is no Ghostbranch app to check")
+	case d.pair == nil:
+		return skipped("no pair to check the Ghostbranch app for")
+	case e.Forge == nil || e.installer() == nil:
+		return skipped("no GitHub token (see token)")
+	}
+	s, err := e.SetupCheck(ctx, SetupOptions{Public: d.pair.Public, Shadow: d.pair.Shadow, Adopt: true, InstallURL: d.opt.InstallURL})
+	if err != nil {
+		return DoctorCheck{Status: DoctorFail, Message: contract.From(err).Message, Details: map[string]any{"installed": false, "selection": "", "accounts": []any{}}}
+	}
+	var inst, acc SetupStep
+	for _, st := range s.Steps {
+		switch st.ID {
+		case "app_installed":
+			inst = st
+		case "app_access":
+			acc = st
+		}
+	}
+	selection, _ := acc.Details["selection"].(string)
+	var accounts any = []any{}
+	if a, ok := inst.Details["accounts"]; ok {
+		accounts = a
+	}
+	det := map[string]any{"installed": inst.Status == SetupDone, "selection": selection, "accounts": accounts}
+	for _, st := range []SetupStep{inst, acc} {
+		if st.Status == SetupNeedsHuman || st.Status == SetupBlocked {
+			// Fix is the link to open, not a command: no FixArgv, so
+			// DOCTOR_FAILED's next gets nothing from this check.
+			return DoctorCheck{Status: DoctorFail, Message: st.Message, Details: det, Fix: st.URL}
+		}
+	}
+	if acc.Status != SetupDone {
+		// Not proved: the app_access step couldn't check both repos (the
+		// shadow doesn't exist yet, say). Its message says what it knows.
+		return DoctorCheck{Status: DoctorWarn, Details: det, Message: acc.Message}
+	}
+	if d.shadowChecks == forge.AccessNo {
+		if inst, ok := d.shadowInstall(ctx); ok {
+			url := inst.ConfigureURL()
+			return DoctorCheck{Status: DoctorWarn, Details: det, Fix: url,
+				Message: fmt.Sprintf("The Ghostbranch app can't read check runs on %s yet, so the gate can't see CI from other apps. An owner of %s approves the app's new permission at %s",
+					d.pair.Shadow, inst.Account, url)}
+		}
+	}
+	return DoctorCheck{Status: DoctorOK, Details: det,
+		Message: fmt.Sprintf("the Ghostbranch app is installed and can see %s and %s", d.pair.Public, d.pair.Shadow)}
+}
+
+// shadowInstall is the Ghostbranch app's install on the shadow repo's
+// owner; ok is false when GitHub won't list the installs.
+func (d *doctorRun) shadowInstall(ctx context.Context) (forge.Installation, bool) {
+	insts, err := d.e.installer().UserInstallations(ctx)
+	if err != nil {
+		return forge.Installation{}, false
+	}
+	owner, _, _ := forge.SplitName(d.pair.Shadow)
+	return installFor(insts, owner)
 }

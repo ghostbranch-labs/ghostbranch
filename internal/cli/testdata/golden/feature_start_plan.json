@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.15",
+  "schema_version": "0.16",
   "command": "feature start",
   "ok": true,
   "exit_code": 0,
@@ -21,6 +21,7 @@
       ]
     ],
     "checkout_hint": "git fetch shadow && git switch feat-x",
+    "local": null,
     "preview": {
       "fingerprint": {
         "shadow_main": "<SHA1>"

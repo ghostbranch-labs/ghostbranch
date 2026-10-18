@@ -389,7 +389,7 @@ func TestPromoteDetachWaitPromote(t *testing.T) {
 	}
 	code, out, errOut := te.run("wait", job, "--json")
 	var w map[string]any
-	if err := json.Unmarshal(waitStream(t, out), &w); err != nil || code != 0 {
+	if err := json.Unmarshal(waitStream(t, out, "wait-event.schema.json"), &w); err != nil || code != 0 {
 		t.Fatalf("wait: %d %v\n%s\n%s", code, err, out, errOut)
 	}
 	if wd, _ := w["data"].(map[string]any); wd["checks"] != "passed" {

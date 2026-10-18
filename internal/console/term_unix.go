@@ -17,6 +17,16 @@ func isTerminal(f *os.File) bool {
 	return err == nil
 }
 
+// inputFD is the file descriptor to read hidden input from: the device
+// itself, when it is the opened terminal.
+func inputFD(dev io.ReadWriteCloser) (int, bool) {
+	f, ok := dev.(*os.File)
+	if !ok || !isTerminal(f) {
+		return 0, false
+	}
+	return int(f.Fd()), true
+}
+
 // Open opens the controlling terminal.
 func Open() (io.ReadWriteCloser, error) { return os.OpenFile("/dev/tty", os.O_RDWR, 0) }
 

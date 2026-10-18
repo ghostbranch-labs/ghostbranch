@@ -4,7 +4,7 @@
   "type": "object",
   "additionalProperties": false,
   "required": ["public", "shadow", "created_shadow", "adopted", "resumed", "mirrored_branches", "mirrored_tags",
-               "overlay_created", "default_branch_set", "audit", "preview", "guard_installed", "doctor"],
+               "overlay_created", "default_branch_set", "audit", "preview", "guard_installed", "doctor", "setup"],
   "properties": {
     "public": { "$ref": "common.schema.json#/$defs/repo" },
     "shadow": { "$ref": "common.schema.json#/$defs/repo" },
@@ -18,6 +18,45 @@
     "audit": { "oneOf": [{ "type": "null" }, { "$ref": "audit.schema.json" }] },
     "preview": { "oneOf": [{ "type": "null" }, { "$ref": "preview.schema.json" }] },
     "guard_installed": { "description": "the push guard is installed in this checkout when init finishes (by this run or before it)", "type": "boolean" },
-    "doctor": { "description": "the doctor run at the end of guided init; null when it didn't run", "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/doctorSummary" }] }
+    "doctor": { "description": "the doctor run at the end of guided init; null when it didn't run", "oneOf": [{ "type": "null" }, { "$ref": "common.schema.json#/$defs/doctorSummary" }] },
+    "setup": {
+      "description": "the setup checklist: worked out before init acts (a --plan, or a stop), and again once init is done",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["steps"],
+      "properties": {
+        "steps": {
+          "description": "every step, in this order: login, account, app_installed, shadow, app_access, pair, guard, doctor",
+          "type": "array",
+          "minItems": 8,
+          "maxItems": 8,
+          "prefixItems": [
+            { "$ref": "#/$defs/setup_step", "properties": { "id": { "const": "login" } } },
+            { "$ref": "#/$defs/setup_step", "properties": { "id": { "const": "account" } } },
+            { "$ref": "#/$defs/setup_step", "properties": { "id": { "const": "app_installed" } } },
+            { "$ref": "#/$defs/setup_step", "properties": { "id": { "const": "shadow" } } },
+            { "$ref": "#/$defs/setup_step", "properties": { "id": { "const": "app_access" } } },
+            { "$ref": "#/$defs/setup_step", "properties": { "id": { "const": "pair" } } },
+            { "$ref": "#/$defs/setup_step", "properties": { "id": { "const": "guard" } } },
+            { "$ref": "#/$defs/setup_step", "properties": { "id": { "const": "doctor" } } }
+          ],
+          "items": false
+        }
+      }
+    }
+  },
+  "$defs": {
+    "setup_step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "status", "message", "url", "details"],
+      "properties": {
+        "id": { "enum": ["login", "account", "app_installed", "shadow", "app_access", "pair", "guard", "doctor"] },
+        "status": { "description": "todo: Ghostbranch will do it; skipped: it doesn't apply", "enum": ["done", "needs_human", "blocked", "todo", "skipped"] },
+        "message": { "type": "string" },
+        "url": { "description": "the link for the step, or \"\" for none", "type": "string" },
+        "details": { "type": "object" }
+      }
+    }
   }
 }

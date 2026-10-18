@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -112,7 +113,11 @@ func (a *app) priorLogin() (*auth.Login, error) {
 }
 
 func (a *app) loginDevice(ctx context.Context) (*LoginResult, error) {
-	if !a.env.ConsoleUsable || a.nonInteractive || a.env.OpenConsole == nil {
+	noConsole := !a.env.ConsoleUsable || a.nonInteractive || a.env.OpenConsole == nil
+	if noConsole && a.jsonOut {
+		return a.loginStreaming(ctx)
+	}
+	if noConsole {
 		return nil, loginUnavailable("no_console", "login needs a person at a terminal to approve it on GitHub; pipe a token to `ghostbranch login --with-token`, or set GHOSTBRANCH_TOKEN")
 	}
 	prev, err := a.priorLogin()
@@ -134,11 +139,58 @@ func (a *app) loginDevice(ctx context.Context) (*LoginResult, error) {
 	return res, nil
 }
 
+// loginStreaming is login --json without a console, for an agent: the first
+// stdout line is the device_code event (the user code and where to enter it,
+// never the device code), then it waits for the person's approval and the
+// last line is the normal envelope.
+func (a *app) loginStreaming(ctx context.Context) (*LoginResult, error) {
+	prev, err := a.priorLogin()
+	if err != nil {
+		return nil, err
+	}
+	a.ndjson = true
+	l, err := a.runLoginWith(ctx, func(dc auth.DeviceCode) {
+		ev := struct {
+			SchemaVersion   string `json:"schema_version"`
+			Type            string `json:"type"`
+			UserCode        string `json:"user_code"`
+			VerificationURI string `json:"verification_uri"`
+			ExpiresAt       string `json:"expires_at"`
+		}{contract.SchemaVersion, "device_code", dc.UserCode, dc.VerificationURI,
+			a.env.Now().UTC().Add(time.Duration(dc.ExpiresIn) * time.Second).Format(time.RFC3339)}
+		enc := json.NewEncoder(a.env.Stdout)
+		enc.SetEscapeHTML(false)
+		_ = enc.Encode(ev)
+	})
+	if err != nil {
+		return nil, err
+	}
+	res := a.loginResult(*l, prev)
+	if prev == nil && a.env.AppSlug != "" {
+		res.InstallURL = "https://github.com/apps/" + a.env.AppSlug + "/installations/new"
+	}
+	return res, nil
+}
+
 // runLogin runs the device flow on ask (the console device, or guided
 // init's asker): it shows the code and URL there, opens GitHub's page in the
 // browser when it can, waits for the approval, fills the account and stores
 // the login. It asks nothing. The device code itself is never shown.
 func (a *app) runLogin(ctx context.Context, ask prompt.Asker) (*auth.Login, error) {
+	return a.runLoginWith(ctx, func(dc auth.DeviceCode) {
+		ask.Say(fmt.Sprintf("To log in, open %s and enter this code: %s", dc.VerificationURI, dc.UserCode))
+		// Only GitHub's own page is ever opened.
+		if a.env.OpenBrowser != nil && strings.HasPrefix(dc.VerificationURI, a.oauthBase()+"/") &&
+			a.env.OpenBrowser(dc.VerificationURI) == nil {
+			ask.Say("(It is open in your browser.)")
+		}
+		ask.Say("Waiting for you to approve it on GitHub. Ctrl-C cancels.")
+	})
+}
+
+// runLoginWith is the device flow with show telling the person (or the
+// agent) the code before the wait. Nothing is stored before the approval.
+func (a *app) runLoginWith(ctx context.Context, show func(auth.DeviceCode)) (*auth.Login, error) {
 	// Probe the keychain before GitHub is asked: a fresh pair that can't be
 	// stored is lost. priorLogin handles a nil, unusable or locked keychain
 	// and lets a corrupt entry be replaced.
@@ -150,13 +202,7 @@ func (a *app) runLogin(ctx context.Context, ask prompt.Asker) (*auth.Login, erro
 	if err != nil {
 		return nil, err
 	}
-	ask.Say(fmt.Sprintf("To log in, open %s and enter this code: %s", dc.VerificationURI, dc.UserCode))
-	// Only GitHub's own page is ever opened.
-	if a.env.OpenBrowser != nil && strings.HasPrefix(dc.VerificationURI, a.oauthBase()+"/") &&
-		a.env.OpenBrowser(dc.VerificationURI) == nil {
-		ask.Say("(It is open in your browser.)")
-	}
-	ask.Say("Waiting for you to approve it on GitHub. Ctrl-C cancels.")
+	show(dc)
 	l, err := flow.Poll(ctx, dc)
 	if err != nil {
 		return nil, err

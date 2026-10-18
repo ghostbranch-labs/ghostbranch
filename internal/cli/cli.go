@@ -56,6 +56,9 @@ type Env struct {
 	ConsoleUsable bool
 	// OpenConsole opens the console device for the approval code.
 	OpenConsole func() (io.ReadWriteCloser, error)
+	// ReadSecret reads one line from the opened console device with echo
+	// off (agents token's token); DefaultEnv's is console.ReadSecret.
+	ReadSecret func(ctx context.Context, dev io.ReadWriteCloser) ([]byte, error)
 	// Asker opens the console for guided init's questions: the console
 	// device, never stdin. DefaultEnv's is prompt.OnConsole over
 	// ConsoleUsable and OpenConsole.
@@ -137,7 +140,7 @@ func trueColorTerm(getenv func(string) string) bool {
 func DefaultEnv() Env {
 	env := Env{
 		Stdout: os.Stdout, Stderr: os.Stderr, Stdin: os.Stdin, Getenv: os.Getenv, UserHome: os.UserHomeDir,
-		ConsoleUsable: console.Usable(os.Stdin, os.Stderr), OpenConsole: console.Open,
+		ConsoleUsable: console.Usable(os.Stdin, os.Stderr), OpenConsole: console.Open, ReadSecret: console.ReadSecret,
 		Now: time.Now, Sleep: sleepCtx, Rand: rand.Reader,
 		NewForge: func(token string) (forge.Forge, error) {
 			c, err := ghforge.New(token)
@@ -190,6 +193,7 @@ type app struct {
 	args           []string
 	pairFull       workspace.Pair
 	shadowRemote   string
+	login          string     // the GitHub login Ghostbranch signed in as, when known without asking GitHub again
 	startName      string     // feature start's name argument, for next
 	startFrom      string     // feature start's --from, for next
 	versionFlag    bool       // ghostbranch --version ran: the command is version
@@ -338,7 +342,11 @@ func (a *app) render(err error) int {
 		_, _ = fmt.Fprint(a.env.Stdout, withoutNothing(human(a.result, outSt), env.Error != nil))
 	}
 	if env.Error != nil {
-		_, _ = fmt.Fprintf(a.env.Stderr, "%s %s [%s]\n", errSt.Fail("error:"), env.Error.Message, env.Error.Code)
+		msg := env.Error.Message
+		if env.Error.Code == contract.AgentTokenRefused {
+			msg = errSt.Fail(msg)
+		}
+		_, _ = fmt.Fprintf(a.env.Stderr, "%s %s [%s]\n", errSt.Fail("error:"), msg, env.Error.Code)
 		printSteps(a.env.Stderr, env.Error)
 		printNext(a.env.Stderr, next, errSt)
 	} else {
@@ -548,6 +556,7 @@ func (a *app) engine(ctx context.Context) (*engine.Engine, error) {
 		actor = "human:unknown"
 		if u, err := f.CurrentUser(ctx); err == nil {
 			actor = "human:" + u.Login
+			a.login = u.Login
 		} else {
 			a.warnings = append(a.warnings, contract.Warning{Code: contract.ActorUnknown,
 				Message: "GHOSTBRANCH_ACTOR is unset and the GitHub login could not be read, so the ledger records human:unknown; set GHOSTBRANCH_ACTOR, for example agent:claude-code"})
@@ -558,6 +567,14 @@ func (a *app) engine(ctx context.Context) (*engine.Engine, error) {
 		NewScanner: a.env.NewScanner, PollInterval: a.env.PollInterval, SettleWindow: a.env.SettleWindow, CIAppearWindow: a.env.CIAppearWindow, CIAppearPoll: a.env.CIAppearPoll,
 		DryRun: a.dryRun, OnPush: a.env.OnPush, Grants: grant.NewStore(ws.GrantsPath(), ws.GrantsLockPath()),
 		Waivers: waiver.NewStore(ws.WaiversPath(), ws.WaiversLockPath())}
+	if source == "login" && a.env.Keychain != nil {
+		if l, err := auth.LoadLogin(a.env.Keychain); err == nil && l != nil {
+			e.AppLogin = l.Kind == "app"
+			if l.Account != "" {
+				a.login = l.Account
+			}
+		}
+	}
 	if a.env.ConsoleUsable && !a.nonInteractive {
 		e.Editor = func(s string) (string, error) {
 			a.reporter().Pause()

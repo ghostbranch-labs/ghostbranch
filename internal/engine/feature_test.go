@@ -223,3 +223,22 @@ func TestFeatureStartWarnsWhenTheMirrorCantBeUpdated(t *testing.T) {
 		t.Fatal("the shadow repo lacks the metadata")
 	}
 }
+
+// GitHub's GH007 (private email at the pushed tip) gets a plain explanation
+// of which commit and email tripped it; the code and exit stay PUSH_REFUSED.
+func TestPushRefusedForPrivateEmailExplainsTheCommit(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.installShadowHook("error: GH007: Your push would publish a private email address.")
+	_, _, err := h.eng.FeatureStart(h.ctx, h.pair, "feat-x")
+	ce := wantCode(t, err, contract.PushRefused)
+	if !strings.HasPrefix(ce.Message, "GitHub refused the push because the newest commit on ") ||
+		!strings.Contains(ce.Message, "has your private email, ") || !strings.Contains(ce.Message, "That commit is already public in ") {
+		t.Fatalf("message = %q", ce.Message)
+	}
+	if ce.Details["cause"] != "email_private" || !strings.Contains(ce.Details["reason"].(string), "GH007") || ce.Details["remote"] != "shadow" ||
+		ce.Details["settings_url"] != "https://github.com/settings/emails" || ce.Details["branch"] != "feat-x" || ce.Details["commit"] == "" {
+		t.Fatalf("details = %v", ce.Details)
+	}
+}

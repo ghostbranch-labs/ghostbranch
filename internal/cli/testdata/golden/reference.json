@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.15",
+  "schema_version": "0.16",
   "command": "reference",
   "ok": true,
   "exit_code": 0,
@@ -67,6 +67,14 @@
         "flags": []
       },
       {
+        "path": "agents token",
+        "use": "token",
+        "short": "Make a coding agent's own token that reaches only the shadow repo, and check it can't publish",
+        "long": "agents token shows GitHub's fine-grained token page, pre-filled with what agents need on the\nshadow repo, and says which repo to pick there. At a console it then reads the new token with hidden\ninput, checks it reaches the shadow repo and can't push to the public repo, and prints the line that\nsets GHOSTBRANCH_TOKEN in the agent's shell. The token is never shown, logged or stored: the person\nrestarts the agent in a shell with it set. With --json (for an agent) it reads nothing and returns the\nlink, the repo to pick and those lines for a person.",
+        "read_only": true,
+        "flags": []
+      },
+      {
         "path": "apply",
         "use": "apply <plan-id|plan.json>",
         "short": "Publish a saved plan if the repos still match it",
@@ -109,7 +117,7 @@
         "path": "doctor",
         "use": "doctor",
         "short": "Check this machine's setup and the pair, and name each fix; changes nothing",
-        "long": "doctor runs six checks, in order: tools (git and this binary), token (its source, account,\nexpiry, whether it can publish, and the permissions each command group needs), pair (both repos,\nthe overlay and its config, shadow main, the managed files), guard (the pre-push hook in this\ncheckout), state (this machine's records) and ci (the audit's summary). Each is ok, warn, fail or\nskipped, and names the command that fixes it. It changes nothing in your repos, records or\nkeychain and never prompts; it fetches into its local copy of the pair (making it if needed) and\nrefreshes the update check's cache. It isn't ledgered.\nIn a checkout of a pair it checks that pair; --repo names another; with neither it skips the\nchecks that need a pair. It exits 0 unless a check fails (DOCTOR_FAILED, details.failed).",
+        "long": "doctor runs seven checks, in order: tools (git and this binary), token (its source, account,\nexpiry, whether it can publish, and the permissions each command group needs), app (for an app\nlogin: the Ghostbranch app is installed and can see the pair's repos), pair (both repos,\nthe overlay and its config, shadow main, the managed files), guard (the pre-push hook in this\ncheckout), state (this machine's records) and ci (the audit's summary). Each is ok, warn, fail or\nskipped, and names the command that fixes it. It changes nothing in your repos, records or\nkeychain and never prompts; it fetches into its local copy of the pair (making it if needed) and\nrefreshes the update check's cache. It isn't ledgered.\nIn a checkout of a pair it checks that pair; --repo names another; with neither, outside a checkout, it uses the\nworkspace's only pair, and with several it skips the checks that need a pair. It exits 0 unless a check fails (DOCTOR_FAILED, details.failed).",
         "read_only": true,
         "flags": []
       },
@@ -267,7 +275,7 @@
         "path": "feature start",
         "use": "start <name>",
         "short": "Start a feature branch in the shadow repo",
-        "long": "feature start creates <name> from shadow main in the shadow repo and records it as a feature. It does not touch your checkout; fetch and switch to the branch afterwards. With --from <feature> it starts at that feature's tip instead and records it as the parent, stacking the new feature on it.",
+        "long": "feature start creates <name> from shadow main in the shadow repo and records it as a feature. With --from <feature> it starts at that feature's tip instead and records it as the parent, stacking the new feature on it.\nRun in a checkout of the public repo, it then adds a remote named shadow for the shadow repo (if no remote reaches it), fetches it, and switches to <name>, tracking shadow/<name>. It never rewrites a remote: a shadow remote that points elsewhere is left alone. With uncommitted changes, a local branch called <name>, or a detached HEAD with commits not on any branch, it fetches but doesn't switch. Elsewhere, or with --no-checkout, it prints the commands instead.",
         "read_only": false,
         "flags": [
           {
@@ -276,6 +284,13 @@
             "type": "string",
             "default": "",
             "usage": "stack the feature on another feature: start it at that feature's tip in the shadow repo (default: shadow main)"
+          },
+          {
+            "name": "no-checkout",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "leave this checkout alone: don't add the shadow remote, fetch or switch; print the commands instead"
           },
           {
             "name": "plan",

@@ -3,7 +3,7 @@
   "title": "feature start data",
   "type": "object",
   "additionalProperties": false,
-  "required": ["name", "branch", "base", "parent", "checkout", "checkout_hint", "preview"],
+  "required": ["name", "branch", "base", "parent", "checkout", "checkout_hint", "local", "preview"],
   "properties": {
     "name": { "type": "string" },
     "branch": { "type": "string" },
@@ -15,6 +15,22 @@
       "items": { "type": "array", "minItems": 2, "items": { "type": "string" } }
     },
     "checkout_hint": { "description": "checkout as one shell line, the argvs joined with ' && '", "type": "string" },
+    "local": {
+      "description": "what feature start did in the checkout it ran in; null for --plan",
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "reason", "remote"],
+          "properties": {
+            "status": { "description": "switched: on the branch now, tracking <remote>/<name>; fetched_only: fetched, not switched; skipped: not fetched", "enum": ["switched", "fetched_only", "skipped"] },
+            "reason": { "description": "why it didn't switch; empty when switched", "enum": ["", "not_a_checkout", "dirty_tree", "remote_differs", "no_checkout_flag", "branch_exists_locally", "fetch_failed", "switch_failed", "detached_commits"] },
+            "remote": { "description": "the checkout's remote for the shadow repo (for remote_differs, the remote named shadow that points elsewhere); empty when no checkout was looked at", "type": "string" }
+          }
+        }
+      ]
+    },
     "preview": { "oneOf": [{ "type": "null" }, { "$ref": "preview.schema.json" }] }
   }
 }

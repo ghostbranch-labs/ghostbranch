@@ -92,9 +92,9 @@ func TestYesNoAnswers(t *testing.T) {
 		if err != nil || got != c.want {
 			t.Errorf("%q def=%v: %v %v", c.typed, c.def, got, err)
 		}
-		hint := "[y/N]"
+		hint := "[y/N, Enter = no]"
 		if c.def {
-			hint = "[Y/n]"
+			hint = "[Y/n, Enter = yes]"
 		}
 		if !strings.Contains(d.shown(), "Create it? "+hint) {
 			t.Errorf("%q: shown %q", c.typed, d.shown())
@@ -109,7 +109,7 @@ func TestYesNoGivesUpAfterThreeTries(t *testing.T) {
 	if code(err) != contract.BadFlag {
 		t.Fatalf("%v", err)
 	}
-	if n := strings.Count(d.shown(), "Proceed? [Y/n]"); n != prompt.MaxTries {
+	if n := strings.Count(d.shown(), "Proceed? [Y/n, Enter = yes]"); n != prompt.MaxTries {
 		t.Fatalf("asked %d times:\n%s", n, d.shown())
 	}
 }
@@ -212,7 +212,7 @@ func TestScript(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.Say("hi")
-	if len(s.Asked) != 4 || !strings.Contains(s.Asked[0], "Create? [Y/n]") || s.Said[0] != "hi" {
+	if len(s.Asked) != 4 || !strings.Contains(s.Asked[0], "Create? [Y/n, Enter = yes]") || s.Said[0] != "hi" {
 		t.Fatalf("asked %q said %q", s.Asked, s.Said)
 	}
 	s.Check(t) // every answer used, none missing
@@ -249,3 +249,52 @@ type recorder struct{ errs []string }
 
 func (r *recorder) Helper()                      {}
 func (r *recorder) Errorf(f string, args ...any) { r.errs = append(r.errs, fmt.Sprintf(f, args...)) }
+
+func TestPromptDefaultInWords(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		def  bool
+		want string
+	}{{true, "Go on? [Y/n, Enter = yes] "}, {false, "Go on? [y/N, Enter = no] "}} {
+		a, d := onDevice(t, "")
+		if got, err := a.YesNo(t.Context(), "Go on?", c.def); err != nil || got != c.def {
+			t.Fatalf("def=%v: %v %v", c.def, got, err)
+		}
+		if !strings.Contains(d.shown(), c.want) {
+			t.Errorf("def=%v: shown %q, want %q", c.def, d.shown(), c.want)
+		}
+	}
+	// A text question keeps its suggestion in plain brackets.
+	a, d := onDevice(t, "")
+	if _, err := a.Text(t.Context(), "Shadow repo", "acme/x"); err != nil || !strings.Contains(d.shown(), "Shadow repo [acme/x]: ") {
+		t.Fatalf("text shown %q %v", d.shown(), err)
+	}
+}
+
+func TestStyledBoldsQuestionsButNotErrors(t *testing.T) {
+	t.Parallel()
+	a, d := onDevice(t, "")
+	a = prompt.Styled(a, func(s string) string { return "<b>" + s + "</b>" }, func(s string) string { return "<a>" + s + "</a>" })
+	if _, err := a.YesNo(t.Context(), "Go on?", true); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(d.shown(), "<b>Go on? [Y/n, Enter = yes]</b> ") {
+		t.Fatalf("shown %q", d.shown())
+	}
+}
+
+func TestStyledWaitShowsAttentionButErrorsStayPlain(t *testing.T) {
+	t.Parallel()
+	a, d := onDevice(t, "")
+	a = prompt.Styled(a, strings.ToUpper, func(s string) string { return "<a>" + s + "</a>" })
+	if err := a.Wait(t.Context(), "Press Enter"); err != nil || !strings.Contains(d.shown(), "<a>Press Enter</a> ") {
+		t.Fatalf("shown %q %v", d.shown(), err)
+	}
+	// The console closes before an answer: the error quotes plain text.
+	a, _ = onDevice(t)
+	a = prompt.Styled(a, strings.ToUpper, func(s string) string { return "\x1b[1m" + s + "\x1b[0m" })
+	err := a.Wait(t.Context(), "Press Enter")
+	if err == nil || strings.Contains(err.Error(), "\x1b") || !strings.Contains(err.Error(), "Press Enter") {
+		t.Fatalf("error %v", err)
+	}
+}

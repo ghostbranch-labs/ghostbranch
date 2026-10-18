@@ -50,6 +50,11 @@ type File struct {
 	// '<public>'), so a push outside the public repo runs none of them.
 	PushGuarded bool
 	push        *pushFilter
+	onPR        bool // on: has pull_request or pull_request_target
+	// onUnknown: on: couldn't be read for certain (an alias it can't
+	// follow, a merge of something not a map, an unexpected node), so
+	// RunsOnPR errs toward running.
+	onUnknown bool
 }
 
 // IsWorkflowPath reports whether GitHub Actions reads path as a workflow:
@@ -173,7 +178,21 @@ func Parse(path string, src []byte, n Names) (File, error) {
 			}
 		}
 	}
-	f.push = parsePush(get(r, "on"))
+	// on: is read with aliases followed and << merge keys folded in, so
+	// on: *triggers or a <<: *common under it reads as written. Only on:
+	// is expanded, within a node budget: an alias bomb elsewhere costs
+	// nothing, and one under on: counts as running.
+	x := &expander{left: maxExpandNodes}
+	on, ok := x.lookup(r, "on", 0)
+	if ok {
+		on, ok = x.expand(on, 0)
+	}
+	if !ok || (on != nil && on.Kind != yaml.ScalarNode && on.Kind != yaml.SequenceNode && on.Kind != yaml.MappingNode) {
+		f.onUnknown = true
+		return f, nil
+	}
+	f.push = parsePush(on)
+	f.onPR = hasEvent(on, "pull_request", "pull_request_target")
 	return f, nil
 }
 
@@ -191,6 +210,191 @@ func walk(n *yaml.Node, fn func(string)) {
 			walk(c, fn)
 		}
 	}
+}
+
+const (
+	// maxExpandDepth bounds the nesting expander follows, which also stops
+	// an alias loop.
+	maxExpandDepth = 64
+	// maxExpandNodes bounds the nodes expander visits, so aliases that
+	// multiply (a "billion laughs" document) can't blow up a Parse.
+	maxExpandNodes = 4096
+)
+
+// expander follows aliases and folds << merge keys, as YAML 1.1 merges do,
+// within a budget of nodes left. Each method's ok is false when it meets
+// what it can't resolve: a dangling alias, a merge of something that isn't
+// a mapping, nesting past maxExpandDepth, or the budget run out.
+type expander struct{ left int }
+
+// visit charges one node to the budget.
+func (x *expander) visit(depth int) bool {
+	x.left--
+	return x.left >= 0 && depth <= maxExpandDepth
+}
+
+// deref follows n's aliases to the node they name.
+func (x *expander) deref(n *yaml.Node, depth int) (*yaml.Node, bool) {
+	for n != nil && n.Kind == yaml.AliasNode {
+		if !x.visit(depth) || n.Alias == nil {
+			return nil, false
+		}
+		n, depth = n.Alias, depth+1
+	}
+	return n, true
+}
+
+// isMerge reports whether k is a << merge key.
+func isMerge(k *yaml.Node) bool { return k.Kind == yaml.ScalarNode && k.Tag == "!!merge" }
+
+// lookup is m[key] without copying anything: m's own keys first, then the
+// maps its << keys merge in, in order. A missing key is nil and ok.
+func (x *expander) lookup(m *yaml.Node, key string, depth int) (*yaml.Node, bool) {
+	m, ok := x.deref(m, depth)
+	if !ok || !x.visit(depth) {
+		return nil, false
+	}
+	if m == nil || m.Kind != yaml.MappingNode {
+		return nil, true
+	}
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if k := m.Content[i]; !isMerge(k) && k.Value == key {
+			return m.Content[i+1], true
+		}
+	}
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if !isMerge(m.Content[i]) {
+			continue
+		}
+		srcs, ok := x.mergeSources(m.Content[i+1], depth+1)
+		if !ok {
+			return nil, false
+		}
+		for _, src := range srcs {
+			if v, ok := x.lookup(src, key, depth+1); !ok || v != nil {
+				return v, ok
+			}
+		}
+	}
+	return nil, true
+}
+
+// mergeSources is the maps a << key's value merges in: one map, or a list
+// of them.
+func (x *expander) mergeSources(v *yaml.Node, depth int) ([]*yaml.Node, bool) {
+	v, ok := x.deref(v, depth)
+	if !ok || v == nil {
+		return nil, false
+	}
+	srcs := []*yaml.Node{v}
+	if v.Kind == yaml.SequenceNode {
+		srcs = nil
+		for _, c := range v.Content {
+			c, ok := x.deref(c, depth+1)
+			if !ok {
+				return nil, false
+			}
+			srcs = append(srcs, c)
+		}
+	}
+	for _, src := range srcs {
+		if src == nil || src.Kind != yaml.MappingNode {
+			return nil, false
+		}
+	}
+	return srcs, true
+}
+
+// expand returns a copy of n with aliases followed and << merge keys folded
+// into their mapping, the mapping's own keys winning and, among merged
+// maps, the first to name a key.
+func (x *expander) expand(n *yaml.Node, depth int) (*yaml.Node, bool) {
+	n, ok := x.deref(n, depth)
+	if !ok || n == nil {
+		return n, ok
+	}
+	if !x.visit(depth) {
+		return nil, false
+	}
+	switch n.Kind {
+	case yaml.SequenceNode, yaml.DocumentNode:
+		out := *n
+		out.Content = make([]*yaml.Node, 0, len(n.Content))
+		for _, c := range n.Content {
+			e, ok := x.expand(c, depth+1)
+			if !ok {
+				return nil, false
+			}
+			out.Content = append(out.Content, e)
+		}
+		return &out, true
+	case yaml.MappingNode:
+		out := *n
+		out.Content = nil
+		own := map[string]bool{}
+		var merged []*yaml.Node
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			k := n.Content[i]
+			v, ok := x.expand(n.Content[i+1], depth+1)
+			if !ok {
+				return nil, false
+			}
+			if isMerge(k) {
+				srcs, ok := x.mergeSources(v, depth+1)
+				if !ok {
+					return nil, false
+				}
+				for _, src := range srcs {
+					merged = append(merged, src.Content...)
+				}
+				continue
+			}
+			own[k.Value] = true
+			out.Content = append(out.Content, k, v)
+		}
+		for i := 0; i+1 < len(merged); i += 2 {
+			if k := merged[i]; !own[k.Value] {
+				own[k.Value] = true
+				out.Content = append(out.Content, k, merged[i+1])
+			}
+		}
+		return &out, true
+	}
+	return n, true
+}
+
+// hasEvent reports whether on: names any of events, in any of its three
+// forms: a string, a list, or a map keyed by event.
+func hasEvent(on *yaml.Node, events ...string) bool {
+	if on == nil {
+		return false
+	}
+	var names []string
+	switch on.Kind {
+	case yaml.ScalarNode:
+		names = []string{on.Value}
+	case yaml.SequenceNode:
+		names = strs(on)
+	case yaml.MappingNode:
+		for i := 0; i+1 < len(on.Content); i += 2 {
+			names = append(names, on.Content[i].Value)
+		}
+	}
+	for _, n := range names {
+		for _, ev := range events {
+			if n == ev {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// RunsOnPR reports whether this workflow runs for a gate PR whose head is
+// branch: it triggers on pull_request or pull_request_target (whatever
+// their filters), or on a push to branch, since the gate pushes it.
+func (f File) RunsOnPR(branch string) bool {
+	return f.onUnknown || f.onPR || f.PushTriggered([]string{branch})
 }
 
 // pushFilter is a workflow's on.push trigger.

@@ -4,7 +4,7 @@
   "type": "object",
   "required": ["schema_version", "type", "job", "at"],
   "properties": {
-    "schema_version": { "const": "0.15" },
+    "schema_version": { "const": "0.16" },
     "type": { "enum": ["waiting", "check", "settled"] },
     "job": { "type": "string" },
     "at": { "$ref": "common.schema.json#/$defs/time" }
@@ -17,9 +17,11 @@
         "candidate": { "$ref": "common.schema.json#/$defs/sha" },
         "shadow_pr": { "type": "integer", "minimum": 1 },
         "shadow_pr_url": { "type": "string" },
-        "ci_timeout": { "type": "string" }
+        "ci_timeout": { "type": "string" },
+        "no_workflows": { "type": "boolean" },
+        "ci_appear_timeout": { "type": "string" }
       },
-      "required": ["candidate", "shadow_pr", "ci_timeout"],
+      "required": ["candidate", "shadow_pr", "ci_timeout", "no_workflows", "ci_appear_timeout"],
       "additionalProperties": false
     },
     {

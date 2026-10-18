@@ -1,0 +1,44 @@
+{
+  "schema_version": "0.16",
+  "command": "agents token",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "link": "https://github.com/settings/personal-access-tokens/new?name=ghostbranch-agent-widget&description=Ghostbranch+agent%3A+acme%2Fwidget-shadow&target_name=acme&expires_in=30&contents=write&pull_requests=write&workflows=write&actions=read&statuses=read&checks=read",
+    "select": "acme/widget-shadow",
+    "check": null,
+    "set_line": {
+      "powershell": "$env:GHOSTBRANCH_TOKEN = '<paste>'",
+      "sh": "export GHOSTBRANCH_TOKEN=<paste>"
+    }
+  },
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "agents",
+        "token",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "a person runs this in their own terminal: it opens the token page, reads the new token with hidden input and checks it can't publish",
+      "needs_human": true,
+      "needs_input": []
+    },
+    {
+      "command": [
+        "ghostbranch",
+        "agents",
+        "status",
+        "--json",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "after the person restarts the agent with GHOSTBRANCH_TOKEN set, the agent checks its token: token_can_publish is false",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
+  "error": null
+}

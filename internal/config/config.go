@@ -78,7 +78,11 @@ type LeakScan struct {
 
 type Gate struct {
 	CIAppearTimeout time.Duration
-	CITimeout       time.Duration
+	// CIAppearTimeoutNoWorkflows replaces CIAppearTimeout when the gate
+	// candidate has no workflow that runs on its PR: only another CI
+	// service could still report, so the gate waits briefly.
+	CIAppearTimeoutNoWorkflows time.Duration
+	CITimeout                  time.Duration
 }
 
 // Default is the configuration init writes.
@@ -88,7 +92,7 @@ func Default() Config {
 		Promote: Promote{Target: "pr", DefaultMode: ModePreserve, AuthorEmail: AuthorNoreply, AuthorMap: map[string]string{}},
 		LeakScan: LeakScan{Strip: []string{".ghostbranch/**"}, Secrets: true,
 			Markers: Markers{Begin: "BEGIN-INTERNAL", End: "END-INTERNAL"}, BlockPatterns: []string{}, LargeFile: 5 << 20},
-		Gate: Gate{CIAppearTimeout: 10 * time.Minute, CITimeout: 60 * time.Minute},
+		Gate: Gate{CIAppearTimeout: 10 * time.Minute, CIAppearTimeoutNoWorkflows: time.Minute, CITimeout: 60 * time.Minute},
 		Sync: Sync{Schedule: ScheduleOff, Branches: []string{"main"}}, CI: CI{RewriteRepoGuards: "rewrite"},
 	}
 }
@@ -100,7 +104,7 @@ var honoured = map[string]bool{
 	"leak_scan.strip": true, "leak_scan.secrets": true,
 	"leak_scan.markers.begin": true, "leak_scan.markers.end": true,
 	"leak_scan.block_patterns": true, "leak_scan.large_file": true,
-	"gate.ci_appear_timeout": true, "gate.ci_timeout": true,
+	"gate.ci_appear_timeout": true, "gate.ci_appear_timeout_no_workflows": true, "gate.ci_timeout": true,
 	"sync.schedule": true, "sync.branches": true, "ci.rewrite_repo_guards": true,
 }
 
@@ -340,6 +344,8 @@ func set(cfg *Config, key string, v any) error {
 		cfg.LeakScan.LargeFile = n
 	case "gate.ci_appear_timeout":
 		cfg.Gate.CIAppearTimeout, err = dur()
+	case "gate.ci_appear_timeout_no_workflows":
+		cfg.Gate.CIAppearTimeoutNoWorkflows, err = dur()
 	case "gate.ci_timeout":
 		cfg.Gate.CITimeout, err = dur()
 	case "sync.schedule":

@@ -49,6 +49,9 @@ func newTestEnv(t *testing.T) *testEnv {
 	pubGit := gitx.New(dir)
 	testutil.Commit(t, pubGit, "main", "initial", map[string]string{
 		"README.md": "# widget\n", ".github/workflows/ci.yml": "name: ci\non: [pull_request]\n"})
+	// acme is an organization octo (the token's account) belongs to, so
+	// octo can set up acme/widget's shadow repo there.
+	f.Orgs = map[string]bool{"acme": true}
 	clock := testutil.NewClock(time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC))
 	te := &testEnv{t: t, root: root, forge: f, pubGit: pubGit,
 		vars: map[string]string{"GHOSTBRANCH_HOME": filepath.Join(root, "home"), "GHOSTBRANCH_TOKEN": "test-token"}}

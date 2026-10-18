@@ -1,0 +1,16 @@
+{
+  "schema_version": "0.16",
+  "command": "agents token",
+  "ok": false,
+  "exit_code": 2,
+  "data": {},
+  "warnings": [],
+  "next": [],
+  "error": {
+    "code": "PAIR_NOT_FOUND",
+    "message": "workspace \"default\" has no repos; run ghostbranch init <owner/repo>",
+    "field": null,
+    "retryable": false,
+    "details": {}
+  }
+}

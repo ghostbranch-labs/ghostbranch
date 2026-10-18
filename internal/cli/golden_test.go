@@ -28,7 +28,7 @@ var update = flag.Bool("update", false, "rewrite golden files")
 var dataSchemas = map[string]string{
 	"init": "init.schema.json", "sync": "sync.schema.json", "feature start": "feature-start.schema.json",
 	"gate": "gate.schema.json", "promote": "promote.schema.json", "apply": "apply.schema.json",
-	"agents allow": "agents-allow.schema.json", "agents revoke": "agents-revoke.schema.json", "agents status": "agents-status.schema.json",
+	"agents allow": "agents-allow.schema.json", "agents revoke": "agents-revoke.schema.json", "agents status": "agents-status.schema.json", "agents token": "agents-token.schema.json",
 	"waivers add": "waivers-add.schema.json", "waivers list": "waivers-list.schema.json", "waivers revoke": "waivers-revoke.schema.json",
 	"explain": "explain.schema.json", "guide": "guide.schema.json", "audit": "audit.schema.json", "upgrade": "upgrade.schema.json",
 	"guard install": "guard.schema.json", "guard uninstall": "guard.schema.json", "guard status": "guard.schema.json", "guard check": "guard.schema.json",
@@ -52,11 +52,15 @@ var (
 
 // normalize replaces the temp dir with <ROOT> and uses / in those paths, so
 // goldens match on every OS.
+// loopbackPort is a fake server's random port, as in the device_code line.
+var loopbackPort = regexp.MustCompile(`127\.0\.0\.1:\d+`)
+
 func normalize(out, root string) string {
 	esc, _ := json.Marshal(root)
 	out = strings.ReplaceAll(out, strings.Trim(string(esc), `"`), "<ROOT>")
 	out = strings.ReplaceAll(out, filepath.ToSlash(root), "<ROOT>")
 	out = rootPath.ReplaceAllStringFunc(out, func(s string) string { return strings.ReplaceAll(s, `\\`, "/") })
+	out = loopbackPort.ReplaceAllString(out, "127.0.0.1:<PORT>")
 	out = pidNumber.ReplaceAllString(out, "pid <PID>")
 	out = pidField.ReplaceAllString(out, `"pid": "<PID>"`)
 	return normalizeSHAs(out)
@@ -147,6 +151,15 @@ func TestGoldenContract(t *testing.T) {
 		}, []string{"gate", "no-such-feature"}, 2},
 		{"init_dry_run", nil, []string{"init", "acme/widget", "--dry-run"}, 0},
 		{"init_create_denied", func(te *testEnv) { te.forge.CreateForbidden = true }, []string{"init", "acme/widget"}, 1},
+		{"init_plan_setup", func(te *testEnv) { appLogin(te); personal(te); installApp(te) }, []string{"init", "acme/widget", "--plan"}, 0},
+		{"init_plan_shadow_exists", func(te *testEnv) {
+			if _, err := te.forge.AddRepo("acme/widget-shadow", true); err != nil {
+				te.t.Fatal(err)
+			}
+		}, []string{"init", "acme/widget", "--plan"}, 2},
+		{"init_app_not_installed", func(te *testEnv) { appLogin(te); personal(te) }, []string{"init", "acme/widget"}, contract.AppNotInstalled.Exit()},
+		{"init_token_wrong_account", func(te *testEnv) { te.forge.User.Login, te.forge.Orgs = "octo", nil }, []string{"init", "acme/widget"}, contract.TokenWrongAccount.Exit()},
+		{"init_plan_no_token", func(te *testEnv) { delete(te.vars, "GHOSTBRANCH_TOKEN") }, []string{"init", "acme/widget", "--plan"}, contract.AuthMissing.Exit()},
 		{"sync_noop", initOnly, []string{"sync"}, 0},
 		{"sync_fast_forward", func(te *testEnv) {
 			initOnly(te)
@@ -158,6 +171,7 @@ func TestGoldenContract(t *testing.T) {
 			editConfig(te, "branches: [main]", "branches: [main, release]")
 		}, []string{"sync"}, 0},
 		{"feature_start", initOnly, []string{"feature", "start", "feat-x"}, 0},
+		{"feature_start_checkout", func(te *testEnv) { initOnly(te); publicCheckout(te) }, []string{"feature", "start", "feat-x"}, 0},
 		{"feature_start_behind", func(te *testEnv) {
 			initOnly(te)
 			testutil.Commit(te.t, te.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})
@@ -304,6 +318,8 @@ func TestGoldenContract(t *testing.T) {
 		{"agents_allow_plan", initOnly, []string{"agents", "allow", "--for", "1d", "--plan"}, 0},
 		{"agents_allow_bad_for", initOnly, []string{"agents", "allow", "--for", "7h"}, 2},
 		{"agents_status", func(te *testEnv) { initOnly(te); grantAgents(te) }, []string{"agents", "status"}, 0},
+		{"agents_token", initOnly, []string{"agents", "token"}, 0},
+		{"agents_token_no_pair", nil, []string{"agents", "token"}, contract.PairNotFound.Exit()},
 		{"explain_code", nil, []string{"explain", "approval_required"}, 0},
 		{"explain_exit", nil, []string{"explain", "3"}, 0},
 		{"explain_unknown", nil, []string{"explain", "NOPE"}, 2},
@@ -403,6 +419,12 @@ jobs:
 		{"gate_detach", withFeature, []string{"gate", "feat-x", "--detach"}, 0},
 		{"wait", func(te *testEnv) { withFeature(te); te.mustRun("gate", "feat-x", "--detach") }, []string{"wait", "<JOB>"}, 0},
 		{"wait_finished", func(te *testEnv) { withFeature(te); te.mustRun("gate", "feat-x") }, []string{"wait", "<JOB>"}, 0},
+		{"wait_no_workflows", func(te *testEnv) {
+			testutil.Commit(te.t, te.pubGit, "main", "drop CI", map[string]string{".github/workflows/ci.yml": testutil.Delete})
+			te.forge.Checks = func(string, string) []forge.Check { return nil }
+			withFeature(te)
+			te.mustRun("gate", "feat-x", "--detach")
+		}, []string{"wait", "<JOB>"}, contract.NoCI.Exit()},
 		{"wait_stale", func(te *testEnv) {
 			withFeature(te)
 			te.mustRun("gate", "feat-x", "--detach")
@@ -424,7 +446,10 @@ jobs:
 			te.forge.User = forge.User{Login: "octo", ID: 1}
 			te.env.Stdin = strings.NewReader("ghp_test_golden\n")
 		}, []string{"login", "--with-token"}, 0},
-		{"login_no_console", nil, []string{"login"}, 1},
+		{"login_device_no_console", func(te *testEnv) {
+			deviceLogin(te, authtest.Options{Pending: 1})
+			te.env.ConsoleUsable = false
+		}, []string{"login"}, 0},
 		{"login_device", func(te *testEnv) { deviceLogin(te, authtest.Options{Pending: 1}) }, []string{"login"}, 0},
 		{"logout", func(te *testEnv) { storeLogin(te, "ghu_test_x", "ghr_test_x", 8*time.Hour) }, []string{"logout"}, 0},
 		{"auth_status_login", func(te *testEnv) {
@@ -498,7 +523,10 @@ jobs:
 			}
 			last := []byte(out)
 			if args[0] == "wait" {
-				last = waitStream(t, out)
+				last = waitStream(t, out, "wait-event.schema.json")
+			}
+			if args[0] == "login" && s.name == "login_device_no_console" {
+				last = waitStream(t, out, "login-event.schema.json")
 			}
 			testutil.ValidateSchema(t, "envelope.schema.json", last)
 			var env struct {
@@ -532,7 +560,7 @@ jobs:
 // waitStream checks wait --json's stdout: NDJSON, one complete JSON value
 // per line, every value but the last a job event. It returns the last
 // value, the envelope.
-func waitStream(t *testing.T, out string) []byte {
+func waitStream(t *testing.T, out, eventSchema string) []byte {
 	t.Helper()
 	dec := json.NewDecoder(strings.NewReader(out))
 	var values []json.RawMessage
@@ -557,7 +585,7 @@ func waitStream(t *testing.T, out string) []byte {
 		}
 	}
 	for _, v := range values[:len(values)-1] {
-		testutil.ValidateSchema(t, "wait-event.schema.json", v)
+		testutil.ValidateSchema(t, eventSchema, v)
 	}
 	return values[len(values)-1]
 }

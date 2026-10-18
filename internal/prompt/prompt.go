@@ -35,6 +35,17 @@ const MaxTries = 3
 
 var ErrNoConsole = errors.New("prompt: no usable console")
 
+// Styled returns a with its questions shown through bold and its Enter
+// prompts through attention (colours on a terminal, nothing otherwise). Only
+// the console device styles; any other Asker comes back unchanged. The text
+// of an error never holds the styling.
+func Styled(a Asker, bold, attention func(string) string) Asker {
+	if d, ok := a.(*device); ok && bold != nil && attention != nil {
+		return &device{dev: d.dev, bold: bold, attention: attention}
+	}
+	return a
+}
+
 // Console is the console device, when stdin and stderr are both terminals
 // (the approval code's test).
 func Console() (Asker, error) { return OnConsole(console.Usable(os.Stdin, os.Stderr), console.Open) }
@@ -57,9 +68,12 @@ func OnConsole(usable bool, open func() (io.ReadWriteCloser, error)) (Asker, err
 // read blocks Close until the person types a line, so the handle and its
 // reader goroutine end with the process (one command).
 type device struct {
-	dev   io.ReadWriteCloser
-	once  sync.Once
-	lines chan string
+	dev io.ReadWriteCloser
+	// bold styles a question as it is shown (nil: as is).
+	bold      func(string) string
+	attention func(string) string
+	once      sync.Once
+	lines     chan string
 }
 
 func (d *device) start() {
@@ -75,10 +89,10 @@ func (d *device) start() {
 	})
 }
 
-// ask shows text and reads one answer. Lines typed before the question
-// appeared are discarded first: those still in the device (Flush) and those
-// the reader already took (drained, best effort).
-func (d *device) ask(ctx context.Context, text string) (string, error) {
+// show asks with shown on screen; text is what errors quote. Lines typed
+// before the question appeared are discarded first: those still in the device
+// (Flush) and those the reader already took (drained, best effort).
+func (d *device) show(ctx context.Context, text, shown string) (string, error) {
 	console.Flush(d.dev)
 	d.start()
 	for drained := false; !drained; {
@@ -89,7 +103,7 @@ func (d *device) ask(ctx context.Context, text string) (string, error) {
 			drained = true
 		}
 	}
-	_, _ = fmt.Fprint(d.dev, text)
+	_, _ = fmt.Fprint(d.dev, shown)
 	select {
 	case <-ctx.Done():
 		_, _ = fmt.Fprintln(d.dev)
@@ -105,16 +119,35 @@ func (d *device) ask(ctx context.Context, text string) (string, error) {
 func (d *device) Say(message string) { _, _ = fmt.Fprintln(d.dev, message) }
 
 func (d *device) YesNo(ctx context.Context, q string, def bool) (bool, error) {
-	return yesNo(ctx, q, def, d.ask, d.Say)
+	return yesNo(ctx, q, def, d.askQuestion, d.Say)
 }
 
 func (d *device) Text(ctx context.Context, q, def string) (string, error) {
-	return text(ctx, q, def, d.ask)
+	return text(ctx, q, def, d.askQuestion)
 }
 
 func (d *device) Wait(ctx context.Context, message string) error {
-	_, err := d.ask(ctx, message+" ")
+	text := message + " "
+	shown := text
+	if d.attention != nil {
+		shown = d.attention(message) + " "
+	}
+	_, err := d.show(ctx, text, shown)
 	return err
+}
+
+// askQuestion is ask with the question in bold; its trailing space stays
+// plain.
+func (d *device) askQuestion(ctx context.Context, text string) (string, error) {
+	return d.show(ctx, text, d.styledQuestion(text))
+}
+
+func (d *device) styledQuestion(text string) string {
+	if d.bold == nil {
+		return text
+	}
+	body := strings.TrimRight(text, " ")
+	return d.bold(body) + text[len(body):]
 }
 
 func interrupted(ctx context.Context, text string) error {
@@ -128,9 +161,9 @@ type askFunc func(ctx context.Context, text string) (string, error)
 // yesNo is YesNo for any asker: empty is def; y, yes, n, no in any case;
 // anything else asks again, up to MaxTries.
 func yesNo(ctx context.Context, q string, def bool, ask askFunc, say func(string)) (bool, error) {
-	hint := "[y/N]"
+	hint := "[y/N, Enter = no]"
 	if def {
-		hint = "[Y/n]"
+		hint = "[Y/n, Enter = yes]"
 	}
 	for try := 1; ; try++ {
 		ans, err := ask(ctx, q+" "+hint+" ")

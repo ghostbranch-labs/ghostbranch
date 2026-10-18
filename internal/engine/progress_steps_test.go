@@ -109,7 +109,7 @@ func TestCIWaitCountsChecksInTheStep(t *testing.T) {
 	if _, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x"); err != nil {
 		t.Fatal(err)
 	}
-	if !inOrder(rec.Updates(), []string{"Waiting for CI to start", "Waiting for CI (1 of 2 checks done)", "Waiting for CI (2 of 2 checks done)"}) {
+	if !inOrder(rec.Updates(), []string{"Waiting for CI to start (up to 10m, 10m left)", "Waiting for CI (1 of 2 checks done)", "Waiting for CI (2 of 2 checks done)"}) {
 		t.Fatalf("CI updates:\n%s", rec.String())
 	}
 }

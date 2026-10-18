@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.15",
+  "schema_version": "0.16",
   "command": "init",
   "ok": true,
   "exit_code": 0,
@@ -53,7 +53,73 @@
       ]
     },
     "guard_installed": false,
-    "doctor": null
+    "doctor": null,
+    "setup": {
+      "steps": [
+        {
+          "id": "login",
+          "status": "done",
+          "message": "Logged in as octo (from GHOSTBRANCH_TOKEN).",
+          "url": "",
+          "details": {
+            "account": "octo",
+            "source": "GHOSTBRANCH_TOKEN"
+          }
+        },
+        {
+          "id": "account",
+          "status": "done",
+          "message": "The token is octo's, which can set up acme/widget-shadow.",
+          "url": "",
+          "details": {
+            "owner": "acme",
+            "token_account": "octo"
+          }
+        },
+        {
+          "id": "app_installed",
+          "status": "skipped",
+          "message": "Only an app login can see where the Ghostbranch app is installed.",
+          "url": "",
+          "details": {}
+        },
+        {
+          "id": "shadow",
+          "status": "todo",
+          "message": "Ghostbranch creates the private repo acme/widget-shadow.",
+          "url": "",
+          "details": {}
+        },
+        {
+          "id": "app_access",
+          "status": "skipped",
+          "message": "Only an app login can see where the Ghostbranch app is installed.",
+          "url": "",
+          "details": {}
+        },
+        {
+          "id": "pair",
+          "status": "todo",
+          "message": "Ghostbranch registers acme/widget with acme/widget-shadow.",
+          "url": "",
+          "details": {}
+        },
+        {
+          "id": "guard",
+          "status": "skipped",
+          "message": "No checkout, so no push guard to install.",
+          "url": "",
+          "details": {}
+        },
+        {
+          "id": "doctor",
+          "status": "todo",
+          "message": "Run ghostbranch doctor once init is done, to check the setup.",
+          "url": "",
+          "details": {}
+        }
+      ]
+    }
   },
   "warnings": [],
   "next": [],

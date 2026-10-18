@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -133,5 +134,44 @@ func TestAFailedSaveAfterARefreshIsSaidOnStderr(t *testing.T) {
 	want := "the refreshed GitHub login couldn't be saved to the OS keychain; the next command will ask you to log in again\n"
 	if got := stderr.String(); !strings.HasSuffix(got, want) || strings.Count(got, "\n") != 1 || strings.Contains(got, "ghr_test") {
 		t.Fatalf("stderr %q", got)
+	}
+}
+
+// Cancelling while the wait polls stores nothing: not in the keychain, not
+// on disk.
+func TestLoginJSONCancelledStoresNothing(t *testing.T) {
+	t.Parallel()
+	srv := authtest.New(t, authtest.Options{Pending: 100})
+	f := fake.New(t.TempDir())
+	f.User = forge.User{Login: "octo", ID: 1}
+	home := t.TempDir()
+	kc := keychain.NewFake()
+	clock := testutil.NewClock(time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC))
+	ctx, cancel := context.WithCancel(context.Background())
+	var out strings.Builder
+	a := &app{jsonOut: true, env: Env{
+		Getenv: func(k string) string {
+			if k == "GHOSTBRANCH_HOME" {
+				return home
+			}
+			return ""
+		},
+		Now: clock.Now, Stdout: &out,
+		Sleep:    func(ctx context.Context, d time.Duration) error { cancel(); return clock.SleepCtx(ctx, d) },
+		NewForge: func(string) (forge.Forge, error) { return f, nil }, Keychain: kc,
+		ClientID: srv.ClientID, OAuthBaseURL: srv.URL, HTTPClient: srv.Client(),
+	}}
+	_, err := a.loginStreaming(ctx)
+	if err == nil {
+		t.Fatal("a cancelled login must fail")
+	}
+	if !strings.Contains(out.String(), `"type":"device_code"`) {
+		t.Fatalf("the event line wasn't written first: %q", out.String())
+	}
+	if l, _ := auth.LoadLogin(kc); l != nil {
+		t.Fatalf("stored after cancel: %v", l)
+	}
+	if ents, _ := os.ReadDir(home); len(ents) != 0 {
+		t.Fatalf("files under GHOSTBRANCH_HOME: %v", ents)
 	}
 }

@@ -22,6 +22,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
+	"github.com/ghostbranch-labs/ghostbranch/internal/forge/fake"
 	"github.com/ghostbranch-labs/ghostbranch/internal/guard"
 	"github.com/ghostbranch-labs/ghostbranch/internal/keychain"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
@@ -67,7 +68,8 @@ func byID(t *testing.T, res *engine.DoctorResult) map[string]engine.DoctorCheck 
 			t.Errorf("%s stopped: %s", c.ID, c.Message)
 		}
 		// next is built from FixArgv; fix is how it reads.
-		if c.Fix != strings.Join(c.FixArgv, " ") {
+		// The app check's fix is a link, which isn't a command.
+		if c.ID != "app" && c.Fix != strings.Join(c.FixArgv, " ") {
 			t.Errorf("%s: fix %q, argv %q", c.ID, c.Fix, c.FixArgv)
 		}
 	}
@@ -94,7 +96,7 @@ func TestDoctorOnAHealthyPair(t *testing.T) {
 		wantStatus(t, c[id], engine.DoctorOK)
 	}
 	wantStatus(t, c["guard"], engine.DoctorSkipped) // no directory given
-	if s := res.Summary(); s.OK != 5 || s.Skipped != 1 || len(s.Failed) != 0 {
+	if s := res.Summary(); s.OK != 5 || s.Skipped != 2 || len(s.Failed) != 0 {
 		t.Fatalf("summary %+v", s)
 	}
 	d := c["token"].Details
@@ -135,7 +137,11 @@ func TestDoctorOnABrokenSetupReportsEveryCheck(t *testing.T) {
 		}, map[string]string{"tools": ok, "token": fail, "pair": skip, "guard": skip, "state": ok, "ci": skip}},
 		{"offline", func(h *harness, opt *engine.DoctorOptions) { h.asApp(); h.eng.Forge = offline{} },
 			map[string]string{"tools": ok, "token": fail, "pair": fail, "guard": skip, "state": ok, "ci": skip}},
-		{"no pair", func(h *harness, opt *engine.DoctorOptions) { h.asApp(); opt.Repo = "" },
+		{"no pair (two registered, no --repo)", func(h *harness, opt *engine.DoctorOptions) {
+			h.asApp()
+			opt.Repo = ""
+			h.eng.WS.AddPair(workspace.Pair{Public: "acme/other", Shadow: "acme/other-shadow"})
+		},
 			map[string]string{"token": ok, "pair": skip, "guard": skip, "state": ok, "ci": skip}},
 		{"not in a checkout", func(h *harness, opt *engine.DoctorOptions) { h.asApp(); opt.Dir = h.t.TempDir() },
 			map[string]string{"pair": ok, "guard": skip}},
@@ -767,5 +773,232 @@ func TestDoctorCICheck(t *testing.T) {
 				t.Fatalf("fix %q", c["ci"].Fix)
 			}
 		})
+	}
+}
+
+// appLoginHarness is a harness with a registered pair and an app login, the
+// app installed on acme (the pair's owner) with the given selection.
+func appLoginHarness(t *testing.T, selection string, installed bool) *harness {
+	t.Helper()
+	h := newHarness(t)
+	h.init()
+	h.eng.Token, h.eng.TokenSource, h.eng.AppLogin = "ghu_test", "login", true
+	if installed {
+		h.forge.Installations = []forge.Installation{{ID: 7, Account: "acme", AccountType: "Organization", Selection: selection}}
+		h.forge.InstallRepos = map[int64][]string{7: {publicName, shadowName}}
+	}
+	return h
+}
+
+func appDoctorOpts() engine.DoctorOptions {
+	o := doctorOpts()
+	o.InstallURL = "https://github.com/apps/ghostbranch-cli/installations/new"
+	return o
+}
+
+func TestDoctorAppCheckOK(t *testing.T) {
+	t.Parallel()
+	h := appLoginHarness(t, "all", true)
+	_, c := h.doctor(appDoctorOpts())
+	wantStatus(t, c["app"], engine.DoctorOK)
+	d := c["app"].Details
+	if d["installed"] != true || d["selection"] != "all" || d["accounts"] == nil {
+		t.Fatalf("details %+v", d)
+	}
+	if c["app"].Fix != "" || c["app"].FixArgv != nil {
+		t.Fatalf("fix %q %v", c["app"].Fix, c["app"].FixArgv)
+	}
+}
+
+// unseenShadow is the fake forge with the shadow repo not found, as when
+// it was deleted or the token can't see it.
+type unseenShadow struct{ *fake.Forge }
+
+func (f unseenShadow) GetRepo(ctx context.Context, full string) (forge.Repo, error) {
+	if full == shadowName {
+		return forge.Repo{}, fmt.Errorf("repo %s: %w", full, forge.ErrNotFound)
+	}
+	return f.Forge.GetRepo(ctx, full)
+}
+
+// The app check is ok only once app_access is done: with the shadow repo
+// unseen it can't say the app sees both repos.
+func TestDoctorAppCheckNotOKWhileTheShadowIsUnseen(t *testing.T) {
+	t.Parallel()
+	h := appLoginHarness(t, "all", true)
+	h.eng.Forge = unseenShadow{h.forge}
+	_, c := h.doctor(appDoctorOpts())
+	if c["app"].Status == engine.DoctorOK || strings.Contains(c["app"].Message, "can see "+publicName+" and "+shadowName) {
+		t.Fatalf("app %+v", c["app"])
+	}
+	wantStatus(t, c["app"], engine.DoctorWarn)
+	if !strings.Contains(c["app"].Message, shadowName) || c["app"].FixArgv != nil {
+		t.Fatalf("app %+v", c["app"])
+	}
+}
+
+func TestDoctorAppCheckNotInstalled(t *testing.T) {
+	t.Parallel()
+	h := appLoginHarness(t, "", false)
+	_, c := h.doctor(appDoctorOpts())
+	wantStatus(t, c["app"], engine.DoctorFail)
+	if c["app"].Fix != appDoctorOpts().InstallURL || c["app"].FixArgv != nil {
+		t.Fatalf("fix %q %v", c["app"].Fix, c["app"].FixArgv)
+	}
+	if c["app"].Details["installed"] != false || c["app"].Details["selection"] != "" {
+		t.Fatalf("details %+v", c["app"].Details)
+	}
+	if !strings.Contains(c["app"].Message, "acme") {
+		t.Fatalf("message %q", c["app"].Message)
+	}
+}
+
+func TestDoctorAppCheckCantSeeRepo(t *testing.T) {
+	t.Parallel()
+	h := appLoginHarness(t, "selected", true)
+	h.forge.Installations[0].AccountType = forge.OwnerUser // a personal account's selection is its list
+	h.forge.InstallRepos = map[int64][]string{7: {"acme/else"}}
+	_, c := h.doctor(appDoctorOpts())
+	wantStatus(t, c["app"], engine.DoctorFail)
+	if c["app"].Details["installed"] != true || c["app"].Details["selection"] != "selected" || c["app"].Fix == "" {
+		t.Fatalf("app %+v", c["app"])
+	}
+}
+
+func TestDoctorAppSkippedForPAT(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.asApp() // a token from GHOSTBRANCH_TOKEN, not an app login
+	_, c := h.doctor(appDoctorOpts())
+	wantStatus(t, c["app"], engine.DoctorSkipped)
+	h2 := newHarness(t)
+	h2.asApp()
+	_, c = h2.doctor(doctorOpts())
+	wantStatus(t, c["app"], engine.DoctorSkipped)
+}
+
+func TestDoctorSinglePairWithoutRepo(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.asApp()
+	opt := doctorOpts()
+	opt.Repo, opt.Dir = "", h.t.TempDir()
+	_, c := h.doctor(opt)
+	wantStatus(t, c["pair"], engine.DoctorOK)
+	if c["pair"].Details["public"] != publicName {
+		t.Fatalf("pair %+v", c["pair"])
+	}
+}
+
+func TestDoctorTwoPairsWithoutRepoUnchanged(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.asApp()
+	h.eng.WS.AddPair(workspace.Pair{Public: "acme/other", Shadow: "acme/other-shadow"})
+	opt := doctorOpts()
+	opt.Repo = ""
+	_, c := h.doctor(opt)
+	wantStatus(t, c["pair"], engine.DoctorSkipped)
+	if !strings.Contains(c["pair"].Message, "pass --repo") {
+		t.Fatalf("message %q", c["pair"].Message)
+	}
+}
+
+func TestDoctorUnregisteredCheckoutKeepsItsMessage(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.asApp()
+	opt := doctorOpts()
+	opt.Repo = ""
+	opt.Remotes = []workspace.Remote{{Name: "origin", URL: "https://github.com/acme/unknown.git"}}
+	_, c := h.doctor(opt)
+	wantStatus(t, c["pair"], engine.DoctorSkipped)
+	if !strings.Contains(c["pair"].Message, "acme/unknown isn't set up") {
+		t.Fatalf("message %q", c["pair"].Message)
+	}
+}
+
+// A v0.1 pair (any non-app token) passes with the same ok count, plus the
+// app check skipped; with the app installed on all repos it is ok too.
+func TestDoctorV01PairUnchanged(t *testing.T) {
+	t.Parallel()
+	h := appLoginHarness(t, "all", true)
+	res, c := h.doctor(appDoctorOpts())
+	for _, id := range []string{"tools", "token", "app", "pair", "state", "ci"} {
+		wantStatus(t, c[id], engine.DoctorOK)
+	}
+	if s := res.Summary(); s.OK != 6 || len(s.Failed) != 0 {
+		t.Fatalf("summary %+v", s)
+	}
+}
+
+// An install that hasn't approved the app's Checks: read: the check-runs
+// probe is refused on the shadow, and the app check warns, with the
+// install's settings page as the fix.
+func TestDoctorChecksNotApprovedWarns(t *testing.T) {
+	t.Parallel()
+	h := appLoginHarness(t, "all", true)
+	h.forge.PermsDenied = map[string]map[string]bool{shadowName: {forge.PermChecksRead: true}}
+	_, c := h.doctor(appDoctorOpts())
+	wantStatus(t, c["app"], engine.DoctorWarn)
+	const url = "https://github.com/organizations/acme/settings/installations/7"
+	want := "The Ghostbranch app can't read check runs on " + shadowName +
+		" yet, so the gate can't see CI from other apps. An owner of acme approves the app's new permission at " + url
+	if c["app"].Message != want {
+		t.Fatalf("message\n%s\nwant\n%s", c["app"].Message, want)
+	}
+	if c["app"].Fix != url || c["app"].FixArgv != nil {
+		t.Fatalf("fix %q %v", c["app"].Fix, c["app"].FixArgv)
+	}
+	if c["app"].Details["installed"] != true {
+		t.Fatalf("details %+v", c["app"].Details)
+	}
+	// Wanted, not needed: the token check doesn't fail for it.
+	if c["token"].Status == engine.DoctorFail {
+		t.Fatalf("token %+v", c["token"])
+	}
+}
+
+// Approved (the probe reads check runs), the app check is ok; so it is
+// when the probe can't tell, as for an empty shadow.
+func TestDoctorChecksApprovedOK(t *testing.T) {
+	t.Parallel()
+	h := appLoginHarness(t, "all", true)
+	_, c := h.doctor(appDoctorOpts())
+	wantStatus(t, c["app"], engine.DoctorOK)
+	if strings.Contains(c["app"].Message, "check runs") {
+		t.Fatalf("app %+v", c["app"])
+	}
+	gate := c["token"].Details["groups"].(map[string]engine.GroupAccess)["gate"]
+	if len(gate.Missing) != 0 || len(gate.Optional) != 0 {
+		t.Fatalf("gate %+v", gate)
+	}
+}
+
+// unknownChecks is the fake forge whose probe can't tell whether the token
+// reads check runs on the shadow, as for an empty shadow.
+type unknownChecks struct{ *fake.Forge }
+
+func (f unknownChecks) ProbePermissions(ctx context.Context, full string) (forge.RepoPermissions, error) {
+	p, err := f.Forge.ProbePermissions(ctx, full)
+	if err == nil && full == shadowName {
+		p.Have[forge.PermChecksRead] = forge.AccessUnknown
+	}
+	return p, err
+}
+
+// When the probe can't tell, the app check stays ok, with no warning.
+func TestDoctorChecksUnknownAccessOK(t *testing.T) {
+	t.Parallel()
+	h := appLoginHarness(t, "all", true)
+	h.eng.Forge = unknownChecks{h.forge}
+	_, c := h.doctor(appDoctorOpts())
+	wantStatus(t, c["app"], engine.DoctorOK)
+	if strings.Contains(c["app"].Message, "check runs") {
+		t.Fatalf("app %+v", c["app"])
 	}
 }

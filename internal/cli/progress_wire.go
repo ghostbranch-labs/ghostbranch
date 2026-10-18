@@ -62,7 +62,7 @@ func (a *app) finishOnCancel(ctx context.Context) {
 // TestEveryCommandIsClassified keeps this and changingCommands complete.
 var readOnlyCommands = map[string]bool{
 	"status": true, "audit": true, "doctor": true, "version": true, "reference": true, "log": true, "explain": true, "guide": true,
-	"feature list": true, "feature show": true, "agents status": true, "waivers list": true,
+	"feature list": true, "feature show": true, "agents status": true, "agents token": true, "waivers list": true,
 	"guard status": true, "guard check": true, "auth status": true,
 }
 

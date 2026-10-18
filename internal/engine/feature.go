@@ -16,13 +16,63 @@ type FeatureStartResult struct {
 	Branch string `json:"branch"`
 	Base   string `json:"base"`
 	// Parent is the feature this one is stacked on, or "main".
-	Parent       string           `json:"parent"`
-	Checkout     [][]string       `json:"checkout"`      // argvs that get the branch into a checkout, in order
-	CheckoutHint string           `json:"checkout_hint"` // Checkout as one shell line
-	Preview      *preview.Preview `json:"preview"`
+	Parent       string     `json:"parent"`
+	Checkout     [][]string `json:"checkout"`      // argvs that get the branch into a checkout, in order
+	CheckoutHint string     `json:"checkout_hint"` // Checkout as one shell line
+	// Local is what feature start did in the checkout it ran in; the CLI
+	// fills it after the branch exists. nil for a dry run, and for the
+	// engine on its own, which never touches a checkout.
+	Local   *LocalCheckout   `json:"local"`
+	Preview *preview.Preview `json:"preview"`
 	// gateFirst is GateFirst's answer.
 	gateFirst string
 }
+
+// LocalCheckout is what feature start did in the checkout it ran in: it
+// switched to the new branch, only fetched it, or left the checkout alone,
+// and why.
+type LocalCheckout struct {
+	Status string `json:"status"` // LocalSwitched, LocalFetchedOnly or LocalSkipped
+	Reason string `json:"reason"` // one of the Reason constants; "" when switched
+	Remote string `json:"remote"` // the checkout's remote for the shadow repo; "" when none was looked at
+	// For the human text and next, never in JSON: the shadow repo
+	// (owner/name); the URL a remote named shadow has when it is another
+	// repo's (ReasonRemoteDiffers); git's message when a git step failed;
+	// whether fetch said the repo wasn't found; whether feature start added
+	// the remote, or failed to; whether the uncommitted work is only
+	// untracked files; the detached HEAD's commit and how many commits only
+	// it reaches (ReasonDetachedCommits); and the GitHub login Ghostbranch
+	// signed in as, when known. URLs and git's messages have no userinfo.
+	Shadow          string `json:"-"`
+	HaveURL         string `json:"-"`
+	GitError        string `json:"-"`
+	NotFound        bool   `json:"-"`
+	Added           bool   `json:"-"`
+	AddFailed       bool   `json:"-"`
+	UntrackedOnly   bool   `json:"-"`
+	DetachedHead    string `json:"-"`
+	DetachedCommits int    `json:"-"`
+	Login           string `json:"-"`
+}
+
+// LocalCheckout.Status values.
+const (
+	LocalSwitched    = "switched"
+	LocalFetchedOnly = "fetched_only"
+	LocalSkipped     = "skipped"
+)
+
+// LocalCheckout.Reason values.
+const (
+	ReasonNotACheckout        = "not_a_checkout"
+	ReasonDirtyTree           = "dirty_tree"
+	ReasonRemoteDiffers       = "remote_differs"
+	ReasonNoCheckoutFlag      = "no_checkout_flag"
+	ReasonBranchExistsLocally = "branch_exists_locally"
+	ReasonFetchFailed         = "fetch_failed"
+	ReasonSwitchFailed        = "switch_failed"
+	ReasonDetachedCommits     = "detached_commits"
+)
 
 // GateFirst is the feature below the new one, in its stack, that next
 // gates first; "" when every one below has a fresh green gate.

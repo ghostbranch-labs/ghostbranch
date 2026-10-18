@@ -44,7 +44,7 @@ func Skill() string { return skill }
 // AgentTokenLink is Strict isolation's pre-filled link for an agent's
 // shadow-only token, with <shadow-owner> and <repo> for the agent to fill.
 func AgentTokenLink() string {
-	return forge.TokenLink("ghostbranch-agent-<repo>", "Ghostbranch agent: the shadow repo only", "<shadow-owner>", 30, forge.AgentTokenPermissions)
+	return forge.TokenLink("ghostbranch-agent-<repo>", "Ghostbranch agent: the shadow repo only", "<shadow-owner>", 30, forge.AgentTokenLinkPermissions)
 }
 
 func cell(s string) string { return strings.ReplaceAll(s, "|", `\|`) }

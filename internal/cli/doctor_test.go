@@ -37,7 +37,7 @@ func TestDoctorHumanOutput(t *testing.T) {
 			marks = append(marks, strings.Join(strings.Fields(l)[:2], " "))
 		}
 	}
-	want := []string{"✓ tools", "! token", "✓ pair", "– guard", "✓ state", "✓ ci", "update check:"}
+	want := []string{"✓ tools", "! token", "– app", "✓ pair", "– guard", "✓ state", "✓ ci", "update check:"}
 	if !reflect.DeepEqual(marks, want) {
 		t.Fatalf("lines %q, want %q\n%s", marks, want, out)
 	}
@@ -61,7 +61,7 @@ func TestDoctorFailsWithTheFixesInNext(t *testing.T) {
 		t.Fatalf("next %v", n)
 	}
 	data, _ := env["data"].(map[string]any)
-	if checks, _ := data["checks"].([]any); len(checks) != 6 {
+	if checks, _ := data["checks"].([]any); len(checks) != 7 {
 		t.Fatalf("data %v", data)
 	}
 }
@@ -99,6 +99,7 @@ func TestDoctorWarnsOfAnAgentOnThePersonsLogin(t *testing.T) {
 	delete(te.vars, "GHOSTBRANCH_TOKEN")
 	te.vars["GHOSTBRANCH_ACTOR"] = "agent:claude-code"
 	storeLogin(te, "ghu_test_x", "ghr_test_x", 8*time.Hour)
+	te.forge.Installations = []forge.Installation{{ID: 7, Account: "acme", AccountType: forge.OwnerOrganization, Selection: "all"}}
 	code, env := te.runJSON("doctor", "--repo", "acme/widget")
 	if code != 0 {
 		t.Fatalf("exit %d: %v", code, env)
@@ -198,7 +199,7 @@ func TestDoctorSaysTheCheckIsOffWithoutAStateDirectory(t *testing.T) {
 	}
 	_, env := te.runJSON("doctor")
 	checks, _ := env["data"].(map[string]any)["checks"].([]any)
-	if len(checks) != 6 {
+	if len(checks) != 7 {
 		t.Fatalf("checks %v", checks)
 	}
 	for _, c := range checks {
@@ -421,5 +422,50 @@ func TestDoctorLooksUpTheShadowOnlyForAPerson(t *testing.T) {
 	}
 	if !strings.Contains(out, "    fix: ghostbranch init acme/other\n") {
 		t.Fatalf("fix line:\n%s", out)
+	}
+}
+
+// Outside a checkout, with one registered pair and no --repo, doctor checks
+// that pair.
+func TestDoctorFindsTheOnlyPairWithoutRepo(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	_, env := te.runJSON("doctor")
+	data, _ := env["data"].(map[string]any)
+	checks, _ := data["checks"].([]any)
+	for _, c := range checks {
+		if m, _ := c.(map[string]any); m["id"] == "pair" && m["status"] != "ok" {
+			t.Fatalf("pair check %v", m)
+		}
+	}
+	if len(checks) != 7 {
+		t.Fatalf("checks %v", checks)
+	}
+}
+
+// An app login without the app installed fails the app check; the fix is the
+// install link, which is not a command, so next carries nothing for it.
+func TestDoctorAppNotInstalled(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	delete(te.vars, "GHOSTBRANCH_TOKEN")
+	storeLogin(te, "ghu_test_x", "ghr_test_x", 8*time.Hour)
+	code, env := te.runJSON("doctor", "--repo", "acme/widget")
+	e, _ := env["error"].(map[string]any)
+	if code != 1 || e["code"] != string(contract.DoctorFailed) {
+		t.Fatalf("exit %d: %v", code, env)
+	}
+	if failed := e["details"].(map[string]any)["failed"]; !reflect.DeepEqual(failed, []any{"app"}) {
+		t.Fatalf("failed %v", failed)
+	}
+	for _, c := range env["data"].(map[string]any)["checks"].([]any) {
+		if m := c.(map[string]any); m["id"] == "app" && !strings.HasPrefix(m["fix"].(string), "https://github.com/apps/") {
+			t.Fatalf("app check %v", m)
+		}
+	}
+	if n := nextOf(t, env); len(n) != 0 {
+		t.Fatalf("next %v", n)
 	}
 }

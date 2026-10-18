@@ -326,3 +326,21 @@ func TestChoosingRefusesABadDefault(t *testing.T) {
 		}
 	}
 }
+
+// Hidden input is read only from the real console: a fake device, or a file
+// that isn't a terminal, is refused before anything is read.
+func TestReadSecretNeedsATerminal(t *testing.T) {
+	t.Parallel()
+	d := &device{in: strings.NewReader("ghp_not-read\n")}
+	if b, err := console.ReadSecret(context.Background(), d); !errors.Is(err, console.ErrNotTerminal) || b != nil {
+		t.Fatalf("fake device: %q, %v", b, err)
+	}
+	f, err := os.CreateTemp(t.TempDir(), "secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	if b, err := console.ReadSecret(context.Background(), f); !errors.Is(err, console.ErrNotTerminal) || b != nil {
+		t.Fatalf("plain file: %q, %v", b, err)
+	}
+}

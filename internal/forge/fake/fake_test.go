@@ -280,3 +280,26 @@ func TestFakeCreateRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestFakeInstaller(t *testing.T) {
+	ctx := context.Background()
+	f := fake.New(filepath.Join(t.TempDir(), "forge"))
+	var _ forge.Installer = f
+	f.Installations = []forge.Installation{{ID: 7, Account: "me", AccountType: "User", Selection: "all"}}
+	f.InstallRepos = map[int64][]string{7: {"me/a"}}
+	ins, err := f.UserInstallations(ctx)
+	if err != nil || len(ins) != 1 || ins[0].ID != 7 {
+		t.Fatalf("UserInstallations = %+v %v", ins, err)
+	}
+	repos, err := f.InstallationRepos(ctx, 7)
+	if err != nil || len(repos) != 1 || repos[0] != "me/a" {
+		t.Fatalf("InstallationRepos = %v %v", repos, err)
+	}
+	f.InstallErr = forge.ErrForbidden
+	if _, err := f.UserInstallations(ctx); !errors.Is(err, forge.ErrForbidden) {
+		t.Fatalf("UserInstallations err = %v", err)
+	}
+	if _, err := f.InstallationRepos(ctx, 7); !errors.Is(err, forge.ErrForbidden) {
+		t.Fatalf("InstallationRepos err = %v", err)
+	}
+}

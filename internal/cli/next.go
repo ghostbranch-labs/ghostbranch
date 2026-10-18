@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -15,6 +14,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
+	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/guard"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
 	"github.com/ghostbranch-labs/ghostbranch/internal/managed"
@@ -131,7 +131,14 @@ func (a *app) steps(err error) []contract.Next {
 		case contract.TokenPermissionMissing:
 			return []contract.Next{{Command: a.scoped("doctor"),
 				Why: "doctor lists every permission the token lacks, for each command; a person grants them, then runs this command again"}}
+		case contract.AuthMissing:
+			if a.command == "init" && a.jsonOut {
+				return []contract.Next{a.agentLoginNext("init needs the person's Ghostbranch login")}
+			}
 		case contract.LoginExpired:
+			if a.command == "init" && a.jsonOut {
+				return []contract.Next{a.agentLoginNext("the person's stored GitHub login expired")}
+			}
 			return []contract.Next{{Command: a.gb("login"), NeedsHuman: true,
 				Why: "the stored GitHub login expired; a person logs in again at a terminal"}}
 		case contract.LoginUnavailable:
@@ -143,13 +150,31 @@ func (a *app) steps(err error) []contract.Next {
 					{Command: a.gb("logout"), Why: "remove the unreadable stored login"},
 					{Command: a.gb("login"), NeedsHuman: true, Why: "then a person logs in again at a terminal"},
 				}
-			case "no_console", "denied", "expired_code", "refresh_failed", "refused":
+			case "denied", "expired_code":
+				if a.loginStreamed() {
+					return []contract.Next{{Command: a.gb("login", "--json", "--non-interactive"), NeedsHuman: true,
+						Why: "the login wasn't approved in time, or was declined; run it again in the background and relay the new code (its first line's user_code and verification_uri) to the person, who approves it on GitHub"}}
+				}
+				return []contract.Next{{Command: a.gb("login"), NeedsHuman: true,
+					Why: "a person runs this in their own terminal and approves it on GitHub"}}
+			case "no_console", "refresh_failed", "refused":
 				return []contract.Next{{Command: a.gb("login"), NeedsHuman: true,
 					Why: "a person runs this in their own terminal and approves it on GitHub"}}
 			case "no_client_id":
 				return []contract.Next{{Command: a.gb("login", "--with-token"), NeedsHuman: true,
 					Why: "pipe a GitHub token on stdin, for example: gh auth token | ghostbranch login --with-token"}}
 			}
+		case contract.AppNotInstalled:
+			return []contract.Next{{Command: a.again(false), NeedsHuman: true,
+				Why: "a person installs the Ghostbranch app on each account in error.details.accounts, at its install_url; then run this again"}}
+		case contract.AppCantSeeRepo:
+			return []contract.Next{{Command: a.again(false), NeedsHuman: true,
+				Why: "a person adds error.details.repos to the Ghostbranch app's repositories, at error.details.configure_url; then run this again"}}
+		case contract.TokenWrongAccount:
+			return a.wrongAccountNexts(ce)
+		case contract.AgentTokenRefused:
+			return []contract.Next{{Command: a.again(true), NeedsHuman: true,
+				Why: "a person makes a new token from error.details.link, with only error.details.shadow selected, then runs this again and pastes it"}}
 		case contract.ShadowCreateDenied:
 			pub, _ := ce.Details["public"].(string)
 			sh, _ := ce.Details["shadow"].(string)
@@ -206,6 +231,10 @@ func (a *app) steps(err error) []contract.Next {
 						Why: "once the job has passed, promote again; it reuses the green gate"})
 				}
 				return out
+			}
+			if a.loginStreamed() {
+				return []contract.Next{{Command: a.gb("login", "--json", "--non-interactive"), NeedsHuman: true,
+					Why: "the login was stopped before it was approved; run it again in the background and relay the new code (its first line's user_code and verification_uri) to the person, who approves it on GitHub"}}
 			}
 			why := "nothing is pending; run it again"
 			if a.command == "apply" {
@@ -621,7 +650,7 @@ func (a *app) steps(err error) []contract.Next {
 				out = append(out, contract.Next{Command: a.scoped("gate", first),
 					Why: first + ", below " + r.Name + " in its stack, has no fresh green gate; gate it first (then each branch above it, bottom up), as " + r.Name + "'s gate builds on it"})
 			}
-			why := "check out with `" + r.CheckoutHint + "`, commit on " + r.Name + ", "
+			why := startWhy(r)
 			switch a.shadowRemote {
 			case "":
 				why += "push it to the shadow repo (never origin), then gate it"
@@ -766,6 +795,13 @@ func (a *app) steps(err error) []contract.Next {
 		if r.Preview == nil && r.Audit != nil && a.hasAuditFindings() {
 			out = append(out, contract.Next{Command: a.scoped("audit"), Why: "the audit after upgrade has warnings; read them"})
 		}
+	case *engine.AgentsTokenResult:
+		if r.Check == nil {
+			out = append(out, contract.Next{Command: a.again(true), NeedsHuman: true,
+				Why: "a person runs this in their own terminal: it opens the token page, reads the new token with hidden input and checks it can't publish"})
+		}
+		out = append(out, contract.Next{Command: a.scoped("agents", "status", "--json"),
+			Why: "after the person restarts the agent with GHOSTBRANCH_TOKEN set, the agent checks its token: token_can_publish is false"})
 	case *engine.StatusResult:
 		out = a.featureNexts(out, r.Features)
 	case *engine.FeatureListResult:
@@ -782,6 +818,14 @@ func (a *app) steps(err error) []contract.Next {
 	case *engine.InitResult:
 		if r.Preview == nil {
 			out = append(out, a.guardNext()...)
+			if !r.Guided {
+				// Plain init doesn't run doctor (guided init does).
+				doctor := []string{"doctor"}
+				if a.jsonOut {
+					doctor = append(doctor, "--json")
+				}
+				out = append(out, contract.Next{Command: a.scoped(doctor...), Why: "init is done; doctor checks the setup"})
+			}
 		}
 	case *engine.FeatureStartResult:
 		if r.Preview == nil {
@@ -983,6 +1027,56 @@ func (a *app) initNexts(pub string) []contract.Next {
 		{Command: a.gb("init", pub, "--plan", "--json"),
 			Why: "no shadow repo yet: create one"},
 	}
+}
+
+// wrongAccountNexts is next for TOKEN_WRONG_ACCOUNT: use a token of the
+// owner's, or keep the shadow repo on the token's own account.
+func (a *app) wrongAccountNexts(ce *contract.Error) []contract.Next {
+	owner, _ := ce.Details["owner"].(string)
+	why := fmt.Sprintf("a person logs in as %s at a terminal; then run init again", owner)
+	if a.eng != nil && a.eng.TokenSource == "GHOSTBRANCH_TOKEN" {
+		why = fmt.Sprintf("GHOSTBRANCH_TOKEN wins over any login: a person sets it to a token of %s's, or unsets it and logs in as %s with this; then run init again", owner, owner)
+	}
+	out := []contract.Next{{Command: a.gb("login"), NeedsHuman: true, Why: why}}
+	r, _ := a.result.(*engine.InitResult)
+	user, _ := ce.Details["token_account"].(string)
+	if _, name, err := forge.SplitName(initPublic(r)); err == nil && user != "" {
+		// This run's own init (its --json, --guard, --sync and --workspace
+		// kept), with the shadow on the token's account. Where the shadow
+		// lives is the person's call.
+		yours := user + "/" + name + "-shadow"
+		cmd := withoutFlags(a.again(false), "--shadow")
+		if !slices.ContainsFunc(cmd, func(arg string) bool { return strings.EqualFold(arg, r.Public) }) {
+			// Guided init asked for the repo: name it.
+			if i := slices.Index(cmd, "init"); i >= 0 {
+				cmd = slices.Insert(cmd, i+1, r.Public)
+			}
+		}
+		out = append(out, contract.Next{Command: append(cmd, "--shadow", yours), NeedsHuman: true,
+			Why: fmt.Sprintf("or, if the person agrees, keep the shadow repo on the token's own account: init creates %s", yours)})
+	}
+	return out
+}
+
+// loginStreamed is whether this run is login --json without a console: the
+// agent's background login, which streams the device code.
+func (a *app) loginStreamed() bool {
+	return a.command == "login" && a.ndjson
+}
+
+// agentLoginNext is the login an agent starts for init --json: in the
+// background, relaying the code to the person.
+func (a *app) agentLoginNext(what string) contract.Next {
+	return contract.Next{Command: a.gb("login", "--json", "--non-interactive"), NeedsHuman: true,
+		Why: what + ": an agent runs this in the background and relays its first line's user_code and verification_uri to the person, who approves it on GitHub; then run init again"}
+}
+
+// initPublic is r's public repo, or "" for none.
+func initPublic(r *engine.InitResult) string {
+	if r == nil {
+		return ""
+	}
+	return r.Public
 }
 
 // waitNext finishes the pending gate job.
@@ -1365,18 +1459,8 @@ func shadowRemote(shadow string) (remote, free string, inCheckout bool) {
 	if err != nil {
 		return "", "shadow", true
 	}
-	names := make([]string, 0, len(remotes))
-	for n := range remotes {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	free = freeRemoteName(remotes)
-	for _, n := range names {
-		if s, ok := guard.Slug(remotes[n]); ok && strings.EqualFold(s, shadow) && safeRemoteName.MatchString(n) {
-			return n, free, true
-		}
-	}
-	return "", free, true
+	remote, free = shadowRemoteIn(remotes, shadow)
+	return remote, free, true
 }
 
 // freeRemoteName is the first of shadow, ghostbranch-shadow,

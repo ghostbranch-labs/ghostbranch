@@ -11,7 +11,7 @@ import (
 
 func (a *app) agentsCmd() *cobra.Command {
 	c := &cobra.Command{Use: "agents", Short: "Let coding agents publish to a repo from this machine, or take that back"}
-	c.AddCommand(a.agentsAllowCmd(), a.agentsRevokeCmd(), a.agentsStatusCmd())
+	c.AddCommand(a.agentsAllowCmd(), a.agentsRevokeCmd(), a.agentsStatusCmd(), a.agentsTokenCmd())
 	return c
 }
 

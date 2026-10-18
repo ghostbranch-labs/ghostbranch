@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.15",
+  "schema_version": "0.16",
   "command": "doctor",
   "ok": false,
   "exit_code": 1,
@@ -28,6 +28,13 @@
           "kind": "",
           "source": ""
         }
+      },
+      {
+        "id": "app",
+        "status": "skipped",
+        "message": "not an app login, so there is no Ghostbranch app to check",
+        "fix": "",
+        "details": {}
       },
       {
         "id": "pair",

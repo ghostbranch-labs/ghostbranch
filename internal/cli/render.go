@@ -255,11 +255,7 @@ func human(r any, st style.Styler) string {
 			previewText(&b, v.Preview)
 			break
 		}
-		if v.Parent != "" && v.Parent != feature.MainParent {
-			fmt.Fprintf(&b, "Started feature %s on %s, at its tip %s.\nCheck it out with: %s\n", v.Name, v.Parent, short(v.Base), v.CheckoutHint)
-			break
-		}
-		fmt.Fprintf(&b, "Started feature %s from shadow main %s.\nCheck it out with: %s\n", v.Name, short(v.Base), v.CheckoutHint)
+		featureStartText(&b, v, st)
 	case *engine.GateResult:
 		if pendingJob(v) {
 			b.WriteString(pendingLine(v))
@@ -506,7 +502,8 @@ func human(r any, st style.Styler) string {
 			fmt.Fprintf(&b, "Stored the %s token for %s in the OS keychain.\n", v.TokenKind, who)
 		}
 		if v.InstallURL != "" {
-			fmt.Fprintf(&b, "Next, install the Ghostbranch app on the account that owns your public repo and pick that repo; ghostbranch init creates the shadow repo: %s\n", v.InstallURL)
+			b.WriteString("Next, install the Ghostbranch app. It acts on GitHub only on the repos you pick.\n")
+			fmt.Fprintf(&b, "Open this on the account that owns your public repo and pick that repo (ghostbranch init creates the shadow repo, and the app gets it automatically): %s\n", v.InstallURL)
 		}
 		if v.EnvToken != "" {
 			fmt.Fprintf(&b, "Note: %s is set in this shell and wins over the stored login.\n", v.EnvToken)
@@ -557,6 +554,8 @@ func human(r any, st style.Styler) string {
 		default:
 			b.WriteString("Stored login: not checked (GHOSTBRANCH_TOKEN wins)\n")
 		}
+	case *engine.AgentsTokenResult:
+		agentsTokenText(&b, v, st)
 	case *engine.AgentsStatusResult:
 		if len(v.Grants) == 0 {
 			b.WriteString("No agent grants on this machine.\n")
@@ -576,6 +575,28 @@ func human(r any, st style.Styler) string {
 		}
 	}
 	return b.String()
+}
+
+// agentsTokenText is agents token's result: the token's check and where to
+// set it, or, when no token was read, the steps for a person.
+func agentsTokenText(b *strings.Builder, v *engine.AgentsTokenResult, st style.Styler) {
+	if v.Check == nil {
+		owner, _, _ := strings.Cut(v.Select, "/")
+		b.WriteString(attention(st, fmt.Sprintf("Make the agent's token on GitHub, for %s: %s", owner, v.Link)) + "\n")
+		b.WriteString(attention(st, fmt.Sprintf("On that page, choose Only select repositories, then %s. Keep the permissions the link set.", v.Select)) + "\n")
+		b.WriteString("Then set it in the agent's shell, and restart the agent there:\n")
+	} else {
+		public := v.Check.Public
+		if public == "" {
+			public = "the public repo"
+		}
+		b.WriteString(st.OK(fmt.Sprintf("This token (account %s) reaches %s, and it can't push to %s.", v.Check.Account, v.Check.Shadow, public)) + "\n")
+		b.WriteString("Set it in the agent's shell (paste the token for <paste>); Ghostbranch doesn't keep it:\n")
+	}
+	fmt.Fprintf(b, "  sh, bash, zsh: %s\n  PowerShell:    %s\n", v.SetLine["sh"], v.SetLine["powershell"])
+	if v.Check != nil {
+		b.WriteString("Then restart your agent in a shell with this set; it can check with ghostbranch agents status.\n")
+	}
 }
 
 // planLines is a saved promote plan: where it is, what it publishes, and
@@ -966,10 +987,47 @@ func doctorLine(b *strings.Builder, c engine.DoctorCheck, st style.Styler) {
 	}
 }
 
+// setupMarks are the setup checklist's marks for people: done, needs you
+// (or blocked), and Ghostbranch will do it. A skipped step isn't shown.
+var setupMarks = map[string]string{engine.SetupDone: "✓", engine.SetupNeedsHuman: "!", engine.SetupBlocked: "!", engine.SetupTodo: "·"}
+
+// attention is text that needs the person: bold yellow.
+func attention(st style.Styler, text string) string { return st.Bold(st.Warn(text)) }
+
+// checklistLines is the setup checklist as guided init shows it: one
+// "<mark> <message>" line per step that applies, coloured by what it asks
+// of the person: done is green, needs you bold yellow, Ghostbranch will do
+// it dim. A step in replace shows those lines instead (already styled).
+func checklistLines(s *engine.Setup, st style.Styler, replace map[string][]string) []string {
+	var out []string
+	for _, step := range s.Steps {
+		mark, ok := setupMarks[step.Status]
+		if !ok {
+			continue
+		}
+		if lines, ok := replace[step.ID]; ok {
+			out = append(out, lines...)
+			continue
+		}
+		line := mark + " " + step.Message
+		switch step.Status {
+		case engine.SetupDone:
+			line = st.OK(line)
+		case engine.SetupTodo:
+			line = st.Dim(line)
+		default:
+			line = attention(st, line)
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
 // walkthrough ends a guided init: the first feature, and agents' tokens.
 const walkthrough = `
 Your first feature:
-  1. ghostbranch feature start <name>   creates the branch in the shadow repo; commit and push to it there
+  1. ghostbranch feature start <name>   creates the branch in the shadow repo and switches this checkout to it;
+                                        commit there, then: git push shadow <name>
   2. ghostbranch gate <name>            rebases on public main, scans for leaks and runs CI
   3. ghostbranch promote <name>         publishes it to the public repo as a PR, once you confirm
 Coding agents: give each agent its own token that reaches only the shadow repo, as GHOSTBRANCH_TOKEN

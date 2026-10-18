@@ -90,7 +90,7 @@ func TestEnvelopeSchemaMatchesTheContract(t *testing.T) {
 		}
 	}
 	for name, want := range map[string]string{"feature.schema.json": contract.RecordVersion, "grants.schema.json": contract.RecordVersion,
-		"plan.schema.json": contract.RecordVersion, "waivers.schema.json": contract.RecordVersion, "wait-event.schema.json": contract.SchemaVersion} {
+		"plan.schema.json": contract.RecordVersion, "waivers.schema.json": contract.RecordVersion, "wait-event.schema.json": contract.SchemaVersion, "login-event.schema.json": contract.SchemaVersion} {
 		var r struct {
 			Properties struct {
 				SchemaVersion struct {
@@ -139,18 +139,46 @@ func schemaRejects(t *testing.T, name, raw string) {
 const initBase = `"public":"acme/widget","shadow":"acme/widget-shadow","created_shadow":true,"adopted":false,"resumed":false,` +
 	`"mirrored_branches":["main"],"mirrored_tags":[],"overlay_created":true,"default_branch_set":true,"audit":null,"preview":null`
 
+// setupJSON is init's data.setup: the eight steps, in order (8.7).
+func setupJSON(ids ...string) string {
+	if len(ids) == 0 {
+		ids = []string{"login", "account", "app_installed", "shadow", "app_access", "pair", "guard", "doctor"}
+	}
+	steps := make([]string, len(ids))
+	for i, id := range ids {
+		steps[i] = `{"id":"` + id + `","status":"done","message":"m","url":"","details":{}}`
+	}
+	return `,"setup":{"steps":[` + strings.Join(steps, ",") + `]}`
+}
+
+// data.setup is required, and its steps are the eight ids in order.
+func TestInitSetupSchema(t *testing.T) {
+	t.Parallel()
+	base := `{` + initBase + `,"guard_installed":false,"doctor":null`
+	testutil.ValidateSchema(t, "init.schema.json", []byte(base+setupJSON()+`}`))
+	schemaRejects(t, "init.schema.json", base+`}`)
+	schemaRejects(t, "init.schema.json", base+`,"setup":null}`)
+	schemaRejects(t, "init.schema.json", base+setupJSON("account", "login", "app_installed", "shadow", "app_access", "pair", "guard", "doctor")+`}`)
+	schemaRejects(t, "init.schema.json", base+setupJSON("login", "account", "app_installed", "shadow", "app_access", "pair", "guard")+`}`)
+	schemaRejects(t, "init.schema.json", base+strings.Replace(setupJSON(), `"status":"done"`, `"status":"waiting"`, 1)+`}`)
+}
+
 // The 6.1 additions to existing results, and the envelope's new values: what
 // the later tasks must emit, and what they must never emit.
 func TestSubProject61Schemas(t *testing.T) {
 	t.Parallel()
 	for name, raw := range map[string][]string{
 		"init.schema.json": {
-			`{` + initBase + `,"guard_installed":false,"doctor":null}`,
-			`{` + initBase + `,"guard_installed":true,"doctor":{"ok":5,"warn":0,"fail":1,"skipped":0,"failed":["guard"]}}`,
+			`{` + initBase + `,"guard_installed":false,"doctor":null` + setupJSON() + `}`,
+			`{` + initBase + `,"guard_installed":true,"doctor":{"ok":5,"warn":0,"fail":1,"skipped":0,"failed":["guard"]}` + setupJSON() + `}`,
 		},
 		"agents-status.schema.json": {
 			`{"pair":"acme/widget","grants":[],"token_can_publish":"false","token":{"source":"GHOSTBRANCH_TOKEN","http_status":403},"token_kind":"fine-grained"}`,
 			`{"pair":"acme/widget","grants":[],"token_can_publish":"false","token":{"source":"GHOSTBRANCH_TOKEN","http_status":403},"token_kind":"unknown"}`,
+		},
+		"agents-token.schema.json": {
+			`{"link":"https://github.com/settings/personal-access-tokens/new?name=ghostbranch-agent-widget","select":"acme/widget-shadow","check":null,"set_line":{"sh":"export GHOSTBRANCH_TOKEN=<paste>","powershell":"$env:GHOSTBRANCH_TOKEN = '<paste>'"}}`,
+			`{"link":"https://github.com/settings/personal-access-tokens/new?name=ghostbranch-agent-widget","select":"acme/widget-shadow","check":{"account":"octo","shadow":"acme/widget-shadow","can_publish":"false","missing":[]},"set_line":{"sh":"export GHOSTBRANCH_TOKEN=<paste>","powershell":"$env:GHOSTBRANCH_TOKEN = '<paste>'"}}`,
 		},
 		"envelope.schema.json": {
 			`{"schema_version":"` + contract.SchemaVersion + `","command":"doctor","ok":false,"exit_code":1,"data":{},"warnings":[],"next":[],"error":{"code":"DOCTOR_FAILED","message":"m","field":null,"retryable":false,"details":{"failed":["guard"]}}}`,
@@ -162,8 +190,9 @@ func TestSubProject61Schemas(t *testing.T) {
 		}
 	}
 	for name, raw := range map[string]string{
-		"init.schema.json":          `{` + initBase + `,"guard_installed":false,"doctor":{"ok":1,"warn":0,"fail":0,"skipped":0,"failed":["nope"]}}`,
+		"init.schema.json":          `{` + initBase + `,"guard_installed":false,"doctor":{"ok":1,"warn":0,"fail":0,"skipped":0,"failed":["nope"]}` + setupJSON() + `}`,
 		"agents-status.schema.json": `{"pair":"acme/widget","grants":[],"token_can_publish":"false","token":{"source":"GHOSTBRANCH_TOKEN","http_status":403},"token_kind":"keychain"}`,
+		"agents-token.schema.json":  `{"link":"https://github.com/settings/personal-access-tokens/new?name=x","select":"acme/widget-shadow","check":{"account":"octo","shadow":"acme/widget-shadow","can_publish":"false","missing":[],"token":"t"},"set_line":{"sh":"s","powershell":"p"}}`,
 	} {
 		schemaRejects(t, name, raw)
 	}

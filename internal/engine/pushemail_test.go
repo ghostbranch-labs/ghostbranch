@@ -1,0 +1,188 @@
+package engine
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
+	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
+)
+
+const gh007Reason = "push declined due to email privacy restrictions: error: GH007: Your push would publish a private email address."
+
+// gh007Repo is a mirror with a public main commit and a feature commit on
+// top of it, both made by email.
+func gh007Repo(t *testing.T, email string) (g *gitx.Git, pub, feat string) {
+	t.Helper()
+	ctx := context.Background()
+	g = testutil.BareRepo(t, t.TempDir())
+	tree, err := g.MakeTree(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := gitx.Identity{Name: "t", Email: email, When: time.Unix(1700000000, 0)}
+	pub, err = g.CommitTree(ctx, tree, nil, "Initial commit", id, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	feat, err = g.CommitTree(ctx, tree, []string{pub}, "add the thing\n\nbody", id, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := g.UpdateRef(ctx, "refs/remotes/public/main", pub); err != nil {
+		t.Fatal(err)
+	}
+	return g, pub, feat
+}
+
+func TestExplainGH007TipOnPublicMain(t *testing.T) {
+	t.Parallel()
+	g, pub, _ := gh007Repo(t, "me@example.com")
+	refused := &gitx.RefusedError{Refs: []string{"refs/heads/probe2"}, Reason: gh007Reason}
+	msg, det, ok := explainGH007(context.Background(), g, []string{pub + ":refs/heads/probe2"}, refused, "acme/widget")
+	if !ok {
+		t.Fatal("no explanation")
+	}
+	want := `GitHub refused the push because the newest commit on probe2 (` + pub[:7] + `, "Initial commit")
+has your private email, me@example.com, and your account blocks pushes that expose it.
+That commit is already public in acme/widget; your own commits are fine.
+Fix one of these:
+  - untick "Block command line pushes that expose my email" at https://github.com/settings/emails, or
+  - add any new commit to acme/widget's main using your no-reply address, then run this again`
+	if msg != want {
+		t.Fatalf("message:\n%s\nwant:\n%s", msg, want)
+	}
+	if det["cause"] != "email_private" || det["commit"] != pub || det["email"] != "me@example.com" ||
+		det["branch"] != "probe2" || det["settings_url"] != "https://github.com/settings/emails" {
+		t.Fatalf("details = %v", det)
+	}
+}
+
+func TestExplainGH007OwnCommit(t *testing.T) {
+	t.Parallel()
+	g, _, feat := gh007Repo(t, "me@example.com")
+	refused := &gitx.RefusedError{Refs: []string{"refs/heads/ghostbranch-gate/probe2"}, Reason: gh007Reason}
+	msg, det, ok := explainGH007(context.Background(), g, []string{"+" + feat + ":refs/heads/ghostbranch-gate/probe2"}, refused, "acme/widget")
+	if !ok {
+		t.Fatal("no explanation")
+	}
+	want := `GitHub refused the push because the newest commit on ghostbranch-gate/probe2 (` + feat[:7] + `, "add the thing")
+has your private email, me@example.com, and your account blocks pushes that expose it.
+Fix one of these:
+  - untick "Block command line pushes that expose my email" at https://github.com/settings/emails, or
+  - set git's user.email to your GitHub no-reply address (shown on that page), recreate the commit, and push again`
+	if msg != want {
+		t.Fatalf("message:\n%s\nwant:\n%s", msg, want)
+	}
+	if det["commit"] != feat || det["branch"] != "ghostbranch-gate/probe2" {
+		t.Fatalf("details = %v", det)
+	}
+}
+
+// Only the first GH007 ref is explained.
+func TestExplainGH007FirstGH007Ref(t *testing.T) {
+	t.Parallel()
+	g, pub, feat := gh007Repo(t, "me@example.com")
+	refused := &gitx.RefusedError{
+		Refs:       []string{"refs/heads/a", "refs/heads/b", "refs/heads/c"},
+		RefReasons: []string{"pre-receive hook declined", gh007Reason, gh007Reason},
+		Reason:     "x",
+	}
+	msg, _, ok := explainGH007(context.Background(), g,
+		[]string{pub + ":refs/heads/a", feat + ":refs/heads/b", pub + ":refs/heads/c"}, refused, "acme/widget")
+	if !ok || !strings.Contains(msg, "newest commit on b ("+feat[:7]) {
+		t.Fatalf("ok=%v msg=%s", ok, msg)
+	}
+}
+
+// When the lookup fails the caller keeps its own message.
+func TestExplainGH007LookupFailsLeavesMessage(t *testing.T) {
+	t.Parallel()
+	g, _, _ := gh007Repo(t, "me@example.com")
+	ctx := context.Background()
+	missing := strings.Repeat("a", 40)
+	for name, tc := range map[string]struct {
+		specs   []string
+		refused *gitx.RefusedError
+	}{
+		"missing commit": {[]string{missing + ":refs/heads/x"}, &gitx.RefusedError{Refs: []string{"refs/heads/x"}, Reason: gh007Reason}},
+		"no refspec":     {nil, &gitx.RefusedError{Refs: []string{"refs/heads/x"}, Reason: gh007Reason}},
+		"not GH007":      {[]string{missing + ":refs/heads/x"}, &gitx.RefusedError{Refs: []string{"refs/heads/x"}, Reason: "pre-receive hook declined"}},
+	} {
+		if msg, det, ok := explainGH007(ctx, g, tc.specs, tc.refused, "acme/widget"); ok || msg != "" || det != nil {
+			t.Errorf("%s: got %q %v %v", name, msg, det, ok)
+		}
+	}
+}
+
+// A public commit's subject and email are untrusted: escapes never reach the
+// terminal text, while the JSON details keep the raw values.
+func TestExplainGH007EscapesCommitText(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	g := testutil.BareRepo(t, t.TempDir())
+	tree, err := g.MakeTree(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := gitx.Identity{Name: "t", Email: "me@example.com", When: time.Unix(1700000000, 0)}
+	sha, err := g.CommitTree(ctx, tree, nil, "evil \x1b[31mred\r\x1b[0m", id, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refused := &gitx.RefusedError{Refs: []string{"refs/heads/x"}, Reason: gh007Reason}
+	msg, det, ok := explainGH007(ctx, g, []string{sha + ":refs/heads/x"}, refused, "acme/widget")
+	if !ok || strings.ContainsAny(msg, "\x1b\r") || !strings.Contains(msg, `evil \u001b[31mred\u000d\u001b[0m`) {
+		t.Fatalf("ok=%v msg=%q", ok, msg)
+	}
+	if det["commit"] != sha {
+		t.Fatalf("details = %v", det)
+	}
+}
+
+// GitHub's real per-ref reason is "email privacy restrictions"; GH007 is only
+// in the remote: lines. The second ref is the one explained.
+func TestExplainGH007MatchesGitHubPerRefReason(t *testing.T) {
+	t.Parallel()
+	g, pub, feat := gh007Repo(t, "me@example.com")
+	refused := &gitx.RefusedError{
+		Refs:       []string{"refs/heads/a", "refs/heads/b"},
+		RefReasons: []string{"push declined due to repository rule violations", "push declined due to email privacy restrictions"},
+		Reason:     "x",
+	}
+	msg, _, ok := explainGH007(context.Background(), g, []string{pub + ":refs/heads/a", feat + ":refs/heads/b"}, refused, "acme/widget")
+	if !ok || !strings.Contains(msg, "newest commit on b ("+feat[:7]) {
+		t.Fatalf("ok=%v msg=%s", ok, msg)
+	}
+}
+
+// A git error (not "no such ref") on the public-main lookup keeps the old message.
+func TestExplainGH007PublicMainLookupErrorLeavesMessage(t *testing.T) {
+	t.Parallel()
+	g, _, feat := gh007Repo(t, "me@example.com")
+	// Point public/main at a corrupt object: only that lookup fails (git
+	// exits 128, not "no such ref"); the tip commit and its log still work.
+	ctx := context.Background()
+	blob, err := g.HashObject(ctx, []byte("hi\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := g.UpdateRef(ctx, "refs/remotes/public/main", blob); err != nil {
+		t.Fatal(err)
+	}
+	obj := filepath.Join(g.Dir, "objects", blob[:2], blob[2:])
+	if err := os.Chmod(obj, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(obj, []byte("junk"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	refused := &gitx.RefusedError{Refs: []string{"refs/heads/x"}, Reason: gh007Reason}
+	if msg, det, ok := explainGH007(context.Background(), g, []string{feat + ":refs/heads/x"}, refused, "acme/widget"); ok || msg != "" || det != nil {
+		t.Fatalf("got %q %v %v", msg, det, ok)
+	}
+}

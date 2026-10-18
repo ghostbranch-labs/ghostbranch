@@ -14,10 +14,13 @@ import (
 // any command needs (optional ones aside).
 func TestTokenLinkPermissionsMatchDoctor(t *testing.T) {
 	t.Parallel()
-	var gate, all []string
+	var gate, all, wanted []string
 	for _, g := range permGroups {
 		for _, n := range g.needs {
 			if n.optional {
+				if g.name == "gate" {
+					wanted = append(wanted, n.perm)
+				}
 				continue
 			}
 			if g.name == "gate" {
@@ -45,5 +48,9 @@ func TestTokenLinkPermissionsMatchDoctor(t *testing.T) {
 		if !covers(forge.PersonTokenPermissions, p) {
 			t.Errorf("a command needs %s; the person's token link lacks it", p)
 		}
+	}
+	// The links also ask for what gate wants but can do without.
+	if !slices.Equal(forge.WantedTokenPermissions, wanted) {
+		t.Errorf("the links want %v; gate's optional permissions are %v", forge.WantedTokenPermissions, wanted)
 	}
 }

@@ -2,13 +2,17 @@ package cli_test
 
 import (
 	"context"
+	"maps"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/auth"
 	"github.com/ghostbranch-labs/ghostbranch/internal/auth/authtest"
+	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/workspace"
 )
@@ -64,10 +68,9 @@ func before(p *person, a, b string) bool {
 }
 
 const (
-	ghQ        = "Found a GitHub CLI (gh) login as acme. Use it, or log in with the Ghostbranch app instead? [app/gh]"
-	installed  = "Press Enter once it's installed."
-	loggedIn   = "Logged in to GitHub as acme with the Ghostbranch GitHub App."
-	installNow = "Next, install the Ghostbranch app on acme and pick acme/widget (init creates the shadow repo next): " + installLink
+	ghQ       = "Found a GitHub CLI (gh) login as acme. Use it, or log in with the Ghostbranch app instead? [app/gh]"
+	installed = "Press Enter once it's installed."
+	loggedIn  = "Logged in to GitHub as acme with the Ghostbranch GitHub App."
 )
 
 func TestGuidedInitSaysWhichAccountItUses(t *testing.T) {
@@ -77,7 +80,7 @@ func TestGuidedInitSaysWhichAccountItUses(t *testing.T) {
 		setup      func(te *testEnv)
 	}{
 		{"GHOSTBRANCH_TOKEN", "Using GitHub account acme (from GHOSTBRANCH_TOKEN)", func(*testEnv) {}},
-		{"stored login", "Using GitHub account acme (from your Ghostbranch login)", func(te *testEnv) { appLogin(te) }},
+		{"stored login", "Using GitHub account acme (from your Ghostbranch login)", func(te *testEnv) { appLogin(te); installApp(te) }},
 		{"GH_TOKEN", "Using GitHub account acme (from GH_TOKEN)", func(te *testEnv) {
 			delete(te.vars, "GHOSTBRANCH_TOKEN")
 			te.vars["GH_TOKEN"] = "gh-env-token"
@@ -136,12 +139,15 @@ func TestGuidedInitAsksBeforeUsingGhsLogin(t *testing.T) {
 		ghToken(te)
 		srv := initDeviceLogin(t, te)
 		made := tokenUsers(te, "acme", nil)
-		p := atTerminal(te, "", "", "", "", "")
+		p := atTerminal(te, "", "", "", "")
 		if code, out, errOut := te.run("init", "acme/widget"); code != 0 {
 			t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
 		}
-		hasPrefixes(t, p.asked, ghQ, installed, "Create the private repo acme/widget-shadow", "Turn on scheduled sync?", "Make these changes now?")
-		for _, l := range []string{loggedIn, "Using GitHub account acme (from your Ghostbranch login)", installNow} {
+		// The forge tokenUsers makes can't list the app's installations, so
+		// the checklist has no install step here (see
+		// TestGuidedInitShowsTheInstallStepAfterItsLogin for one).
+		hasPrefixes(t, p.asked, ghQ, "Create the private repo acme/widget-shadow", "Turn on scheduled sync?", "Make these changes now?")
+		for _, l := range []string{loggedIn, noGHHint} {
 			if !slices.Contains(p.said, l) {
 				t.Errorf("never said %q: %q", l, p.said)
 			}
@@ -170,12 +176,16 @@ func TestGuidedInitAsksBeforeUsingGhsLogin(t *testing.T) {
 }
 
 const (
-	mismatch = "acme/widget belongs to acme, but this token is octo's, so it can't create acme's shadow repo."
+	mismatch = "! The token is octo's, so it can't set up acme/widget-shadow on acme: log in as acme with ghostbranch login, or put the shadow on your account with --shadow octo/widget-shadow."
 	asAcmeQ  = "Log in as acme with the Ghostbranch app now?"
+	// wrongAccount is the stop's message: both ways on.
+	wrongAccount = "error: The token is octo's, so it can't set up acme/widget-shadow on acme: log in as acme with ghostbranch login, or put the shadow on your account with --shadow octo/widget-shadow. [TOKEN_WRONG_ACCOUNT]"
 )
 
-// A personal account's public repo and a token of another account: init
-// says so before any write, and offers to log in as the owner.
+// A personal account's public repo and a token of another account: the
+// checklist's account step says so before any write, and offers to log in
+// as the owner; a no, or a login as another account again, is
+// TOKEN_WRONG_ACCOUNT with both ways on.
 func TestGuidedInitStopsWhenTheTokenIsAnotherAccounts(t *testing.T) {
 	t.Parallel()
 	envToken := func(te *testEnv) {
@@ -189,14 +199,8 @@ func TestGuidedInitStopsWhenTheTokenIsAnotherAccounts(t *testing.T) {
 		p := atTerminal(te, "n")
 		te.forge.User.Login = "octo"
 		code, _, errOut := te.run("init", "acme/widget")
-		if code != 1 || !strings.Contains(errOut, "[AUTH_MISSING]") || !strings.Contains(errOut, "ghostbranch login") {
+		if code != 2 || !strings.Contains(errOut, wrongAccount) {
 			t.Fatalf("exit %d: %s", code, errOut)
-		}
-		for _, want := range []string{"error: The GitHub token is octo's, not acme's",
-			"or keep the shadow repo on your own account: ghostbranch init acme/widget --shadow octo/widget-shadow"} {
-			if !strings.Contains(errOut, want) {
-				t.Errorf("stderr lacks %q:\n%s", want, errOut)
-			}
 		}
 		hasPrefixes(t, p.asked, asAcmeQ)
 		if !slices.Contains(p.said, mismatch) || shadowExists(te) || len(registered(te)) != 0 {
@@ -209,12 +213,12 @@ func TestGuidedInitStopsWhenTheTokenIsAnotherAccounts(t *testing.T) {
 		envToken(te)
 		srv := initDeviceLogin(t, te)
 		made := tokenUsers(te, "octo", map[string]string{srv.AccessToken(1): "acme"})
-		p := atTerminal(te, "", "", "", "", "", "")
+		p := atTerminal(te, "", "", "", "")
 		if code, out, errOut := te.run("init", "acme/widget"); code != 0 {
 			t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
 		}
-		hasPrefixes(t, p.asked, asAcmeQ, installed, "Create the private repo acme/widget-shadow", "Turn on scheduled sync?", "Make these changes now?")
-		for _, l := range []string{mismatch, loggedIn, "Using GitHub account acme (from your Ghostbranch login)", installNow} {
+		hasPrefixes(t, p.asked, asAcmeQ, "Create the private repo acme/widget-shadow", "Turn on scheduled sync?", "Make these changes now?")
+		for _, l := range []string{mismatch, loggedIn} {
 			if !slices.Contains(p.said, l) {
 				t.Errorf("never said %q: %q", l, p.said)
 			}
@@ -232,16 +236,11 @@ func TestGuidedInitStopsWhenTheTokenIsAnotherAccounts(t *testing.T) {
 		tokenUsers(te, "octo", nil)
 		p := atTerminal(te, "y")
 		code, _, errOut := te.run("init", "acme/widget")
-		if code != 1 || !strings.Contains(errOut, "[AUTH_MISSING]") {
+		if code != 2 || !strings.Contains(errOut, wrongAccount) {
 			t.Fatalf("exit %d: %s", code, errOut)
 		}
-		for _, want := range []string{"error: The GitHub token is octo's, not acme's",
-			"or keep the shadow repo on your own account: ghostbranch init acme/widget --shadow octo/widget-shadow"} {
-			if !strings.Contains(errOut, want) {
-				t.Errorf("stderr lacks %q:\n%s", want, errOut)
-			}
-		}
-		if !saidHas(p, "still") || shadowExists(te) {
+		hasPrefixes(t, p.asked, asAcmeQ)
+		if !slices.Contains(p.said, "The new login is still octo's, not acme's.") || shadowExists(te) {
 			t.Fatalf("said %q", p.said)
 		}
 	})
@@ -253,11 +252,10 @@ func TestGuidedInitStopsWhenTheTokenIsAnotherAccounts(t *testing.T) {
 		p := atTerminal(te)
 		te.forge.User.Login = "octo"
 		code, _, errOut := te.run("init", "acme/widget")
-		if code != 1 || !strings.Contains(errOut, "[AUTH_MISSING]") || !strings.Contains(errOut, "GHOSTBRANCH_TOKEN") ||
-			!strings.Contains(errOut, "error: The GitHub token is octo's, not acme's") {
+		if code != 2 || !strings.Contains(errOut, "error: The token is octo's, so it can't set up acme/widget-shadow on acme: set GHOSTBRANCH_TOKEN to a token of acme's, or put the shadow on your account with --shadow octo/widget-shadow. [TOKEN_WRONG_ACCOUNT]") {
 			t.Fatalf("exit %d: %s", code, errOut)
 		}
-		if len(p.asked) != 0 || !slices.Contains(p.said, mismatch) || shadowExists(te) {
+		if len(p.asked) != 0 || !saidHas(p, "! The token is octo's, so it can't set up acme/widget-shadow on acme: set GHOSTBRANCH_TOKEN") || shadowExists(te) {
 			t.Fatalf("asked %q, said %q", p.asked, p.said)
 		}
 	})
@@ -268,7 +266,7 @@ func TestGuidedInitStopsWhenTheTokenIsAnotherAccounts(t *testing.T) {
 		if code, out, errOut := te.run("init", "acme/widget"); code != 0 {
 			t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
 		}
-		if slices.Contains(p.asked, asAcmeQ) || saidHas(p, "belongs to") {
+		if slices.Contains(p.asked, asAcmeQ) || saidHas(p, "so it can't set up") {
 			t.Fatalf("asked %q", p.asked)
 		}
 	})
@@ -280,14 +278,14 @@ func TestGuidedInitStopsWhenTheTokenIsAnotherAccounts(t *testing.T) {
 		if code, out, errOut := te.run("init", "acme/widget", "--shadow", "octo/widget-shadow"); code != 0 {
 			t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
 		}
-		if saidHas(p, "belongs to") {
+		if saidHas(p, "so it can't set up") {
 			t.Fatalf("said %q", p.said)
 		}
 	})
 }
 
-// After init's own login (no token at all), it confirms the account and
-// shows the install step, then waits for it.
+// After init's own login (no token at all), it confirms the account, and
+// the checklist shows the install step and waits for it, before any write.
 func TestGuidedInitShowsTheInstallStepAfterItsLogin(t *testing.T) {
 	t.Parallel()
 	for _, org := range []bool{false, true} {
@@ -298,13 +296,14 @@ func TestGuidedInitShowsTheInstallStepAfterItsLogin(t *testing.T) {
 			initDeviceLogin(t, te)
 			answers := []string{"y", "", "", "", ""}
 			if org {
-				te.forge.Orgs = map[string]bool{"acme": true}
 				answers = append(answers, "")
 			}
 			p := atTerminal(te, answers...)
 			if org {
+				te.forge.Orgs = map[string]bool{"acme": true}
 				te.forge.User.Login = "octo"
 			}
+			p.onWait = func() { installOn(te, "acme") }
 			if code, out, errOut := te.run("init", "acme/widget"); code != 0 {
 				t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
 			}
@@ -312,10 +311,10 @@ func TestGuidedInitShowsTheInstallStepAfterItsLogin(t *testing.T) {
 			if org {
 				who = "octo"
 			}
-			if !slices.Contains(p.said, "Logged in to GitHub as "+who+" with the Ghostbranch GitHub App.") || !slices.Contains(p.said, installNow) {
+			if !slices.Contains(p.said, "Logged in to GitHub as "+who+" with the Ghostbranch GitHub App.") || !saidHas(p, "Install the Ghostbranch app on acme") {
 				t.Fatalf("said %q", p.said)
 			}
-			if !before(p, "! "+installNow, "? "+installed) || !before(p, "? "+installed, "? Make these changes now?") {
+			if !before(p, "! ! Install the Ghostbranch app on acme", "? "+installed) || !before(p, "? "+installed, "? Make these changes now?") || len(te.forge.Created) != 1 {
 				t.Fatalf("order: %q", p.log)
 			}
 		})
@@ -331,6 +330,7 @@ func TestGuidedInitRetriesTheCreationOnceTheAppIsInstalled(t *testing.T) {
 	t.Parallel()
 	te := newTestEnv(t)
 	appLogin(te)
+	installApp(te) // the check passes: the refusal is one it didn't predict
 	refuseIn(te, notInstalledMsg, "acme")
 	p := atTerminal(te, "", "", "", "")
 	p.onWait = func() { te.forge.CreateRefused = nil }
@@ -350,6 +350,7 @@ func TestGuidedInitMakesTheShadowByHandWhenTheRetryIsRefused(t *testing.T) {
 	t.Parallel()
 	te := newTestEnv(t)
 	appLogin(te)
+	installApp(te) // the check passes: the refusal is one it didn't predict
 	refuseIn(te, notInstalledMsg, "acme")
 	p := atTerminal(te, "", "", "", "", "")
 	waits := 0
@@ -380,6 +381,7 @@ func TestGuidedInitInstallLoopIsBounded(t *testing.T) {
 	t.Parallel()
 	te := newTestEnv(t)
 	appLogin(te)
+	installApp(te) // the check passes: the refusal is one it didn't predict
 	refuseIn(te, notInstalledMsg, "acme")
 	p := atTerminal(te, "", "", "", "", "")
 	waits := 0
@@ -429,7 +431,7 @@ func TestGuidedInitGivesATokenTheTokenFix(t *testing.T) {
 			if strings.Contains(all, "App's repositories") || strings.Contains(all, "app's repositories") {
 				t.Fatalf("app advice for a token: %q", p.said)
 			}
-			link := forge.TokenLink("ghostbranch-widget", "Ghostbranch: acme/widget and acme/widget-shadow", "acme", 90, forge.PersonTokenPermissions)
+			link := forge.TokenLink("ghostbranch-widget", "Ghostbranch: acme/widget and acme/widget-shadow", "acme", 90, forge.PersonTokenLinkPermissions)
 			for _, want := range []string{link, `choose "Only select repositories", then pick acme/widget and acme/widget-shadow`, tc.store} {
 				if !strings.Contains(all, want) {
 					t.Errorf("never said %q: %q", want, p.said)
@@ -484,11 +486,47 @@ func TestGuidedInitRefusalNamesTheAccountMismatch(t *testing.T) {
 	}
 }
 
-// With --adopt or a registered pair, init creates no shadow repo, so the
-// install step doesn't say it will.
+// A collaborator's pair set up on v0.1.x (acme's personal repo, octo's
+// token, the shadow on acme): resuming it asks no account question and
+// doesn't stop.
+func TestGuidedInitRegisteredPairOtherAccountNoStop(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te) // octo's token set it up
+	p := atTerminal(te, "")
+	te.forge.User.Login = "octo"
+	code, out, errOut := te.run("init", "acme/widget")
+	if code != 0 || strings.Contains(errOut, "TOKEN_WRONG_ACCOUNT") {
+		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
+	}
+	if len(p.asked) != 0 { // nothing to change, so nothing to confirm
+		t.Fatalf("asked %q", p.asked)
+	}
+	wantPair(t, te, "acme/widget-shadow")
+}
+
+// The same collaborator on another machine: init --adopt goes on.
+func TestPlainInitAdoptOtherAccountNoStop(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	te.vars["GHOSTBRANCH_HOME"] = filepath.Join(te.root, "home-2") // another machine
+	te.forge.User.Login, te.forge.Orgs = "octo", nil               // acme's own repo
+	code, env := te.runJSON("init", "acme/widget", "--adopt")
+	if code != 0 {
+		t.Fatalf("exit %d: %v", code, env)
+	}
+	if status, _ := setupSteps(t, env); status["account"] != "done" {
+		t.Fatalf("steps %v", status)
+	}
+	wantPair(t, te, "acme/widget-shadow")
+}
+
+// With --adopt or a registered pair, the shadow repo exists, so the install
+// step picks it too.
 func TestGuidedInitInstallStepForAnExistingShadow(t *testing.T) {
 	t.Parallel()
-	const line = "Next, install the Ghostbranch app on acme and pick acme/widget: " + installLink
+	const line = "! Install the Ghostbranch app on acme"
 	for _, tc := range []struct {
 		name string
 		args []string
@@ -507,12 +545,453 @@ func TestGuidedInitInstallStepForAnExistingShadow(t *testing.T) {
 			delete(te.vars, "GHOSTBRANCH_TOKEN")
 			initDeviceLogin(t, te)
 			p := atTerminal(te, "y", "", "", "")
+			p.onWait = func() { installApp(te) }
 			if code, out, errOut := te.run(append([]string{"init", "acme/widget"}, tc.args...)...); code != 0 {
 				t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
 			}
-			if !slices.Contains(p.said, line) || saidHas(p, "init creates the shadow repo next") {
-				t.Fatalf("said %q", p.said)
+			if !before(p, "! "+line, "? "+installed) || !slices.Contains(p.said, `    2. Choose acme, then "Only select repositories", then pick acme/widget and acme/widget-shadow`) {
+				t.Fatalf("log %q", p.log)
 			}
 		})
+	}
+}
+
+// Plain init (agents' JSON) works out the setup checklist first: --plan
+// returns it, and a stop is its code before any write.
+
+// personal makes acme/widget acme's own repo, with acme's token.
+func personal(te *testEnv) { te.forge.User.Login, te.forge.Orgs = "acme", nil }
+
+// installApp installs the Ghostbranch app on acme (a personal account), for
+// every repo.
+func installApp(te *testEnv) {
+	te.forge.Installations = []forge.Installation{{ID: 7, Account: "acme", AccountType: forge.OwnerUser, Selection: "all"}}
+}
+
+// setupSteps is data.setup.steps as id → status, and the ids in order.
+func setupSteps(t *testing.T, env map[string]any) (map[string]string, []string) {
+	t.Helper()
+	d, _ := env["data"].(map[string]any)
+	s, _ := d["setup"].(map[string]any)
+	steps, _ := s["steps"].([]any)
+	if len(steps) == 0 {
+		t.Fatalf("no data.setup.steps: %v", env["data"])
+	}
+	status := map[string]string{}
+	var ids []string
+	for _, st := range steps {
+		m, _ := st.(map[string]any)
+		id, _ := m["id"].(string)
+		status[id], _ = m["status"].(string)
+		ids = append(ids, id)
+	}
+	return status, ids
+}
+
+func errDetails(env map[string]any) map[string]any {
+	e, _ := env["error"].(map[string]any)
+	d, _ := e["details"].(map[string]any)
+	return d
+}
+
+func nextNeedsHuman(env map[string]any, i int) bool {
+	ns, _ := env["next"].([]any)
+	if i >= len(ns) {
+		return false
+	}
+	m, _ := ns[i].(map[string]any)
+	h, _ := m["needs_human"].(bool)
+	return h
+}
+
+func noWrites(t *testing.T, te *testEnv) {
+	t.Helper()
+	if len(te.forge.Created) != 0 || shadowExists(te) || len(registered(te)) != 0 {
+		t.Fatalf("wrote: created %v, pairs %v", te.forge.Created, registered(te))
+	}
+}
+
+func TestPlainInitPlanJSONHasSetup(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	appLogin(te)
+	personal(te)
+	installApp(te)
+	code, env := te.runJSON("init", "acme/widget", "--plan")
+	if code != 0 {
+		t.Fatalf("exit %d: %v", code, env)
+	}
+	status, ids := setupSteps(t, env)
+	if !slices.Equal(ids, engine.SetupStepIDs) {
+		t.Fatalf("ids %v", ids)
+	}
+	want := map[string]string{"login": "done", "account": "done", "app_installed": "done", "shadow": "todo",
+		"app_access": "todo", "pair": "todo", "guard": "skipped", "doctor": "todo"}
+	if !maps.Equal(status, want) {
+		t.Fatalf("steps %v, want %v", status, want)
+	}
+	if d, _ := env["data"].(map[string]any); d["preview"] == nil {
+		t.Fatalf("no preview: %v", d)
+	}
+	noWrites(t, te)
+}
+
+// A plan with a stop writes nothing and is still the stop's code, with the
+// checklist in data.setup.
+func TestPlainInitPlanWithAStopWritesNothing(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	appLogin(te)
+	personal(te)
+	code, env := te.runJSON("init", "acme/widget", "--plan")
+	if c, _ := errCode(env); code != 2 || c != "APP_NOT_INSTALLED" {
+		t.Fatalf("exit %d: %v", code, env)
+	}
+	if n := nextCommands(env); len(n) != 1 || n[0] != "ghostbranch init acme/widget --plan --json" || !nextNeedsHuman(env, 0) {
+		t.Fatalf("next %v", env["next"])
+	}
+	if status, _ := setupSteps(t, env); status["app_installed"] != "needs_human" {
+		t.Fatalf("steps %v", status)
+	}
+	noWrites(t, te)
+}
+
+// v0.1.1's BAD_FLAG (field adopt) for the shadow repo stays, under --plan too.
+func TestPlainInitPlanShadowExistsIsBadFlag(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	if _, err := te.forge.AddRepo("acme/widget-shadow", true); err != nil {
+		t.Fatal(err)
+	}
+	code, env := te.runJSON("init", "acme/widget", "--plan")
+	wantBadAdopt(t, env, code, "acme/widget-shadow already exists; pass --adopt")
+	if status, _ := setupSteps(t, env); status["shadow"] != "needs_human" {
+		t.Fatalf("steps %v", status)
+	}
+	if len(registered(te)) != 0 {
+		t.Fatalf("registered %v", registered(te))
+	}
+}
+
+func TestPlainInitAdoptPlanMissingShadowIsBadFlag(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	code, env := te.runJSON("init", "acme/widget", "--adopt", "--plan")
+	wantBadAdopt(t, env, code, "acme/widget-shadow does not exist; drop --adopt")
+	if status, _ := setupSteps(t, env); status["shadow"] != "needs_human" {
+		t.Fatalf("steps %v", status)
+	}
+	noWrites(t, te)
+}
+
+func wantBadAdopt(t *testing.T, env map[string]any, code int, msg string) {
+	t.Helper()
+	e, _ := env["error"].(map[string]any)
+	if c, _ := errCode(env); code != 2 || c != "BAD_FLAG" || e["field"] != "adopt" || !strings.Contains(e["message"].(string), msg) {
+		t.Fatalf("exit %d: %v", code, env["error"])
+	}
+	if steps, _ := errDetails(env)["steps"].([]any); len(steps) != len(engine.SetupStepIDs) {
+		t.Fatalf("details.steps %v", errDetails(env)["steps"])
+	}
+}
+
+func TestPlainInitAppNotInstalledStopsBeforeWrite(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	appLogin(te)
+	personal(te)
+	code, env := te.runJSON("init", "acme/widget")
+	if c, _ := errCode(env); code != 2 || c != "APP_NOT_INSTALLED" {
+		t.Fatalf("exit %d: %v", code, env)
+	}
+	if n := nextCommands(env); len(n) != 1 || n[0] != "ghostbranch init acme/widget --json" || !nextNeedsHuman(env, 0) {
+		t.Fatalf("next %v", env["next"])
+	}
+	accts, _ := errDetails(env)["accounts"].([]any)
+	if len(accts) != 1 || accts[0].(map[string]any)["account"] != "acme" || accts[0].(map[string]any)["install_url"] != installLink {
+		t.Fatalf("details %v", errDetails(env))
+	}
+	if status, _ := setupSteps(t, env); status["app_installed"] != "needs_human" {
+		t.Fatalf("steps %v", status)
+	}
+	noWrites(t, te)
+}
+
+func TestPlainInitWrongAccountCode(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, why string }{
+		{"GH_TOKEN", "a person logs in as acme at a terminal"},
+		{"GHOSTBRANCH_TOKEN", "GHOSTBRANCH_TOKEN wins over any login"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			te := newTestEnv(t)
+			if tc.name == "GH_TOKEN" {
+				delete(te.vars, "GHOSTBRANCH_TOKEN")
+				te.vars["GH_TOKEN"] = "gh-env-token"
+			}
+			te.forge.User.Login, te.forge.Orgs = "octo", nil // acme's own repo
+			code, env := te.runJSON("init", "acme/widget")
+			if c, _ := errCode(env); code != 2 || c != "TOKEN_WRONG_ACCOUNT" {
+				t.Fatalf("exit %d: %v", code, env)
+			}
+			if d := errDetails(env); d["token_account"] != "octo" || d["owner"] != "acme" {
+				t.Fatalf("details %v", d)
+			}
+			n := nextCommands(env)
+			if len(n) != 2 || n[0] != "ghostbranch login" || !nextNeedsHuman(env, 0) ||
+				n[1] != "ghostbranch init acme/widget --json --shadow octo/widget-shadow" || !nextNeedsHuman(env, 1) {
+				t.Fatalf("next %v", env["next"])
+			}
+			if ns, _ := env["next"].([]any); !strings.Contains(ns[0].(map[string]any)["why"].(string), tc.why) {
+				t.Fatalf("why %v", ns[0])
+			}
+			noWrites(t, te)
+		})
+	}
+}
+
+// TOKEN_WRONG_ACCOUNT's --shadow way on is this run's own init: its flags
+// and workspace kept, any --shadow given replaced, and a person's call.
+func TestPlainInitWrongAccountShadowNextKeepsTheFlags(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	te.vars["GHOSTBRANCH_WORKSPACE"] = "work"
+	te.forge.User.Login, te.forge.Orgs = "octo", nil // acme's own repo
+	code, env := te.runJSON("init", "acme/widget", "--shadow", "acme/widget-shadow", "--no-guard", "--sync")
+	if c, _ := errCode(env); code != 2 || c != "TOKEN_WRONG_ACCOUNT" {
+		t.Fatalf("exit %d: %v", code, env)
+	}
+	n := nextCommands(env)
+	want := "ghostbranch init acme/widget --no-guard --sync --json --workspace work --shadow octo/widget-shadow"
+	if len(n) != 2 || n[0] != "ghostbranch login --workspace work" || !nextNeedsHuman(env, 0) || n[1] != want || !nextNeedsHuman(env, 1) {
+		t.Fatalf("next %v", env["next"])
+	}
+	noWrites(t, te)
+}
+
+// I1: an agent setting up from scratch, with no token at all: init --plan
+// --json is still the whole checklist, with the login step a person's, and
+// next starts the login in the background.
+func TestPlainInitNoTokenGivesLoginStep(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, code string
+		setup      func(te *testEnv)
+	}{
+		{"no token", "AUTH_MISSING", func(te *testEnv) { delete(te.vars, "GHOSTBRANCH_TOKEN") }},
+		{"expired login", "LOGIN_EXPIRED", func(te *testEnv) {
+			delete(te.vars, "GHOSTBRANCH_TOKEN")
+			storeLogin(te, "ghu_test", "", -time.Hour) // no refresh token: expired
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			te := newTestEnv(t)
+			tc.setup(te)
+			code, env := te.runJSON("init", "acme/widget", "--plan")
+			if c, _ := errCode(env); code != 1 || c != tc.code {
+				t.Fatalf("exit %d: %v", code, env)
+			}
+			status, ids := setupSteps(t, env)
+			if !slices.Equal(ids, engine.SetupStepIDs) || status["login"] != "needs_human" || status["shadow"] != "todo" || status["doctor"] != "todo" {
+				t.Fatalf("steps %v", status)
+			}
+			if steps, _ := errDetails(env)["steps"].([]any); len(steps) != len(engine.SetupStepIDs) {
+				t.Fatalf("details.steps %v", errDetails(env)["steps"])
+			}
+			if n := nextCommands(env); len(n) != 1 || n[0] != "ghostbranch login --json --non-interactive" || !nextNeedsHuman(env, 0) {
+				t.Fatalf("next %v", env["next"])
+			}
+			ns, _ := env["next"].([]any)
+			if why, _ := ns[0].(map[string]any)["why"].(string); !strings.Contains(why, "in the background") || !strings.Contains(why, "user_code") {
+				t.Fatalf("why %q", why)
+			}
+			noWrites(t, te)
+		})
+	}
+}
+
+// I2: the login step names where the token came from, so an agent can
+// tell a gh or env token from the person's Ghostbranch login.
+func TestPlainInitLoginStepNamesTheTokenSource(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		source string
+		setup  func(te *testEnv)
+	}{
+		{"login", func(te *testEnv) { appLogin(te); personal(te); installApp(te) }},
+		{"GH_TOKEN", func(te *testEnv) { delete(te.vars, "GHOSTBRANCH_TOKEN"); te.vars["GH_TOKEN"] = "gh-env-token" }},
+		{"gh auth token", func(te *testEnv) {
+			delete(te.vars, "GHOSTBRANCH_TOKEN")
+			te.env.GHToken = func() (string, error) { return "gh-cli-token", nil }
+		}},
+	} {
+		t.Run(tc.source, func(t *testing.T) {
+			t.Parallel()
+			te := newTestEnv(t)
+			tc.setup(te)
+			code, env := te.runJSON("init", "acme/widget", "--plan")
+			if code != 0 {
+				t.Fatalf("exit %d: %v", code, env)
+			}
+			d, _ := env["data"].(map[string]any)
+			s, _ := d["setup"].(map[string]any)
+			steps, _ := s["steps"].([]any)
+			login, _ := steps[0].(map[string]any)
+			det, _ := login["details"].(map[string]any)
+			if login["id"] != "login" || login["status"] != "done" || det["source"] != tc.source {
+				t.Fatalf("login step %v", login)
+			}
+		})
+	}
+}
+
+// I3: plain init doesn't run doctor, so its doctor step says to, and next
+// runs it.
+func TestPlainInitSuccessNextRunsDoctor(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	code, env := te.runJSON("init", "acme/widget")
+	if code != 0 {
+		t.Fatalf("exit %d: %v", code, env)
+	}
+	if n := nextCommands(env); !slices.Contains(n, "ghostbranch doctor --json --repo acme/widget") {
+		t.Fatalf("next %v", env["next"])
+	}
+	d, _ := env["data"].(map[string]any)
+	s, _ := d["setup"].(map[string]any)
+	steps, _ := s["steps"].([]any)
+	for _, st := range steps {
+		if m, _ := st.(map[string]any); m["id"] == "doctor" && (m["status"] != "todo" || !strings.Contains(m["message"].(string), "Run ghostbranch doctor")) {
+			t.Fatalf("doctor step %v", m)
+		}
+	}
+}
+
+// A token that isn't an app login keeps v0.1.1's refusal.
+func TestPlainInitNonAppTokenUnchanged(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	te.forge.CreateForbidden = true
+	code, env := te.runJSON("init", "acme/widget")
+	if c, _ := errCode(env); code != 1 || c != "SHADOW_CREATE_DENIED" {
+		t.Fatalf("exit %d: %v", code, env)
+	}
+	if status, _ := setupSteps(t, env); status["app_installed"] != "skipped" || status["app_access"] != "skipped" {
+		t.Fatalf("steps %v", status)
+	}
+}
+
+// The shadow's name is taken on GitHub, but the app can't see that repo:
+// with an app login it is APP_CANT_SEE_REPO, with the install's Configure
+// page; another token keeps today's error.
+func TestPlainInitShadowExistsButHiddenIsAppCantSeeRepo(t *testing.T) {
+	t.Parallel()
+	t.Run("app login", func(t *testing.T) {
+		t.Parallel()
+		te := newTestEnv(t)
+		appLogin(te)
+		personal(te)
+		installApp(te)
+		te.forge.CreateTaken = map[string]bool{"acme/widget-shadow": true}
+		code, env := te.runJSON("init", "acme/widget")
+		if c, _ := errCode(env); code != 2 || c != "APP_CANT_SEE_REPO" {
+			t.Fatalf("exit %d: %v", code, env)
+		}
+		d := errDetails(env)
+		repos, _ := d["repos"].([]any)
+		if d["configure_url"] != "https://github.com/settings/installations/7" || len(repos) != 1 || repos[0] != "acme/widget-shadow" {
+			t.Fatalf("details %v", d)
+		}
+		if steps, _ := d["steps"].([]any); len(steps) != len(engine.SetupStepIDs) {
+			t.Fatalf("details.steps %v", d["steps"])
+		}
+		if e, _ := env["error"].(map[string]any); !strings.Contains(e["message"].(string), "tick acme/widget-shadow") {
+			t.Fatalf("message %v", e["message"])
+		}
+		if n := nextCommands(env); len(n) != 1 || n[0] != "ghostbranch init acme/widget --json" || !nextNeedsHuman(env, 0) {
+			t.Fatalf("next %v", env["next"])
+		}
+		if status, _ := setupSteps(t, env); status["app_access"] != "needs_human" || status["shadow"] != "done" {
+			t.Fatalf("steps %v", status)
+		}
+		if len(registered(te)) != 0 {
+			t.Fatalf("registered %v", registered(te))
+		}
+	})
+	t.Run("another token", func(t *testing.T) {
+		t.Parallel()
+		te := newTestEnv(t)
+		te.forge.CreateTaken = map[string]bool{"acme/widget-shadow": true}
+		_, env := te.runJSON("init", "acme/widget")
+		if c, _ := errCode(env); c == "" || c == "APP_CANT_SEE_REPO" {
+			t.Fatalf("error %v", env["error"])
+		}
+	})
+}
+
+// On success data.setup is the checklist once init is done.
+func TestPlainInitSuccessHasTheFinalSetup(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	appLogin(te)
+	personal(te)
+	installApp(te)
+	code, env := te.runJSON("init", "acme/widget")
+	if code != 0 {
+		t.Fatalf("exit %d: %v", code, env)
+	}
+	want := map[string]string{"login": "done", "account": "done", "app_installed": "done", "shadow": "done",
+		"app_access": "done", "pair": "done", "guard": "skipped", "doctor": "todo"}
+	if status, _ := setupSteps(t, env); !maps.Equal(status, want) {
+		t.Fatalf("steps %v, want %v", status, want)
+	}
+	wantPair(t, te, "acme/widget-shadow")
+}
+
+// AppLogin is set only for a stored login whose Kind is app: not for a
+// stored token of another kind (even one with the app's ghu_ prefix), and
+// not for GHOSTBRANCH_TOKEN, which wins over a stored app login.
+func appStepsRan(t *testing.T, te *testEnv) bool {
+	t.Helper()
+	personal(te)
+	installApp(te)
+	code, env := te.runJSON("init", "acme/widget", "--plan")
+	if code != 0 {
+		t.Fatalf("exit %d: %v", code, env)
+	}
+	status, _ := setupSteps(t, env)
+	return status["app_installed"] != "skipped"
+}
+
+func TestAppLoginWiringAppLogin(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	appLogin(te)
+	if !appStepsRan(t, te) {
+		t.Fatal("an app login skipped the app steps")
+	}
+}
+
+func TestAppLoginWiringPATLogin(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	delete(te.vars, "GHOSTBRANCH_TOKEN")
+	if err := auth.SaveLogin(te.env.Keychain, auth.Login{Token: "ghu_looks_like_the_app", Account: "acme", Kind: "pat"}); err != nil {
+		t.Fatal(err)
+	}
+	if appStepsRan(t, te) {
+		t.Fatal("a stored login of kind pat ran the app steps")
+	}
+}
+
+func TestAppLoginWiringGhostbranchToken(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	storeLogin(te, "ghu_test", "ghr_test", time.Hour)
+	te.vars["GHOSTBRANCH_TOKEN"] = "ghu_from_env"
+	if appStepsRan(t, te) {
+		t.Fatal("GHOSTBRANCH_TOKEN ran the app steps")
 	}
 }

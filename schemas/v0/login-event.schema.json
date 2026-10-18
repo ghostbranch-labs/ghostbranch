@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "The first line of ghostbranch login --json without a console, before the final envelope",
+  "type": "object",
+  "required": ["schema_version", "type", "user_code", "verification_uri", "expires_at"],
+  "properties": {
+    "schema_version": { "const": "0.16" },
+    "type": { "const": "device_code" },
+    "user_code": { "type": "string", "minLength": 1 },
+    "verification_uri": { "type": "string", "minLength": 1 },
+    "expires_at": { "$ref": "common.schema.json#/$defs/time" }
+  },
+  "additionalProperties": false
+}

@@ -24,6 +24,18 @@ type Forge struct {
 	next   map[string]int
 	stacks map[string][]*stack
 
+	// Installations and InstallRepos are the Installer answers; InstallErr
+	// makes both calls fail with it when set. InstallCalls counts
+	// UserInstallations calls.
+	Installations []forge.Installation
+	InstallRepos  map[int64][]string
+	InstallErr    error
+	InstallCalls  int
+	// Created records each repo CreatePrivateRepo created, and
+	// DefaultBranchSets each "repo branch" SetDefaultBranch set.
+	Created           []string
+	DefaultBranchSets []string
+
 	// User is returned by CurrentUser.
 	User    forge.User
 	UserErr error // CurrentUser fails with it when set
@@ -95,6 +107,10 @@ type Forge struct {
 	// CreateRefused makes CreatePrivateRepo under these owners fail with
 	// ErrForbidden, carrying the message as GitHub's (a *forge.HostError).
 	CreateRefused map[string]string
+	// CreateTaken makes CreatePrivateRepo of these owner/name fail with
+	// ErrRepoExists, as GitHub does for a name taken by a repo the token
+	// can't see (GetRepo of it is still ErrNotFound).
+	CreateTaken map[string]bool
 	// StacksUnavailable makes CreateStack and AddToStack fail with
 	// forge.ErrStacksUnavailable and StackOf answer nil, as a host without
 	// native stacks does. StackConflicts makes that many next CreateStack
@@ -340,10 +356,14 @@ func (f *Forge) CreatePrivateRepo(_ context.Context, full string) (forge.Repo, e
 				&forge.HostError{Message: msg, Err: fmt.Errorf("%w: 403 %s", forge.ErrForbidden, msg)})
 		}
 	}
+	if f.CreateTaken[full] {
+		return forge.Repo{}, fmt.Errorf("create %s: %w", full, forge.ErrRepoExists)
+	}
 	r, err := f.add(full, true)
 	if err != nil {
 		return forge.Repo{}, err
 	}
+	f.Created = append(f.Created, full)
 	return f.view(full, r), nil
 }
 
@@ -366,6 +386,7 @@ func (f *Forge) SetDefaultBranch(_ context.Context, full, branch string) error {
 		return fmt.Errorf("set default branch of %s: branch %s does not exist", full, branch)
 	}
 	f.repos[full].DefaultBranch = branch
+	f.DefaultBranchSets = append(f.DefaultBranchSets, full+" "+branch)
 	return nil
 }
 
@@ -582,7 +603,7 @@ func (f *Forge) ProbePermissions(_ context.Context, full string) (forge.RepoPerm
 		return out, nil
 	}
 	for _, p := range []string{forge.PermMetadataRead, forge.PermContentsRead, forge.PermPullsRead,
-		forge.PermActionsRead, forge.PermStatusesRead, forge.PermSecretsRead} {
+		forge.PermActionsRead, forge.PermStatusesRead, forge.PermChecksRead, forge.PermSecretsRead} {
 		out.Have[p] = forge.AccessYes
 		if f.PermsDenied[full][p] {
 			out.Have[p] = forge.AccessNo
@@ -605,3 +626,24 @@ func (f *Forge) OAuthScopes(context.Context) ([]string, bool, error) {
 }
 
 var _ forge.PermissionProber = (*Forge)(nil)
+
+// UserInstallations returns Installations (forge.Installer).
+func (f *Forge) UserInstallations(context.Context) ([]forge.Installation, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.InstallCalls++
+	if f.InstallErr != nil {
+		return nil, f.InstallErr
+	}
+	return slices.Clone(f.Installations), nil
+}
+
+// InstallationRepos returns InstallRepos[id] (forge.Installer).
+func (f *Forge) InstallationRepos(_ context.Context, id int64) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.InstallErr != nil {
+		return nil, f.InstallErr
+	}
+	return slices.Clone(f.InstallRepos[id]), nil
+}
