@@ -169,7 +169,7 @@ func TestAgentsTokenConsoleAccepted(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d\n%s%s", code, out, errOut)
 	}
-	for _, want := range []string{"export GHOSTBRANCH_TOKEN=", "$env:GHOSTBRANCH_TOKEN = ", "restart your agent", "ghostbranch agents status"} {
+	for _, want := range []string{"reaches acme/widget-shadow, and it can't push to acme/widget.", "export GHOSTBRANCH_TOKEN=", "$env:GHOSTBRANCH_TOKEN = ", "restart your agent", "ghostbranch agents status"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("stdout lacks %q:\n%s", want, out)
 		}

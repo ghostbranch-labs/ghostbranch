@@ -589,7 +589,11 @@ func agentsTokenText(b *strings.Builder, v *engine.AgentsTokenResult) {
 		fmt.Fprintf(b, "On that page, choose Only select repositories, then %s. Keep the permissions the link set.\n", v.Select)
 		b.WriteString("Then set it in the agent's shell, and restart the agent there:\n")
 	} else {
-		fmt.Fprintf(b, "This token (account %s) reaches %s with what agents need, and can't push to the public repo.\n", v.Check.Account, v.Check.Shadow)
+		public := v.Check.Public
+		if public == "" {
+			public = "the public repo"
+		}
+		fmt.Fprintf(b, "This token (account %s) reaches %s, and it can't push to %s.\n", v.Check.Account, v.Check.Shadow, public)
 		b.WriteString("Set it in the agent's shell (paste the token for <paste>); Ghostbranch doesn't keep it:\n")
 	}
 	fmt.Fprintf(b, "  sh, bash, zsh: %s\n  PowerShell:    %s\n", v.SetLine["sh"], v.SetLine["powershell"])

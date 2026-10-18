@@ -16,6 +16,9 @@ type AgentTokenCheck struct {
 	Shadow     string   `json:"shadow"`
 	CanPublish string   `json:"can_publish"` // forge.PushAccess.Can on the public repo
 	Missing    []string `json:"missing"`     // of forge.AgentTokenPermissions on the shadow
+	// Public is the public repo the push probe asked about, for the text
+	// output; the JSON names it in neither field (the contract is unchanged).
+	Public string `json:"-"`
 	// reachesShadow is false when the token can't see the shadow repo at
 	// all (the wrong repo was picked).
 	reachesShadow bool
@@ -59,7 +62,7 @@ func CheckAgentToken(ctx context.Context, f forge.Forge, p workspace.Pair) (*Age
 	if err != nil {
 		return nil, forgeErr(err, "read the offered token's GitHub account")
 	}
-	c := &AgentTokenCheck{Account: u.Login, Shadow: p.Shadow, CanPublish: "unknown", Missing: []string{}}
+	c := &AgentTokenCheck{Account: u.Login, Shadow: p.Shadow, Public: p.Public, CanPublish: "unknown", Missing: []string{}}
 	var have map[string]string
 	if pp, ok := f.(forge.PermissionProber); ok {
 		probe, err := pp.ProbePermissions(ctx, p.Shadow)
