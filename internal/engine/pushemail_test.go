@@ -164,10 +164,21 @@ func TestExplainGH007MatchesGitHubPerRefReason(t *testing.T) {
 func TestExplainGH007PublicMainLookupErrorLeavesMessage(t *testing.T) {
 	t.Parallel()
 	g, _, feat := gh007Repo(t, "me@example.com")
-	if err := g.DeleteRef(context.Background(), "refs/remotes/public/main"); err != nil {
+	// Point public/main at a corrupt object: only that lookup fails (git
+	// exits 128, not "no such ref"); the tip commit and its log still work.
+	ctx := context.Background()
+	blob, err := g.HashObject(ctx, []byte("hi\n"))
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(g.Dir, "packed-refs"), []byte("garbage line\n"), 0o600); err != nil {
+	if err := g.UpdateRef(ctx, "refs/remotes/public/main", blob); err != nil {
+		t.Fatal(err)
+	}
+	obj := filepath.Join(g.Dir, "objects", blob[:2], blob[2:])
+	if err := os.Chmod(obj, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(obj, []byte("junk"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	refused := &gitx.RefusedError{Refs: []string{"refs/heads/x"}, Reason: gh007Reason}

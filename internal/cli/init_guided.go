@@ -1169,8 +1169,6 @@ func (a *app) guidedInit(ctx context.Context, args []string, f initFlags) error 
 		if !ok {
 			return contract.New(contract.Interrupted, "init stopped at the summary; nothing was changed")
 		}
-	}
-	if !skipConfirm {
 		ask.Say("Setting up " + public + "…")
 	}
 	res, w, err := e.Init(ctx, o)
