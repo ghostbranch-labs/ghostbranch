@@ -442,7 +442,7 @@ func TestFeatureStartSwitchFailed(t *testing.T) {
 	gitOut(t, dir, "switch", "-q", "side")
 	gitOut(t, dir, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "side")
 	gitOut(t, dir, "switch", "-q", "main")
-	gitOut(t, dir, "merge", "-q", "--no-ff", "--no-commit", "side")
+	gitOut(t, dir, "-c", "user.name=t", "-c", "user.email=t@example.com", "merge", "-q", "--no-ff", "--no-commit", "side")
 	code, env, local := startIn(te)
 	if code != 0 {
 		t.Fatalf("exit %d: %v", code, env)
