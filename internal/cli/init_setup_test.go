@@ -3,6 +3,7 @@ package cli_test
 import (
 	"context"
 	"maps"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -443,17 +444,18 @@ func TestGuidedInitGivesATokenTheTokenFix(t *testing.T) {
 	}
 }
 
-// A registered pair whose shadow repo is gone, with a token of another
-// account than the owner's personal one: the account step stops it before
-// any write, as for a new pair (8.6 reached GitHub's refusal here).
-func TestGuidedInitRegisteredPairChecksTheAccount(t *testing.T) {
+// A refusal of a token whose account isn't the shadow owner's (here a
+// registered pair, which skips the check before writes) says how to get the
+// owner's token, not that a permission is missing. A login can't take
+// effect while GHOSTBRANCH_TOKEN is set, so then it says to set that.
+func TestGuidedInitRefusalNamesTheAccountMismatch(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
-		name, fix string
-		ghToken   bool
+		name, want string
+		ghToken    bool
 	}{
-		{"GH_TOKEN", "log in as acme with ghostbranch login", true},
-		{"GHOSTBRANCH_TOKEN", "set GHOSTBRANCH_TOKEN to a token of acme's", false},
+		{"GH_TOKEN", "  - your token is octo's, so it can't create repos on acme: run ghostbranch login and approve it as acme (the Ghostbranch app), then ghostbranch init again", true},
+		{"GHOSTBRANCH_TOKEN", "  - your token is octo's, so it can't create repos on acme: set GHOSTBRANCH_TOKEN to a token of acme's (a login can't take effect while it is set), then ghostbranch init again", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -470,17 +472,52 @@ func TestGuidedInitRegisteredPairChecksTheAccount(t *testing.T) {
 			if err := ws.Save(); err != nil {
 				t.Fatal(err)
 			}
-			p := atTerminal(te, "n")
+			refuseIn(te, "Not Found", "acme")
+			p := atTerminal(te, "", "")
 			te.forge.User.Login = "octo"
-			code, _, errOut := te.run("init", "acme/widget")
-			if code != 2 || !strings.Contains(errOut, "[TOKEN_WRONG_ACCOUNT]") || !strings.Contains(errOut, tc.fix) {
-				t.Fatalf("exit %d: %s", code, errOut)
+			p.onWait = func() { _, _ = te.forge.AddRepo("acme/widget-shadow", true) }
+			if code, out, errOut := te.run("init", "acme/widget"); code != 0 {
+				t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
 			}
-			if len(te.forge.Created) != 0 || saidHas(p, "GitHub refused") {
-				t.Fatalf("created %v; said %q", te.forge.Created, p.said)
+			if !slices.Contains(p.said, tc.want) || saidHas(p, "Administration: write") {
+				t.Fatalf("said %q", p.said)
 			}
 		})
 	}
+}
+
+// A collaborator's pair set up on v0.1.x (acme's personal repo, octo's
+// token, the shadow on acme): resuming it asks no account question and
+// doesn't stop.
+func TestGuidedInitRegisteredPairOtherAccountNoStop(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te) // octo's token set it up
+	p := atTerminal(te, "")
+	te.forge.User.Login = "octo"
+	code, out, errOut := te.run("init", "acme/widget")
+	if code != 0 || strings.Contains(errOut, "TOKEN_WRONG_ACCOUNT") {
+		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
+	}
+	hasPrefixes(t, p.asked, "Make these changes now?")
+	wantPair(t, te, "acme/widget-shadow")
+}
+
+// The same collaborator on another machine: init --adopt goes on.
+func TestPlainInitAdoptOtherAccountNoStop(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	te.vars["GHOSTBRANCH_HOME"] = filepath.Join(te.root, "home-2") // another machine
+	te.forge.User.Login, te.forge.Orgs = "octo", nil               // acme's own repo
+	code, env := te.runJSON("init", "acme/widget", "--adopt")
+	if code != 0 {
+		t.Fatalf("exit %d: %v", code, env)
+	}
+	if status, _ := setupSteps(t, env); status["account"] != "done" {
+		t.Fatalf("steps %v", status)
+	}
+	wantPair(t, te, "acme/widget-shadow")
 }
 
 // With --adopt or a registered pair, the shadow repo exists, so the install

@@ -402,3 +402,36 @@ func dirFiles(t *testing.T, dir string) map[string]string {
 	}
 	return out
 }
+
+// A registered pair or --adopt creates no repo, so a token of another
+// account than the personal owner's (a collaborator's) passes the account
+// step, as in v0.1.x.
+func TestSetupAccountDoneForRegisteredPair(t *testing.T) {
+	t.Parallel()
+	h := setupHarness(t, "octo", false)
+	h.init() // registers acme/widget with acme/widget-shadow, which now exists
+	s := h.setup(engine.SetupOptions{Public: publicName})
+	if st := step(t, s, "account"); st.Status != engine.SetupDone {
+		t.Fatalf("account = %+v", st)
+	}
+	if fs := s.FirstStop(); fs != nil {
+		t.Fatalf("FirstStop = %+v", fs)
+	}
+}
+
+func TestSetupAccountDoneForAdopt(t *testing.T) {
+	t.Parallel()
+	h := setupHarness(t, "octo", false, shadowName)
+	s := h.setup(engine.SetupOptions{Public: publicName, Adopt: true})
+	if st := step(t, s, "account"); st.Status != engine.SetupDone {
+		t.Fatalf("account = %+v", st)
+	}
+	if fs := s.FirstStop(); fs != nil {
+		t.Fatalf("FirstStop = %+v", fs)
+	}
+	// Without --adopt, the same token still stops at account.
+	s = h.setup(engine.SetupOptions{Public: publicName})
+	if st := step(t, s, "account"); st.Status != engine.SetupNeedsHuman {
+		t.Fatalf("account without --adopt = %+v", st)
+	}
+}

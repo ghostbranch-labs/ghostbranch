@@ -746,12 +746,18 @@ func explainRefusal(ask prompt.Asker, s setup, public, shadow string, err error,
 		ask.Say("The Ghostbranch app isn't installed on " + owner + ". Install it at " + s.install + pick + ", then press Enter: init tries creating " + shadow + " again.")
 		return
 	}
-	// A token of another personal account than the owner's never gets
-	// here: the checklist's account step stopped it before any write.
+	// The token's account is another personal account than the owner's
+	// (a registered pair, which the account step lets through): no
+	// permission makes that work, a login as the owner does.
+	mismatch := s.install == "" && s.user != "" && !s.pubOrg && strings.EqualFold(owner, pubOwner) && !strings.EqualFold(owner, s.user)
 	var causes []string
 	switch {
 	case appMissing:
 		causes = append(causes, "the "+s.app+" GitHub App isn't installed on "+owner+": install it at "+s.install)
+	case mismatch && s.source == "GHOSTBRANCH_TOKEN":
+		causes = append(causes, "your token is "+s.user+"'s, so it can't create repos on "+owner+": set GHOSTBRANCH_TOKEN to a token of "+owner+"'s (a login can't take effect while it is set), then ghostbranch init again")
+	case mismatch:
+		causes = append(causes, "your token is "+s.user+"'s, so it can't create repos on "+owner+": run ghostbranch login and approve it as "+owner+" (the Ghostbranch app), then ghostbranch init again")
 	case s.install == "":
 		causes = append(causes, "your token may lack Administration: write (fine-grained) or the repo scope (classic) on "+owner+": ghostbranch doctor shows what's missing")
 	}

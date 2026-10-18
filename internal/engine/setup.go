@@ -147,9 +147,12 @@ func (e *Engine) SetupCheck(ctx context.Context, opt SetupOptions) (*Setup, erro
 	}
 
 	// account: a personal account's repos are created by that account
-	// only. An org checks membership itself when the shadow is created.
+	// only. An org checks membership itself when the shadow is created. A
+	// registered pair or --adopt creates no repo, so any account the person
+	// set up with is fine (as v0.1.x: a collaborator's pair keeps working).
 	owner := ""
 	switch {
+	case registered || opt.Adopt:
 	case ownerType(pubOwner) != forge.OwnerOrganization:
 		if !strings.EqualFold(pubOwner, lk.user) && !strings.EqualFold(shadowOwner, lk.user) {
 			owner = pubOwner
