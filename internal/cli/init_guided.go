@@ -1159,7 +1159,7 @@ func (a *app) guidedInit(ctx context.Context, args []string, f initFlags) error 
 		return done(a, pv, nil, nil)
 	}
 	if nothing && !guardOn && o.Schedule != engine.DefaultSyncSchedule {
-		ask.Say("Nothing to change: " + public + " is already set up with " + pv.Shadow + ".")
+		ask.Say("Nothing to change: " + pv.Public + " is already set up with " + pv.Shadow + ".")
 	} else if ok, err := ask.YesNo(ctx, "Make these changes now?", true); err != nil {
 		return err
 	} else if !ok {

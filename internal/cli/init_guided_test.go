@@ -2,7 +2,6 @@ package cli_test
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -1192,17 +1191,45 @@ func TestGuidedInitNothingToChangeAsksNothing(t *testing.T) {
 	wantPair(t, te, "acme/widget-shadow")
 }
 
-// --json output of a repeat init is the same as before, and carries no prose.
+// --json output of a repeat init is the same bytes with or without a
+// console: the guided flow, and its new line, are not in play.
 func TestInitNothingToChangeJSONUnchanged(t *testing.T) {
 	t.Parallel()
 	te := newTestEnv(t)
 	initOnly(te)
-	code, out, errOut := te.run("init", "acme/widget", "--json")
-	if code != 0 {
+	te.forge.User.Login = "acme" // as atTerminal sets it, so the two runs differ only in the console
+	code, want, errOut := te.run("init", "acme/widget", "--json")
+	if code != 0 || strings.Contains(want, "Nothing to change") {
+		t.Fatalf("exit %d\n%s\n%s", code, want, errOut)
+	}
+	p := atTerminal(te, "")
+	code, got, errOut := te.run("init", "acme/widget", "--json")
+	if code != 0 || got != want || len(p.asked) != 0 || len(p.said) != 0 {
+		t.Fatalf("exit %d, asked %q, said %q\n%s\nwant\n%s\n%s", code, p.asked, p.said, got, want, errOut)
+	}
+}
+
+// A guard to install is something to change: the question stays.
+func TestGuidedInitGuardToInstallStillAsks(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	dir := pairCheckout(te)
+	hook := filepath.Join(dir, ".git", "hooks", "pre-push")
+	te.env.GuardState = func(string) (bool, bool) { _, err := os.Stat(hook); return true, err == nil }
+	if err := os.MkdirAll(filepath.Join(te.root, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(te.root, "bin", "ghostbranch"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p := atTerminal(te, "", "")
+	if code, out, errOut := te.run("init", "acme/widget"); code != 0 {
 		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
 	}
-	if strings.Contains(out+errOut, "Nothing to change") || !json.Valid([]byte(out)) {
-		t.Fatalf("json output changed:\n%s\n%s", out, errOut)
+	hasPrefixes(t, p.asked, "Install the push guard in this checkout?", "Make these changes now?")
+	if _, err := os.Stat(hook); err != nil {
+		t.Fatalf("guard not installed: %v", err)
 	}
 }
 
