@@ -301,15 +301,7 @@ func (a *app) loginInInit(ctx context.Context, ask prompt.Asker) error {
 }
 
 // sourceWords is auth.Resolve's token source in plain words.
-func sourceWords(src string) string {
-	switch src {
-	case "login":
-		return "your Ghostbranch login"
-	case "gh auth token":
-		return "the GitHub CLI (gh)"
-	}
-	return src // GHOSTBRANCH_TOKEN, GH_TOKEN, GITHUB_TOKEN
-}
+func sourceWords(src string) string { return engine.TokenSourceWords(src) }
 
 // tokenUser is the token's GitHub login, or "" when GitHub doesn't say.
 func tokenUser(ctx context.Context, e *engine.Engine) string {
@@ -320,8 +312,13 @@ func tokenUser(ctx context.Context, e *engine.Engine) string {
 	return u.Login
 }
 
-// sayAccount is the line naming the account and the token's source.
-func sayAccount(ask prompt.Asker, e *engine.Engine, user string) {
+// sayAccount is the line naming the account and the token's source. After a
+// login in this run (justLoggedIn) it says nothing when the login line
+// already named the account.
+func sayAccount(ask prompt.Asker, e *engine.Engine, user string, justLoggedIn bool) {
+	if user != "" && justLoggedIn {
+		return
+	}
 	if user == "" {
 		ask.Say("Using a GitHub token from " + sourceWords(e.TokenSource) + "; GitHub didn't say which account it is.")
 		return
@@ -382,15 +379,26 @@ const setupRechecks = 2
 func (a *app) guidedSetup(ctx context.Context, ask prompt.Asker, e *engine.Engine, so engine.SetupOptions, in, installed, guardOn bool, user string) (*engine.Engine, string, error) {
 	rechecks := map[string]int{}
 	relogged := false
+	st := a.styler(a.env.StderrColor)
 	for {
 		s, err := a.setupCheck(ctx, e, so, in, installed, guardOn)
 		if err != nil {
 			return nil, "", err
 		}
-		for _, l := range checklistLines(s) {
+		stop := guidedStop(s)
+		waits := stop != nil && stop.Status == engine.SetupNeedsHuman && stop.ID != "account" && rechecks[stop.ID] < setupRechecks
+		var instr []string
+		var enter string
+		if waits {
+			instr, enter = a.stopInstructions(ctx, e, so, stop)
+		}
+		var replace map[string][]string
+		if instr != nil {
+			replace = map[string][]string{stop.ID: instr}
+		}
+		for _, l := range checklistLines(s, st, replace) {
 			ask.Say(l)
 		}
-		stop := guidedStop(s)
 		switch {
 		case stop == nil:
 			return e, user, nil
@@ -415,16 +423,19 @@ func (a *app) guidedSetup(ctx context.Context, ask prompt.Asker, e *engine.Engin
 			if e, user, err = a.relogin(ctx, ask); err != nil {
 				return nil, "", err
 			}
-			sayAccount(ask, e, user)
+			sayAccount(ask, e, user, true)
 			relogged = true
 			continue
-		case rechecks[stop.ID] == setupRechecks:
+		case !waits:
 			return nil, "", a.setupStopped(e, so, s, stop, installed)
 		}
-		if stop.URL != "" {
-			ask.Say(linkLine(stop))
+		if instr == nil {
+			if stop.URL != "" {
+				ask.Say(attention(st, "Link: "+stop.URL))
+			}
+			enter = "Press Enter once it's done."
 		}
-		if err := ask.Wait(ctx, "Press Enter once it's done."); err != nil {
+		if err := ask.Wait(ctx, attention(st, enter)); err != nil {
 			return nil, "", err
 		}
 		rechecks[stop.ID]++
@@ -443,24 +454,96 @@ func guidedStop(s *engine.Setup) *engine.SetupStep {
 	return nil
 }
 
-// linkLine is a step's link with the accounts or repos it is for.
-func linkLine(st *engine.SetupStep) string {
-	var who []string
-	switch st.ID {
+// stopInstructions is what a step the person does shows in place of its
+// checklist line: the step as a "!" heading, what it is for, and the
+// numbered steps, each in bold yellow, with the line Wait shows. It is nil
+// for a step it has no instructions for.
+func (a *app) stopInstructions(ctx context.Context, e *engine.Engine, so engine.SetupOptions, stop *engine.SetupStep) ([]string, string) {
+	st := a.styler(a.env.StderrColor)
+	var lines []string
+	say := func(l string) { lines = append(lines, attention(st, l)) }
+	switch stop.ID {
 	case "app_installed":
-		accounts, _ := st.Details["accounts"].([]map[string]any)
-		for _, acct := range accounts {
-			if name, ok := acct["account"].(string); ok && acct["status"] == "missing" {
-				who = append(who, name)
-			}
+		p, err := e.InitPair(so.Public, so.Shadow)
+		if err != nil {
+			return nil, ""
 		}
+		pubOwner, _, _ := forge.SplitName(p.Public)
+		shadowOwner, _, _ := forge.SplitName(p.Shadow)
+		_, shadowExists := lookupRepo(ctx, e, p.Shadow)
+		accounts, _ := stop.Details["accounts"].([]map[string]any)
+		first := true
+		for _, acct := range accounts {
+			name, _ := acct["account"].(string)
+			if name == "" || acct["status"] != "missing" {
+				continue
+			}
+			var pick []string
+			if strings.EqualFold(name, pubOwner) {
+				pick = append(pick, p.Public)
+			}
+			if strings.EqualFold(name, shadowOwner) && shadowExists {
+				pick = append(pick, p.Shadow)
+			}
+			say("! Install the Ghostbranch app on " + name)
+			if first {
+				say("    Ghostbranch acts on GitHub through its app, and only on the repos you pick.")
+			}
+			say("    1. Open " + stop.URL)
+			choose := "    2. Choose " + name + `, then "Only select repositories"`
+			switch {
+			case len(pick) > 0:
+				choose += ", then pick " + strings.Join(pick, " and ")
+			default:
+				choose += " and pick any repo"
+			}
+			say(choose)
+			if !shadowExists && strings.EqualFold(name, shadowOwner) {
+				say("       (init creates " + p.Shadow + " next; the app gets it automatically)")
+			}
+			say("    3. Click Install, then come back here")
+			if isOrg(ctx, e, name, p.Public, p.Shadow) {
+				say("    If you aren't an owner of " + name + ", GitHub sends an owner a request; setup continues once they approve.")
+			}
+			first = false
+		}
+		if lines == nil {
+			return nil, ""
+		}
+		return lines, "Press Enter once it's installed."
 	case "app_access":
-		who, _ = st.Details["repos"].([]string)
+		repos, _ := stop.Details["repos"].([]string)
+		if len(repos) == 0 || stop.URL == "" {
+			return nil, ""
+		}
+		list := strings.Join(repos, " and ")
+		say("! The Ghostbranch app is installed, but can't see " + list)
+		say("    1. Open " + stop.URL)
+		say("    2. Under Repository access, tick " + list)
+		say("    3. Click Save, then come back here")
+		return lines, "Press Enter once it's saved."
 	}
-	if len(who) == 0 {
-		return "Link: " + st.URL
+	return nil, ""
+}
+
+// lookupRepo is the repo GitHub names, if it exists.
+func lookupRepo(ctx context.Context, e *engine.Engine, name string) (forge.Repo, bool) {
+	r, err := e.Forge.GetRepo(ctx, name)
+	return r, err == nil
+}
+
+// isOrg reports whether account is an organization, going by the repos
+// (public, shadow) it owns that GitHub names.
+func isOrg(ctx context.Context, e *engine.Engine, account string, repos ...string) bool {
+	for _, name := range repos {
+		if owner, _, _ := forge.SplitName(name); !strings.EqualFold(owner, account) {
+			continue
+		}
+		if r, ok := lookupRepo(ctx, e, name); ok && r.OwnerType != "" {
+			return r.OwnerType == forge.OwnerOrganization
+		}
 	}
-	return "Link for " + strings.Join(who, " and ") + ": " + st.URL
+	return false
 }
 
 // setupStopped ends init at a setup stop, before any write: stop's code,
@@ -953,7 +1036,7 @@ func (a *app) guidedInit(ctx context.Context, args []string, f initFlags) error 
 		return contract.Wrap(contract.MissingInput, err,
 			"init has questions and the console can't be opened; answer them with flags: <owner/repo>, --shadow or --adopt, --guard or --no-guard, --sync or --no-sync")
 	}
-	ask = pausingAsker{inner: ask, p: a.reporter()}
+	ask = pausingAsker{inner: prompt.Styled(ask, a.styler(a.env.StderrColor).Bold), p: a.reporter()}
 	for _, l := range intro {
 		ask.Say(l)
 	}
@@ -984,9 +1067,10 @@ func (a *app) guidedInit(ctx context.Context, args []string, f initFlags) error 
 			if e, user, err = a.relogin(ctx, ask); err != nil {
 				return err
 			}
+			loggedIn = true
 		}
 	}
-	sayAccount(ask, e, user)
+	sayAccount(ask, e, user, loggedIn)
 	var pub forge.Repo
 	if public, pub, err = checkPublic(ctx, ask, e.Forge, public, len(args) == 0); err != nil {
 		return err

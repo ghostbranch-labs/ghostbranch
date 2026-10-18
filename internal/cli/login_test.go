@@ -94,7 +94,8 @@ func TestLoginWithTheDeviceFlow(t *testing.T) {
 	te2 := newTestEnv(t)
 	deviceLogin(te2, authtest.Options{})
 	code, out, errOut = te2.run("login")
-	const install = "Next, install the Ghostbranch app on the account that owns your public repo and pick that repo; ghostbranch init creates the shadow repo: https://github.com/apps/ghostbranch-test/installations/new\n"
+	const install = "Next, install the Ghostbranch app. It acts on GitHub only on the repos you pick.\n" +
+		"Open this on the account that owns your public repo and pick that repo (ghostbranch init creates the shadow repo, and the app gets it automatically): https://github.com/apps/ghostbranch-test/installations/new\n"
 	if code != 0 || !strings.Contains(out, install) {
 		t.Fatalf("human first login: %d\n%s\n%s", code, out, errOut)
 	}

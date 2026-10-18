@@ -59,7 +59,7 @@
         {
           "id": "login",
           "status": "done",
-          "message": "Logged in as acme (the token from login).",
+          "message": "Logged in as acme (from your Ghostbranch login).",
           "url": "",
           "details": {
             "account": "acme",

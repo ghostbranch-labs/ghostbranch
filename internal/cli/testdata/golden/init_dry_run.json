@@ -59,7 +59,7 @@
         {
           "id": "login",
           "status": "done",
-          "message": "Logged in as octo (the token from GHOSTBRANCH_TOKEN).",
+          "message": "Logged in as octo (from GHOSTBRANCH_TOKEN).",
           "url": "",
           "details": {
             "account": "octo",

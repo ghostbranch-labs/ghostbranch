@@ -104,7 +104,7 @@ func (e *Engine) SetupCheck(ctx context.Context, opt SetupOptions) (*Setup, erro
 	}
 	lk.user = u.Login
 	set("login", SetupDone, "", map[string]any{"source": e.TokenSource, "account": lk.user},
-		"Logged in as %s (the token from %s).", lk.user, e.TokenSource)
+		"Logged in as %s (from %s).", lk.user, TokenSourceWords(e.TokenSource))
 	switch r, err := e.Forge.GetRepo(ctx, p.Public); {
 	case err == nil:
 		lk.pub, lk.pubFound = r, true
@@ -391,4 +391,16 @@ func (s *Setup) StopError(step *SetupStep) *contract.Error {
 		ce = contract.New(contract.Internal, "setup step %s stopped: %s", step.ID, step.Message)
 	}
 	return ce.WithDetails(d)
+}
+
+// TokenSourceWords is a token source (as auth.Resolve names it) in plain
+// words.
+func TokenSourceWords(src string) string {
+	switch src {
+	case "login":
+		return "your Ghostbranch login"
+	case "gh auth token":
+		return "the GitHub CLI (gh)"
+	}
+	return src // GHOSTBRANCH_TOKEN, GH_TOKEN, GITHUB_TOKEN
 }

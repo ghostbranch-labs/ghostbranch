@@ -147,7 +147,7 @@ func TestGuidedInitAsksBeforeUsingGhsLogin(t *testing.T) {
 		// the checklist has no install step here (see
 		// TestGuidedInitShowsTheInstallStepAfterItsLogin for one).
 		hasPrefixes(t, p.asked, ghQ, "Create the private repo acme/widget-shadow", "Turn on scheduled sync?", "Make these changes now?")
-		for _, l := range []string{loggedIn, "Using GitHub account acme (from your Ghostbranch login)", noGHHint} {
+		for _, l := range []string{loggedIn, noGHHint} {
 			if !slices.Contains(p.said, l) {
 				t.Errorf("never said %q: %q", l, p.said)
 			}
@@ -218,7 +218,7 @@ func TestGuidedInitStopsWhenTheTokenIsAnotherAccounts(t *testing.T) {
 			t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
 		}
 		hasPrefixes(t, p.asked, asAcmeQ, "Create the private repo acme/widget-shadow", "Turn on scheduled sync?", "Make these changes now?")
-		for _, l := range []string{mismatch, loggedIn, "Using GitHub account acme (from your Ghostbranch login)"} {
+		for _, l := range []string{mismatch, loggedIn} {
 			if !slices.Contains(p.said, l) {
 				t.Errorf("never said %q: %q", l, p.said)
 			}
@@ -311,10 +311,10 @@ func TestGuidedInitShowsTheInstallStepAfterItsLogin(t *testing.T) {
 			if org {
 				who = "octo"
 			}
-			if !slices.Contains(p.said, "Logged in to GitHub as "+who+" with the Ghostbranch GitHub App.") || !saidHas(p, installStep) {
+			if !slices.Contains(p.said, "Logged in to GitHub as "+who+" with the Ghostbranch GitHub App.") || !saidHas(p, "Install the Ghostbranch app on acme") {
 				t.Fatalf("said %q", p.said)
 			}
-			if !before(p, "! ! "+installStep, "? "+doneQ) || !before(p, "? "+doneQ, "? Make these changes now?") || len(te.forge.Created) != 1 {
+			if !before(p, "! ! Install the Ghostbranch app on acme", "? "+installed) || !before(p, "? "+installed, "? Make these changes now?") || len(te.forge.Created) != 1 {
 				t.Fatalf("order: %q", p.log)
 			}
 		})
@@ -524,7 +524,7 @@ func TestPlainInitAdoptOtherAccountNoStop(t *testing.T) {
 // step picks it too.
 func TestGuidedInitInstallStepForAnExistingShadow(t *testing.T) {
 	t.Parallel()
-	const line = "! Install the Ghostbranch app on acme and pick acme/widget and acme/widget-shadow."
+	const line = "! Install the Ghostbranch app on acme"
 	for _, tc := range []struct {
 		name string
 		args []string
@@ -547,7 +547,7 @@ func TestGuidedInitInstallStepForAnExistingShadow(t *testing.T) {
 			if code, out, errOut := te.run(append([]string{"init", "acme/widget"}, tc.args...)...); code != 0 {
 				t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
 			}
-			if !before(p, "! "+line, "? "+doneQ) {
+			if !before(p, "! "+line, "? "+installed) || !slices.Contains(p.said, `    2. Choose acme, then "Only select repositories", then pick acme/widget and acme/widget-shadow`) {
 				t.Fatalf("log %q", p.log)
 			}
 		})

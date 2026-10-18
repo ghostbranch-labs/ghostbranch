@@ -506,7 +506,8 @@ func human(r any, st style.Styler) string {
 			fmt.Fprintf(&b, "Stored the %s token for %s in the OS keychain.\n", v.TokenKind, who)
 		}
 		if v.InstallURL != "" {
-			fmt.Fprintf(&b, "Next, install the Ghostbranch app on the account that owns your public repo and pick that repo; ghostbranch init creates the shadow repo: %s\n", v.InstallURL)
+			b.WriteString("Next, install the Ghostbranch app. It acts on GitHub only on the repos you pick.\n")
+			fmt.Fprintf(&b, "Open this on the account that owns your public repo and pick that repo (ghostbranch init creates the shadow repo, and the app gets it automatically): %s\n", v.InstallURL)
 		}
 		if v.EnvToken != "" {
 			fmt.Fprintf(&b, "Note: %s is set in this shell and wins over the stored login.\n", v.EnvToken)
@@ -558,7 +559,7 @@ func human(r any, st style.Styler) string {
 			b.WriteString("Stored login: not checked (GHOSTBRANCH_TOKEN wins)\n")
 		}
 	case *engine.AgentsTokenResult:
-		agentsTokenText(&b, v)
+		agentsTokenText(&b, v, st)
 	case *engine.AgentsStatusResult:
 		if len(v.Grants) == 0 {
 			b.WriteString("No agent grants on this machine.\n")
@@ -582,18 +583,18 @@ func human(r any, st style.Styler) string {
 
 // agentsTokenText is agents token's result: the token's check and where to
 // set it, or, when no token was read, the steps for a person.
-func agentsTokenText(b *strings.Builder, v *engine.AgentsTokenResult) {
+func agentsTokenText(b *strings.Builder, v *engine.AgentsTokenResult, st style.Styler) {
 	if v.Check == nil {
 		owner, _, _ := strings.Cut(v.Select, "/")
-		fmt.Fprintf(b, "Make the agent's token on GitHub, for %s: %s\n", owner, v.Link)
-		fmt.Fprintf(b, "On that page, choose Only select repositories, then %s. Keep the permissions the link set.\n", v.Select)
+		b.WriteString(attention(st, fmt.Sprintf("Make the agent's token on GitHub, for %s: %s", owner, v.Link)) + "\n")
+		b.WriteString(attention(st, fmt.Sprintf("On that page, choose Only select repositories, then %s. Keep the permissions the link set.", v.Select)) + "\n")
 		b.WriteString("Then set it in the agent's shell, and restart the agent there:\n")
 	} else {
 		public := v.Check.Public
 		if public == "" {
 			public = "the public repo"
 		}
-		fmt.Fprintf(b, "This token (account %s) reaches %s, and it can't push to %s.\n", v.Check.Account, v.Check.Shadow, public)
+		b.WriteString(st.OK(fmt.Sprintf("This token (account %s) reaches %s, and it can't push to %s.", v.Check.Account, v.Check.Shadow, public)) + "\n")
 		b.WriteString("Set it in the agent's shell (paste the token for <paste>); Ghostbranch doesn't keep it:\n")
 	}
 	fmt.Fprintf(b, "  sh, bash, zsh: %s\n  PowerShell:    %s\n", v.SetLine["sh"], v.SetLine["powershell"])
@@ -994,14 +995,34 @@ func doctorLine(b *strings.Builder, c engine.DoctorCheck, st style.Styler) {
 // (or blocked), and Ghostbranch will do it. A skipped step isn't shown.
 var setupMarks = map[string]string{engine.SetupDone: "✓", engine.SetupNeedsHuman: "!", engine.SetupBlocked: "!", engine.SetupTodo: "·"}
 
+// attention is text that needs the person: bold yellow.
+func attention(st style.Styler, text string) string { return st.Bold(st.Warn(text)) }
+
 // checklistLines is the setup checklist as guided init shows it: one
-// "<mark> <message>" line per step that applies.
-func checklistLines(s *engine.Setup) []string {
+// "<mark> <message>" line per step that applies, coloured by what it asks
+// of the person: done is green, needs you bold yellow, Ghostbranch will do
+// it dim. A step in replace shows those lines instead (already styled).
+func checklistLines(s *engine.Setup, st style.Styler, replace map[string][]string) []string {
 	var out []string
-	for _, st := range s.Steps {
-		if mark, ok := setupMarks[st.Status]; ok {
-			out = append(out, mark+" "+st.Message)
+	for _, step := range s.Steps {
+		mark, ok := setupMarks[step.Status]
+		if !ok {
+			continue
 		}
+		if lines, ok := replace[step.ID]; ok {
+			out = append(out, lines...)
+			continue
+		}
+		line := mark + " " + step.Message
+		switch step.Status {
+		case engine.SetupDone:
+			line = st.OK(line)
+		case engine.SetupTodo:
+			line = st.Dim(line)
+		default:
+			line = attention(st, line)
+		}
+		out = append(out, line)
 	}
 	return out
 }
