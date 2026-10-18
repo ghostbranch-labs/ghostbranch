@@ -237,7 +237,7 @@ func TestPushRefusedForPrivateEmailExplainsTheCommit(t *testing.T) {
 		!strings.Contains(ce.Message, "has your private email, ") {
 		t.Fatalf("message = %q", ce.Message)
 	}
-	if ce.Details["reason"] != "email_private" || ce.Details["remote"] != "shadow" ||
+	if ce.Details["cause"] != "email_private" || !strings.Contains(ce.Details["reason"].(string), "GH007") || ce.Details["remote"] != "shadow" ||
 		ce.Details["settings_url"] != "https://github.com/settings/emails" || ce.Details["commit"] == "" {
 		t.Fatalf("details = %v", ce.Details)
 	}

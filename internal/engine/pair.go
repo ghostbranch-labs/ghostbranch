@@ -185,7 +185,6 @@ func (e *Engine) push(ctx context.Context, pc *pairCtx, remote string, opt gitx.
 		details := map[string]any{"remote": remote, "refs": refused.Refs, "reason": refused.Reason}
 		if text, extra, ok := explainGH007(ctx, pc.git, refspecs, refused, pc.public.FullName); ok {
 			msg = text
-			details["server_reason"] = refused.Reason
 			for k, v := range extra {
 				details[k] = v
 			}

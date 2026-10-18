@@ -54,7 +54,7 @@ Fix one of these:
 	if msg != want {
 		t.Fatalf("message:\n%s\nwant:\n%s", msg, want)
 	}
-	if det["reason"] != "email_private" || det["commit"] != pub || det["email"] != "me@example.com" ||
+	if det["cause"] != "email_private" || det["commit"] != pub || det["email"] != "me@example.com" ||
 		det["branch"] != "probe2" || det["settings_url"] != "https://github.com/settings/emails" {
 		t.Fatalf("details = %v", det)
 	}

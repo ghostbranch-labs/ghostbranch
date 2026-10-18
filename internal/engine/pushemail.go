@@ -71,6 +71,6 @@ func explainGH007(ctx context.Context, g *gitx.Git, refspecs []string, refused *
 		b.WriteString("  - set git's user.email to your GitHub no-reply address (shown on that page), recreate the commit, and push again")
 	}
 	return b.String(), map[string]any{
-		"reason": "email_private", "commit": tip, "email": email, "branch": branch, "settings_url": emailSettingsURL,
+		"cause": "email_private", "commit": tip, "email": email, "branch": branch, "settings_url": emailSettingsURL,
 	}, true
 }
