@@ -186,7 +186,8 @@ const (
 	// needs. details: configure_url, repos.
 	AppCantSeeRepo Code = "APP_CANT_SEE_REPO"
 	// TokenWrongAccount means the token belongs to a different account than
-	// the repo's owner. details: owner.
+	// the repo's owner. details: token_account (the token's account), owner
+	// (the account the shadow repo needs).
 	TokenWrongAccount Code = "TOKEN_WRONG_ACCOUNT"
 	// AgentTokenRefused means the token offered for an agent is too wide or
 	// lacks what agents need. details: reason (can_publish,
