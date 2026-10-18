@@ -558,6 +558,11 @@ func (a *app) engine(ctx context.Context) (*engine.Engine, error) {
 		NewScanner: a.env.NewScanner, PollInterval: a.env.PollInterval, SettleWindow: a.env.SettleWindow, CIAppearWindow: a.env.CIAppearWindow, CIAppearPoll: a.env.CIAppearPoll,
 		DryRun: a.dryRun, OnPush: a.env.OnPush, Grants: grant.NewStore(ws.GrantsPath(), ws.GrantsLockPath()),
 		Waivers: waiver.NewStore(ws.WaiversPath(), ws.WaiversLockPath())}
+	if source == "login" && a.env.Keychain != nil {
+		if l, err := auth.LoadLogin(a.env.Keychain); err == nil && l != nil {
+			e.AppLogin = l.Kind == "app"
+		}
+	}
 	if a.env.ConsoleUsable && !a.nonInteractive {
 		e.Editor = func(s string) (string, error) {
 			a.reporter().Pause()

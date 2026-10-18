@@ -60,7 +60,11 @@ type Engine struct {
 	// agent or a script, not a person at a terminal. Doctor and agents
 	// status read it to spot an agent on a person's stored login.
 	LooksLikeAgent bool
-	Now            func() time.Time
+	// AppLogin: Token is the stored login (TokenSource "login") and that
+	// login came from the Ghostbranch app (Kind "app"), so it can list the
+	// app's installations. Never decided from the token's prefix.
+	AppLogin bool
+	Now      func() time.Time
 	// Sleep waits d, or returns ctx.Err() as soon as ctx is done.
 	Sleep func(context.Context, time.Duration) error
 	Rand  io.Reader

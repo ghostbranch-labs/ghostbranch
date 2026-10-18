@@ -85,35 +85,12 @@ func (e *Engine) Init(ctx context.Context, opt InitOptions) (res *InitResult, wa
 		}
 		e.record("init", pair, "", "", summary, err)
 	}()
-	if _, _, err := forge.SplitName(opt.Public); err != nil {
-		return nil, nil, contract.New(contract.BadFlag, "%v", err).WithField("public")
-	}
-	shadow := opt.Shadow
-	// A registered pair keeps its shadow repo: init resumes it, and never
-	// quietly sets up a second one.
-	if reg, ok := e.WS.Find(opt.Public); ok {
-		switch {
-		case shadow == "":
-			shadow = reg.Shadow
-		case !strings.EqualFold(shadow, reg.Shadow):
-			return nil, nil, contract.New(contract.BadFlag,
-				"%s is registered here with the shadow repo %s, not %s. To switch shadow repos, run ghostbranch remove --repo %s, then ghostbranch init %s --shadow %s (with --adopt if that repo exists)",
-				reg.Public, reg.Shadow, shadow, reg.Public, reg.Public, shadow).WithField("shadow").
-				WithDetails(map[string]any{"public": reg.Public, "registered_shadow": reg.Shadow})
-		}
-	}
-	if shadow == "" {
-		shadow = opt.Public + "-shadow"
-	}
-	if _, _, err := forge.SplitName(shadow); err != nil {
-		return nil, nil, contract.New(contract.BadFlag, "%v", err).WithField("shadow")
+	p, err := e.initPair(opt.Public, opt.Shadow)
+	if err != nil {
+		return nil, nil, err
 	}
 	if s := opt.Schedule; s != "" && s != config.ScheduleOff && s != DefaultSyncSchedule {
 		return nil, nil, contract.New(contract.BadFlag, "init's schedule must be %q or %q, not %q", config.ScheduleOff, DefaultSyncSchedule, s).WithField("sync")
-	}
-	p := workspace.Pair{Public: opt.Public, Shadow: shadow}
-	if err := sameRepo(p); err != nil {
-		return nil, nil, err
 	}
 	pair = &p
 	res = &InitResult{Public: p.Public, Shadow: p.Shadow, MirroredBranches: []string{}, MirroredTags: []string{}}
@@ -262,6 +239,34 @@ func (e *Engine) Init(ctx context.Context, opt InitOptions) (res *InitResult, wa
 	}
 	res.Audit, warns = e.auditInto(ctx, pc, cfg, O, warns)
 	return res, warns, nil
+}
+
+// initPair is the pair init sets up for public: the shadow named, else the
+// registered pair's, else <public>-shadow. A registered pair keeps its
+// shadow repo: init resumes it, and never quietly sets up a second one.
+func (e *Engine) initPair(public, shadow string) (workspace.Pair, error) {
+	if _, _, err := forge.SplitName(public); err != nil {
+		return workspace.Pair{}, contract.New(contract.BadFlag, "%v", err).WithField("public")
+	}
+	if reg, ok := e.WS.Find(public); ok {
+		switch {
+		case shadow == "":
+			shadow = reg.Shadow
+		case !strings.EqualFold(shadow, reg.Shadow):
+			return workspace.Pair{}, contract.New(contract.BadFlag,
+				"%s is registered here with the shadow repo %s, not %s. To switch shadow repos, run ghostbranch remove --repo %s, then ghostbranch init %s --shadow %s (with --adopt if that repo exists)",
+				reg.Public, reg.Shadow, shadow, reg.Public, reg.Public, shadow).WithField("shadow").
+				WithDetails(map[string]any{"public": reg.Public, "registered_shadow": reg.Shadow})
+		}
+	}
+	if shadow == "" {
+		shadow = public + "-shadow"
+	}
+	if _, _, err := forge.SplitName(shadow); err != nil {
+		return workspace.Pair{}, contract.New(contract.BadFlag, "%v", err).WithField("shadow")
+	}
+	p := workspace.Pair{Public: public, Shadow: shadow}
+	return p, sameRepo(p)
 }
 
 // shadowCreateDenied is SHADOW_CREATE_DENIED with the steps that work with

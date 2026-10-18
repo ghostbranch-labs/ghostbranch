@@ -25,10 +25,16 @@ type Forge struct {
 	stacks map[string][]*stack
 
 	// Installations and InstallRepos are the Installer answers; InstallErr
-	// makes both calls fail with it when set.
+	// makes both calls fail with it when set. InstallCalls counts
+	// UserInstallations calls.
 	Installations []forge.Installation
 	InstallRepos  map[int64][]string
 	InstallErr    error
+	InstallCalls  int
+	// Created records each repo CreatePrivateRepo created, and
+	// DefaultBranchSets each "repo branch" SetDefaultBranch set.
+	Created           []string
+	DefaultBranchSets []string
 
 	// User is returned by CurrentUser.
 	User    forge.User
@@ -350,6 +356,7 @@ func (f *Forge) CreatePrivateRepo(_ context.Context, full string) (forge.Repo, e
 	if err != nil {
 		return forge.Repo{}, err
 	}
+	f.Created = append(f.Created, full)
 	return f.view(full, r), nil
 }
 
@@ -372,6 +379,7 @@ func (f *Forge) SetDefaultBranch(_ context.Context, full, branch string) error {
 		return fmt.Errorf("set default branch of %s: branch %s does not exist", full, branch)
 	}
 	f.repos[full].DefaultBranch = branch
+	f.DefaultBranchSets = append(f.DefaultBranchSets, full+" "+branch)
 	return nil
 }
 
@@ -616,6 +624,7 @@ var _ forge.PermissionProber = (*Forge)(nil)
 func (f *Forge) UserInstallations(context.Context) ([]forge.Installation, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.InstallCalls++
 	if f.InstallErr != nil {
 		return nil, f.InstallErr
 	}
