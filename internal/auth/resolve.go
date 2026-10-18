@@ -32,7 +32,7 @@ func (s Source) now() time.Time {
 
 // Resolve returns the token and where it came from, in this order:
 // GHOSTBRANCH_TOKEN, the stored login ("login"), GH_TOKEN, GITHUB_TOKEN,
-// `gh auth token`. With GHOSTBRANCH_TOKEN set the keychain is never touched.
+// `gh auth token` (off when GHOSTBRANCH_NO_GH is set; see NoGH). With GHOSTBRANCH_TOKEN set the keychain is never touched.
 // A stored login that can't be used (corrupt, locked keychain, expired,
 // newer) is an error, never a quiet fall back to a later source; only a
 // machine with no keychain at all goes on.
@@ -64,12 +64,26 @@ func Resolve(ctx context.Context, src Source) (string, string, error) {
 			return v, k, nil
 		}
 	}
-	if src.GH != nil {
+	noGH := NoGH(get)
+	if src.GH != nil && !noGH {
 		if t, err := src.GH(); err == nil && strings.TrimSpace(t) != "" {
 			return strings.TrimSpace(t), "gh auth token", nil
 		}
 	}
+	if noGH {
+		return "", "", contract.New(contract.AuthMissing, "no GitHub token: run `ghostbranch login`, or set GHOSTBRANCH_TOKEN or GH_TOKEN, or run `gh auth login` (the gh fallback is off: GHOSTBRANCH_NO_GH is set)")
+	}
 	return "", "", contract.New(contract.AuthMissing, "no GitHub token: run `ghostbranch login`, or set GHOSTBRANCH_TOKEN or GH_TOKEN, or run `gh auth login`")
+}
+
+// NoGH reports whether GHOSTBRANCH_NO_GH turns off the `gh auth token`
+// fallback: 1, true or yes, in any case, after trimming spaces.
+func NoGH(getenv func(string) string) bool {
+	switch strings.ToLower(strings.TrimSpace(getenv("GHOSTBRANCH_NO_GH"))) {
+	case "1", "true", "yes":
+		return true
+	}
+	return false
 }
 
 func stale(l *Login, now time.Time) bool {
