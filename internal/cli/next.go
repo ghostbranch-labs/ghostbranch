@@ -15,6 +15,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
+	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/guard"
 	"github.com/ghostbranch-labs/ghostbranch/internal/leak"
 	"github.com/ghostbranch-labs/ghostbranch/internal/managed"
@@ -150,6 +151,14 @@ func (a *app) steps(err error) []contract.Next {
 				return []contract.Next{{Command: a.gb("login", "--with-token"), NeedsHuman: true,
 					Why: "pipe a GitHub token on stdin, for example: gh auth token | ghostbranch login --with-token"}}
 			}
+		case contract.AppNotInstalled:
+			return []contract.Next{{Command: a.again(false), NeedsHuman: true,
+				Why: "a person installs the Ghostbranch app on each account in error.details.accounts, at its install_url; then run this again"}}
+		case contract.AppCantSeeRepo:
+			return []contract.Next{{Command: a.again(false), NeedsHuman: true,
+				Why: "a person adds error.details.repos to the Ghostbranch app's repositories, at error.details.configure_url; then run this again"}}
+		case contract.TokenWrongAccount:
+			return a.wrongAccountNexts(ce)
 		case contract.ShadowCreateDenied:
 			pub, _ := ce.Details["public"].(string)
 			sh, _ := ce.Details["shadow"].(string)
@@ -983,6 +992,33 @@ func (a *app) initNexts(pub string) []contract.Next {
 		{Command: a.gb("init", pub, "--plan", "--json"),
 			Why: "no shadow repo yet: create one"},
 	}
+}
+
+// wrongAccountNexts is next for TOKEN_WRONG_ACCOUNT: use a token of the
+// owner's, or keep the shadow repo on the token's own account.
+func (a *app) wrongAccountNexts(ce *contract.Error) []contract.Next {
+	owner, _ := ce.Details["owner"].(string)
+	why := fmt.Sprintf("a person logs in as %s at a terminal; then run init again", owner)
+	if a.eng != nil && a.eng.TokenSource == "GHOSTBRANCH_TOKEN" {
+		why = fmt.Sprintf("GHOSTBRANCH_TOKEN wins over any login: a person sets it to a token of %s's, or unsets it and logs in as %s with this; then run init again", owner, owner)
+	}
+	out := []contract.Next{{Command: a.gb("login"), NeedsHuman: true, Why: why}}
+	r, _ := a.result.(*engine.InitResult)
+	user, _ := ce.Details["token_account"].(string)
+	if _, name, err := forge.SplitName(initPublic(r)); err == nil && user != "" {
+		yours := user + "/" + name + "-shadow"
+		out = append(out, contract.Next{Command: a.gb("init", r.Public, "--shadow", yours),
+			Why: fmt.Sprintf("or keep the shadow repo on the token's own account: init creates %s", yours)})
+	}
+	return out
+}
+
+// initPublic is r's public repo, or "" for none.
+func initPublic(r *engine.InitResult) string {
+	if r == nil {
+		return ""
+	}
+	return r.Public
 }
 
 // waitNext finishes the pending gate job.

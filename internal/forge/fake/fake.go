@@ -107,6 +107,10 @@ type Forge struct {
 	// CreateRefused makes CreatePrivateRepo under these owners fail with
 	// ErrForbidden, carrying the message as GitHub's (a *forge.HostError).
 	CreateRefused map[string]string
+	// CreateTaken makes CreatePrivateRepo of these owner/name fail with
+	// ErrRepoExists, as GitHub does for a name taken by a repo the token
+	// can't see (GetRepo of it is still ErrNotFound).
+	CreateTaken map[string]bool
 	// StacksUnavailable makes CreateStack and AddToStack fail with
 	// forge.ErrStacksUnavailable and StackOf answer nil, as a host without
 	// native stacks does. StackConflicts makes that many next CreateStack
@@ -351,6 +355,9 @@ func (f *Forge) CreatePrivateRepo(_ context.Context, full string) (forge.Repo, e
 			return forge.Repo{}, fmt.Errorf("create %s: %w", full,
 				&forge.HostError{Message: msg, Err: fmt.Errorf("%w: 403 %s", forge.ErrForbidden, msg)})
 		}
+	}
+	if f.CreateTaken[full] {
+		return forge.Repo{}, fmt.Errorf("create %s: %w", full, forge.ErrRepoExists)
 	}
 	r, err := f.add(full, true)
 	if err != nil {

@@ -76,7 +76,9 @@ func guardFlagErr(public string) error {
 }
 
 // plainInit is init without questions: today's init, plus the guard and
-// sync flags.
+// sync flags. It works out the setup checklist first and, on a stop, writes
+// nothing: --plan returns the checklist, otherwise the stop's code. On
+// success data.setup is the checklist worked out again.
 func (a *app) plainInit(ctx context.Context, public string, f initFlags) error {
 	a.ran = true
 	in, installed := a.guardHere(public)
@@ -88,10 +90,32 @@ func (a *app) plainInit(ctx context.Context, public string, f initFlags) error {
 	if err != nil {
 		return err
 	}
+	p, err := e.InitPair(public, f.shadow)
+	if err != nil {
+		return err
+	}
+	so := engine.SetupOptions{Public: public, Shadow: f.shadow, Adopt: f.adopt, InstallURL: a.installURL()}
+	setup, err := a.setupCheck(ctx, e, so, in, installed, guardOn)
+	if err != nil {
+		return err
+	}
+	if stop := setup.FirstStop(); stop != nil {
+		res := &engine.InitResult{Public: p.Public, Shadow: p.Shadow, MirroredBranches: []string{}, MirroredTags: []string{},
+			GuardInstalled: installed, Setup: setup}
+		if a.dryRun {
+			return done(a, res, nil, nil)
+		}
+		return done(a, res, nil, setup.StopError(stop))
+	}
 	res, w, err := e.Init(ctx, engine.InitOptions{Public: public, Shadow: f.shadow, Adopt: f.adopt, Schedule: schedule(f.sync)})
 	if res != nil {
 		a.pairFull = workspace.Pair{Public: res.Public, Shadow: res.Shadow}
 		res.GuardInstalled = installed
+		res.Setup = setup
+	}
+	if ce := contract.From(err); ce != nil && ce.Code == contract.AppCantSeeRepo && res != nil {
+		res.Setup = shadowHiddenSetup(setup, ce)
+		ce.Details["steps"] = res.Setup.Steps
 	}
 	if err == nil && res.Preview == nil && guardOn {
 		gr, gerr := a.installGuard(ctx)
@@ -100,7 +124,59 @@ func (a *app) plainInit(ctx context.Context, public string, f initFlags) error {
 		}
 		res.GuardInstalled = gr.Status.Installed
 	}
+	if err == nil && res.Preview == nil {
+		// The checklist again, now that init is done; the one from before
+		// stands if GitHub can't be read.
+		if s, serr := a.setupCheck(ctx, e, so, in, res.GuardInstalled, guardOn); serr == nil {
+			res.Setup = s
+		}
+	}
 	return done(a, res, w, err)
+}
+
+// setupCheck is e.SetupCheck with the guard step for this directory, which
+// the CLI knows (GuardState) and the engine doesn't.
+func (a *app) setupCheck(ctx context.Context, e *engine.Engine, so engine.SetupOptions, in, installed, guardOn bool) (*engine.Setup, error) {
+	s, err := e.SetupCheck(ctx, so)
+	if err != nil || !in {
+		return s, err
+	}
+	for i := range s.Steps {
+		if s.Steps[i].ID != "guard" {
+			continue
+		}
+		st := engine.SetupStep{ID: "guard", Status: engine.SetupSkipped, Details: map[string]any{},
+			Message: "Pass --guard to install the push guard in this checkout."}
+		switch {
+		case installed:
+			st.Status, st.Message = engine.SetupDone, "The push guard is installed in this checkout."
+		case guardOn:
+			st.Status, st.Message = engine.SetupTodo, "Ghostbranch installs the push guard in this checkout."
+		}
+		s.Steps[i] = st
+	}
+	return s, nil
+}
+
+// shadowHiddenSetup is the checklist for APP_CANT_SEE_REPO at create time:
+// the shadow repo exists, and app_access is the stop.
+func shadowHiddenSetup(s *engine.Setup, ce *contract.Error) *engine.Setup {
+	out := &engine.Setup{Steps: append([]engine.SetupStep(nil), s.Steps...)}
+	configure, _ := ce.Details["configure_url"].(string)
+	repos, _ := ce.Details["repos"].([]string)
+	for i, st := range out.Steps {
+		switch st.ID {
+		case "shadow":
+			if len(repos) == 1 {
+				out.Steps[i] = engine.SetupStep{ID: "shadow", Status: engine.SetupDone, Details: map[string]any{},
+					Message: repos[0] + " exists, though the Ghostbranch app can't see it."}
+			}
+		case "app_access":
+			out.Steps[i] = engine.SetupStep{ID: "app_access", Status: engine.SetupNeedsHuman, Message: ce.Message, URL: configure,
+				Details: map[string]any{"configure_url": configure, "repos": ce.Details["repos"]}}
+		}
+	}
+	return out
 }
 
 // originSlug is owner/repo from the checkout's origin remote, or "".

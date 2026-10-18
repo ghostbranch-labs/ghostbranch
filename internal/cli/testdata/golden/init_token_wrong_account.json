@@ -1,0 +1,187 @@
+{
+  "schema_version": "0.16",
+  "command": "init",
+  "ok": false,
+  "exit_code": 2,
+  "data": {
+    "public": "acme/widget",
+    "shadow": "acme/widget-shadow",
+    "created_shadow": false,
+    "adopted": false,
+    "resumed": false,
+    "mirrored_branches": [],
+    "mirrored_tags": [],
+    "overlay_created": false,
+    "default_branch_set": false,
+    "audit": null,
+    "preview": null,
+    "guard_installed": false,
+    "doctor": null,
+    "setup": {
+      "steps": [
+        {
+          "id": "login",
+          "status": "done",
+          "message": "Logged in as octo (the token from GHOSTBRANCH_TOKEN).",
+          "url": "",
+          "details": {
+            "account": "octo",
+            "source": "GHOSTBRANCH_TOKEN"
+          }
+        },
+        {
+          "id": "account",
+          "status": "needs_human",
+          "message": "The token is octo's, so it can't set up acme/widget-shadow on acme: set GHOSTBRANCH_TOKEN to a token of acme's, or put the shadow on your account with --shadow octo/widget-shadow.",
+          "url": "",
+          "details": {
+            "owner": "acme",
+            "shadow_on_your_account": "octo/widget-shadow",
+            "token_account": "octo"
+          }
+        },
+        {
+          "id": "app_installed",
+          "status": "skipped",
+          "message": "Only an app login can see where the Ghostbranch app is installed.",
+          "url": "",
+          "details": {}
+        },
+        {
+          "id": "shadow",
+          "status": "todo",
+          "message": "Ghostbranch creates the private repo acme/widget-shadow.",
+          "url": "",
+          "details": {}
+        },
+        {
+          "id": "app_access",
+          "status": "skipped",
+          "message": "Only an app login can see where the Ghostbranch app is installed.",
+          "url": "",
+          "details": {}
+        },
+        {
+          "id": "pair",
+          "status": "todo",
+          "message": "Ghostbranch registers acme/widget with acme/widget-shadow.",
+          "url": "",
+          "details": {}
+        },
+        {
+          "id": "guard",
+          "status": "skipped",
+          "message": "No checkout, so no push guard to install.",
+          "url": "",
+          "details": {}
+        },
+        {
+          "id": "doctor",
+          "status": "todo",
+          "message": "Ghostbranch runs doctor once setup is done.",
+          "url": "",
+          "details": {}
+        }
+      ]
+    }
+  },
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "login"
+      ],
+      "why": "GHOSTBRANCH_TOKEN wins over any login: a person sets it to a token of acme's, or unsets it and logs in as acme with this; then run init again",
+      "needs_human": true,
+      "needs_input": []
+    },
+    {
+      "command": [
+        "ghostbranch",
+        "init",
+        "acme/widget",
+        "--shadow",
+        "octo/widget-shadow"
+      ],
+      "why": "or keep the shadow repo on the token's own account: init creates octo/widget-shadow",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
+  "error": {
+    "code": "TOKEN_WRONG_ACCOUNT",
+    "message": "The token is octo's, so it can't set up acme/widget-shadow on acme: set GHOSTBRANCH_TOKEN to a token of acme's, or put the shadow on your account with --shadow octo/widget-shadow.",
+    "field": null,
+    "retryable": false,
+    "details": {
+      "owner": "acme",
+      "steps": [
+        {
+          "id": "login",
+          "status": "done",
+          "message": "Logged in as octo (the token from GHOSTBRANCH_TOKEN).",
+          "url": "",
+          "details": {
+            "account": "octo",
+            "source": "GHOSTBRANCH_TOKEN"
+          }
+        },
+        {
+          "id": "account",
+          "status": "needs_human",
+          "message": "The token is octo's, so it can't set up acme/widget-shadow on acme: set GHOSTBRANCH_TOKEN to a token of acme's, or put the shadow on your account with --shadow octo/widget-shadow.",
+          "url": "",
+          "details": {
+            "owner": "acme",
+            "shadow_on_your_account": "octo/widget-shadow",
+            "token_account": "octo"
+          }
+        },
+        {
+          "id": "app_installed",
+          "status": "skipped",
+          "message": "Only an app login can see where the Ghostbranch app is installed.",
+          "url": "",
+          "details": {}
+        },
+        {
+          "id": "shadow",
+          "status": "todo",
+          "message": "Ghostbranch creates the private repo acme/widget-shadow.",
+          "url": "",
+          "details": {}
+        },
+        {
+          "id": "app_access",
+          "status": "skipped",
+          "message": "Only an app login can see where the Ghostbranch app is installed.",
+          "url": "",
+          "details": {}
+        },
+        {
+          "id": "pair",
+          "status": "todo",
+          "message": "Ghostbranch registers acme/widget with acme/widget-shadow.",
+          "url": "",
+          "details": {}
+        },
+        {
+          "id": "guard",
+          "status": "skipped",
+          "message": "No checkout, so no push guard to install.",
+          "url": "",
+          "details": {}
+        },
+        {
+          "id": "doctor",
+          "status": "todo",
+          "message": "Ghostbranch runs doctor once setup is done.",
+          "url": "",
+          "details": {}
+        }
+      ],
+      "token_account": "octo"
+    }
+  }
+}

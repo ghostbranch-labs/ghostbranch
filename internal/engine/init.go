@@ -51,6 +51,9 @@ type InitResult struct {
 	GuardInstalled bool `json:"guard_installed"`
 	// Doctor is doctor's summary after a guided init; nil otherwise.
 	Doctor *DoctorSummary `json:"doctor"`
+	// Setup is the setup checklist: worked out before init acts, and
+	// again once it is done.
+	Setup *Setup `json:"setup"`
 	// Guided and DoctorChecks are for human output only.
 	Guided       bool          `json:"-"`
 	DoctorChecks []DoctorCheck `json:"-"`
@@ -129,6 +132,9 @@ func (e *Engine) Init(ctx context.Context, opt InitOptions) (res *InitResult, wa
 			st.Fail() // guided init asks next; the step mustn't spin or end as ✓
 			if errors.Is(err, forge.ErrForbidden) {
 				return res, warns, shadowCreateDenied(p, opt.Shadow != "", err)
+			}
+			if errors.Is(err, forge.ErrRepoExists) && e.AppLogin {
+				return res, warns, e.shadowHidden(ctx, p)
 			}
 			return res, warns, forgeErr(err, "create shadow repo %s", p.Shadow)
 		}
@@ -241,6 +247,11 @@ func (e *Engine) Init(ctx context.Context, opt InitOptions) (res *InitResult, wa
 	return res, warns, nil
 }
 
+// InitPair is the pair init sets up for public and the --shadow given.
+func (e *Engine) InitPair(public, shadow string) (workspace.Pair, error) {
+	return e.initPair(public, shadow)
+}
+
 // initPair is the pair init sets up for public: the shadow named, else the
 // registered pair's, else <public>-shadow. A registered pair keeps its
 // shadow repo: init resumes it, and never quietly sets up a second one.
@@ -283,6 +294,29 @@ func shadowCreateDenied(p workspace.Pair, explicitShadow bool, err error) error 
 	}
 	return contract.Wrap(contract.ShadowCreateDenied, err, "the token can't create %s; create it yourself and adopt it", p.Shadow).
 		WithDetails(map[string]any{"public": p.Public, "shadow": p.Shadow, "explicit_shadow": explicitShadow, "steps": steps})
+}
+
+// shadowHidden is APP_CANT_SEE_REPO for an app login whose create of p's
+// shadow repo GitHub refused because the name is taken, though GetRepo
+// couldn't find it: the repo exists, and the Ghostbranch app can't see it.
+// details.configure_url is the app's install on the shadow's account ("" when
+// it can't be listed).
+func (e *Engine) shadowHidden(ctx context.Context, p workspace.Pair) error {
+	owner, _, _ := forge.SplitName(p.Shadow)
+	configure := ""
+	if in := e.installer(); in != nil {
+		if insts, lerr := in.UserInstallations(ctx); lerr == nil {
+			if inst, ok := installFor(insts, owner); ok {
+				configure = inst.ConfigureURL()
+			}
+		}
+	}
+	msg := fmt.Sprintf("%s already exists, but the Ghostbranch app can't see it: tick %s in the Ghostbranch app's repositories on %s", p.Shadow, p.Shadow, owner)
+	if configure != "" {
+		msg += ", at " + configure
+	}
+	return contract.New(contract.AppCantSeeRepo, "%s.", msg).
+		WithDetails(map[string]any{"configure_url": configure, "repos": []string{p.Shadow}})
 }
 
 // checkAdoptable accepts an empty shadow repo, one that is already this

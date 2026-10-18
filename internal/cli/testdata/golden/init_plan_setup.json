@@ -1,0 +1,138 @@
+{
+  "schema_version": "0.16",
+  "command": "init",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "public": "acme/widget",
+    "shadow": "acme/widget-shadow",
+    "created_shadow": true,
+    "adopted": false,
+    "resumed": false,
+    "mirrored_branches": [
+      "main"
+    ],
+    "mirrored_tags": [],
+    "overlay_created": false,
+    "default_branch_set": false,
+    "audit": null,
+    "preview": {
+      "fingerprint": {
+        "public_main": "<SHA1>"
+      },
+      "ops": [
+        {
+          "op": "create_repo",
+          "private": true,
+          "repo": "acme/widget-shadow"
+        },
+        {
+          "from": null,
+          "op": "push_ref",
+          "ref": "refs/heads/main",
+          "repo": "acme/widget-shadow",
+          "to": "<SHA1>"
+        },
+        {
+          "from": null,
+          "op": "push_ref",
+          "ref": "refs/heads/ghostbranch",
+          "repo": "acme/widget-shadow",
+          "to": null
+        },
+        {
+          "branch": "ghostbranch",
+          "op": "set_default_branch",
+          "repo": "acme/widget-shadow"
+        },
+        {
+          "op": "register_pair",
+          "public": "acme/widget",
+          "shadow": "acme/widget-shadow"
+        }
+      ]
+    },
+    "guard_installed": false,
+    "doctor": null,
+    "setup": {
+      "steps": [
+        {
+          "id": "login",
+          "status": "done",
+          "message": "Logged in as acme (the token from login).",
+          "url": "",
+          "details": {
+            "account": "acme",
+            "source": "login"
+          }
+        },
+        {
+          "id": "account",
+          "status": "done",
+          "message": "The token is acme's, which can set up acme/widget-shadow.",
+          "url": "",
+          "details": {
+            "owner": "acme",
+            "token_account": "acme"
+          }
+        },
+        {
+          "id": "app_installed",
+          "status": "done",
+          "message": "The Ghostbranch app is installed on acme.",
+          "url": "",
+          "details": {
+            "accounts": [
+              {
+                "account": "acme",
+                "install_url": "",
+                "status": "installed"
+              }
+            ]
+          }
+        },
+        {
+          "id": "shadow",
+          "status": "todo",
+          "message": "Ghostbranch creates the private repo acme/widget-shadow.",
+          "url": "",
+          "details": {}
+        },
+        {
+          "id": "app_access",
+          "status": "todo",
+          "message": "The Ghostbranch app can see acme/widget; Ghostbranch checks acme/widget-shadow once it creates it.",
+          "url": "",
+          "details": {
+            "repos": [],
+            "selection": "all"
+          }
+        },
+        {
+          "id": "pair",
+          "status": "todo",
+          "message": "Ghostbranch registers acme/widget with acme/widget-shadow.",
+          "url": "",
+          "details": {}
+        },
+        {
+          "id": "guard",
+          "status": "skipped",
+          "message": "No checkout, so no push guard to install.",
+          "url": "",
+          "details": {}
+        },
+        {
+          "id": "doctor",
+          "status": "todo",
+          "message": "Ghostbranch runs doctor once setup is done.",
+          "url": "",
+          "details": {}
+        }
+      ]
+    }
+  },
+  "warnings": [],
+  "next": [],
+  "error": null
+}

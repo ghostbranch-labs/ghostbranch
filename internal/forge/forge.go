@@ -26,6 +26,11 @@ var ErrForbidden = errors.New("forbidden")
 // current state.
 var ErrConflict = errors.New("conflict")
 
+// ErrRepoExists wraps a creation the host refused because the name is
+// taken (GitHub's 422 "name already exists on this account"): the repo
+// exists even when the token can't see it.
+var ErrRepoExists = errors.New("repo already exists")
+
 // ErrStacksUnavailable means the host won't make a native stack of these
 // PRs: it has no stacks API (a 404), or it refused this list (a 422: the
 // PRs don't chain, one is from a fork, or one is already stacked). Promote

@@ -76,7 +76,7 @@ func (p *person) Say(m string) {
 // answers. The token is acme's own, as a person setting up their own
 // public repo has; atOrgTerminal makes it octo's.
 func atTerminal(te *testEnv, answers ...string) *person {
-	te.forge.User.Login = "acme"
+	te.forge.User.Login, te.forge.Orgs = "acme", nil // acme's own repo
 	p := &person{inner: prompt.NewScript(answers...)}
 	te.env.ConsoleUsable = true
 	te.env.Asker = func() (prompt.Asker, error) { return p, nil }
@@ -501,8 +501,8 @@ const installLink = "https://github.com/apps/ghostbranch-cli/installations/new"
 
 // atOrgTerminal is atTerminal with acme an organization; the login is octo.
 func atOrgTerminal(te *testEnv, answers ...string) *person {
-	te.forge.Orgs = map[string]bool{"acme": true}
 	p := atTerminal(te, answers...)
+	te.forge.Orgs = map[string]bool{"acme": true}
 	te.forge.User.Login = "octo"
 	return p
 }
@@ -833,13 +833,11 @@ func TestGuidedInitSaysWhyCreationWasRefused(t *testing.T) {
 			if tc.app {
 				appLogin(te)
 			}
-			if tc.org {
-				te.forge.Orgs = map[string]bool{"acme": true}
-			}
 			owner, _, _ := forge.SplitName(tc.shadow)
 			refuseIn(te, tc.msg, owner)
 			p := atTerminal(te, tc.answers...)
 			if tc.org {
+				te.forge.Orgs = map[string]bool{"acme": true}
 				te.forge.User.Login = "octo"
 			}
 			// The repo appears at the create-by-hand Enter, after any waits

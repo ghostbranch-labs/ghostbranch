@@ -87,6 +87,8 @@ func TestAnExpiringLoginRefreshesThroughTheCLI(t *testing.T) {
 	te.env.ClientID, te.env.OAuthBaseURL, te.env.HTTPClient = srv.ClientID, srv.URL, srv.Client()
 	delete(te.vars, "GHOSTBRANCH_TOKEN")
 	storeLogin(te, "ghu_test_old", "ghr_test_seed", 2*time.Minute)
+	// An app login: init checks the app is installed before it acts.
+	te.forge.Installations = []forge.Installation{{ID: 7, Account: "acme", AccountType: forge.OwnerOrganization, Selection: "all"}}
 	if code, env := te.runJSON("init", "acme/widget"); code != 0 {
 		t.Fatalf("%d %v", code, env)
 	}

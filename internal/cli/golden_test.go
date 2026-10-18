@@ -147,6 +147,9 @@ func TestGoldenContract(t *testing.T) {
 		}, []string{"gate", "no-such-feature"}, 2},
 		{"init_dry_run", nil, []string{"init", "acme/widget", "--dry-run"}, 0},
 		{"init_create_denied", func(te *testEnv) { te.forge.CreateForbidden = true }, []string{"init", "acme/widget"}, 1},
+		{"init_plan_setup", func(te *testEnv) { appLogin(te); personal(te); installApp(te) }, []string{"init", "acme/widget", "--plan"}, 0},
+		{"init_app_not_installed", func(te *testEnv) { appLogin(te); personal(te) }, []string{"init", "acme/widget"}, contract.AppNotInstalled.Exit()},
+		{"init_token_wrong_account", func(te *testEnv) { te.forge.User.Login, te.forge.Orgs = "octo", nil }, []string{"init", "acme/widget"}, contract.TokenWrongAccount.Exit()},
 		{"sync_noop", initOnly, []string{"sync"}, 0},
 		{"sync_fast_forward", func(te *testEnv) {
 			initOnly(te)

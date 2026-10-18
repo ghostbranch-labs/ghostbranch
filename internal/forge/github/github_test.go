@@ -403,6 +403,28 @@ func TestCreatePrivateRepoForbidden(t *testing.T) {
 	}
 }
 
+// A name already taken on the account is ErrRepoExists, even for a repo the
+// token can't see; another 422 is not.
+func TestCreatePrivateRepoNameTaken(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /user", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{"login": "octo", "id": 1})
+	})
+	mux.HandleFunc("POST /user/repos", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"message":"Repository creation failed.","errors":[{"resource":"Repository","code":"custom","field":"name","message":"name already exists on this account"}]}`, http.StatusUnprocessableEntity)
+	})
+	mux.HandleFunc("POST /orgs/acme/repos", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"message":"Repository creation failed.","errors":[{"resource":"Repository","code":"custom","field":"name","message":"name is too long"}]}`, http.StatusUnprocessableEntity)
+	})
+	c := newClient(t, mux)
+	if _, err := c.CreatePrivateRepo(context.Background(), "octo/widget-shadow"); !errors.Is(err, forge.ErrRepoExists) {
+		t.Fatalf("taken: %v", err)
+	}
+	if _, err := c.CreatePrivateRepo(context.Background(), "acme/widget-shadow"); err == nil || errors.Is(err, forge.ErrRepoExists) {
+		t.Fatalf("another 422: %v", err)
+	}
+}
+
 func TestPushRunsListsPushRunsForTheSHA(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /repos/acme/s/actions/runs", func(w http.ResponseWriter, r *http.Request) {
