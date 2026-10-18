@@ -723,7 +723,7 @@ func TestNoCIMessageNamesMissingWorkflow(t *testing.T) {
 		reason, says string
 	}{
 		{"no workflow at all", true, "no_workflow", "the gate candidate has no workflow under .github/workflows that runs on this PR"},
-		{"a workflow that never ran", false, "actions_disabled_or_untriggered", "or no workflow triggers on pull_request"},
+		{"a workflow that never ran", false, "actions_disabled_or_untriggered", "matches the workflows' pull_request filters"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()

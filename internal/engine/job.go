@@ -122,7 +122,7 @@ func outcomeErr(out checkOutcome, pr int, cfg config.Gate, shadow string, workfl
 			details["reason"], details["no_workflows"] = "actions_disabled_or_untriggered", false
 		}
 		return contract.New(contract.NoCI,
-			"no checks appeared on shadow PR #%d within %s; check that Actions is enabled in %s, or no workflow triggers on pull_request", pr, shortDur(cfg.CIAppearTimeout), shadow).
+			"no checks appeared on shadow PR #%d within %s; check that Actions is enabled in %s and that the PR matches the workflows' pull_request filters", pr, shortDur(cfg.CIAppearTimeout), shadow).
 			WithDetails(details)
 	case feature.ChecksTimeout:
 		return contract.New(contract.CITimeout, "checks did not finish within %s", cfg.CITimeout)
