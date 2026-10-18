@@ -211,6 +211,36 @@ type PushProber interface {
 	PushAccess(ctx context.Context, full string) PushAccess
 }
 
+// Installation is one install of the Ghostbranch GitHub App that the
+// signed-in user can see.
+type Installation struct {
+	ID          int64
+	Account     string // login of the user or org it is installed on
+	AccountType string // "User" | "Organization"
+	Selection   string // "all" | "selected"
+}
+
+// ConfigureURL is the install's settings page: /settings/installations/<id>
+// for a User, /organizations/<org>/settings/installations/<id> for an
+// Organization.
+func (i Installation) ConfigureURL() string {
+	if i.AccountType == "Organization" {
+		return fmt.Sprintf("https://github.com/organizations/%s/settings/installations/%d", i.Account, i.ID)
+	}
+	return fmt.Sprintf("https://github.com/settings/installations/%d", i.ID)
+}
+
+// Installer is an optional interface for forges that can tell where the
+// app is installed. A token that is not an app login gets ErrForbidden.
+type Installer interface {
+	// UserInstallations: GET /user/installations, every page.
+	UserInstallations(ctx context.Context) ([]Installation, error)
+	// InstallationRepos: GET /user/installations/{id}/repositories, every
+	// page; owner/name of the repos the install covers that the user can
+	// also access.
+	InstallationRepos(ctx context.Context, id int64) ([]string, error)
+}
+
 // Stack is a native stack of PRs: its number, from the repo's issue and PR
 // sequence, and its PRs, bottom first. Merged PRs stay in it.
 type Stack struct {

@@ -24,6 +24,12 @@ type Forge struct {
 	next   map[string]int
 	stacks map[string][]*stack
 
+	// Installations and InstallRepos are the Installer answers; InstallErr
+	// makes both calls fail with it when set.
+	Installations []forge.Installation
+	InstallRepos  map[int64][]string
+	InstallErr    error
+
 	// User is returned by CurrentUser.
 	User    forge.User
 	UserErr error // CurrentUser fails with it when set
@@ -605,3 +611,23 @@ func (f *Forge) OAuthScopes(context.Context) ([]string, bool, error) {
 }
 
 var _ forge.PermissionProber = (*Forge)(nil)
+
+// UserInstallations returns Installations (forge.Installer).
+func (f *Forge) UserInstallations(context.Context) ([]forge.Installation, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.InstallErr != nil {
+		return nil, f.InstallErr
+	}
+	return slices.Clone(f.Installations), nil
+}
+
+// InstallationRepos returns InstallRepos[id] (forge.Installer).
+func (f *Forge) InstallationRepos(_ context.Context, id int64) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.InstallErr != nil {
+		return nil, f.InstallErr
+	}
+	return slices.Clone(f.InstallRepos[id]), nil
+}
