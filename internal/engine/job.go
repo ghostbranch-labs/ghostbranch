@@ -101,8 +101,9 @@ func (e *Engine) relock(ctx context.Context, pc *pairCtx, job string) error {
 }
 
 // outcomeErr is the error a settled CI outcome stands for; nil when it
-// passed. workflows lists the candidate's own workflow files (read only for
-// NO_CI); known is false when the candidate couldn't be read.
+// passed. workflows lists the candidate's workflows that run on its PR
+// (prWorkflows, read only for NO_CI); known is false when the candidate
+// couldn't be read.
 func outcomeErr(out checkOutcome, pr int, cfg config.Gate, shadow string, workflows func() (files []string, known bool)) error {
 	switch out.status {
 	case feature.ChecksFailed:
@@ -112,13 +113,13 @@ func outcomeErr(out checkOutcome, pr int, cfg config.Gate, shadow string, workfl
 		wf, known := workflows()
 		if known && len(wf) == 0 {
 			return contract.New(contract.NoCI,
-				"no checks appeared on shadow PR #%d within %s, and the gate candidate has no workflow under .github/workflows (public main has none): add CI to the public repo, or, if your CI is an external app, install it on %s",
-				pr, cfg.CIAppearTimeout, shadow).WithDetails(map[string]any{"reason": "no_workflow", "shadow_pr": pr})
+				"no checks appeared on shadow PR #%d within %s, and the gate candidate has no workflow under .github/workflows that runs on this PR: add CI to the public repo, or, if your CI is an external app, install it on %s",
+				pr, appearTimeout(cfg, true), shadow).WithDetails(map[string]any{"reason": "no_workflow", "no_workflows": true, "shadow_pr": pr})
 		}
 		// An unreadable candidate gives no reason: which one holds is unknown.
 		details := map[string]any{"shadow_pr": pr}
 		if known {
-			details["reason"] = "actions_disabled_or_untriggered"
+			details["reason"], details["no_workflows"] = "actions_disabled_or_untriggered", false
 		}
 		return contract.New(contract.NoCI,
 			"no checks appeared on shadow PR #%d within %s; check that Actions is enabled in %s, or no workflow triggers on pull_request", pr, cfg.CIAppearTimeout, shadow).
@@ -129,18 +130,30 @@ func outcomeErr(out checkOutcome, pr int, cfg config.Gate, shadow string, workfl
 	return nil
 }
 
-// candidateWorkflows lists the workflow files in candidate C, leaving out
-// Ghostbranch's own (ghostbranch-*.yml); known is false when C can't be
-// read.
-func candidateWorkflows(ctx context.Context, g *gitx.Git, C string) (files []string, known bool) {
+// prWorkflows lists the workflow files in candidate C that run on its gate
+// PR, whose head is branch (workflow.File.RunsOnPR), leaving out
+// Ghostbranch's own (ghostbranch-*.yml). A file that doesn't parse counts
+// as running, so a doubt keeps the full wait. known is false when C can't
+// be read. The CI wait and NO_CI's reason both use it, so they agree.
+func prWorkflows(ctx context.Context, g *gitx.Git, names workflow.Names, C, branch string) (files []string, known bool) {
 	es, err := g.ListTree(ctx, C)
 	if err != nil {
 		return nil, false
 	}
-	files = []string{}
+	var paths, shas []string
 	for _, en := range es {
-		if workflow.IsWorkflowPath(en.Path) && !strings.HasPrefix(path.Base(en.Path), "ghostbranch-") {
-			files = append(files, en.Path)
+		if en.Type == "blob" && workflow.IsWorkflowPath(en.Path) && !strings.HasPrefix(path.Base(en.Path), "ghostbranch-") {
+			paths, shas = append(paths, en.Path), append(shas, en.SHA)
+		}
+	}
+	blobs, err := g.ReadBlobs(ctx, shas)
+	if err != nil {
+		return nil, false
+	}
+	files = []string{}
+	for i, p := range paths {
+		if f, err := workflow.Parse(p, blobs[shas[i]], names); err != nil || f.RunsOnPR(branch) {
+			files = append(files, p)
 		}
 	}
 	return files, true
@@ -162,10 +175,18 @@ func (e *Engine) finish(ctx context.Context, pc *pairCtx, name string, res *Gate
 		url = pr.URL
 	}
 	e.notef(progress.Info, "CI runs on shadow PR #%d: %s (gate candidate %s)", pending.ShadowPR, url, short(C))
-	ci := e.startStep("Waiting for CI to start")
-	o.job = job
-	e.event(o, JobEvent{Type: EventWaiting, Candidate: C, ShadowPR: pending.ShadowPR, ShadowPRURL: url, CITimeout: cfg.Gate.CITimeout.String()})
-	out, err := e.waitChecks(ctx, shadow, C, cfg.Gate, waitOpts{start: pending.StartedAt, deadline: o.deadline, job: job, emit: o.emit, step: ci})
+	wf, known := prWorkflows(ctx, pc.git, guardNames(pc), C, gateBranch(name))
+	noWorkflows := known && len(wf) == 0
+	o.job, o.noWorkflows, o.shadow = job, noWorkflows, shadow
+	title := "Waiting for CI to start"
+	if noWorkflows {
+		title = startText(cfg.Gate, o, 0)
+	}
+	ci := e.startStep("%s", title)
+	e.event(o, JobEvent{Type: EventWaiting, Candidate: C, ShadowPR: pending.ShadowPR, ShadowPRURL: url, CITimeout: cfg.Gate.CITimeout.String(),
+		NoWorkflows: &noWorkflows, CIAppearTimeout: appearTimeout(cfg.Gate, noWorkflows).String()})
+	out, err := e.waitChecks(ctx, shadow, C, cfg.Gate, waitOpts{start: pending.StartedAt, deadline: o.deadline, job: job, emit: o.emit, step: ci,
+		noWorkflows: noWorkflows, shadow: shadow})
 	if err != nil {
 		return res, warns, err // the step stays running; the CLI marks it failed
 	}
@@ -225,7 +246,7 @@ func (e *Engine) finish(ctx context.Context, pc *pairCtx, name string, res *Gate
 			Details: map[string]any{"job": job}})
 	}
 	return res, warns, outcomeErr(checkOutcome{status: res.Checks, failed: res.FailedChecks}, pending.ShadowPR, cfg.Gate, shadow,
-		func() ([]string, bool) { return candidateWorkflows(ctx, pc.git, C) })
+		func() ([]string, bool) { return wf, known })
 }
 
 // recordFinish takes the lock back and records res's outcome over the
@@ -465,7 +486,9 @@ func (e *Engine) Wait(ctx context.Context, p workspace.Pair, job string, opt Wai
 			return res, warns, err
 		}
 		return res, warns, outcomeErr(checkOutcome{status: res.Checks, failed: res.FailedChecks}, m.Gate.ShadowPR, cfg.Gate, pc.pair.Shadow,
-			func() ([]string, bool) { return candidateWorkflows(ctx, pc.git, m.Gate.Candidate) })
+			func() ([]string, bool) {
+				return prWorkflows(ctx, pc.git, guardNames(pc), m.Gate.Candidate, gateBranch(ref.Feature))
+			})
 	}
 	var deadline time.Time
 	if opt.Timeout > 0 {

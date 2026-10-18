@@ -50,6 +50,7 @@ type File struct {
 	// '<public>'), so a push outside the public repo runs none of them.
 	PushGuarded bool
 	push        *pushFilter
+	onPR        bool // on: has pull_request or pull_request_target
 }
 
 // IsWorkflowPath reports whether GitHub Actions reads path as a workflow:
@@ -174,6 +175,7 @@ func Parse(path string, src []byte, n Names) (File, error) {
 		}
 	}
 	f.push = parsePush(get(r, "on"))
+	f.onPR = hasEvent(get(r, "on"), "pull_request", "pull_request_target")
 	return f, nil
 }
 
@@ -191,6 +193,40 @@ func walk(n *yaml.Node, fn func(string)) {
 			walk(c, fn)
 		}
 	}
+}
+
+// hasEvent reports whether on: names any of events, in any of its three
+// forms: a string, a list, or a map keyed by event.
+func hasEvent(on *yaml.Node, events ...string) bool {
+	if on == nil {
+		return false
+	}
+	var names []string
+	switch on.Kind {
+	case yaml.ScalarNode:
+		names = []string{on.Value}
+	case yaml.SequenceNode:
+		names = strs(on)
+	case yaml.MappingNode:
+		for i := 0; i+1 < len(on.Content); i += 2 {
+			names = append(names, on.Content[i].Value)
+		}
+	}
+	for _, n := range names {
+		for _, ev := range events {
+			if n == ev {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// RunsOnPR reports whether this workflow runs for a gate PR whose head is
+// branch: it triggers on pull_request or pull_request_target (whatever
+// their filters), or on a push to branch, since the gate pushes it.
+func (f File) RunsOnPR(branch string) bool {
+	return f.onPR || f.PushTriggered([]string{branch})
 }
 
 // pushFilter is a workflow's on.push trigger.

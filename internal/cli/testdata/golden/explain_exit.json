@@ -62,7 +62,7 @@
         "exit_code": 3,
         "summary": "No CI checks appeared on the gate candidate (error.details.reason).",
         "causes": [
-          "no_workflow: the candidate has no workflow under .github/workflows, and no CI app posts checks",
+          "no_workflow: the candidate has no workflow under .github/workflows that runs on the PR (error.details.no_workflows is true; the gate waited gate.ci_appear_timeout_no_workflows), and no CI app posts checks",
           "actions_disabled_or_untriggered: Actions is disabled in the shadow repo, or no workflow triggers on pull_request",
           "no reason: the gate candidate couldn't be read, so which of the two holds is unknown"
         ],

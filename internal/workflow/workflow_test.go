@@ -159,6 +159,31 @@ func TestPushTriggers(t *testing.T) {
 	}
 }
 
+// A gate PR runs a workflow triggered on pull_request or
+// pull_request_target, or on a push its head branch matches.
+func TestRunsOnPR(t *testing.T) {
+	for on, want := range map[string]bool{
+		"on: pull_request":                             true,
+		"on: [pull_request_target]":                    true,
+		"on:\n  pull_request:\n    branches: [main]\n": true,
+		"on: push": true,
+		"on:\n  push:\n    branches: ['ghostbranch-gate/**']\n": true,
+		"on:\n  push:\n    branches: [main]\n":                  false,
+		"on:\n  push:\n    tags: ['v*']\n":                      false,
+		"on: [workflow_dispatch]":                               false,
+		"on:\n  schedule:\n    - cron: '0 0 * * *'\n":           false,
+		"name: no trigger":                                      false,
+	} {
+		f, err := Parse("w.yml", []byte(on+"\njobs: {}\n"), names)
+		if err != nil {
+			t.Fatalf("%q: %v", on, err)
+		}
+		if got := f.RunsOnPR("ghostbranch-gate/feat-x"); got != want {
+			t.Errorf("%q: got %v", on, got)
+		}
+	}
+}
+
 func TestPushGuarded(t *testing.T) {
 	const guard = "github.event_name != 'push' || github.repository == 'acme/widget'"
 	job := func(id, cond string) string {
