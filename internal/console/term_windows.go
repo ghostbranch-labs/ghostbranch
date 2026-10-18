@@ -40,22 +40,19 @@ func inputFD(dev io.ReadWriteCloser) (int, bool) {
 	return int(c.in.Fd()), true
 }
 
-// x/sys/windows v0.30.0 has no wrapper for FlushConsoleInputBuffer.
-var procFlushConsoleInputBuffer = windows.NewLazySystemDLL("kernel32.dll").NewProc("FlushConsoleInputBuffer")
-
 // flush discards what was typed before the code is shown, so an Enter
 // pressed during a long gate cannot answer it. Only the real console is
 // flushed, and errors are ignored.
 func flush(dev io.ReadWriteCloser) {
 	c, ok := dev.(winConsole)
-	if !ok || procFlushConsoleInputBuffer.Find() != nil {
+	if !ok {
 		return
 	}
 	rc, err := c.in.SyscallConn()
 	if err != nil {
 		return
 	}
-	_ = rc.Control(func(h uintptr) { _, _, _ = procFlushConsoleInputBuffer.Call(h) })
+	_ = rc.Control(func(h uintptr) { _ = windows.FlushConsoleInputBuffer(windows.Handle(h)) })
 }
 
 // Open opens the console's input and output buffers.
