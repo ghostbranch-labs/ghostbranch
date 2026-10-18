@@ -557,6 +557,8 @@ func human(r any, st style.Styler) string {
 		default:
 			b.WriteString("Stored login: not checked (GHOSTBRANCH_TOKEN wins)\n")
 		}
+	case *engine.AgentsTokenResult:
+		agentsTokenText(&b, v)
 	case *engine.AgentsStatusResult:
 		if len(v.Grants) == 0 {
 			b.WriteString("No agent grants on this machine.\n")
@@ -576,6 +578,24 @@ func human(r any, st style.Styler) string {
 		}
 	}
 	return b.String()
+}
+
+// agentsTokenText is agents token's result: the token's check and where to
+// set it, or, when no token was read, the steps for a person.
+func agentsTokenText(b *strings.Builder, v *engine.AgentsTokenResult) {
+	if v.Check == nil {
+		owner, _, _ := strings.Cut(v.Select, "/")
+		fmt.Fprintf(b, "Make the agent's token on GitHub, for %s: %s\n", owner, v.Link)
+		fmt.Fprintf(b, "On that page, choose Only select repositories, then %s. Keep the permissions the link set.\n", v.Select)
+		b.WriteString("Then set it in the agent's shell, and restart the agent there:\n")
+	} else {
+		fmt.Fprintf(b, "This token (account %s) reaches %s with what agents need, and can't push to the public repo.\n", v.Check.Account, v.Check.Shadow)
+		b.WriteString("Set it in the agent's shell (paste the token for <paste>); Ghostbranch doesn't keep it:\n")
+	}
+	fmt.Fprintf(b, "  sh, bash, zsh: %s\n  PowerShell:    %s\n", v.SetLine["sh"], v.SetLine["powershell"])
+	if v.Check != nil {
+		b.WriteString("Then restart your agent in a shell with this set; it can check with ghostbranch agents status.\n")
+	}
 }
 
 // planLines is a saved promote plan: where it is, what it publishes, and

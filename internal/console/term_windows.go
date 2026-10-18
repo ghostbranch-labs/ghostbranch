@@ -31,6 +31,15 @@ func (c winConsole) Close() error {
 	return err
 }
 
+// inputFD is the console input handle to read hidden input from.
+func inputFD(dev io.ReadWriteCloser) (int, bool) {
+	c, ok := dev.(winConsole)
+	if !ok || !isTerminal(c.in) {
+		return 0, false
+	}
+	return int(c.in.Fd()), true
+}
+
 // x/sys/windows v0.30.0 has no wrapper for FlushConsoleInputBuffer.
 var procFlushConsoleInputBuffer = windows.NewLazySystemDLL("kernel32.dll").NewProc("FlushConsoleInputBuffer")
 

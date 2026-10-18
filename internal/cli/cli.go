@@ -56,6 +56,9 @@ type Env struct {
 	ConsoleUsable bool
 	// OpenConsole opens the console device for the approval code.
 	OpenConsole func() (io.ReadWriteCloser, error)
+	// ReadSecret reads one line from the opened console device with echo
+	// off (agents token's token); DefaultEnv's is console.ReadSecret.
+	ReadSecret func(ctx context.Context, dev io.ReadWriteCloser) ([]byte, error)
 	// Asker opens the console for guided init's questions: the console
 	// device, never stdin. DefaultEnv's is prompt.OnConsole over
 	// ConsoleUsable and OpenConsole.
@@ -137,7 +140,7 @@ func trueColorTerm(getenv func(string) string) bool {
 func DefaultEnv() Env {
 	env := Env{
 		Stdout: os.Stdout, Stderr: os.Stderr, Stdin: os.Stdin, Getenv: os.Getenv, UserHome: os.UserHomeDir,
-		ConsoleUsable: console.Usable(os.Stdin, os.Stderr), OpenConsole: console.Open,
+		ConsoleUsable: console.Usable(os.Stdin, os.Stderr), OpenConsole: console.Open, ReadSecret: console.ReadSecret,
 		Now: time.Now, Sleep: sleepCtx, Rand: rand.Reader,
 		NewForge: func(token string) (forge.Forge, error) {
 			c, err := ghforge.New(token)

@@ -28,7 +28,7 @@ var update = flag.Bool("update", false, "rewrite golden files")
 var dataSchemas = map[string]string{
 	"init": "init.schema.json", "sync": "sync.schema.json", "feature start": "feature-start.schema.json",
 	"gate": "gate.schema.json", "promote": "promote.schema.json", "apply": "apply.schema.json",
-	"agents allow": "agents-allow.schema.json", "agents revoke": "agents-revoke.schema.json", "agents status": "agents-status.schema.json",
+	"agents allow": "agents-allow.schema.json", "agents revoke": "agents-revoke.schema.json", "agents status": "agents-status.schema.json", "agents token": "agents-token.schema.json",
 	"waivers add": "waivers-add.schema.json", "waivers list": "waivers-list.schema.json", "waivers revoke": "waivers-revoke.schema.json",
 	"explain": "explain.schema.json", "guide": "guide.schema.json", "audit": "audit.schema.json", "upgrade": "upgrade.schema.json",
 	"guard install": "guard.schema.json", "guard uninstall": "guard.schema.json", "guard status": "guard.schema.json", "guard check": "guard.schema.json",
@@ -316,6 +316,8 @@ func TestGoldenContract(t *testing.T) {
 		{"agents_allow_plan", initOnly, []string{"agents", "allow", "--for", "1d", "--plan"}, 0},
 		{"agents_allow_bad_for", initOnly, []string{"agents", "allow", "--for", "7h"}, 2},
 		{"agents_status", func(te *testEnv) { initOnly(te); grantAgents(te) }, []string{"agents", "status"}, 0},
+		{"agents_token", initOnly, []string{"agents", "token"}, 0},
+		{"agents_token_no_pair", nil, []string{"agents", "token"}, contract.PairNotFound.Exit()},
 		{"explain_code", nil, []string{"explain", "approval_required"}, 0},
 		{"explain_exit", nil, []string{"explain", "3"}, 0},
 		{"explain_unknown", nil, []string{"explain", "NOPE"}, 2},

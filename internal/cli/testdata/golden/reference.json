@@ -67,6 +67,14 @@
         "flags": []
       },
       {
+        "path": "agents token",
+        "use": "token",
+        "short": "Make a coding agent's own token that reaches only the shadow repo, and check it can't publish",
+        "long": "agents token shows GitHub's fine-grained token page, pre-filled with what agents need on the\nshadow repo, and says which repo to pick there. At a console it then reads the new token with hidden\ninput, checks it reaches the shadow repo and can't push to the public repo, and prints the line that\nsets GHOSTBRANCH_TOKEN in the agent's shell. The token is never shown, logged or stored: the person\nrestarts the agent in a shell with it set. With --json (for an agent) it reads nothing and returns the\nlink, the repo to pick and those lines for a person.",
+        "read_only": true,
+        "flags": []
+      },
+      {
         "path": "apply",
         "use": "apply <plan-id|plan.json>",
         "short": "Publish a saved plan if the repos still match it",

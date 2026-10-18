@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "agents token data",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["link", "select", "check", "set_line"],
+  "properties": {
+    "link": { "type": "string", "pattern": "^https://github\\.com/settings/personal-access-tokens/new\\?" },
+    "select": { "$ref": "common.schema.json#/$defs/repo" },
+    "check": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["account", "shadow", "can_publish", "missing"],
+          "properties": {
+            "account": { "type": "string" },
+            "shadow": { "$ref": "common.schema.json#/$defs/repo" },
+            "can_publish": { "enum": ["true", "false", "unknown"] },
+            "missing": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      ]
+    },
+    "set_line": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sh", "powershell"],
+      "properties": { "sh": { "type": "string" }, "powershell": { "type": "string" } }
+    }
+  }
+}

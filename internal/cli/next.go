@@ -159,6 +159,9 @@ func (a *app) steps(err error) []contract.Next {
 				Why: "a person adds error.details.repos to the Ghostbranch app's repositories, at error.details.configure_url; then run this again"}}
 		case contract.TokenWrongAccount:
 			return a.wrongAccountNexts(ce)
+		case contract.AgentTokenRefused:
+			return []contract.Next{{Command: a.again(true), NeedsHuman: true,
+				Why: "a person makes a new token from error.details.link, with only error.details.shadow selected, then runs this again and pastes it"}}
 		case contract.ShadowCreateDenied:
 			pub, _ := ce.Details["public"].(string)
 			sh, _ := ce.Details["shadow"].(string)
@@ -775,6 +778,13 @@ func (a *app) steps(err error) []contract.Next {
 		if r.Preview == nil && r.Audit != nil && a.hasAuditFindings() {
 			out = append(out, contract.Next{Command: a.scoped("audit"), Why: "the audit after upgrade has warnings; read them"})
 		}
+	case *engine.AgentsTokenResult:
+		if r.Check == nil {
+			out = append(out, contract.Next{Command: a.again(true), NeedsHuman: true,
+				Why: "a person runs this in their own terminal: it opens the token page, reads the new token with hidden input and checks it can't publish"})
+		}
+		out = append(out, contract.Next{Command: a.scoped("agents", "status", "--json"),
+			Why: "after the person restarts the agent with GHOSTBRANCH_TOKEN set, the agent checks its token: token_can_publish is false"})
 	case *engine.StatusResult:
 		out = a.featureNexts(out, r.Features)
 	case *engine.FeatureListResult:

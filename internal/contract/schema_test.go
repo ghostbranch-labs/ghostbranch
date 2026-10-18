@@ -176,6 +176,10 @@ func TestSubProject61Schemas(t *testing.T) {
 			`{"pair":"acme/widget","grants":[],"token_can_publish":"false","token":{"source":"GHOSTBRANCH_TOKEN","http_status":403},"token_kind":"fine-grained"}`,
 			`{"pair":"acme/widget","grants":[],"token_can_publish":"false","token":{"source":"GHOSTBRANCH_TOKEN","http_status":403},"token_kind":"unknown"}`,
 		},
+		"agents-token.schema.json": {
+			`{"link":"https://github.com/settings/personal-access-tokens/new?name=ghostbranch-agent-widget","select":"acme/widget-shadow","check":null,"set_line":{"sh":"export GHOSTBRANCH_TOKEN=<paste>","powershell":"$env:GHOSTBRANCH_TOKEN = '<paste>'"}}`,
+			`{"link":"https://github.com/settings/personal-access-tokens/new?name=ghostbranch-agent-widget","select":"acme/widget-shadow","check":{"account":"octo","shadow":"acme/widget-shadow","can_publish":"false","missing":[]},"set_line":{"sh":"export GHOSTBRANCH_TOKEN=<paste>","powershell":"$env:GHOSTBRANCH_TOKEN = '<paste>'"}}`,
+		},
 		"envelope.schema.json": {
 			`{"schema_version":"` + contract.SchemaVersion + `","command":"doctor","ok":false,"exit_code":1,"data":{},"warnings":[],"next":[],"error":{"code":"DOCTOR_FAILED","message":"m","field":null,"retryable":false,"details":{"failed":["guard"]}}}`,
 			`{"schema_version":"` + contract.SchemaVersion + `","command":"auth status","ok":true,"exit_code":0,"data":{},"warnings":[{"code":"AGENT_ON_PERSON_LOGIN","message":"m"}],"next":[],"error":null}`,
@@ -188,6 +192,7 @@ func TestSubProject61Schemas(t *testing.T) {
 	for name, raw := range map[string]string{
 		"init.schema.json":          `{` + initBase + `,"guard_installed":false,"doctor":{"ok":1,"warn":0,"fail":0,"skipped":0,"failed":["nope"]}` + setupJSON() + `}`,
 		"agents-status.schema.json": `{"pair":"acme/widget","grants":[],"token_can_publish":"false","token":{"source":"GHOSTBRANCH_TOKEN","http_status":403},"token_kind":"keychain"}`,
+		"agents-token.schema.json":  `{"link":"https://github.com/settings/personal-access-tokens/new?name=x","select":"acme/widget-shadow","check":{"account":"octo","shadow":"acme/widget-shadow","can_publish":"false","missing":[],"token":"t"},"set_line":{"sh":"s","powershell":"p"}}`,
 	} {
 		schemaRejects(t, name, raw)
 	}
