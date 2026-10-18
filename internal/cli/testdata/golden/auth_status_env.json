@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.15",
+  "schema_version": "0.16",
   "command": "auth status",
   "ok": true,
   "exit_code": 0,
