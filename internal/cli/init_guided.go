@@ -90,8 +90,7 @@ func (a *app) plainInit(ctx context.Context, public string, f initFlags) error {
 	if err != nil {
 		return err
 	}
-	p, err := e.InitPair(public, f.shadow)
-	if err != nil {
+	if _, err := e.InitPair(public, f.shadow); err != nil {
 		return err
 	}
 	so := engine.SetupOptions{Public: public, Shadow: f.shadow, Adopt: f.adopt, InstallURL: a.installURL()}
@@ -100,9 +99,7 @@ func (a *app) plainInit(ctx context.Context, public string, f initFlags) error {
 		return err
 	}
 	if stop := setup.FirstStop(); stop != nil {
-		res := &engine.InitResult{Public: p.Public, Shadow: p.Shadow, MirroredBranches: []string{}, MirroredTags: []string{},
-			GuardInstalled: installed, Setup: setup}
-		return done(a, res, nil, setup.StopError(stop))
+		return a.setupStopped(e, so, setup, stop, installed)
 	}
 	res, w, err := e.Init(ctx, engine.InitOptions{Public: public, Shadow: f.shadow, Adopt: f.adopt, Schedule: schedule(f.sync)})
 	if res != nil {
@@ -325,60 +322,112 @@ func askGhOrApp(ctx context.Context, ask prompt.Asker, user string) (bool, error
 	}
 }
 
-// ownerMismatch is whether the shadow repo would go on the public repo's
-// owner, a personal account, while the token is another account's: GitHub
-// then refuses the creation. A registered pair, --adopt, and a --shadow on
-// another account don't create on the owner, so they aren't checked.
-func ownerMismatch(public string, pub forge.Repo, user string, f initFlags, registered bool) bool {
-	owner, _, _ := forge.SplitName(public)
-	if user == "" || pub.OwnerType != forge.OwnerUser || registered || f.adopt || strings.EqualFold(owner, user) {
-		return false
+// setupRechecks is how many times guided init checks a step a person does
+// again: twice. A step still stopped after its second re-check stops init,
+// so no step is asked a third time (anti-goal 2).
+const setupRechecks = 2
+
+// guidedSetup works out the setup checklist for so and shows it. A step a
+// person does (needs_human) shows its link, waits for Enter, and the
+// checklist is worked out again; a step still stopped after setupRechecks
+// re-checks, or a blocked one, stops init with its code. The account step
+// offers a login as the owner instead, once. The shadow step is no stop
+// here: the shadow questions settle it. It returns the engine to go on
+// with, which a login replaces, and the token's account.
+func (a *app) guidedSetup(ctx context.Context, ask prompt.Asker, e *engine.Engine, so engine.SetupOptions, in, installed, guardOn bool, user string) (*engine.Engine, string, error) {
+	rechecks := map[string]int{}
+	relogged := false
+	for {
+		s, err := a.setupCheck(ctx, e, so, in, installed, guardOn)
+		if err != nil {
+			return nil, "", err
+		}
+		for _, l := range checklistLines(s) {
+			ask.Say(l)
+		}
+		stop := guidedStop(s)
+		switch {
+		case stop == nil:
+			return e, user, nil
+		case stop.Status == engine.SetupBlocked:
+			return nil, "", a.setupStopped(e, so, s, stop, installed)
+		case stop.ID == "account":
+			owner, _ := stop.Details["owner"].(string)
+			if relogged {
+				ask.Say("The new login is still " + user + "'s, not " + owner + "'s.")
+			}
+			// GHOSTBRANCH_TOKEN wins over any login, so a login can't help.
+			if relogged || e.TokenSource == "GHOSTBRANCH_TOKEN" {
+				return nil, "", a.setupStopped(e, so, s, stop, installed)
+			}
+			yes, err := ask.YesNo(ctx, "Log in as "+owner+" with the Ghostbranch app now?", true)
+			if err != nil {
+				return nil, "", err
+			}
+			if !yes {
+				return nil, "", a.setupStopped(e, so, s, stop, installed)
+			}
+			if e, user, err = a.relogin(ctx, ask); err != nil {
+				return nil, "", err
+			}
+			sayAccount(ask, e, user)
+			relogged = true
+			continue
+		case rechecks[stop.ID] == setupRechecks:
+			return nil, "", a.setupStopped(e, so, s, stop, installed)
+		}
+		if stop.URL != "" {
+			ask.Say(linkLine(stop))
+		}
+		if err := ask.Wait(ctx, "Press Enter once it's done."); err != nil {
+			return nil, "", err
+		}
+		rechecks[stop.ID]++
 	}
-	if f.shadow != "" {
-		so, _, _ := forge.SplitName(f.shadow)
-		return strings.EqualFold(so, owner)
-	}
-	return true
 }
 
-// loginAsOwner says the token's account can't create the owner's shadow
-// repo and offers a login as the owner. It stops init when the person
-// declines, when GHOSTBRANCH_TOKEN (which wins over any login) is set, or
-// when the new login is still another account's.
-func (a *app) loginAsOwner(ctx context.Context, ask prompt.Asker, e *engine.Engine, public, user string) (*engine.Engine, string, error) {
-	owner, _, _ := forge.SplitName(public)
-	ask.Say(fmt.Sprintf("%s belongs to %s, but this token is %s's, so it can't create %s's shadow repo.", public, owner, user, owner))
-	fix := fmt.Sprintf("run ghostbranch login in your terminal and approve it as %s, then ghostbranch init %s again", owner, public)
-	if e.TokenSource == "GHOSTBRANCH_TOKEN" {
-		return nil, "", contract.New(contract.AuthMissing,
-			"The GitHub token is %s's, not %s's, and GHOSTBRANCH_TOKEN wins over any login: init stopped before any change. Set GHOSTBRANCH_TOKEN to a token of %s's, or unset it and %s", user, owner, owner, fix)
+// guidedStop is the first step guided init waits on or stops at: needs_human
+// or blocked, other than the shadow step.
+func guidedStop(s *engine.Setup) *engine.SetupStep {
+	for i := range s.Steps {
+		st := &s.Steps[i]
+		if st.ID != "shadow" && (st.Status == engine.SetupNeedsHuman || st.Status == engine.SetupBlocked) {
+			return st
+		}
 	}
-	yes, err := ask.YesNo(ctx, "Log in as "+owner+" with the Ghostbranch app now?", true)
+	return nil
+}
+
+// linkLine is a step's link with the accounts or repos it is for.
+func linkLine(st *engine.SetupStep) string {
+	var who []string
+	switch st.ID {
+	case "app_installed":
+		accounts, _ := st.Details["accounts"].([]map[string]any)
+		for _, acct := range accounts {
+			if name, ok := acct["account"].(string); ok && acct["status"] == "missing" {
+				who = append(who, name)
+			}
+		}
+	case "app_access":
+		who, _ = st.Details["repos"].([]string)
+	}
+	if len(who) == 0 {
+		return "Link: " + st.URL
+	}
+	return "Link for " + strings.Join(who, " and ") + ": " + st.URL
+}
+
+// setupStopped ends init at a setup stop, before any write: stop's code,
+// with the checklist in data.setup.
+func (a *app) setupStopped(e *engine.Engine, so engine.SetupOptions, s *engine.Setup, stop *engine.SetupStep, installed bool) error {
+	p, err := e.InitPair(so.Public, so.Shadow)
 	if err != nil {
-		return nil, "", err
+		return err
 	}
-	if !yes {
-		return nil, "", ownerStop(public, user, fix)
-	}
-	if e, user, err = a.relogin(ctx, ask); err != nil {
-		return nil, "", err
-	}
-	sayAccount(ask, e, user)
-	if !strings.EqualFold(user, owner) {
-		ask.Say("The new login is still " + user + "'s, not " + owner + "'s.")
-		return nil, "", ownerStop(public, user, fix)
-	}
-	return e, user, nil
-}
-
-// ownerStop is AUTH_MISSING for a token of user's on owner's public repo:
-// log in as the owner, or (a collaborator's way on) keep the shadow repo on
-// user's own account.
-func ownerStop(public, user, fix string) error {
-	owner, name, _ := forge.SplitName(public)
-	return contract.New(contract.AuthMissing,
-		"The GitHub token is %s's, not %s's: init stopped before any change. To fix it, %s; or keep the shadow repo on your own account: ghostbranch init %s --shadow %s/%s-shadow",
-		user, owner, fix, public, user, name)
+	res := &engine.InitResult{Public: p.Public, Shadow: p.Shadow, MirroredBranches: []string{}, MirroredTags: []string{},
+		GuardInstalled: installed, Setup: s}
+	return done(a, res, nil, s.StopError(stop))
 }
 
 // checkPublic looks the public repo up and returns its name and what GitHub
@@ -503,16 +552,11 @@ func (a *app) installURL() string {
 	return "https://github.com/apps/" + a.appSlug() + "/installations/new"
 }
 
-// appLogin is whether e's token is a stored GitHub App login.
-func appLogin(e *engine.Engine) bool {
-	return e.TokenSource == "login" && auth.Kind(e.Token) == "app"
-}
-
 // shadowSetup reads the setup: the public repo's owner type and the
 // token's account, user.
 func (a *app) shadowSetup(e *engine.Engine, public string, pub forge.Repo, user string) setup {
 	s := setup{app: a.appSlug(), user: user, pubOrg: pub.OwnerType == forge.OwnerOrganization, source: e.TokenSource}
-	if appLogin(e) {
+	if e.AppLogin {
 		s.install = a.installURL()
 	}
 	if !s.pubOrg {
@@ -702,17 +746,12 @@ func explainRefusal(ask prompt.Asker, s setup, public, shadow string, err error,
 		ask.Say("The Ghostbranch app isn't installed on " + owner + ". Install it at " + s.install + pick + ", then press Enter: init tries creating " + shadow + " again.")
 		return
 	}
-	// The token's account is another personal account than the owner's:
-	// no permission makes that work, a login as the owner does.
-	mismatch := s.install == "" && s.user != "" && !s.pubOrg && strings.EqualFold(owner, pubOwner) && !strings.EqualFold(owner, s.user)
+	// A token of another personal account than the owner's never gets
+	// here: the checklist's account step stopped it before any write.
 	var causes []string
 	switch {
 	case appMissing:
 		causes = append(causes, "the "+s.app+" GitHub App isn't installed on "+owner+": install it at "+s.install)
-	case mismatch && s.source == "GHOSTBRANCH_TOKEN":
-		causes = append(causes, "your token is "+s.user+"'s, so it can't create repos on "+owner+": set GHOSTBRANCH_TOKEN to a token of "+owner+"'s (a login can't take effect while it is set), then ghostbranch init again")
-	case mismatch:
-		causes = append(causes, "your token is "+s.user+"'s, so it can't create repos on "+owner+": run ghostbranch login and approve it as "+owner+" (the Ghostbranch app), then ghostbranch init again")
 	case s.install == "":
 		causes = append(causes, "your token may lack Administration: write (fine-grained) or the repo scope (classic) on "+owner+": ghostbranch doctor shows what's missing")
 	}
@@ -864,10 +903,10 @@ func (a *app) guidedInit(ctx context.Context, args []string, f initFlags) error 
 			return err
 		}
 		if useApp {
+			ask.Say("To stop Ghostbranch using gh's login, add GHOSTBRANCH_NO_GH=1 to your shell profile.")
 			if e, user, err = a.relogin(ctx, ask); err != nil {
 				return err
 			}
-			loggedIn = true
 		}
 	}
 	sayAccount(ask, e, user)
@@ -876,23 +915,19 @@ func (a *app) guidedInit(ctx context.Context, args []string, f initFlags) error 
 		return err
 	}
 	reg, registered := e.WS.Find(public)
-	if ownerMismatch(public, pub, user, f, registered) {
-		if e, user, err = a.loginAsOwner(ctx, ask, e, public, user); err != nil {
-			return err
-		}
-		loggedIn = true
+	in, installed := a.guardHere(public)
+	// The checklist, before any write: the app's install comes before the
+	// shadow repo is created.
+	so := engine.SetupOptions{Public: public, Shadow: f.shadow, Adopt: f.adopt, InstallURL: a.installURL()}
+	flagGuard := f.guard != nil && *f.guard
+	if e, user, err = a.guidedSetup(ctx, ask, e, so, in, installed, flagGuard, user); err != nil {
+		return err
 	}
-	if loggedIn && appLogin(e) {
-		owner, _, _ := forge.SplitName(public)
-		next := " (init creates the shadow repo next)"
-		if registered || f.adopt {
-			next = "" // the shadow repo exists already
-		}
-		ask.Say("Next, install the Ghostbranch app on " + owner + " and pick " + public + next + ": " + a.installURL())
-		if err := ask.Wait(ctx, "Press Enter once it's installed."); err != nil {
-			return err
-		}
+	checked := f.shadow
+	if checked == "" && registered {
+		checked = reg.Shadow
 	}
+	checked = shadowOf(engine.InitOptions{Public: public, Shadow: checked})
 	s := a.shadowSetup(e, public, pub, user)
 	o := engine.InitOptions{Public: public, Shadow: f.shadow, Adopt: f.adopt, Schedule: schedule(f.sync)}
 	switch {
@@ -903,8 +938,16 @@ func (a *app) guidedInit(ctx context.Context, args []string, f initFlags) error 
 		if o, err = chooseShadow(ctx, ask, e.Forge, o, s); err != nil {
 			return err
 		}
+		// Another shadow repo (the person's account, say) may need the app
+		// on another account: check again.
+		if !strings.EqualFold(shadowOf(o), checked) {
+			so.Shadow, so.Adopt = o.Shadow, o.Adopt
+			if e, user, err = a.guidedSetup(ctx, ask, e, so, in, installed, flagGuard, user); err != nil {
+				return err
+			}
+			s = a.shadowSetup(e, public, pub, user)
+		}
 	}
-	in, installed := a.guardHere(public)
 	guardOn := false
 	switch {
 	case f.guard != nil:

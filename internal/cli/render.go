@@ -966,6 +966,22 @@ func doctorLine(b *strings.Builder, c engine.DoctorCheck, st style.Styler) {
 	}
 }
 
+// setupMarks are the setup checklist's marks for people: done, needs you
+// (or blocked), and Ghostbranch will do it. A skipped step isn't shown.
+var setupMarks = map[string]string{engine.SetupDone: "✓", engine.SetupNeedsHuman: "!", engine.SetupBlocked: "!", engine.SetupTodo: "·"}
+
+// checklistLines is the setup checklist as guided init shows it: one
+// "<mark> <message>" line per step that applies.
+func checklistLines(s *engine.Setup) []string {
+	var out []string
+	for _, st := range s.Steps {
+		if mark, ok := setupMarks[st.Status]; ok {
+			out = append(out, mark+" "+st.Message)
+		}
+	}
+	return out
+}
+
 // walkthrough ends a guided init: the first feature, and agents' tokens.
 const walkthrough = `
 Your first feature:

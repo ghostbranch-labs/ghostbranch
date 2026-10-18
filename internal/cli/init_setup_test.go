@@ -67,10 +67,9 @@ func before(p *person, a, b string) bool {
 }
 
 const (
-	ghQ        = "Found a GitHub CLI (gh) login as acme. Use it, or log in with the Ghostbranch app instead? [app/gh]"
-	installed  = "Press Enter once it's installed."
-	loggedIn   = "Logged in to GitHub as acme with the Ghostbranch GitHub App."
-	installNow = "Next, install the Ghostbranch app on acme and pick acme/widget (init creates the shadow repo next): " + installLink
+	ghQ       = "Found a GitHub CLI (gh) login as acme. Use it, or log in with the Ghostbranch app instead? [app/gh]"
+	installed = "Press Enter once it's installed."
+	loggedIn  = "Logged in to GitHub as acme with the Ghostbranch GitHub App."
 )
 
 func TestGuidedInitSaysWhichAccountItUses(t *testing.T) {
@@ -80,7 +79,7 @@ func TestGuidedInitSaysWhichAccountItUses(t *testing.T) {
 		setup      func(te *testEnv)
 	}{
 		{"GHOSTBRANCH_TOKEN", "Using GitHub account acme (from GHOSTBRANCH_TOKEN)", func(*testEnv) {}},
-		{"stored login", "Using GitHub account acme (from your Ghostbranch login)", func(te *testEnv) { appLogin(te) }},
+		{"stored login", "Using GitHub account acme (from your Ghostbranch login)", func(te *testEnv) { appLogin(te); installApp(te) }},
 		{"GH_TOKEN", "Using GitHub account acme (from GH_TOKEN)", func(te *testEnv) {
 			delete(te.vars, "GHOSTBRANCH_TOKEN")
 			te.vars["GH_TOKEN"] = "gh-env-token"
@@ -139,12 +138,15 @@ func TestGuidedInitAsksBeforeUsingGhsLogin(t *testing.T) {
 		ghToken(te)
 		srv := initDeviceLogin(t, te)
 		made := tokenUsers(te, "acme", nil)
-		p := atTerminal(te, "", "", "", "", "")
+		p := atTerminal(te, "", "", "", "")
 		if code, out, errOut := te.run("init", "acme/widget"); code != 0 {
 			t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
 		}
-		hasPrefixes(t, p.asked, ghQ, installed, "Create the private repo acme/widget-shadow", "Turn on scheduled sync?", "Make these changes now?")
-		for _, l := range []string{loggedIn, "Using GitHub account acme (from your Ghostbranch login)", installNow} {
+		// The forge tokenUsers makes can't list the app's installations, so
+		// the checklist has no install step here (see
+		// TestGuidedInitShowsTheInstallStepAfterItsLogin for one).
+		hasPrefixes(t, p.asked, ghQ, "Create the private repo acme/widget-shadow", "Turn on scheduled sync?", "Make these changes now?")
+		for _, l := range []string{loggedIn, "Using GitHub account acme (from your Ghostbranch login)", noGHHint} {
 			if !slices.Contains(p.said, l) {
 				t.Errorf("never said %q: %q", l, p.said)
 			}
@@ -173,12 +175,16 @@ func TestGuidedInitAsksBeforeUsingGhsLogin(t *testing.T) {
 }
 
 const (
-	mismatch = "acme/widget belongs to acme, but this token is octo's, so it can't create acme's shadow repo."
+	mismatch = "! The token is octo's, so it can't set up acme/widget-shadow on acme: log in as acme with ghostbranch login, or put the shadow on your account with --shadow octo/widget-shadow."
 	asAcmeQ  = "Log in as acme with the Ghostbranch app now?"
+	// wrongAccount is the stop's message: both ways on.
+	wrongAccount = "error: The token is octo's, so it can't set up acme/widget-shadow on acme: log in as acme with ghostbranch login, or put the shadow on your account with --shadow octo/widget-shadow. [TOKEN_WRONG_ACCOUNT]"
 )
 
-// A personal account's public repo and a token of another account: init
-// says so before any write, and offers to log in as the owner.
+// A personal account's public repo and a token of another account: the
+// checklist's account step says so before any write, and offers to log in
+// as the owner; a no, or a login as another account again, is
+// TOKEN_WRONG_ACCOUNT with both ways on.
 func TestGuidedInitStopsWhenTheTokenIsAnotherAccounts(t *testing.T) {
 	t.Parallel()
 	envToken := func(te *testEnv) {
@@ -192,14 +198,8 @@ func TestGuidedInitStopsWhenTheTokenIsAnotherAccounts(t *testing.T) {
 		p := atTerminal(te, "n")
 		te.forge.User.Login = "octo"
 		code, _, errOut := te.run("init", "acme/widget")
-		if code != 1 || !strings.Contains(errOut, "[AUTH_MISSING]") || !strings.Contains(errOut, "ghostbranch login") {
+		if code != 2 || !strings.Contains(errOut, wrongAccount) {
 			t.Fatalf("exit %d: %s", code, errOut)
-		}
-		for _, want := range []string{"error: The GitHub token is octo's, not acme's",
-			"or keep the shadow repo on your own account: ghostbranch init acme/widget --shadow octo/widget-shadow"} {
-			if !strings.Contains(errOut, want) {
-				t.Errorf("stderr lacks %q:\n%s", want, errOut)
-			}
 		}
 		hasPrefixes(t, p.asked, asAcmeQ)
 		if !slices.Contains(p.said, mismatch) || shadowExists(te) || len(registered(te)) != 0 {
@@ -212,12 +212,12 @@ func TestGuidedInitStopsWhenTheTokenIsAnotherAccounts(t *testing.T) {
 		envToken(te)
 		srv := initDeviceLogin(t, te)
 		made := tokenUsers(te, "octo", map[string]string{srv.AccessToken(1): "acme"})
-		p := atTerminal(te, "", "", "", "", "", "")
+		p := atTerminal(te, "", "", "", "")
 		if code, out, errOut := te.run("init", "acme/widget"); code != 0 {
 			t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
 		}
-		hasPrefixes(t, p.asked, asAcmeQ, installed, "Create the private repo acme/widget-shadow", "Turn on scheduled sync?", "Make these changes now?")
-		for _, l := range []string{mismatch, loggedIn, "Using GitHub account acme (from your Ghostbranch login)", installNow} {
+		hasPrefixes(t, p.asked, asAcmeQ, "Create the private repo acme/widget-shadow", "Turn on scheduled sync?", "Make these changes now?")
+		for _, l := range []string{mismatch, loggedIn, "Using GitHub account acme (from your Ghostbranch login)"} {
 			if !slices.Contains(p.said, l) {
 				t.Errorf("never said %q: %q", l, p.said)
 			}
@@ -235,16 +235,11 @@ func TestGuidedInitStopsWhenTheTokenIsAnotherAccounts(t *testing.T) {
 		tokenUsers(te, "octo", nil)
 		p := atTerminal(te, "y")
 		code, _, errOut := te.run("init", "acme/widget")
-		if code != 1 || !strings.Contains(errOut, "[AUTH_MISSING]") {
+		if code != 2 || !strings.Contains(errOut, wrongAccount) {
 			t.Fatalf("exit %d: %s", code, errOut)
 		}
-		for _, want := range []string{"error: The GitHub token is octo's, not acme's",
-			"or keep the shadow repo on your own account: ghostbranch init acme/widget --shadow octo/widget-shadow"} {
-			if !strings.Contains(errOut, want) {
-				t.Errorf("stderr lacks %q:\n%s", want, errOut)
-			}
-		}
-		if !saidHas(p, "still") || shadowExists(te) {
+		hasPrefixes(t, p.asked, asAcmeQ)
+		if !slices.Contains(p.said, "The new login is still octo's, not acme's.") || shadowExists(te) {
 			t.Fatalf("said %q", p.said)
 		}
 	})
@@ -256,11 +251,10 @@ func TestGuidedInitStopsWhenTheTokenIsAnotherAccounts(t *testing.T) {
 		p := atTerminal(te)
 		te.forge.User.Login = "octo"
 		code, _, errOut := te.run("init", "acme/widget")
-		if code != 1 || !strings.Contains(errOut, "[AUTH_MISSING]") || !strings.Contains(errOut, "GHOSTBRANCH_TOKEN") ||
-			!strings.Contains(errOut, "error: The GitHub token is octo's, not acme's") {
+		if code != 2 || !strings.Contains(errOut, "error: The token is octo's, so it can't set up acme/widget-shadow on acme: set GHOSTBRANCH_TOKEN to a token of acme's, or put the shadow on your account with --shadow octo/widget-shadow. [TOKEN_WRONG_ACCOUNT]") {
 			t.Fatalf("exit %d: %s", code, errOut)
 		}
-		if len(p.asked) != 0 || !slices.Contains(p.said, mismatch) || shadowExists(te) {
+		if len(p.asked) != 0 || !saidHas(p, "! The token is octo's, so it can't set up acme/widget-shadow on acme: set GHOSTBRANCH_TOKEN") || shadowExists(te) {
 			t.Fatalf("asked %q, said %q", p.asked, p.said)
 		}
 	})
@@ -271,7 +265,7 @@ func TestGuidedInitStopsWhenTheTokenIsAnotherAccounts(t *testing.T) {
 		if code, out, errOut := te.run("init", "acme/widget"); code != 0 {
 			t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
 		}
-		if slices.Contains(p.asked, asAcmeQ) || saidHas(p, "belongs to") {
+		if slices.Contains(p.asked, asAcmeQ) || saidHas(p, "so it can't set up") {
 			t.Fatalf("asked %q", p.asked)
 		}
 	})
@@ -283,14 +277,14 @@ func TestGuidedInitStopsWhenTheTokenIsAnotherAccounts(t *testing.T) {
 		if code, out, errOut := te.run("init", "acme/widget", "--shadow", "octo/widget-shadow"); code != 0 {
 			t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
 		}
-		if saidHas(p, "belongs to") {
+		if saidHas(p, "so it can't set up") {
 			t.Fatalf("said %q", p.said)
 		}
 	})
 }
 
-// After init's own login (no token at all), it confirms the account and
-// shows the install step, then waits for it.
+// After init's own login (no token at all), it confirms the account, and
+// the checklist shows the install step and waits for it, before any write.
 func TestGuidedInitShowsTheInstallStepAfterItsLogin(t *testing.T) {
 	t.Parallel()
 	for _, org := range []bool{false, true} {
@@ -308,6 +302,7 @@ func TestGuidedInitShowsTheInstallStepAfterItsLogin(t *testing.T) {
 				te.forge.Orgs = map[string]bool{"acme": true}
 				te.forge.User.Login = "octo"
 			}
+			p.onWait = func() { installOn(te, "acme") }
 			if code, out, errOut := te.run("init", "acme/widget"); code != 0 {
 				t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
 			}
@@ -315,10 +310,10 @@ func TestGuidedInitShowsTheInstallStepAfterItsLogin(t *testing.T) {
 			if org {
 				who = "octo"
 			}
-			if !slices.Contains(p.said, "Logged in to GitHub as "+who+" with the Ghostbranch GitHub App.") || !slices.Contains(p.said, installNow) {
+			if !slices.Contains(p.said, "Logged in to GitHub as "+who+" with the Ghostbranch GitHub App.") || !saidHas(p, installStep) {
 				t.Fatalf("said %q", p.said)
 			}
-			if !before(p, "! "+installNow, "? "+installed) || !before(p, "? "+installed, "? Make these changes now?") {
+			if !before(p, "! ! "+installStep, "? "+doneQ) || !before(p, "? "+doneQ, "? Make these changes now?") || len(te.forge.Created) != 1 {
 				t.Fatalf("order: %q", p.log)
 			}
 		})
@@ -334,6 +329,7 @@ func TestGuidedInitRetriesTheCreationOnceTheAppIsInstalled(t *testing.T) {
 	t.Parallel()
 	te := newTestEnv(t)
 	appLogin(te)
+	installApp(te) // the check passes: the refusal is one it didn't predict
 	refuseIn(te, notInstalledMsg, "acme")
 	p := atTerminal(te, "", "", "", "")
 	p.onWait = func() { te.forge.CreateRefused = nil }
@@ -353,6 +349,7 @@ func TestGuidedInitMakesTheShadowByHandWhenTheRetryIsRefused(t *testing.T) {
 	t.Parallel()
 	te := newTestEnv(t)
 	appLogin(te)
+	installApp(te) // the check passes: the refusal is one it didn't predict
 	refuseIn(te, notInstalledMsg, "acme")
 	p := atTerminal(te, "", "", "", "", "")
 	waits := 0
@@ -383,6 +380,7 @@ func TestGuidedInitInstallLoopIsBounded(t *testing.T) {
 	t.Parallel()
 	te := newTestEnv(t)
 	appLogin(te)
+	installApp(te) // the check passes: the refusal is one it didn't predict
 	refuseIn(te, notInstalledMsg, "acme")
 	p := atTerminal(te, "", "", "", "", "")
 	waits := 0
@@ -445,18 +443,17 @@ func TestGuidedInitGivesATokenTheTokenFix(t *testing.T) {
 	}
 }
 
-// A refusal of a token whose account isn't the shadow owner's (here a
-// registered pair, which skips the check before writes) says how to get the
-// owner's token, not that a permission is missing. A login can't take
-// effect while GHOSTBRANCH_TOKEN is set, so then it says to set that.
-func TestGuidedInitRefusalNamesTheAccountMismatch(t *testing.T) {
+// A registered pair whose shadow repo is gone, with a token of another
+// account than the owner's personal one: the account step stops it before
+// any write, as for a new pair (8.6 reached GitHub's refusal here).
+func TestGuidedInitRegisteredPairChecksTheAccount(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
-		name, want string
-		ghToken    bool
+		name, fix string
+		ghToken   bool
 	}{
-		{"GH_TOKEN", "  - your token is octo's, so it can't create repos on acme: run ghostbranch login and approve it as acme (the Ghostbranch app), then ghostbranch init again", true},
-		{"GHOSTBRANCH_TOKEN", "  - your token is octo's, so it can't create repos on acme: set GHOSTBRANCH_TOKEN to a token of acme's (a login can't take effect while it is set), then ghostbranch init again", false},
+		{"GH_TOKEN", "log in as acme with ghostbranch login", true},
+		{"GHOSTBRANCH_TOKEN", "set GHOSTBRANCH_TOKEN to a token of acme's", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -473,25 +470,24 @@ func TestGuidedInitRefusalNamesTheAccountMismatch(t *testing.T) {
 			if err := ws.Save(); err != nil {
 				t.Fatal(err)
 			}
-			refuseIn(te, "Not Found", "acme")
-			p := atTerminal(te, "", "")
+			p := atTerminal(te, "n")
 			te.forge.User.Login = "octo"
-			p.onWait = func() { _, _ = te.forge.AddRepo("acme/widget-shadow", true) }
-			if code, out, errOut := te.run("init", "acme/widget"); code != 0 {
-				t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
+			code, _, errOut := te.run("init", "acme/widget")
+			if code != 2 || !strings.Contains(errOut, "[TOKEN_WRONG_ACCOUNT]") || !strings.Contains(errOut, tc.fix) {
+				t.Fatalf("exit %d: %s", code, errOut)
 			}
-			if !slices.Contains(p.said, tc.want) || saidHas(p, "Administration: write") {
-				t.Fatalf("said %q", p.said)
+			if len(te.forge.Created) != 0 || saidHas(p, "GitHub refused") {
+				t.Fatalf("created %v; said %q", te.forge.Created, p.said)
 			}
 		})
 	}
 }
 
-// With --adopt or a registered pair, init creates no shadow repo, so the
-// install step doesn't say it will.
+// With --adopt or a registered pair, the shadow repo exists, so the install
+// step picks it too.
 func TestGuidedInitInstallStepForAnExistingShadow(t *testing.T) {
 	t.Parallel()
-	const line = "Next, install the Ghostbranch app on acme and pick acme/widget: " + installLink
+	const line = "! Install the Ghostbranch app on acme and pick acme/widget and acme/widget-shadow."
 	for _, tc := range []struct {
 		name string
 		args []string
@@ -510,11 +506,12 @@ func TestGuidedInitInstallStepForAnExistingShadow(t *testing.T) {
 			delete(te.vars, "GHOSTBRANCH_TOKEN")
 			initDeviceLogin(t, te)
 			p := atTerminal(te, "y", "", "", "")
+			p.onWait = func() { installApp(te) }
 			if code, out, errOut := te.run(append([]string{"init", "acme/widget"}, tc.args...)...); code != 0 {
 				t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
 			}
-			if !slices.Contains(p.said, line) || saidHas(p, "init creates the shadow repo next") {
-				t.Fatalf("said %q", p.said)
+			if !before(p, "! "+line, "? "+doneQ) {
+				t.Fatalf("log %q", p.log)
 			}
 		})
 	}
