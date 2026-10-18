@@ -63,7 +63,8 @@ func TestRenderListsEveryCodeFromTheRegistry(t *testing.T) {
 	// isolation's pre-filled token link with the repository choice it can't make (Tier 1 setup guidance).
 	// 525: 8.7's Setting up a repo for a person section (13 lines), four stuck rows for the new codes and the exact login exception.
 	// 530: 8.7's final review (the person's own login step, doctor after init, AUTH_MISSING during setup).
-	if n := strings.Count(out, "\n"); n > 530 {
+	// 531: feature start checks the branch out, and data.local (8.8, issue #35).
+	if n := strings.Count(out, "\n"); n > 531 {
 		t.Errorf("the guide is %d lines; keep it short (spec: about 150 plus the tables)", n)
 	}
 }
@@ -274,6 +275,8 @@ func TestGuideTeachesTheLifecycle(t *testing.T) {
 		"Never close or abandon a feature a person is still working on.",
 		"JSON is on stdout and progress on stderr: never merge the two streams",
 		"`ghostbranch feature start <name> --repo <public> --json`",
+		"it also adds the `shadow` remote, fetches it and switches to the branch",
+		"`data.local.status` `switched`: you are on `<name>`. Commit there, then push **to the shadow repo only** (`git push shadow <name>`;",
 		"`ghostbranch gate <name> --repo <public> --json`",
 	} {
 		if !strings.Contains(out, want) {

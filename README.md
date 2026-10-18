@@ -111,9 +111,9 @@ Six Ghostbranch commands, with your usual git work in between. The example featu
 
 ```sh
 ghostbranch sync                          # bring the shadow repo up to date with public main
-ghostbranch feature start add-search      # create the feature branch in the shadow repo
+ghostbranch feature start add-search      # create the feature branch in the shadow repo and switch to it
 
-# run the "Check it out with" line it prints, then edit, test and commit as usual
+# edit, test and commit as usual (outside a checkout, run the "Check it out with" line it prints)
 git push shadow add-search                # push to the shadow repo, never to origin
 
 ghostbranch gate add-search               # rebase on public main, leak scan, full CI

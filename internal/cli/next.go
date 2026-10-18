@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -651,7 +650,7 @@ func (a *app) steps(err error) []contract.Next {
 				out = append(out, contract.Next{Command: a.scoped("gate", first),
 					Why: first + ", below " + r.Name + " in its stack, has no fresh green gate; gate it first (then each branch above it, bottom up), as " + r.Name + "'s gate builds on it"})
 			}
-			why := "check out with `" + r.CheckoutHint + "`, commit on " + r.Name + ", "
+			why := startWhy(r)
 			switch a.shadowRemote {
 			case "":
 				why += "push it to the shadow repo (never origin), then gate it"
@@ -1460,18 +1459,8 @@ func shadowRemote(shadow string) (remote, free string, inCheckout bool) {
 	if err != nil {
 		return "", "shadow", true
 	}
-	names := make([]string, 0, len(remotes))
-	for n := range remotes {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	free = freeRemoteName(remotes)
-	for _, n := range names {
-		if s, ok := guard.Slug(remotes[n]); ok && strings.EqualFold(s, shadow) && safeRemoteName.MatchString(n) {
-			return n, free, true
-		}
-	}
-	return "", free, true
+	remote, free = shadowRemoteIn(remotes, shadow)
+	return remote, free, true
 }
 
 // freeRemoteName is the first of shadow, ghostbranch-shadow,

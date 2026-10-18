@@ -171,6 +171,7 @@ func TestGoldenContract(t *testing.T) {
 			editConfig(te, "branches: [main]", "branches: [main, release]")
 		}, []string{"sync"}, 0},
 		{"feature_start", initOnly, []string{"feature", "start", "feat-x"}, 0},
+		{"feature_start_checkout", func(te *testEnv) { initOnly(te); publicCheckout(te) }, []string{"feature", "start", "feat-x"}, 0},
 		{"feature_start_behind", func(te *testEnv) {
 			initOnly(te)
 			testutil.Commit(te.t, te.pubGit, "main", "upstream", map[string]string{"up.txt": "up\n"})

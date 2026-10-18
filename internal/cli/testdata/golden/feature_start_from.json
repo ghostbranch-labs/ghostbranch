@@ -21,6 +21,11 @@
       ]
     ],
     "checkout_hint": "git fetch shadow && git switch feat-y",
+    "local": {
+      "status": "skipped",
+      "reason": "not_a_checkout",
+      "remote": ""
+    },
     "preview": null
   },
   "warnings": [],

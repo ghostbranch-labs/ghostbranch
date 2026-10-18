@@ -11,10 +11,11 @@ main, green CI, and a leak scan of exactly what will be published.
 0. **Always run `ghostbranch sync --repo <public> --json` first**, before `feature start` or resuming
    a feature: features start from shadow main. Sync never writes to public. New repo? *Set up a repo*.
 1. `ghostbranch feature start <name> --repo <public> --json` creates the feature branch in the shadow repo.
-2. Run the commands in `data.checkout`, in order (argvs; `data.checkout_hint` is the same as one shell
-   line). They fetch the branch from the shadow repo (in a checkout of the public repo, usually a remote
-   named `shadow`) and switch to it. Commit there, and push **to the
-   shadow repo only** (`git push shadow <name>`), never to `origin` (a handed-off PR: see *After publishing*).
+   Run in a checkout of the public repo, it also adds the `shadow` remote, fetches it and switches to the branch.
+2. `data.local.status` `switched`: you are on `<name>`. Commit there, then push **to the shadow repo only**
+   (`git push shadow <name>`; `data.local.remote` names the remote), never to `origin` (a handed-off PR: see
+   *After publishing*). `fetched_only` or `skipped` (`data.local.reason` says why): follow `next`, or run
+   `data.checkout` in order (argvs; `data.checkout_hint` is one shell line). It never switches over uncommitted work.
 3. `ghostbranch gate <name> --repo <public> --json` rebases on public main, scans for leaks and runs CI.
 4. `ghostbranch promote <name> --repo <public> --plan --json` publishes in the repo's `promote.default_mode`
    (`preserve` unless set); pass `--mode` to choose. With more than one commit, add

@@ -255,11 +255,7 @@ func human(r any, st style.Styler) string {
 			previewText(&b, v.Preview)
 			break
 		}
-		if v.Parent != "" && v.Parent != feature.MainParent {
-			fmt.Fprintf(&b, "Started feature %s on %s, at its tip %s.\nCheck it out with: %s\n", v.Name, v.Parent, short(v.Base), v.CheckoutHint)
-			break
-		}
-		fmt.Fprintf(&b, "Started feature %s from shadow main %s.\nCheck it out with: %s\n", v.Name, short(v.Base), v.CheckoutHint)
+		featureStartText(&b, v, st)
 	case *engine.GateResult:
 		if pendingJob(v) {
 			b.WriteString(pendingLine(v))
@@ -1030,7 +1026,8 @@ func checklistLines(s *engine.Setup, st style.Styler, replace map[string][]strin
 // walkthrough ends a guided init: the first feature, and agents' tokens.
 const walkthrough = `
 Your first feature:
-  1. ghostbranch feature start <name>   creates the branch in the shadow repo; commit and push to it there
+  1. ghostbranch feature start <name>   creates the branch in the shadow repo and switches this checkout to it;
+                                        commit there, then: git push shadow <name>
   2. ghostbranch gate <name>            rebases on public main, scans for leaks and runs CI
   3. ghostbranch promote <name>         publishes it to the public repo as a PR, once you confirm
 Coding agents: give each agent its own token that reaches only the shadow repo, as GHOSTBRANCH_TOKEN

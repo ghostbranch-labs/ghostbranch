@@ -198,13 +198,14 @@ is replaced; --plan shows that first. It writes only the shadow repo's overlay b
 }
 
 func (a *app) featureStartCmd() *cobra.Command {
-	var yes bool
+	var yes, noCheckout bool
 	var from string
 	c := &cobra.Command{
 		Use:   "start <name>",
 		Short: "Start a feature branch in the shadow repo",
-		Long:  `feature start creates <name> from shadow main in the shadow repo and records it as a feature. It does not touch your checkout; fetch and switch to the branch afterwards. With --from <feature> it starts at that feature's tip instead and records it as the parent, stacking the new feature on it.`,
-		Args:  cobra.ExactArgs(1),
+		Long: `feature start creates <name> from shadow main in the shadow repo and records it as a feature. With --from <feature> it starts at that feature's tip instead and records it as the parent, stacking the new feature on it.
+Run in a checkout of the public repo, it then adds a remote named shadow for the shadow repo (if no remote reaches it), fetches it, and switches to <name>, tracking shadow/<name>. It never rewrites a remote: a shadow remote that points elsewhere is left alone. With uncommitted changes, or a local branch called <name>, it fetches but doesn't switch. Elsewhere, or with --no-checkout, it prints the commands instead.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			e, err := a.engine(cmd.Context())
 			if err != nil {
@@ -217,7 +218,10 @@ func (a *app) featureStartCmd() *cobra.Command {
 			a.startName = args[0]
 			a.startFrom = from
 			res, w, err := e.FeatureStart(cmd.Context(), p, args[0], engine.FeatureStartOptions{From: from})
-			if res != nil && a.env.ShadowRemote != nil {
+			switch {
+			case res != nil && err == nil && res.Preview == nil:
+				a.checkOutFeature(cmd.Context(), p, res, noCheckout)
+			case res != nil && a.env.ShadowRemote != nil:
 				remote, free, in := a.env.ShadowRemote(p.Shadow)
 				res.SetCheckout(checkoutArgv(res.Name, p.Shadow, remote, free, in))
 				a.shadowRemote = pushRemote(remote, free, in)
@@ -226,6 +230,7 @@ func (a *app) featureStartCmd() *cobra.Command {
 		},
 	}
 	c.Flags().StringVar(&from, "from", "", "stack the feature on another feature: start it at that feature's tip in the shadow repo (default: shadow main)")
+	c.Flags().BoolVar(&noCheckout, "no-checkout", false, "leave this checkout alone: don't add the shadow remote, fetch or switch; print the commands instead")
 	c.Flags().BoolVar(&yes, "yes", false, "accepted for consistency; feature start never asks")
 	c.Flags().BoolVar(&a.dryRun, "plan", false, "preview exactly what would change, and change nothing (same as --dry-run)")
 	return c
