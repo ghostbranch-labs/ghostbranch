@@ -96,6 +96,20 @@ main, green CI, and a leak scan of exactly what will be published.
    scheduled sync, whether they need a `GHOSTBRANCH_SYNC_TOKEN` secret (see *Keeping up with public*).
    Guarded jobs run in the shadow repo on unreleased code: never deploy or publish credentials there.
 
+## When the person is stuck
+
+A login, the app's install and tokens are the person's to do. Help them one step at a time:
+
+1. Run `ghostbranch doctor --json`, then `ghostbranch explain <CODE> --json` for the code it reports.
+2. Hand over one person-only fix at a time, with its link. When they say it's done, run `doctor`
+   again before you go on.
+
+- `AUTH_MISSING` or `LOGIN_EXPIRED`: the person runs `ghostbranch login` in their own terminal.
+- The app can't see a repo (`doctor` says it doesn't exist or the token can't see it): give the install
+  link, `https://github.com/apps/ghostbranch-cli/installations/new`, and ask them to add that repo.
+- A token for you: the pre-filled link in *Strict isolation*, with exactly its permissions.
+- Never ask for, read or paste a token, and never ask for wider access.
+
 ## Lifecycle
 
 - `ghostbranch status --repo <public> --json` shows the pair's health and every feature's state:
@@ -367,8 +381,9 @@ Ghostbranch uses the first token it finds: `GHOSTBRANCH_TOKEN`, then your stored
 `GH_TOKEN`, `GITHUB_TOKEN`, then `gh auth token`. With `GHOSTBRANCH_TOKEN` set, the stored login is
 never read.
 
-- `ghostbranch login` signs you in with the Ghostbranch GitHub App in your browser. When you install
-  the app, pick both the public repo and its shadow repo. The login lives in your OS keychain and
+- `ghostbranch login` signs you in with the Ghostbranch GitHub App in your browser. Then install the app
+  on the account that owns your public repo and pick that repo; `ghostbranch init` creates the shadow
+  repo. The login lives in your OS keychain and
   refreshes itself; `LOGIN_EXPIRED` means log in again. `ghostbranch login --with-token` stores a
   token you pipe in on stdin instead. With no keychain (`LOGIN_UNAVAILABLE`), set `GHOSTBRANCH_TOKEN`.
 - `ghostbranch auth status` shows the source, account, kind, expiry and whether it can publish;
@@ -403,8 +418,10 @@ boundary is the token. Plan files, grants, waivers and the ledger are mode 0600 
 other OS users can't read them, but an agent running as you can.
 
 1. Create a fine-grained token scoped to **the shadow repo only**: Contents, Pull requests and
-   Workflows read and write; Actions and Commit statuses read. Actions write is optional: it lets
-   `sync` cancel the runs its pushes start.
+   Workflows read and write; Actions and Commit statuses read. This link fills in the rest (replace
+   `<shadow-owner>` and `<repo>`): {{AGENT_TOKEN_LINK}}
+   GitHub can't pre-fill the repositories: choose "Only select repositories", then pick only the
+   shadow repo. Actions write is optional: it lets `sync` cancel the runs its pushes start.
 2. Set it as `GHOSTBRANCH_TOKEN` **only in the agent's environment**.
 3. Make sure the agent's sandbox cannot read your `gh` login or keychain, or `gh auth token` hands it
    your full token.

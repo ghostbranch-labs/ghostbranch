@@ -622,9 +622,9 @@
       },
       {
         "path": "remove",
-        "use": "remove",
+        "use": "remove [owner/repo]",
         "short": "Unregister the pair from this machine (needs a person at a console)",
-        "long": "remove takes the pair off this machine: it revokes the pair's agent grants and waivers, deletes\nits plan files and its local mirror, and drops it from the workspace. Nothing on GitHub changes: the\nshadow repo, its branches and features stay, and the ledger keeps its history. Because it drops grants\nand waivers, a person confirms by typing a code at the console; --plan shows what would go. It needs\nno GitHub token.",
+        "long": "remove takes the pair off this machine: it revokes the pair's agent grants and waivers, deletes\nits plan files and its local mirror, and drops it from the workspace. Nothing on GitHub changes: the\nshadow repo, its branches and features stay, and the ledger keeps its history. Because it drops grants\nand waivers, a person confirms by typing a code at the console; --plan shows what would go. It needs\nno GitHub token. The repo is an argument or --repo (the same thing); without either, it is this\ncheckout's pair.",
         "read_only": false,
         "flags": [
           {

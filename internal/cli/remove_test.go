@@ -181,3 +181,32 @@ func TestRemoveNeedsNoToken(t *testing.T) {
 		t.Fatalf("ledger: %+v %v", es, err)
 	}
 }
+
+// remove takes the repo as an argument too, like init; it and --repo must
+// agree.
+func TestRemoveTakesTheRepoAsAnArgument(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	if code, env := te.runJSON("remove", "acme/widget", "--plan"); code != 0 {
+		t.Fatalf("remove acme/widget --plan: %d %v", code, env)
+	}
+	if code, env := te.runJSON("remove", "acme/widget", "--repo", "acme/widget", "--plan"); code != 0 {
+		t.Fatalf("the same repo twice: %d %v", code, env)
+	}
+	code, env := te.runJSON("remove", "acme/widget", "--repo", "acme/other", "--plan")
+	e, _ := env["error"].(map[string]any)
+	if code != 2 || e["code"] != "BAD_FLAG" || e["field"] != "repo" {
+		t.Fatalf("two repos: %d %v", code, env)
+	}
+	if code, env := te.runJSON("remove", "acme/a", "acme/b"); code != 2 {
+		t.Fatalf("two arguments: %d %v", code, env)
+	}
+	atConsole(te, typeTheCode)
+	if code, out, errOut := te.run("remove", "acme/widget"); code != 0 {
+		t.Fatalf("remove acme/widget: %d\n%s\n%s", code, out, errOut)
+	}
+	if code, env := te.runJSON("sync", "--repo", "acme/widget"); code != 2 || env["error"].(map[string]any)["code"] != "PAIR_NOT_FOUND" {
+		t.Fatalf("still registered: %d %v", code, env)
+	}
+}

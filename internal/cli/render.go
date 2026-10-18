@@ -506,7 +506,7 @@ func human(r any, st style.Styler) string {
 			fmt.Fprintf(&b, "Stored the %s token for %s in the OS keychain.\n", v.TokenKind, who)
 		}
 		if v.InstallURL != "" {
-			fmt.Fprintf(&b, "Next, pick the repos Ghostbranch may use (your public repo and its shadow): %s\n", v.InstallURL)
+			fmt.Fprintf(&b, "Next, install the Ghostbranch app on the account that owns your public repo and pick that repo; ghostbranch init creates the shadow repo: %s\n", v.InstallURL)
 		}
 		if v.EnvToken != "" {
 			fmt.Fprintf(&b, "Note: %s is set in this shell and wins over the stored login.\n", v.EnvToken)
@@ -956,9 +956,13 @@ func doctorLine(b *strings.Builder, c engine.DoctorCheck, st style.Styler) {
 	case engine.DoctorSkipped:
 		mark = st.Dim(mark)
 	}
-	fmt.Fprintf(b, "%s %-6s %s\n", mark, c.ID, c.Message)
-	if c.Fix != "" {
-		fmt.Fprintf(b, "    fix: %s\n", c.Fix)
+	msg, fix := c.Message, c.Fix
+	if c.PersonMessage != "" {
+		msg, fix = c.PersonMessage, strings.Join(c.PersonFixArgv, " ")
+	}
+	fmt.Fprintf(b, "%s %-6s %s\n", mark, c.ID, msg)
+	if fix != "" {
+		fmt.Fprintf(b, "    fix: %s\n", fix)
 	}
 }
 

@@ -70,6 +70,7 @@ func (d *doctorRun) findPair() {
 	case pub != "" && d.opt.Repo != "":
 		d.unregistered = pub
 	case pub != "":
+		d.checkout = pub
 		d.noPair = fmt.Sprintf("this checkout's repo %s isn't set up in workspace %q: ghostbranch init %s --adopt --plan sets it up if its shadow repo exists, else ghostbranch init %s --plan", pub, e.WS.Name, pub, pub)
 	default:
 		d.noPair = "not in a checkout of a registered public repo; pass --repo <owner/repo> to check a pair"
@@ -338,7 +339,15 @@ func (d *doctorRun) token(ctx context.Context) DoctorCheck {
 		if kind == "app" {
 			fix = []string{"ghostbranch", "login"} // shows the App's install page
 		}
-		v.add(DoctorFail, "it lacks permissions these commands need (or can't see the repo): "+permList(missing), fix...)
+		msg := "it lacks permissions these commands need (or can't see the repo): " + permList(missing)
+		// Only a person gets the link: that token could publish, and an
+		// agent must never relay a link for one.
+		if kind != "app" && !e.LooksLikeAgent {
+			link, repos := forge.PairTokenLink(d.pair.Public, d.pair.Shadow)
+			msg += `; a person can make a fine-grained token with every permission Ghostbranch needs at ` + link +
+				` (choose "Only select repositories", then pick ` + repos + `)`
+		}
+		v.add(DoctorFail, msg, fix...)
 	}
 	if pa.Can == "false" || len(groups["promote"].Missing) > 0 {
 		v.add(DoctorWarn, "it can't publish to "+d.pair.Public+": a person publishes, from a terminal whose token can (an agent's token should be like this)")
@@ -362,16 +371,47 @@ func repoProblem(full string, err error) string {
 	return "looking up " + full + " failed: " + err.Error()
 }
 
+// personInit is what a person reads for a public repo that isn't set up
+// here: plain init, with --adopt when <pub>-shadow already exists (a
+// read-only lookup). When the lookup can't say, the line says when to add
+// --adopt. Runs for --json skip it: their output keeps the --plan forms.
+func (d *doctorRun) personInit(ctx context.Context, lead, pub string) (string, []string) {
+	if !d.opt.ForPerson {
+		return "", nil
+	}
+	argv := []string{"ghostbranch", "init", pub}
+	msg := fmt.Sprintf("%s isn't set up in workspace %q: run ", lead, d.e.WS.Name)
+	tail := " (add --adopt if its shadow repo already exists)"
+	if d.e.Forge != nil {
+		_, err := d.e.Forge.GetRepo(ctx, pub+"-shadow")
+		switch {
+		case err == nil:
+			argv = append(argv, "--adopt")
+			msg = fmt.Sprintf("%s isn't set up in workspace %q, and its shadow repo %s-shadow exists: run ", lead, d.e.WS.Name, pub)
+			tail = ""
+		case errors.Is(err, forge.ErrNotFound):
+			tail = ""
+		}
+	}
+	return msg + strings.Join(argv, " ") + tail, argv
+}
+
 func (d *doctorRun) pairCheck(ctx context.Context) DoctorCheck {
 	e := d.e
 	switch {
 	case d.unregistered != "":
 		pub := d.unregistered
-		return DoctorCheck{Status: DoctorFail, Details: map[string]any{"public": pub}, Unregistered: pub,
+		c := DoctorCheck{Status: DoctorFail, Details: map[string]any{"public": pub}, Unregistered: pub,
 			Message: fmt.Sprintf("%s isn't set up in workspace %q: ghostbranch init %s --adopt --plan if its shadow repo exists, else ghostbranch init %s --plan", pub, e.WS.Name, pub, pub)}.
 			withFix("ghostbranch", "init", pub, "--adopt", "--plan")
+		c.PersonMessage, c.PersonFixArgv = d.personInit(ctx, pub, pub)
+		return c
 	case d.pair == nil:
-		return skipped(d.noPair)
+		c := skipped(d.noPair)
+		if d.checkout != "" {
+			c.PersonMessage, c.PersonFixArgv = d.personInit(ctx, "this checkout's repo "+d.checkout, d.checkout)
+		}
+		return c
 	case e.Forge == nil:
 		return skipped("no GitHub token (see token)")
 	}

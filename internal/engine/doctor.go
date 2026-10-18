@@ -56,6 +56,10 @@ type DoctorOptions struct {
 	// WorkspaceErr is why the workspace couldn't be opened.
 	WorkspaceErr error
 	Getenv       func(string) string
+	// ForPerson is a run whose output a person reads (not --json): only
+	// then does doctor work out the plain init line for a repo that isn't
+	// set up here (PersonMessage).
+	ForPerson bool
 }
 
 // DoctorCheck is one check's finding. Fix is a command that fixes it, or
@@ -71,6 +75,11 @@ type DoctorCheck struct {
 	// Unregistered is the public repo a failing pair check is about when
 	// it isn't set up here: next offers both init forms (F-27).
 	Unregistered string `json:"-"`
+	// PersonMessage and PersonFixArgv replace Message and the fix in the
+	// output for people, when set: a person runs plain init where an agent
+	// gets the --plan forms. The JSON keeps Message and Fix as they are.
+	PersonMessage string   `json:"-"`
+	PersonFixArgv []string `json:"-"`
 }
 
 // withFix sets c's fix to argv; no argv leaves it without one.
@@ -135,6 +144,7 @@ type doctorRun struct {
 	pair         *workspace.Pair
 	unregistered string // --repo names this public repo, which isn't set up here
 	noPair       string // why there is no pair, as a skip reason
+	checkout     string // this checkout's public repo, when that is why there is no pair
 	pc           *pairCtx
 	cfg          config.Config
 	O            string
