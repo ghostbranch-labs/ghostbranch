@@ -499,7 +499,9 @@ func TestGuidedInitRegisteredPairOtherAccountNoStop(t *testing.T) {
 	if code != 0 || strings.Contains(errOut, "TOKEN_WRONG_ACCOUNT") {
 		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
 	}
-	hasPrefixes(t, p.asked, "Make these changes now?")
+	if len(p.asked) != 0 { // nothing to change, so nothing to confirm
+		t.Fatalf("asked %q", p.asked)
+	}
 	wantPair(t, te, "acme/widget-shadow")
 }
 

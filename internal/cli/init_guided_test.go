@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -242,7 +243,9 @@ func TestGuidedInitResumes(t *testing.T) {
 	if code, out, errOut := te.run("init", "acme/widget"); code != 0 {
 		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
 	}
-	hasPrefixes(t, p.asked, "Make these changes now?")
+	if len(p.asked) != 0 { // a finished setup has nothing to change, so nothing to confirm
+		t.Fatalf("asked %q", p.asked)
+	}
 	if !slices.ContainsFunc(p.said, func(s string) bool { return strings.HasPrefix(s, "Resuming the setup of acme/widget") }) {
 		t.Fatalf("said %q", p.said)
 	}
@@ -1158,11 +1161,49 @@ func TestGuidedInitAllDoneAsksNothingNew(t *testing.T) {
 	if code, out, errOut := te.run("init", "acme/widget", "--adopt"); code != 0 {
 		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
 	}
-	// v0.1.1 (ba53e6a) asks exactly this for the same inputs.
+	// v0.1.1 (ba53e6a) asks exactly this for the same inputs. The preview
+	// still has an action here (registering the pair on this machine), so
+	// the question stays.
 	if v011 := []string{"Make these changes now?"}; !slices.Equal(p.asked, v011) {
 		t.Fatalf("asked %q, want v0.1.1's %q", p.asked, v011)
 	}
 	wantPair(t, te, "acme/widget-shadow")
+}
+
+// With nothing to change, guided init says so and does not ask.
+func TestGuidedInitNothingToChangeAsksNothing(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te) // registered, overlay made: nothing is left to do
+	p := atTerminal(te, "")
+	if code, out, errOut := te.run("init", "acme/widget"); code != 0 {
+		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
+	}
+	if len(p.asked) != 0 {
+		t.Fatalf("asked %q, want nothing", p.asked)
+	}
+	want := "Nothing to change: acme/widget is already set up with acme/widget-shadow."
+	if !slices.Contains(p.said, want) {
+		t.Fatalf("said %q, want %q", p.said, want)
+	}
+	if !slices.Contains(p.said, "Checking the setup (ghostbranch doctor)…") {
+		t.Fatalf("doctor did not run: %q", p.said)
+	}
+	wantPair(t, te, "acme/widget-shadow")
+}
+
+// --json output of a repeat init is the same as before, and carries no prose.
+func TestInitNothingToChangeJSONUnchanged(t *testing.T) {
+	t.Parallel()
+	te := newTestEnv(t)
+	initOnly(te)
+	code, out, errOut := te.run("init", "acme/widget", "--json")
+	if code != 0 {
+		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
+	}
+	if strings.Contains(out+errOut, "Nothing to change") || !json.Valid([]byte(out)) {
+		t.Fatalf("json output changed:\n%s\n%s", out, errOut)
+	}
 }
 
 // Choosing the app over gh's login says, once, how to turn gh's login off.

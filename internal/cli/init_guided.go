@@ -1141,7 +1141,8 @@ func (a *app) guidedInit(ctx context.Context, args []string, f initFlags) error 
 	if pv.Preview != nil {
 		lines = pv.Preview.Describe()
 	}
-	if len(lines) == 0 {
+	nothing := len(lines) == 0
+	if nothing {
 		ask.Say("  (nothing to change)")
 	}
 	for _, l := range lines {
@@ -1157,7 +1158,9 @@ func (a *app) guidedInit(ctx context.Context, args []string, f initFlags) error 
 	if a.dryRun {
 		return done(a, pv, nil, nil)
 	}
-	if ok, err := ask.YesNo(ctx, "Make these changes now?", true); err != nil {
+	if nothing && !guardOn && o.Schedule != engine.DefaultSyncSchedule {
+		ask.Say("Nothing to change: " + public + " is already set up with " + pv.Shadow + ".")
+	} else if ok, err := ask.YesNo(ctx, "Make these changes now?", true); err != nil {
 		return err
 	} else if !ok {
 		return contract.New(contract.Interrupted, "init stopped at the summary; nothing was changed")
