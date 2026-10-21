@@ -1,0 +1,24 @@
+{
+  "name": "ghostbranch",
+  "description": "Ghostbranch: private feature branches for public GitHub repos.",
+  "owner": {
+    "name": "Ghostbranch Labs",
+    "url": "https://ghostbranch.site"
+  },
+  "plugins": [
+    {
+      "name": "ghostbranch",
+      "source": "./",
+      "description": "Teaches your agent to drive the Ghostbranch CLI: start, gate, promote and publish private features. Needs the ghostbranch binary installed.",
+      "author": {
+        "name": "Ghostbranch Labs",
+        "url": "https://ghostbranch.site"
+      },
+      "homepage": "https://ghostbranch.site",
+      "repository": "https://github.com/ghostbranch-labs/ghostbranch",
+      "license": "Apache-2.0",
+      "keywords": ["git", "github", "private-branches", "ci", "secret-scanning"],
+      "skills": ["./skills/ghostbranch"]
+    }
+  ]
+}
