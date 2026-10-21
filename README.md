@@ -14,6 +14,8 @@ Build unreleased features in a private shadow of your open-source repo, running 
 
 Website and docs: <https://ghostbranch.site>.
 
+**Jump to:** [Try it](#try-it) · [Install](#install) · [What it needs and costs](#what-it-needs-and-what-it-costs) · [First feature](#a-first-feature-in-six-commands) · [How it works](#how-it-works) · [Support](#support) · [License](#license)
+
 ## The problem
 
 On GitHub, a public repo can't have a private branch. Teams building unannounced features on an open-source project end up running a private mirror by hand. That works until someone makes a mistake.
@@ -37,6 +39,10 @@ Ghostbranch is a local-first CLI that people and coding agents both drive, with 
 Ghostbranch is in beta. Commands, their output and the JSON contract may still change between releases.
 
 Agent runs have been tested with Claude Code. Codex has a skill (`ghostbranch guide --install codex`) but hasn't been tested yet.
+
+## Try it
+
+To see it work before pointing it at a repo you care about, use the template [ghostbranch-labs/try-ghostbranch](https://github.com/ghostbranch-labs/try-ghostbranch). It has one file and a CI check that runs in seconds. Click **Use this template**, keep your copy public, and follow its README: about five minutes from install to a passing gate, with the cleanup at the end. The site has the same steps: [Try it](https://ghostbranch.site/docs/getting-started/try-it).
 
 ## Install
 
@@ -104,8 +110,6 @@ scoop install ghostbranch
 winget is coming after the first release.
 
 Then run `ghostbranch init` in a clone of your public repo. It asks only what it can't work out on its own: the public repo, a GitHub login if there's no token yet, where the private shadow repo lives, whether to install the push guard, and whether to turn on scheduled sync. After a preview and your confirmation, it creates the shadow repo, installs the guard if you said yes, runs `ghostbranch doctor` and walks you through your first feature. Flags or `--json` skip the prompts.
-
-**Try it on a throwaway repo first:** [ghostbranch-labs/try-ghostbranch](https://github.com/ghostbranch-labs/try-ghostbranch) is a template with one file and a one-minute CI. Click **Use this template**, then follow its README: about five minutes from install to a passing gate.
 
 ### What it needs and what it costs
 
