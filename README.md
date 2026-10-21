@@ -105,6 +105,14 @@ winget is coming after the first release.
 
 Then run `ghostbranch init` in a clone of your public repo. It asks only what it can't work out on its own: the public repo, a GitHub login if there's no token yet, where the private shadow repo lives, whether to install the push guard, and whether to turn on scheduled sync. After a preview and your confirmation, it creates the shadow repo, installs the guard if you said yes, runs `ghostbranch doctor` and walks you through your first feature. Flags or `--json` skip the prompts.
 
+**Try it on a throwaway repo first:** [ghostbranch-labs/try-ghostbranch](https://github.com/ghostbranch-labs/try-ghostbranch) is a template with one file and a one-minute CI. Click **Use this template**, then follow its README: about five minutes from install to a passing gate.
+
+### What it needs and what it costs
+
+- **CI that runs on pull requests.** The gate runs your public repo's GitHub Actions workflows on a draft pull request in the shadow repo, so at least one workflow needs `on: pull_request`. Without one, the gate stops with `NO_CI`.
+- **The Ghostbranch GitHub app, on the repos you pick.** It asks for write access to contents, pull requests, workflows, Actions and administration (administration only so `init` can create the shadow repo). [What each permission is for](https://ghostbranch.site/docs/security/tokens-and-keychain#the-github-app-login). Ghostbranch never deletes a repo, and `init` never writes to the public repo.
+- **Actions minutes.** The shadow repo is private, so its CI counts against your account's minutes: GitHub Free includes 2,000 a month, Pro and Team 3,000. Each gate costs one run of your pull-request CI. Scheduled sync is off unless you turn it on.
+
 ## A first feature in six commands
 
 Six Ghostbranch commands, with your usual git work in between. The example feature is `add-search`.
