@@ -15,6 +15,7 @@ It's a single Go binary. It runs on macOS, Windows and Linux, and it needs git 2
 - `cmd/ghostbranch`: the binary's entry point.
 - `internal/`: the engine, the CLI, the push guard, the leak scan and the rest.
 - `internal/guide/guide.md`: the guide the binary prints for agents (`ghostbranch guide`).
+- `skills/ghostbranch/SKILL.md`: the agent skill. The binary embeds it, and `.claude-plugin/marketplace.json` publishes it as a Claude Code plugin.
 - `schemas/`: the JSON contract's schemas.
 - `install/`, `npm/`, `packaging/`: the install routes.
 

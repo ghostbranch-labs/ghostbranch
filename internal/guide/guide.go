@@ -15,13 +15,13 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/preview"
+	"github.com/ghostbranch-labs/ghostbranch/skills"
 )
 
 //go:embed guide.md
 var source string
 
-//go:embed skill.md
-var skill string
+var skill = skills.Ghostbranch
 
 // Marker identifies a SKILL.md that Ghostbranch wrote and may replace or remove.
 const Marker = "Installed by `ghostbranch guide --install`."

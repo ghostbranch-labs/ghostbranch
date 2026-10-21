@@ -128,6 +128,15 @@ Every result ends with **Next**: the command to run after it, and why. `ghostbra
 
 Coding agents run the same loop with `--json`, and `ghostbranch guide` prints their instructions. Only a person can approve a publish, unless that person has allowed agents to publish with `ghostbranch agents allow`.
 
+To give your agent the Ghostbranch skill, run `ghostbranch guide --install claude` (or `codex`). Claude Code can also install it as a plugin:
+
+```sh
+claude plugin marketplace add ghostbranch-labs/ghostbranch
+claude plugin install ghostbranch@ghostbranch
+```
+
+The skill needs the `ghostbranch` binary installed.
+
 ## Support
 
 Ghostbranch is free and open source. Sponsoring it pays for the time spent building and fixing it, the CI that tests every change, the website's domain and, later, code signing, so your computer can tell that a download really came from us. If it saves you work, please consider [sponsoring it on GitHub](https://github.com/sponsors/ayushguptax).
