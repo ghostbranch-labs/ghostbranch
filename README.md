@@ -12,6 +12,8 @@
 
 Build unreleased features in a private shadow of your open-source repo, running the same CI. Publish with one gated command, after a leak scan and with a person's approval.
 
+<img width="1100" height="600" alt="Demo: ghostbranch init creates a private shadow repo, the guard refuses a push of feature work to the public repo, the gate's checks pass, and one clean public pull request opens without the internal note." src="https://github.com/user-attachments/assets/e881a266-e807-4d36-a4be-2b76d82b0c28" />
+
 Website and docs: <https://ghostbranch.site>.
 
 **Jump to:** [Try it](#try-it) · [Install](#install) · [What it needs and costs](#what-it-needs-and-what-it-costs) · [First feature](#a-first-feature-in-six-commands) · [How it works](#how-it-works) · [Support](#support) · [License](#license)
