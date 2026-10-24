@@ -20,10 +20,11 @@ Website and docs: <https://ghostbranch.site>.
 
 ## The problem
 
-On GitHub, a public repo can't have a private branch. Teams building unannounced features on an open-source project end up running a private mirror by hand. That works until someone makes a mistake.
+On GitHub, a public repo can't have a private branch. Teams building unannounced features on an open-source project, and maintainers fixing a vulnerability under embargo, end up running a private mirror by hand. That works until someone makes a mistake.
 
 - **Every branch is public.** Anyone can see a branch pushed to a public repo, and its CI runs, too.
 - **Forks stay public.** A fork of a public repository is always public, so a fork can't keep anything private.
+- **Security fixes get no CI.** GitHub's temporary private forks for security advisories can't run Actions, so a fix under embargo is tested by hand, or not at all, before it goes public.
 - **Hand-run mirrors leak.** A push to the wrong remote, a committed secret, or CI that has drifted from the real repo: the feature goes out early, or arrives broken.
 
 ## How it works
