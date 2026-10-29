@@ -803,7 +803,7 @@ func TestBaseBranchDocs(t *testing.T) {
 		t.Errorf("PUSH_BLOCKED = %+v", pb)
 	}
 	rc := doc("REBASE_CONFLICT")
-	if !strings.Contains(rc.Summary, "the base branch (main unless the repo uses another default branch)") ||
+	if !strings.Contains(rc.Summary, "public's base branch (main unless the repo uses another default branch)") ||
 		!strings.Contains(rc.WhatToDo, "details.parent and details.upstream hold the real branch names") {
 		t.Errorf("REBASE_CONFLICT = %+v", rc)
 	}
@@ -813,6 +813,8 @@ func TestBaseBranchDocs(t *testing.T) {
 	for _, code := range []string{"SHADOW_BEHIND", "OVERLAY_COLLISION", "DRIFT_UNKNOWN", "JOB_STALE"} {
 		if e := doc(code); strings.Contains(e.Summary, "public main") || strings.Contains(e.Summary, "Shadow main") {
 			t.Errorf("%s still says main for the public line: %s", code, e.Summary)
+		} else if strings.Contains(e.Summary, "'s the base branch") {
+			t.Errorf("%s reads \"'s the base branch\": %s", code, e.Summary)
 		}
 	}
 }

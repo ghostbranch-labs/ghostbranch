@@ -119,7 +119,7 @@ func (a *app) syncCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "sync",
 		Short: "Fast-forward the shadow's base branch to public's",
-		Long: `sync fast-forwards the shadow repo's base branch (main unless the public repo uses another default branch) to public's. It never force-pushes: if the shadow's has diverged it stops with exit 4.
+		Long: `sync fast-forwards the shadow repo's base branch (main unless the public repo uses another default branch) to public's. It never force-pushes: if the shadow's base branch has diverged it stops with exit 4.
 Its pushes start the shadow repo's push-triggered workflows, which re-test what public CI already tested,
 so it then cancels those runs (the token needs Actions write on the shadow repo); --no-cancel leaves them running.
 Last, it closes each feature whose public PR merged and whose branch hasn't moved since it was published,
