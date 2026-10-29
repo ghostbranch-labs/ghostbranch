@@ -136,6 +136,113 @@ func TestLoadFactsNamesASharedCommitStably(t *testing.T) {
 	}
 }
 
+// trunkConfig is the overlay config of a pair whose base branch is trunk.
+const trunkConfig = "public: acme/widget\nshadow: acme/widget-shadow\npublic_branch: trunk\n"
+
+// trunkMirror builds a mirror for a pair on trunk, with a stale public main
+// at m. Feature feat-x has commits p and u; public trunk is at p, so p is
+// published and u isn't. The overlay branch holds overlay, or there is none
+// when overlay is nil. The mirror is also the checkout.
+func trunkMirror(t *testing.T, overlay map[string]string) (g *gitx.Git, p, u string) {
+	t.Helper()
+	ctx := context.Background()
+	g = testutil.BareRepo(t, t.TempDir())
+	m := testutil.Commit(t, g, "trunk", "m", map[string]string{"a.txt": "a\n"})
+	for _, r := range []string{"refs/heads/feat-x", "refs/remotes/public/main", "refs/shadow-meta/features/feat-x"} {
+		if err := g.UpdateRef(ctx, r, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p = testutil.Commit(t, g, "feat-x", "p", map[string]string{"f.txt": "published\n"})
+	u = testutil.Commit(t, g, "feat-x", "u", map[string]string{"f.txt": "secret\n"})
+	for r, sha := range map[string]string{"refs/remotes/public/trunk": p, "refs/remotes/shadow/feat-x": u} {
+		if err := g.UpdateRef(ctx, r, sha); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if overlay != nil {
+		o := testutil.Commit(t, g, "ghostbranch", "overlay", overlay)
+		if err := g.UpdateRef(ctx, "refs/remotes/shadow/ghostbranch", o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return g, p, u
+}
+
+// pushedTo checks one push of sha to refs/heads/<branch>, a new branch, and
+// returns the refused refs.
+func pushedTo(t *testing.T, g *gitx.Git, branch, sha string, f guard.Facts) []string {
+	t.Helper()
+	line := guard.Line{LocalRef: "refs/heads/" + branch, LocalSHA: sha, RemoteRef: "refs/heads/" + branch, RemoteSHA: zero}
+	blocks, err := guard.Check(context.Background(), objects{g}, []guard.Line{line}, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var refs []string
+	for _, b := range blocks {
+		refs = append(refs, b.Ref)
+	}
+	return refs
+}
+
+// On a trunk pair the guard checks pushes against public trunk, read from
+// the overlay, never the stale public main beside it.
+func TestGuardUsesBaseBranch(t *testing.T) {
+	t.Parallel()
+	g, p, u := trunkMirror(t, map[string]string{".ghostbranch.yml": trunkConfig})
+	f, err := guard.LoadFacts(context.Background(), g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.PublicMain != p {
+		t.Fatalf("PublicMain %q, want public trunk %q", f.PublicMain, p)
+	}
+	if got := pushedTo(t, g, "release", p, f); got != nil {
+		t.Errorf("a commit in public trunk is published, yet the push was refused: %v", got)
+	}
+	if got := pushedTo(t, g, "trunk", u, f); !reflect.DeepEqual(got, []string{"refs/heads/trunk"}) {
+		t.Errorf("an unpublished feature commit: blocked %v, want refs/heads/trunk", got)
+	}
+}
+
+// Review Focus 5: an overlay the guard can't read is an error, so the hook
+// refuses the push, never a guess at main. An overlay naming a base the
+// mirror doesn't have counts every feature commit as unpublished, as an
+// older guard does on a master pair: it over-blocks, never allows.
+func TestGuardFailsClosedWithoutBase(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	for _, c := range []struct{ what, file, body string }{
+		{"invalid YAML", ".ghostbranch.yml", "public: [acme/widget\n"},
+		{"a key from a newer Ghostbranch", ".ghostbranch.yml", trunkConfig + "from_the_future: 1\n"},
+		{"no .ghostbranch.yml", "README.md", "overlay\n"},
+	} {
+		g, _, _ := trunkMirror(t, map[string]string{c.file: c.body})
+		if f, err := guard.LoadFacts(ctx, g); err == nil {
+			t.Errorf("%s: LoadFacts must fail, got public main %q", c.what, f.PublicMain)
+		}
+	}
+
+	g, p, _ := trunkMirror(t, map[string]string{".ghostbranch.yml": trunkConfig})
+	if err := g.DeleteRef(ctx, "refs/remotes/public/trunk"); err != nil {
+		t.Fatal(err)
+	}
+	// Public main at p: a guard that fell back to main would let p through.
+	if err := g.UpdateRef(ctx, "refs/remotes/public/main", p); err != nil {
+		t.Fatal(err)
+	}
+	f, err := guard.LoadFacts(ctx, g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.PublicMain != "" {
+		t.Fatalf("no public trunk in the mirror, yet PublicMain is %q", f.PublicMain)
+	}
+	if got := pushedTo(t, g, "release", p, f); !reflect.DeepEqual(got, []string{"refs/heads/release"}) {
+		t.Errorf("with no public trunk known: blocked %v, want refs/heads/release", got)
+	}
+}
+
 func TestCheck(t *testing.T) {
 	g, main, feat := mirror(t)
 	ctx := context.Background()

@@ -3,11 +3,13 @@ package guard
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
 	"strings"
 
+	"github.com/ghostbranch-labs/ghostbranch/internal/config"
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 )
@@ -38,7 +40,7 @@ type Facts struct {
 	Names      map[string]bool   // every feature
 	Heads      map[string]string // feature -> shadow head, for features with commits not in public main
 	Commits    map[string]string // unpublished feature commit -> its feature
-	PublicMain string            // public main in the mirror, if known
+	PublicMain string            // the tip of the pair's base branch in the mirror, if known
 	// Archived maps the public branch of each feature handed off to the
 	// public repo (6.5) to that feature: a push to that branch isn't
 	// refused for the feature's name or head. The archive's private
@@ -46,15 +48,24 @@ type Facts struct {
 	Archived map[string]string
 }
 
-// LoadFacts reads features from the engine's mirror, offline. Any git error
-// is returned, so the check fails closed.
+// overlayRef is the shadow's overlay branch in the engine's mirror (the
+// engine's OverlayBranch); its .ghostbranch.yml names the pair's base branch.
+const overlayRef = "refs/remotes/shadow/ghostbranch"
+
+// LoadFacts reads features from the engine's mirror, offline, checked
+// against the pair's base branch. Any git error, or an overlay config it
+// can't read, is returned, so the check fails closed.
 func LoadFacts(ctx context.Context, mirror *gitx.Git) (Facts, error) {
 	f := Facts{Names: map[string]bool{}, Heads: map[string]string{}, Commits: map[string]string{}, Archived: map[string]string{}}
 	metas, err := mirror.Refs(ctx, "refs/shadow-meta/features")
 	if err != nil {
 		return f, err
 	}
-	pm, hasPM, err := mirror.Resolve(ctx, "refs/remotes/public/main")
+	base, err := baseBranch(ctx, mirror)
+	if err != nil {
+		return f, err
+	}
+	pm, hasPM, err := mirror.Resolve(ctx, "refs/remotes/public/"+base)
 	if err != nil {
 		return f, err
 	}
@@ -105,6 +116,34 @@ func LoadFacts(ctx context.Context, mirror *gitx.Git) (Facts, error) {
 		}
 	}
 	return f, nil
+}
+
+// baseBranch reads the pair's base branch from the overlay's .ghostbranch.yml
+// in the mirror: public_branch, or main when the key is missing. A mirror
+// with no overlay branch is main, as before the key existed. An overlay with
+// no config, or one that doesn't parse (a key from a newer Ghostbranch
+// included), is an error, never a guess at main: main may not be the pair's
+// branch at all, and the guard never checks a push against the wrong one.
+func baseBranch(ctx context.Context, mirror *gitx.Git) (string, error) {
+	O, ok, err := mirror.Resolve(ctx, overlayRef)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return config.Config{}.Base(), nil
+	}
+	raw, ok, err := mirror.ShowFile(ctx, O, ".ghostbranch.yml")
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", errors.New("the overlay branch has no .ghostbranch.yml, so the guard can't tell the pair's base branch")
+	}
+	cfg, _, err := config.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("read the pair's base branch from .ghostbranch.yml: %w", err)
+	}
+	return cfg.Base(), nil
 }
 
 // loadArchive reads name's record. A feature handed off to the public repo
