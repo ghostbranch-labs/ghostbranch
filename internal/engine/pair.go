@@ -138,17 +138,22 @@ func (e *Engine) open(ctx context.Context, op string, p workspace.Pair, mutating
 // openBase sets pc.base and checks the public repo still has it. A config
 // that can't be read stops every command but two: doctor reports it in its
 // config check (pc.base stays ""), and init leaves an overlay it can't read
-// to checkAdoptable, which refuses it before any write. Neither checks the
-// branch here: init checks it itself once checkAdoptable has passed, and
-// doctor reports a missing one.
+// to checkAdoptable, which refuses it before any write. Any other error,
+// such as git failing to read the mirror, stops them too. Neither checks
+// the branch here: init checks it itself once checkAdoptable has passed,
+// and doctor reports a missing one.
 func (e *Engine) openBase(ctx context.Context, pc *pairCtx) error {
 	base, err := e.readBase(ctx, pc)
-	switch ce := contract.From(err); {
+	unreadable := false
+	if ce := contract.From(err); ce != nil {
+		unreadable = ce.Code == contract.ConfigInvalid || ce.Code == contract.UpgradeNeeded
+	}
+	switch {
 	case err == nil:
 		pc.base = base
-	case pc.op == "doctor":
+	case pc.op == "doctor" && unreadable:
 		return nil
-	case pc.op == "init" && (ce.Code == contract.ConfigInvalid || ce.Code == contract.UpgradeNeeded):
+	case pc.op == "init" && unreadable:
 		pc.base = defaultBase(pc.public)
 	default:
 		return err
@@ -172,9 +177,13 @@ func (e *Engine) openBase(ctx context.Context, pc *pairCtx) error {
 // baseGone is BASE_BRANCH_CHANGED: the public repo no longer has pc.base,
 // the branch the pair was set up on.
 func baseGone(pc *pairCtx) error {
+	now := " (its default branch is now " + pc.public.DefaultBranch + ")"
+	if pc.public.DefaultBranch == "" {
+		now = ", and GitHub names no default branch"
+	}
 	return contract.New(contract.BaseBranchChanged,
-		"%s no longer has the branch %s this pair was set up on (its default branch is now %s); Ghostbranch doesn't follow a renamed default branch yet. See ghostbranch explain BASE_BRANCH_CHANGED.",
-		pc.pair.Public, pc.base, pc.public.DefaultBranch).
+		"%s no longer has the branch %s this pair was set up on%s; Ghostbranch doesn't follow a renamed default branch yet. See ghostbranch explain BASE_BRANCH_CHANGED.",
+		pc.pair.Public, pc.base, now).
 		WithDetails(map[string]any{"recorded": pc.base, "current": pc.public.DefaultBranch})
 }
 

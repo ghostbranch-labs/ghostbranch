@@ -174,7 +174,10 @@ func (e *Engine) Init(ctx context.Context, opt InitOptions) (res *InitResult, wa
 	if !ok {
 		return res, warns, baseGone(pc)
 	}
-	_, hasOverlay, _ := g.Resolve(ctx, shadowRef(OverlayBranch))
+	_, hasOverlay, err := g.Resolve(ctx, shadowRef(OverlayBranch))
+	if err != nil {
+		return res, warns, internalErr(err, "read the overlay branch")
+	}
 	if !hasOverlay {
 		if err := checkNewBase(p, pc.base); err != nil {
 			return res, warns, err

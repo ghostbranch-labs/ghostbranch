@@ -193,6 +193,9 @@ func (a *app) steps(err error) []contract.Next {
 			// The adopt can't succeed until a person has done steps 1 and 2.
 			return []contract.Next{{Command: a.gb(args...), NeedsHuman: true,
 				Why: "a person first creates the empty private repo and adds it to the token (error.details.steps 1 and 2); then run this to adopt it"}}
+		case contract.BaseBranchChanged:
+			return []contract.Next{{Command: a.gb("explain", string(contract.BaseBranchChanged)), NeedsHuman: true,
+				Why: "the public repo no longer has the branch this pair was set up on, and Ghostbranch doesn't follow a renamed default branch yet; a person moves the pair by hand, as the explanation says"}}
 		case contract.PlanStale:
 			if fs := stringList(ce.Details["features"]); len(fs) > 1 {
 				if pub, _ := ce.Details["public"].(string); pub != "" {

@@ -786,3 +786,14 @@ func TestStaleGateSaysThePlanUpdatesOnlyWhenPRsAreOpen(t *testing.T) {
 		t.Fatalf("stale top, open PRs: %+v", n)
 	}
 }
+
+// BASE_BRANCH_CHANGED needs a person (the registry says so): next points
+// at its explanation, which gives the manual route, rather than nothing.
+func TestNextAfterBaseBranchChanged(t *testing.T) {
+	t.Parallel()
+	a := testApp("status", "--json")
+	next := a.next(contract.New(contract.BaseBranchChanged, "x").WithDetails(map[string]any{"recorded": "trunk", "current": "next"}))
+	if len(next) != 1 || !slices.Equal(next[0].Command, []string{"ghostbranch", "explain", "BASE_BRANCH_CHANGED"}) || !next[0].NeedsHuman || next[0].Why == "" {
+		t.Fatalf("next = %+v", next)
+	}
+}

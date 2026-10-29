@@ -1,8 +1,11 @@
 package engine_test
 
 import (
+	"context"
 	"errors"
 	"maps"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -813,5 +816,50 @@ func TestStartFromBaseAlias(t *testing.T) {
 		if m := h.meta(name); m.Stacked() || m.ForkedAt != "" {
 			t.Fatalf("--from %s: record parent %q, forked_at %q", from, m.Parent, m.ForkedAt)
 		}
+	}
+}
+
+// noDefaultBranch is a forge whose public repo reports no default branch.
+type noDefaultBranch struct{ forge.Forge }
+
+func (f noDefaultBranch) GetRepo(ctx context.Context, full string) (forge.Repo, error) {
+	r, err := f.Forge.GetRepo(ctx, full)
+	if full == publicName {
+		r.DefaultBranch = ""
+	}
+	return r, err
+}
+
+// BASE_BRANCH_CHANGED when GitHub names no default branch: the message
+// says so instead of naming an empty one, and details.current is "".
+func TestBaseBranchChangedWithNoDefault(t *testing.T) {
+	t.Parallel()
+	h := newHarnessOn(t, "trunk")
+	h.init()
+	if err := h.forge.RenameBranch(publicName, "trunk", "next"); err != nil {
+		t.Fatal(err)
+	}
+	h.eng.Forge = noDefaultBranch{h.forge}
+	_, _, err := h.eng.Status(h.ctx, h.pair)
+	ce := wantCode(t, err, contract.BaseBranchChanged)
+	want := "acme/widget no longer has the branch trunk this pair was set up on, and GitHub names no default branch; " +
+		"Ghostbranch doesn't follow a renamed default branch yet. See ghostbranch explain BASE_BRANCH_CHANGED."
+	if ce.Message != want || ce.Details["recorded"] != "trunk" || ce.Details["current"] != "" {
+		t.Fatalf("%q %+v", ce.Message, ce.Details)
+	}
+}
+
+// doctor reports a config it can't read rather than stopping, but a mirror
+// git can't read is an error for doctor too, never a missing base.
+func TestDoctorOpenBaseKeepsInternalErrors(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".git"), []byte("gitdir: "+filepath.Join(dir, "missing")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h := newHarness(t)
+	err := engine.OpenBaseIn(h.eng, h.ctx, "doctor", dir)
+	if codeOf(err) != contract.Internal {
+		t.Fatalf("doctor on an unreadable mirror: %v", err)
 	}
 }
