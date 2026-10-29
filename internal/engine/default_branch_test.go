@@ -2,6 +2,7 @@ package engine_test
 
 import (
 	"errors"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/managed"
+	"github.com/ghostbranch-labs/ghostbranch/internal/plan"
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
 )
 
@@ -361,7 +363,7 @@ func TestAdoptWithAForeignOrUnreadableOverlayWritesNothing(t *testing.T) {
 		_, _, err = h.eng.Init(h.ctx, engine.InitOptions{Public: publicName, Adopt: true})
 		_ = wantCode(t, err, contract.ShadowNotEmpty)
 		after, _ := sh.Refs(h.ctx, "refs")
-		if len(h.pushes) != 0 || len(h.forge.DefaultBranchSets) != 0 || len(after) != len(refs) {
+		if len(h.pushes) != 0 || len(h.forge.DefaultBranchSets) != 0 || !maps.Equal(after, refs) {
 			t.Fatalf("%s: wrote %+v %v %v", name, h.pushes, h.forge.DefaultBranchSets, after)
 		}
 		if _, ok := h.eng.WS.Find(publicName); ok {
@@ -418,5 +420,36 @@ func TestFeatureNameIsNotTheBase(t *testing.T) {
 	_, _, err = h.eng.Promote(h.ctx, h.pair, engine.PromoteOptions{Feature: "feat-x", Branch: "trunk", Mode: "squash", Message: "m", PlanOnly: true})
 	if ce := wantCode(t, err, contract.NameInvalid); ce.Field != "branch" || len(h.pushes) != before {
 		t.Fatalf("promote: %+v", ce)
+	}
+}
+
+// A hand-edited plan can't publish to the base branch, though GitHub's
+// default has moved to another branch: apply re-checks every target with
+// the pair's base, its own and each chain entry's.
+func TestApplyRefusesAPlanTargetingTheBase(t *testing.T) {
+	t.Parallel()
+	h := newHarnessOn(t, "trunk")
+	h.init()
+	testutil.Commit(t, h.pubGit, "develop", "develop work", map[string]string{"dev.txt": "dev\n"})
+	if err := h.forge.SetDefaultBranch(h.ctx, publicName, "develop"); err != nil {
+		t.Fatal(err)
+	}
+	stack := []plan.Entry{{Feature: "feat-x", Publish: plan.Publish{TargetBranch: "feat-x"}}, {Feature: "feat-y", Publish: plan.Publish{TargetBranch: "trunk"}}}
+	for i, tc := range []struct {
+		target string
+		chain  []plan.Entry
+	}{{"trunk", nil}, {"feat-x", stack}} {
+		id := "20261029T120000Z-00000" + string(rune('a'+i))
+		pl := plan.Plan{SchemaVersion: plan.SchemaVersion, ID: id, Pair: plan.Pair{Public: publicName, Shadow: shadowName},
+			Feature: "feat-x", Mode: "squash", Publish: plan.Publish{TargetBranch: tc.target}, Chain: tc.chain}
+		if _, err := plan.Save(h.eng.WS.PlansDir(), pl); err != nil {
+			t.Fatal(err)
+		}
+		before := len(h.pushes)
+		_, _, err := h.eng.Apply(h.ctx, engine.ApplyOptions{Plan: id, Yes: true})
+		ce := wantCode(t, err, contract.NameInvalid)
+		if ce.Field != "plan" || !strings.Contains(ce.Message, `"trunk"`) || len(h.pushes) != before {
+			t.Fatalf("plan %d: %+v (pushes %+v)", i, ce, h.pushes[before:])
+		}
 	}
 }

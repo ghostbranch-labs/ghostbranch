@@ -107,11 +107,8 @@ func (e *Engine) Apply(ctx context.Context, opt ApplyOptions) (res *ApplyResult,
 		return nil, nil, err
 	}
 	// The plan file is local and unsigned: re-check where it would publish.
-	if err := feature.ValidateName(pl.Publish.TargetBranch, "plan", "main"); err != nil {
-		return nil, nil, err
-	}
-	for _, en := range pl.Chain {
-		if err := feature.ValidateName(en.Publish.TargetBranch, "plan", "main"); err != nil {
+	for _, target := range planTargets(pl) {
+		if err := feature.ValidateName(target, "plan", "main"); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -126,7 +123,25 @@ func (e *Engine) Apply(ctx context.Context, opt ApplyOptions) (res *ApplyResult,
 		return nil, nil, err
 	}
 	defer pc.unlock()
+	// Again with the pair's base branch, now it is known: GitHub's default
+	// may be another branch (§ 4.6), so the default-branch check in
+	// applyPlan doesn't cover it.
+	for _, target := range planTargets(pl) {
+		if err := feature.ValidateName(target, "plan", pc.base); err != nil {
+			return nil, nil, err
+		}
+	}
 	return e.apply(ctx, pc, pl, applyOpts{yes: opt.Yes, archive: opt.Archive})
+}
+
+// planTargets is every public branch a plan would publish to: its own
+// target, then each chain entry's.
+func planTargets(pl plan.Plan) []string {
+	out := []string{pl.Publish.TargetBranch}
+	for _, en := range pl.Chain {
+		out = append(out, en.Publish.TargetBranch)
+	}
+	return out
 }
 
 // archivedSummary is the ledger's note of the features an apply archived.
