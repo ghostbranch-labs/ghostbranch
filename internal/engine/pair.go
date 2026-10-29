@@ -177,15 +177,20 @@ func baseGone(pc *pairCtx) error {
 
 // readBase reads the pair's base branch from the overlay's .ghostbranch.yml:
 // public_branch, or main when the key is missing. Before init has made the
-// overlay, it is the public repo's default branch. A config that doesn't
-// parse is an error, never a guess: guessing main would act on the wrong
-// branch.
+// overlay, it is the public repo's default branch for init and doctor (which
+// reports the missing overlay itself); every other command stops there with
+// readConfig's error, so none acts on a branch the pair never recorded. A
+// config that doesn't parse is an error, never a guess: guessing main would
+// act on the wrong branch.
 func (e *Engine) readBase(ctx context.Context, pc *pairCtx) (string, error) {
 	O, ok, err := pc.git.Resolve(ctx, shadowRef(OverlayBranch))
 	if err != nil {
 		return "", internalErr(err, "read the overlay branch")
 	}
 	if !ok {
+		if pc.op != "init" && pc.op != "doctor" {
+			return "", noOverlay(pc)
+		}
 		return defaultBase(pc.public), nil
 	}
 	raw, ok, err := pc.git.ShowFile(ctx, O, ".ghostbranch.yml")
@@ -343,6 +348,12 @@ func mirrorNotUpdated(what string, err error, details map[string]any) contract.W
 		Details: details}
 }
 
+// noOverlay is CONFIG_INVALID for a shadow repo with no overlay branch.
+func noOverlay(pc *pairCtx) error {
+	return contract.New(contract.ConfigInvalid,
+		"shadow repo %s has no %q overlay branch; run ghostbranch init", pc.pair.Shadow, OverlayBranch)
+}
+
 // readConfig reads .ghostbranch.yml from the overlay branch, never from a
 // feature, and checks the overlay branch holds only overlay paths. It
 // returns the config and the overlay commit O.
@@ -353,8 +364,7 @@ func (e *Engine) readConfig(ctx context.Context, pc *pairCtx) (config.Config, st
 		return config.Config{}, "", nil, internalErr(err, "read the overlay branch")
 	}
 	if !ok {
-		return config.Config{}, "", nil, contract.New(contract.ConfigInvalid,
-			"shadow repo %s has no %q overlay branch; run ghostbranch init", pc.pair.Shadow, OverlayBranch)
+		return config.Config{}, "", nil, noOverlay(pc)
 	}
 	raw, ok, err := g.ShowFile(ctx, O, ".ghostbranch.yml")
 	if err != nil || !ok {

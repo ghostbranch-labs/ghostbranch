@@ -70,6 +70,7 @@
         "details": {}
       }
     ],
+    "base_branch": "",
     "update_check": {
       "enabled": false,
       "off_reason": "development build",

@@ -168,7 +168,7 @@ func (e *Engine) archiveTargets(ctx context.Context, pc *pairCtx, name string) (
 				WithDetails(map[string]any{"feature": name, "ref": remoteArchiveRef(name)})}
 		}
 	}
-	if t.gatePR, err = e.Forge.FindOpenPR(ctx, pc.pair.Shadow, gateBranch(name), "main"); err != nil {
+	if t.gatePR, err = e.Forge.FindOpenPR(ctx, pc.pair.Shadow, gateBranch(name), pc.base); err != nil {
 		return nil, &archiveStepError{step: stepGatePR, err: forgeErr(err, "find the gate PR of feature %s", name)}
 	}
 	t.opt = gitx.PushOptions{Atomic: true}

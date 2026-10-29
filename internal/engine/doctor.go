@@ -98,6 +98,9 @@ func (c DoctorCheck) withFix(argv ...string) DoctorCheck {
 // DoctorResult is doctor's data: every check, in DoctorCheckIDs order.
 type DoctorResult struct {
 	Checks []DoctorCheck `json:"checks"`
+	// BaseBranch is the pair's base branch, the public line it works
+	// against; "" when there is no pair or its overlay config can't be read.
+	BaseBranch string `json:"base_branch"`
 	// UpdateCheck is the update checker's state from a fresh look (6.4a).
 	// The CLI sets it; the engine never looks.
 	UpdateCheck *updatecheck.Status `json:"update_check,omitempty"`
@@ -151,6 +154,7 @@ type doctorRun struct {
 	noPair       string // why there is no pair, as a skip reason
 	checkout     string // this checkout's public repo, when that is why there is no pair
 	pc           *pairCtx
+	baseGone     bool // the public repo no longer has pc.base
 	cfg          config.Config
 	O            string
 	shadowChecks string // Checks: read on the shadow, from the token check's probe: forge.AccessNo only when GitHub refused it
@@ -183,6 +187,9 @@ func (e *Engine) Doctor(ctx context.Context, opt DoctorOptions) (*DoctorResult, 
 			return res, contract.Wrap(contract.Interrupted, err, "doctor was interrupted after %d of %d checks", len(res.Checks), len(DoctorCheckIDs))
 		}
 		res.Checks = append(res.Checks, runCheck(ctx, id, run[id]))
+		if d.pc != nil {
+			res.BaseBranch = d.pc.base
+		}
 	}
 	return res, nil
 }

@@ -59,12 +59,12 @@ func (e *Engine) Status(ctx context.Context, p workspace.Pair) (*StatusResult, [
 	if err != nil {
 		return nil, warns, err
 	}
-	m, err := compareMains(ctx, g)
+	m, err := compareMains(ctx, g, pc.base)
 	if err != nil {
-		return nil, warns, internalErr(err, "compare shadow main with public main")
+		return nil, warns, internalErr(err, "compare shadow "+pc.base+" with public "+pc.base)
 	}
 	if m.Public == "" {
-		return nil, warns, internalErr(fmt.Errorf("git: %s does not exist", publicRef("main")), "read public main")
+		return nil, warns, internalErr(fmt.Errorf("git: %s does not exist", publicRef(pc.base)), "read public "+pc.base)
 	}
 	files, err := e.managedFiles(ctx, g, O, cfg)
 	if err != nil {
@@ -150,9 +150,9 @@ func (e *Engine) FeatureShow(ctx context.Context, p workspace.Pair, name string)
 	}
 	res := &FeatureShowResult{Feature: rs[0], Commits: []CommitInfo{}, Ledger: []ledger.Entry{}}
 	if head := res.Feature.Head; head != "" {
-		pm, err := g.MustResolve(ctx, publicRef("main"))
+		pm, err := g.MustResolve(ctx, publicRef(pc.base))
 		if err != nil {
-			return nil, warns, internalErr(err, "read public main")
+			return nil, warns, internalErr(err, "read public "+pc.base)
 		}
 		// Only its own commits: forked_at..head when it records a fork point
 		// (stacked, or moved onto main off a parent), else every commit

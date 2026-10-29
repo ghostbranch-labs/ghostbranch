@@ -97,9 +97,9 @@ type FeatureStartOptions struct {
 }
 
 // FeatureStart creates a feature branch and its metadata ref in one atomic
-// push: from shadow main, or, with From, stacked on another feature's tip.
-// It does not touch the user's checkout, and never writes the parent's
-// record.
+// push: from the shadow repo's copy of the base branch, or, with From,
+// stacked on another feature's tip. It does not touch the user's checkout,
+// and never writes the parent's record.
 func (e *Engine) FeatureStart(ctx context.Context, p workspace.Pair, name string, opts ...FeatureStartOptions) (res *FeatureStartResult, warns []contract.Warning, err error) {
 	var opt FeatureStartOptions
 	if len(opts) > 0 {
@@ -138,23 +138,23 @@ func (e *Engine) FeatureStart(ctx context.Context, p workspace.Pair, name string
 	if err != nil {
 		return nil, warns, err
 	}
-	// A feature started from a stale shadow main would be based on old
-	// code: refuse, before anything is created (--plan too).
-	mn, err := compareMains(ctx, pc.git)
+	// A feature started from a stale shadow base branch would be based on
+	// old code: refuse, before anything is created (--plan too).
+	mn, err := compareMains(ctx, pc.git, pc.base)
 	if err != nil {
-		return nil, warns, internalErr(err, "compare shadow main with public main")
+		return nil, warns, internalErr(err, "compare shadow "+pc.base+" with public "+pc.base)
 	}
 	if mn.Behind > 0 {
 		return nil, warns, contract.New(contract.ShadowBehindError,
-			"shadow main is %d commit(s) behind public main, so a feature started now would be based on old code; run ghostbranch sync --repo %s, then start the feature again", mn.Behind, p.Public).
+			"shadow %s is %d commit(s) behind public %s, so a feature started now would be based on old code; run ghostbranch sync --repo %s, then start the feature again", pc.base, mn.Behind, pc.base, p.Public).
 			WithDetails(map[string]any{"public_main": mn.Public, "shadow_main": mn.Shadow})
 	}
 	if err := e.checkNameFree(ctx, pc, name); err != nil {
 		return nil, warns, err
 	}
-	shadowMain, err := pc.git.MustResolve(ctx, shadowRef("main"))
+	shadowMain, err := pc.git.MustResolve(ctx, shadowRef(pc.base))
 	if err != nil {
-		return nil, warns, internalErr(err, "read shadow main")
+		return nil, warns, internalErr(err, "read shadow "+pc.base)
 	}
 	base, parent, forkedAt := shadowMain, feature.MainParent, ""
 	if from != "" {
@@ -192,7 +192,7 @@ func (e *Engine) FeatureStart(ctx context.Context, p workspace.Pair, name string
 	warns = addWarnings(warns, e.updateMirror(ctx, pc.git, shadowRef(name), base)...)
 	warns = addWarnings(warns, e.updateMirror(ctx, pc.git, metaRef(name), metaSHA)...)
 	if from != "" {
-		if pm, err := pc.git.MustResolve(ctx, publicRef("main")); err == nil {
+		if pm, err := pc.git.MustResolve(ctx, publicRef(pc.base)); err == nil {
 			res.gateFirst = e.firstToGate(ctx, pc, from, pm, O)
 		}
 	}

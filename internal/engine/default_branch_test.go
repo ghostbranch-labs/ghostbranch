@@ -68,9 +68,8 @@ func TestOpenMissingKeyMeansMain(t *testing.T) {
 // before it reaches the missing ref.
 func TestBaseBranchChangedStopsEveryCommand(t *testing.T) {
 	t.Parallel()
-	h := newHarness(t)
+	h := newHarnessOn(t, "trunk")
 	h.init()
-	h.retargetTo("trunk")
 	h.startFeature("feat-x", map[string]string{"x.txt": "x\n"}) // so gate gets as far as open
 	if err := h.forge.RenameBranch(publicName, "trunk", "next"); err != nil {
 		t.Fatal(err)
@@ -99,11 +98,12 @@ func TestBaseBranchChangedStopsEveryCommand(t *testing.T) {
 	if len(h.pushes) != before {
 		t.Fatalf("pushes after the rename: %+v", h.pushes[before:])
 	}
-	// doctor reports it rather than stopping.
+	// doctor reports it as a failed pair check rather than stopping.
 	h.asApp()
-	res, err := h.eng.Doctor(h.ctx, doctorOpts())
-	if codeOf(err) == contract.BaseBranchChanged || res == nil {
-		t.Fatalf("doctor: %v", err)
+	_, c := h.doctor(doctorOpts())
+	wantStatus(t, c["pair"], engine.DoctorFail)
+	if !strings.Contains(c["pair"].Message, "no longer has the branch trunk") || c["pair"].Fix != "ghostbranch explain BASE_BRANCH_CHANGED" {
+		t.Fatalf("pair check: %+v", c["pair"])
 	}
 }
 
@@ -450,6 +450,188 @@ func TestApplyRefusesAPlanTargetingTheBase(t *testing.T) {
 		ce := wantCode(t, err, contract.NameInvalid)
 		if ce.Field != "plan" || !strings.Contains(ce.Message, `"trunk"`) || len(h.pushes) != before {
 			t.Fatalf("plan %d: %+v (pushes %+v)", i, ce, h.pushes[before:])
+		}
+	}
+}
+
+// prBase is the base of the newest PR in full whose head is head, "" when
+// there is none.
+func (h *harness) prBase(full, head string) string {
+	h.t.Helper()
+	base := ""
+	for _, pr := range h.forge.PRs(full) {
+		if pr.Head == head {
+			base = pr.Base
+		}
+	}
+	return base
+}
+
+// noPRBase fails the test if any PR in either repo has base branch.
+func (h *harness) noPRBase(branch string) {
+	h.t.Helper()
+	for _, full := range []string{publicName, shadowName} {
+		for _, pr := range h.forge.PRs(full) {
+			if pr.Base == branch {
+				h.t.Fatalf("%s PR #%d (%s) has base %s", full, pr.Number, pr.Head, branch)
+			}
+		}
+	}
+}
+
+// noPushTo fails the test if any push from the from'th on writes ref.
+func (h *harness) noPushTo(from int, ref string) {
+	h.t.Helper()
+	for _, p := range h.pushes[from:] {
+		for _, s := range p.refspecs {
+			if strings.HasSuffix(s, ":"+ref) {
+				h.t.Fatalf("%s pushed %s", p.op, s)
+			}
+		}
+	}
+}
+
+// loopOn runs one feature through the whole loop on a pair whose base
+// branch is base: start, gate, promote --plan and apply; then GitHub merges
+// the public PR, landing the published commit on base, and sync closes the
+// feature. Every PR base and the record's base must be base.
+func (h *harness) loopOn(base, name string) {
+	h.t.Helper()
+	h.startFeature(name, map[string]string{name + ".txt": name + "\n"})
+	h.gateFeature(name)
+	if got := h.prBase(shadowName, "ghostbranch-gate/"+name); got != base {
+		h.t.Fatalf("gate PR base = %q, want %s", got, base)
+	}
+	pres, err := promote(h, engine.PromoteOptions{Feature: name, Mode: "squash", Message: "Add " + name, PlanOnly: true})
+	if err != nil || pres.Plan == nil || len(pres.PRs) != 1 || pres.PRs[0].Base != base {
+		h.t.Fatalf("promote --plan = %+v %v", pres, err)
+	}
+	ares, _ := h.applyPlan(engine.ApplyOptions{Plan: pres.Plan.ID, Yes: true})
+	if len(ares.PRs) != 1 || ares.PRs[0].Base != base {
+		h.t.Fatalf("apply PRs = %+v", ares.PRs)
+	}
+	if got := h.prBase(publicName, name); got != base {
+		h.t.Fatalf("public PR base = %q, want %s", got, base)
+	}
+	if m := h.meta(name); m.Promoted == nil || m.Promoted.Base != base {
+		h.t.Fatalf("promoted = %+v", m.Promoted)
+	}
+	h.forge.SetPRMerged(publicName, ares.PublicPR)
+	if err := h.pubGit.UpdateRef(h.ctx, "refs/heads/"+base, h.pubTip(name)); err != nil {
+		h.t.Fatal(err)
+	}
+	res, _ := h.syncOK(engine.SyncOptions{})
+	if len(res.Closed) != 1 || res.Closed[0].Name != name {
+		h.t.Fatalf("closed = %+v", res.Closed)
+	}
+	if got, _ := h.shadowGit().MustResolve(h.ctx, "refs/heads/"+base); got != h.pubTip(base) {
+		h.t.Fatalf("shadow %s = %s, want public %s", base, got, h.pubTip(base))
+	}
+}
+
+// The whole single-feature loop on a repo whose only branch is trunk.
+func TestDefaultBranchLoop(t *testing.T) {
+	t.Parallel()
+	h := newHarnessOn(t, "trunk")
+	h.init()
+	h.loopOn("trunk", "feat-a")
+	h.noPRBase("main")
+	h.noPushTo(0, "refs/heads/main")
+}
+
+// Review Focus 1: a stale main next to a default master may be mirrored,
+// but nothing targets it: no PR base, push, comparison or sync.
+func TestDefaultBranchStaleMainIsNeverTargeted(t *testing.T) {
+	t.Parallel()
+	h := newHarnessOn(t, "master")
+	if err := h.pubGit.UpdateRef(h.ctx, "refs/heads/main", h.pubTip("master")); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Commit(t, h.pubGit, "master", "master only", map[string]string{".github/workflows/extra.yml": "name: extra\non: [pull_request]\n" +
+		"jobs:\n  t:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo ${{ secrets.MASTER_ONLY }}\n"})
+	h.init()
+	before := len(h.pushes)
+	h.loopOn("master", "feat-a")
+
+	// audit reads master's workflows, not stale main's.
+	ares, _, err := h.eng.Audit(h.ctx, h.pair)
+	if err != nil || !slices.ContainsFunc(ares.Secrets.Referenced, func(r engine.SecretRef) bool { return r.Name == "MASTER_ONLY" }) {
+		t.Fatalf("audit = %+v %v", ares, err)
+	}
+	// doctor and status count shadow master behind public master.
+	tip := testutil.Commit(t, h.pubGit, "master", "upstream", map[string]string{"up.txt": "1\n"})
+	h.asApp()
+	dres, c := h.doctor(doctorOpts())
+	wantStatus(t, c["pair"], engine.DoctorWarn)
+	if dres.BaseBranch != "master" || !strings.Contains(c["pair"].Message, "shadow master is 1 commit(s) behind public master") {
+		t.Fatalf("doctor: %q %+v", dres.BaseBranch, c["pair"])
+	}
+	st, warns := h.status(contract.ShadowBehind)
+	if st.PublicMain != tip || !st.ShadowBehind || warns[0].Details["behind"] != 1 ||
+		warns[0].Message != "shadow master is 1 commit(s) behind public master; run ghostbranch sync --repo acme/widget" {
+		t.Fatalf("status = %+v %+v", st, warns)
+	}
+	// sync.branches is [master]: public main moving doesn't move shadow main.
+	staleShadow, _ := h.shadowGit().MustResolve(h.ctx, "refs/heads/main")
+	testutil.Commit(t, h.pubGit, "main", "main moves", map[string]string{"m.txt": "1\n"})
+	res, _ := h.syncOK(engine.SyncOptions{})
+	if res.PublicMain != tip || res.ShadowMainAfter != tip || len(res.Branches) != 1 || res.Branches[0].Name != "master" {
+		t.Fatalf("sync = %+v", res)
+	}
+	if got, _ := h.shadowGit().MustResolve(h.ctx, "refs/heads/main"); got != staleShadow {
+		t.Fatalf("shadow main moved: %s, was %s", got, staleShadow)
+	}
+	h.noPRBase("main")
+	h.noPushTo(before, "refs/heads/main")
+}
+
+// doctor's pair check names the base branch: ok on a trunk pair, failed
+// once trunk is gone, and a warning on a pair kept on main whose public
+// default is now develop.
+func TestDoctorBaseBranch(t *testing.T) {
+	t.Parallel()
+	h := newHarnessOn(t, "trunk")
+	h.init()
+	h.asApp()
+	res, c := h.doctor(doctorOpts())
+	wantStatus(t, c["pair"], engine.DoctorOK)
+	if res.BaseBranch != "trunk" {
+		t.Fatalf("base_branch = %q", res.BaseBranch)
+	}
+	if err := h.forge.RenameBranch(publicName, "trunk", "main"); err != nil {
+		t.Fatal(err)
+	}
+	res, c = h.doctor(doctorOpts())
+	wantStatus(t, c["pair"], engine.DoctorFail)
+	if res.BaseBranch != "trunk" || !strings.Contains(c["pair"].Message, "acme/widget no longer has the branch trunk this pair was set up on (its default branch is now main)") ||
+		c["pair"].Fix != "ghostbranch explain BASE_BRANCH_CHANGED" {
+		t.Fatalf("renamed: %q %+v", res.BaseBranch, c["pair"])
+	}
+
+	k := newHarness(t)
+	k.init()
+	testutil.Commit(t, k.pubGit, "develop", "develop work", map[string]string{"dev.txt": "dev\n"})
+	if err := k.forge.SetDefaultBranch(k.ctx, publicName, "develop"); err != nil {
+		t.Fatal(err)
+	}
+	k.asApp()
+	res, c = k.doctor(doctorOpts())
+	wantStatus(t, c["pair"], engine.DoctorWarn)
+	if res.BaseBranch != "main" || !strings.Contains(c["pair"].Message, "develop") || !strings.Contains(c["pair"].Message, "main") {
+		t.Fatalf("kept pair: %q %+v", res.BaseBranch, c["pair"])
+	}
+}
+
+// A feature can't take the base branch's name, under --plan too.
+func TestFeatureStartRefusesBaseName(t *testing.T) {
+	t.Parallel()
+	h := newHarnessOn(t, "trunk")
+	h.init()
+	for _, dry := range []bool{true, false} {
+		h.eng.DryRun = dry
+		_, _, err := h.eng.FeatureStart(h.ctx, h.pair, "trunk")
+		if ce := wantCode(t, err, contract.NameInvalid); ce.Field != "name" || !strings.Contains(ce.Message, `"trunk"`) {
+			t.Fatalf("dry run %v: %+v", dry, ce)
 		}
 	}
 }

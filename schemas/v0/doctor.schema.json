@@ -3,13 +3,14 @@
   "title": "doctor data",
   "type": "object",
   "additionalProperties": false,
-  "required": ["checks"],
+  "required": ["checks", "base_branch"],
   "properties": {
     "checks": {
       "description": "every check, in order: tools, token, app, pair, guard, state, ci (fewer only when doctor was interrupted)",
       "type": "array", "maxItems": 7,
       "items": { "$ref": "#/$defs/check" }
     },
+    "base_branch": { "description": "the pair's base branch, the public branch it works against: public_branch from the overlay config, main when the key is missing; \"\" when there is no pair or its overlay config can't be read", "type": "string" },
     "update_check": {
       "description": "the update checker (6.4a): whether it is on and what a fresh look found. The CLI always sets it; the engine's own result lacks it",
       "type": "object", "additionalProperties": false,

@@ -403,7 +403,7 @@ func (e *Engine) closeWith(ctx context.Context, pc *pairCtx, r FeatureReport, t 
 	sh := pc.pair.Shadow
 	res := &FeatureCloseResult{Feature: r.Name, State: r.State, Deleted: map[string]string{}, NeedsConsole: !ClosableWithoutConsole(r),
 		Reparented: []string{}}
-	pr, err := e.Forge.FindOpenPR(ctx, sh, gateBranch(r.Name), "main")
+	pr, err := e.Forge.FindOpenPR(ctx, sh, gateBranch(r.Name), pc.base)
 	if err != nil {
 		return nil, nil, forgeErr(err, "find the gate PR of feature %s", r.Name)
 	}

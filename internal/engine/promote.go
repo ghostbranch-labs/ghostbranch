@@ -190,9 +190,9 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	if !ok {
 		return res, warns, contract.New(contract.FeatureNotFound, "feature branch %q is gone from %s", m.Branch, p.Shadow).WithField("feature")
 	}
-	pm, err := g.MustResolve(ctx, publicRef("main"))
+	pm, err := g.MustResolve(ctx, publicRef(pc.base))
 	if err != nil {
-		return res, warns, internalErr(err, "read public main")
+		return res, warns, internalErr(err, "read public "+pc.base)
 	}
 	// A feature whose PR is open is updated, not published again: read the
 	// PR now. Commits someone pushed to it stop the promote before any CI
@@ -492,7 +492,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	}
 	pub := plan.Publish{Commit: P, Tree: T, Parent: pubParent, TargetBranch: branch, PR: plan.PR{Title: title, Body: body},
 		Commits: chain, DroppedEmpty: dropped}
-	prs := []plan.StackPR{{Feature: opt.Feature, Base: "main"}}
+	prs := []plan.StackPR{{Feature: opt.Feature, Base: pc.base}}
 	if gu != nil {
 		pub.Update, pub.Style, pub.ReplaceReason, pub.ExpectedHead = true, gu.Style, planReason(gu.Style, gu.Reason, forcedReason(upd, &m, mode, false)), gu.Head
 		if gu.Style == plan.StyleReplace {
@@ -520,7 +520,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 		}
 		if gu != nil {
 			e.previewUpdate(ctx, pc, pv, branch, gu.Head, P, gu.PR, pl.Typed)
-		} else if err := e.previewPublish(ctx, pc, pv, opt.Feature, publishedPlan(m), branch, "main", P); err != nil {
+		} else if err := e.previewPublish(ctx, pc, pv, opt.Feature, publishedPlan(m), branch, pc.base, P); err != nil {
 			return res, warns, err
 		}
 		res.Preview = pv

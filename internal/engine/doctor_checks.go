@@ -455,20 +455,33 @@ func (d *doctorRun) pairCheck(ctx context.Context) DoctorCheck {
 	if err != nil {
 		return fail("the overlay's .ghostbranch.yml: " + contract.From(err).Message)
 	}
+	// The config read, so pc.base is set. A base branch the public repo no
+	// longer has fails the pair, and the checks that need it skip.
+	_, there, err := pc.git.Resolve(ctx, publicRef(pc.base))
+	if err != nil {
+		return fail("couldn't read public " + pc.base + " in the local mirror: " + err.Error())
+	}
+	if !there {
+		d.baseGone = true
+		return fail(contract.From(baseGone(pc)).Message, "ghostbranch", "explain", string(contract.BaseBranchChanged))
+	}
 	d.cfg, d.O = cfg, O
 	var v verdict
 	if pub.Private {
 		v.add(DoctorWarn, p.Public+" is private; Ghostbranch is meant for public repos")
 	}
-	m, err := compareMains(ctx, pc.git)
+	if def := pc.public.DefaultBranch; def != "" && def != pc.base {
+		v.add(DoctorWarn, fmt.Sprintf("%s's default branch is %s, but this pair works on %s, the branch it was set up on; Ghostbranch keeps using %s", p.Public, def, pc.base, pc.base))
+	}
+	m, err := compareMains(ctx, pc.git, pc.base)
 	switch {
 	case err != nil:
-		v.add(DoctorFail, "couldn't compare shadow main with public main: "+err.Error())
+		v.add(DoctorFail, fmt.Sprintf("couldn't compare shadow %s with public %s: %v", pc.base, pc.base, err))
 	case m.Shadow == "":
-		v.add(DoctorWarn, "the shadow repo has no main branch", "ghostbranch", "sync", "--repo", p.Public)
+		v.add(DoctorWarn, "the shadow repo has no "+pc.base+" branch", "ghostbranch", "sync", "--repo", p.Public)
 	case m.Behind > 0:
 		det["behind"] = m.Behind
-		v.add(DoctorWarn, fmt.Sprintf("shadow main is %d commit(s) behind public main", m.Behind), "ghostbranch", "sync", "--repo", p.Public)
+		v.add(DoctorWarn, fmt.Sprintf("shadow %s is %d commit(s) behind public %s", pc.base, m.Behind, pc.base), "ghostbranch", "sync", "--repo", p.Public)
 	}
 	files, err := e.managedFiles(ctx, pc.git, O, cfg)
 	if err != nil {
@@ -480,7 +493,7 @@ func (d *doctorRun) pairCheck(ctx context.Context) DoctorCheck {
 		}
 	}
 	return v.result(fmt.Sprintf("%s (public) and %s (private) are reachable, and the overlay and its config are valid", p.Public, p.Shadow),
-		"; shadow main and the managed files are current", det)
+		"; shadow "+pc.base+" and the managed files are current", det)
 }
 
 // clones reports whether any remote URL names public.
@@ -615,9 +628,12 @@ func (d *doctorRun) state(ctx context.Context) DoctorCheck {
 		}
 	}
 	tail := "; the records are readable, none is newer than this binary, and no gate job has been pending for over an hour"
-	if d.pc == nil {
+	switch {
+	case d.pc == nil:
 		tail += " (features not checked: no readable pair)"
-	} else {
+	case d.baseGone:
+		tail += " (features not checked: " + d.pair.Public + " no longer has the pair's base branch " + d.pc.base + ", see pair)"
+	default:
 		rs, _, err := e.surveyShown(ctx, d.pc)
 		if err != nil {
 			v.add(DoctorFail, "the features of "+d.pair.Public+" couldn't be listed: "+contract.From(err).Message)

@@ -88,18 +88,18 @@ func (e *Engine) auditInto(ctx context.Context, pc *pairCtx, cfg config.Config, 
 func (e *Engine) audit(ctx context.Context, pc *pairCtx, cfg config.Config, O string) (*AuditResult, []contract.Warning, error) {
 	g := pc.git
 	names := guardNames(pc)
-	base, ok, err := g.Resolve(ctx, shadowRef("main"))
+	base, ok, err := g.Resolve(ctx, shadowRef(pc.base))
 	if err != nil {
-		return nil, nil, internalErr(err, "read shadow main")
+		return nil, nil, internalErr(err, "read shadow "+pc.base)
 	}
 	if !ok {
-		if base, err = g.MustResolve(ctx, publicRef("main")); err != nil {
-			return nil, nil, internalErr(err, "read public main")
+		if base, err = g.MustResolve(ctx, publicRef(pc.base)); err != nil {
+			return nil, nil, internalErr(err, "read public "+pc.base)
 		}
 	}
 	mainEntries, err := g.ListTree(ctx, base)
 	if err != nil {
-		return nil, nil, internalErr(err, "list shadow main")
+		return nil, nil, internalErr(err, "list shadow "+pc.base)
 	}
 	oEntries, err := g.ListTree(ctx, O)
 	if err != nil {

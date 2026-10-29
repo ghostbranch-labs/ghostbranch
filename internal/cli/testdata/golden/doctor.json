@@ -117,6 +117,7 @@
         }
       }
     ],
+    "base_branch": "main",
     "update_check": {
       "enabled": false,
       "off_reason": "development build",
