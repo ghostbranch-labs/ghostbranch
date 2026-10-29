@@ -64,7 +64,7 @@ func (e *Engine) FeatureAbandon(ctx context.Context, p workspace.Pair, name stri
 		}
 		e.record("feature abandon", &p, name, "", summary, err)
 	}()
-	if err := feature.ValidateName(name, "feature"); err != nil {
+	if err := feature.ValidateName(name, "feature", "main"); err != nil {
 		return nil, nil, err
 	}
 	pc, err := e.open(ctx, "feature abandon", p, true)
@@ -140,7 +140,7 @@ func (e *Engine) FeatureClose(ctx context.Context, p workspace.Pair, name string
 			ent.Approval = appr
 		})
 	}()
-	if err := feature.ValidateName(name, "feature"); err != nil {
+	if err := feature.ValidateName(name, "feature", "main"); err != nil {
 		return nil, nil, err
 	}
 	pc, err := e.open(ctx, "feature close", p, true)

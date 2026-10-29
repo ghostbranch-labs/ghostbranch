@@ -52,7 +52,7 @@ func ParseJob(id string) (JobRef, error) {
 		return JobRef{}, bad
 	}
 	f, c := rest[:i], rest[i+1:]
-	if !jobCandidate.MatchString(c) || feature.ValidateName(f, "job") != nil {
+	if !jobCandidate.MatchString(c) || feature.ValidateName(f, "job", "main") != nil {
 		return JobRef{}, bad
 	}
 	return JobRef{Feature: f, Candidate: c}, nil

@@ -116,11 +116,11 @@ func (e *Engine) FeatureStart(ctx context.Context, p workspace.Pair, name string
 		}
 		e.record("feature start", &p, name, "", summary, err)
 	}()
-	if err := feature.ValidateName(name, "name"); err != nil {
+	if err := feature.ValidateName(name, "name", "main"); err != nil {
 		return nil, nil, err
 	}
 	if from != "" {
-		if err := feature.ValidateName(from, "from"); err != nil {
+		if err := feature.ValidateName(from, "from", "main"); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -129,6 +129,11 @@ func (e *Engine) FeatureStart(ctx context.Context, p workspace.Pair, name string
 		return nil, nil, err
 	}
 	defer pc.unlock()
+	// The name was checked before the pair was read; the base branch's name
+	// is reserved too, as the shadow repo has a branch of that name.
+	if err := feature.ValidateName(name, "name", pc.base); err != nil {
+		return nil, nil, err
+	}
 	_, O, warns, err := e.readConfig(ctx, pc)
 	if err != nil {
 		return nil, warns, err

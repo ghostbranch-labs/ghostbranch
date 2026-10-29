@@ -107,11 +107,11 @@ func (e *Engine) Apply(ctx context.Context, opt ApplyOptions) (res *ApplyResult,
 		return nil, nil, err
 	}
 	// The plan file is local and unsigned: re-check where it would publish.
-	if err := feature.ValidateName(pl.Publish.TargetBranch, "plan"); err != nil {
+	if err := feature.ValidateName(pl.Publish.TargetBranch, "plan", "main"); err != nil {
 		return nil, nil, err
 	}
 	for _, en := range pl.Chain {
-		if err := feature.ValidateName(en.Publish.TargetBranch, "plan"); err != nil {
+		if err := feature.ValidateName(en.Publish.TargetBranch, "plan", "main"); err != nil {
 			return nil, nil, err
 		}
 	}

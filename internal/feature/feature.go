@@ -351,8 +351,10 @@ func StateOf(in StateInput) State {
 var nameChars = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
 
 // ValidateName checks a feature or public branch name. field names the
-// input in the error.
-func ValidateName(name, field string) error {
+// input in the error. base is the pair's base branch, reserved like main:
+// a feature of that name would collide with the shadow's copy of it.
+// Callers with no pair yet pass main.
+func ValidateName(name, field, base string) error {
 	bad := func(why string) error {
 		return contract.New(contract.NameInvalid, "invalid name %q: %s", name, why).WithField(field)
 	}
@@ -369,7 +371,7 @@ func ValidateName(name, field string) error {
 		return bad("no path component may start with '.'")
 	case strings.Contains(name, ".lock/"):
 		return bad("no path component may end with '.lock'")
-	case name == "main" || name == "HEAD" || name == "ghostbranch" || strings.HasPrefix(name, "ghostbranch/") || strings.HasPrefix(name, "ghostbranch-"):
+	case name == "main" || name == base || name == "HEAD" || name == "ghostbranch" || strings.HasPrefix(name, "ghostbranch/") || strings.HasPrefix(name, "ghostbranch-"):
 		return bad("this name is reserved")
 	}
 	return nil

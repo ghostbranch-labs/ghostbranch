@@ -54,7 +54,7 @@ func (e *Engine) FeatureFold(ctx context.Context, p workspace.Pair, opt FoldOpti
 			}
 		})
 	}()
-	if err := feature.ValidateName(name, "feature"); err != nil {
+	if err := feature.ValidateName(name, "feature", "main"); err != nil {
 		return nil, nil, err
 	}
 	pc, err := e.open(ctx, "feature fold", p, true)

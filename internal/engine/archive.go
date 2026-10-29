@@ -372,7 +372,7 @@ func (e *Engine) FeatureArchive(ctx context.Context, p workspace.Pair, name stri
 			}
 		})
 	}()
-	if err := feature.ValidateName(name, "feature"); err != nil {
+	if err := feature.ValidateName(name, "feature", "main"); err != nil {
 		return nil, nil, err
 	}
 	pc, err := e.open(ctx, "feature archive", p, true)

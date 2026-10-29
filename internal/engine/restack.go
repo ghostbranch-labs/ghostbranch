@@ -77,11 +77,11 @@ func (e *Engine) FeatureRestack(ctx context.Context, p workspace.Pair, opt Resta
 		}
 		e.record("feature restack", &p, name, "", summary, err)
 	}()
-	if err := feature.ValidateName(name, "feature"); err != nil {
+	if err := feature.ValidateName(name, "feature", "main"); err != nil {
 		return nil, nil, err
 	}
 	if opt.Onto != "" && opt.Onto != "main" {
-		if err := feature.ValidateName(opt.Onto, "onto"); err != nil {
+		if err := feature.ValidateName(opt.Onto, "onto", "main"); err != nil {
 			return nil, nil, err
 		}
 	}

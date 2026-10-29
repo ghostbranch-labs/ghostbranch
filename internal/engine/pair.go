@@ -139,7 +139,8 @@ func (e *Engine) open(ctx context.Context, op string, p workspace.Pair, mutating
 // that can't be read stops every command but two: doctor reports it in its
 // config check (pc.base stays ""), and init leaves an overlay it can't read
 // to checkAdoptable, which refuses it before any write. Neither checks the
-// branch: init sets the pair up, and doctor reports a missing one itself.
+// branch here: init checks it itself once checkAdoptable has passed, and
+// doctor reports a missing one.
 func (e *Engine) openBase(ctx context.Context, pc *pairCtx) error {
 	base, err := e.readBase(ctx, pc)
 	switch ce := contract.From(err); {
@@ -160,12 +161,18 @@ func (e *Engine) openBase(ctx context.Context, pc *pairCtx) error {
 		return internalErr(err, "read public "+pc.base)
 	}
 	if !ok {
-		return contract.New(contract.BaseBranchChanged,
-			"%s no longer has the branch %s this pair was set up on (its default branch is now %s); Ghostbranch doesn't follow a renamed default branch yet. See ghostbranch explain BASE_BRANCH_CHANGED.",
-			pc.pair.Public, pc.base, pc.public.DefaultBranch).
-			WithDetails(map[string]any{"recorded": pc.base, "current": pc.public.DefaultBranch})
+		return baseGone(pc)
 	}
 	return nil
+}
+
+// baseGone is BASE_BRANCH_CHANGED: the public repo no longer has pc.base,
+// the branch the pair was set up on.
+func baseGone(pc *pairCtx) error {
+	return contract.New(contract.BaseBranchChanged,
+		"%s no longer has the branch %s this pair was set up on (its default branch is now %s); Ghostbranch doesn't follow a renamed default branch yet. See ghostbranch explain BASE_BRANCH_CHANGED.",
+		pc.pair.Public, pc.base, pc.public.DefaultBranch).
+		WithDetails(map[string]any{"recorded": pc.base, "current": pc.public.DefaultBranch})
 }
 
 // readBase reads the pair's base branch from the overlay's .ghostbranch.yml:

@@ -55,7 +55,7 @@ func (e *Engine) FeaturePull(ctx context.Context, p workspace.Pair, opt PullOpti
 		}
 		e.record("feature pull", &p, name, "", summary, err)
 	}()
-	if err := feature.ValidateName(name, "feature"); err != nil {
+	if err := feature.ValidateName(name, "feature", "main"); err != nil {
 		return nil, nil, err
 	}
 	pc, err := e.open(ctx, "feature pull", p, true)

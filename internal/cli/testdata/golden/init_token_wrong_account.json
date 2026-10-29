@@ -6,6 +6,7 @@
   "data": {
     "public": "acme/widget",
     "shadow": "acme/widget-shadow",
+    "base_branch": "",
     "created_shadow": false,
     "adopted": false,
     "resumed": false,

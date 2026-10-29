@@ -37,6 +37,7 @@ const DefaultSyncSchedule = "23 */6 * * *"
 type InitResult struct {
 	Public           string           `json:"public"`
 	Shadow           string           `json:"shadow"`
+	BaseBranch       string           `json:"base_branch"` // the overlay's, else GitHub's default; "" if init stopped first
 	CreatedShadow    bool             `json:"created_shadow"`
 	Adopted          bool             `json:"adopted"`
 	Resumed          bool             `json:"resumed"`
@@ -123,6 +124,12 @@ func (e *Engine) Init(ctx context.Context, opt InitOptions) (res *InitResult, wa
 	}
 
 	if !exists {
+		// A new shadow repo gets a new overlay, set up on the public
+		// default branch.
+		res.BaseBranch = defaultBase(pub)
+		if err := checkNewBase(p, res.BaseBranch); err != nil {
+			return res, warns, err
+		}
 		if e.DryRun {
 			res.CreatedShadow = true // what the run would do
 			return res, warns, e.previewNewShadow(ctx, p, pub, registered, res)
@@ -151,16 +158,31 @@ func (e *Engine) Init(ctx context.Context, opt InitOptions) (res *InitResult, wa
 	defer pc.unlock()
 	g := pc.git
 
-	publicMain, ok, err := g.Resolve(ctx, publicRef("main"))
+	// checkAdoptable first: until it passes, pc.base may come from an
+	// overlay that isn't this pair's, or be GitHub's default because the
+	// overlay couldn't be read.
+	if err := e.checkAdoptable(ctx, pc); err != nil {
+		return res, warns, err
+	}
+	res.BaseBranch = pc.base
+	// open doesn't check the base for init: a resume or an adopt stops here
+	// when the branch the overlay records is gone.
+	publicMain, ok, err := g.Resolve(ctx, publicRef(pc.base))
 	if err != nil {
-		return res, warns, internalErr(err, "read public main")
+		return res, warns, internalErr(err, "read public "+pc.base)
 	}
 	if !ok {
-		return res, warns, contract.New(contract.ForgeError, "public repo %s has no main branch", p.Public)
+		return res, warns, baseGone(pc)
+	}
+	_, hasOverlay, _ := g.Resolve(ctx, shadowRef(OverlayBranch))
+	if !hasOverlay {
+		if err := checkNewBase(p, pc.base); err != nil {
+			return res, warns, err
+		}
 	}
 	entries, err := g.ListTree(ctx, publicMain)
 	if err != nil {
-		return res, warns, internalErr(err, "list public main")
+		return res, warns, internalErr(err, "list public "+pc.base)
 	}
 	set := overlay.NewSet()
 	var clash []string
@@ -171,18 +193,14 @@ func (e *Engine) Init(ctx context.Context, opt InitOptions) (res *InitResult, wa
 	}
 	if len(clash) > 0 {
 		return res, warns, contract.New(contract.OverlayCollision,
-			"public main already has paths Ghostbranch reserves for the overlay: %s", strings.Join(clash, ", ")).
+			"public %s already has paths Ghostbranch reserves for the overlay: %s", pc.base, strings.Join(clash, ", ")).
 			WithDetails(map[string]any{"paths": clash})
 	}
-	if err := e.checkAdoptable(ctx, pc); err != nil {
-		return res, warns, err
-	}
 
-	specs, leases, err := e.missingMirrorRefs(ctx, g, res, opt.Adopt)
+	specs, leases, err := e.missingMirrorRefs(ctx, g, res, pc.base, opt.Adopt)
 	if err != nil {
 		return res, warns, err
 	}
-	_, hasOverlay, _ := g.Resolve(ctx, shadowRef(OverlayBranch))
 	if hasOverlay && opt.Schedule != "" {
 		if err := e.checkSchedule(ctx, pc, opt.Schedule); err != nil {
 			return res, warns, err
@@ -384,11 +402,11 @@ func (e *Engine) checkAdoptable(ctx context.Context, pc *pairCtx) error {
 	return nil
 }
 
-// checkPublicBranches refuses a public repo without a main branch (an empty
-// repo: there is nothing to mirror), or with a branch named ghostbranch
-// (or under ghostbranch/): mirroring it would collide with the overlay
-// branch. It reads the public repo's branches with ls-remote, before
-// anything is created or pushed.
+// checkPublicBranches refuses a public repo without its default branch
+// (main when GitHub doesn't say; an empty repo has nothing to mirror), or
+// with a branch named ghostbranch (or under ghostbranch/): mirroring it
+// would collide with the overlay branch. It reads the public repo's
+// branches with ls-remote, before anything is created or pushed.
 func (e *Engine) checkPublicBranches(ctx context.Context, p workspace.Pair, pub forge.Repo) error {
 	// ls-remote needs no repo. Run it in a new empty directory, with repo
 	// discovery stopped at its parent, so no repo's config applies while the
@@ -419,24 +437,43 @@ func (e *Engine) checkPublicBranches(ctx context.Context, p workspace.Pair, pub 
 		}
 		branches = append(branches, b)
 	}
+	base := defaultBase(pub)
 	switch {
 	case len(branches) == 0:
 		return contract.New(contract.BadFlag,
-			"%s has no commits on main yet: push a first commit (a README is enough), then run ghostbranch init again", p.Public).
-			WithField("public").WithDetails(map[string]any{"public": p.Public, "branch": "main"})
-	case !slices.Contains(branches, "main"):
+			"%s has no commits on %s yet: push a first commit (a README is enough), then run ghostbranch init again", p.Public, base).
+			WithField("public").WithDetails(map[string]any{"public": p.Public, "branch": base})
+	case !slices.Contains(branches, base):
+		// GitHub always has a non-empty repo's default branch; this is a
+		// rename or a delete racing init.
 		return contract.New(contract.BadFlag,
-			"%s has no main branch (it has %s): Ghostbranch mirrors main, so create it in the public repo, then run ghostbranch init again",
-			p.Public, strings.Join(branches, ", ")).WithField("public").WithDetails(map[string]any{"public": p.Public, "branch": "main"})
+			"%s has no branch %s, though GitHub names it the default branch (it has %s); run ghostbranch init again",
+			p.Public, base, strings.Join(branches, ", ")).WithField("public").WithDetails(map[string]any{"public": p.Public, "branch": base})
 	}
 	return nil
 }
 
+// checkNewBase refuses a public default branch a new overlay can't record
+// as public_branch (config.ValidBaseBranch): one the sync workflow can't
+// carry, or one named like a Ghostbranch gate branch. init calls it before
+// anything is written.
+func checkNewBase(p workspace.Pair, branch string) error {
+	err := config.ValidBaseBranch(branch)
+	if err == nil {
+		return nil
+	}
+	why := strings.TrimPrefix(contract.From(err).Message, "public_branch: ")
+	return contract.New(contract.NameInvalid,
+		"%s's default branch can't be the branch Ghostbranch works against: %s; rename it in the public repo, then run init again", p.Public, why).
+		WithField("public").WithDetails(map[string]any{"public": p.Public, "branch": branch})
+}
+
 // missingMirrorRefs lists public branches and tags absent from the shadow
-// repo, main first, with must-not-exist leases. With ffMain (an adopt), a
-// shadow main that is behind public main is fast-forwarded too, leased on
-// its old head, and listed in res.MirroredBranches.
-func (e *Engine) missingMirrorRefs(ctx context.Context, g *gitx.Git, res *InitResult, ffMain bool) ([]string, []gitx.Lease, error) {
+// repo, the base branch first, with must-not-exist leases. With ffBase (an
+// adopt), a shadow base branch that is behind public's is fast-forwarded
+// too, leased on its old head, and listed in res.MirroredBranches. Other
+// branches are only ever created.
+func (e *Engine) missingMirrorRefs(ctx context.Context, g *gitx.Git, res *InitResult, base string, ffBase bool) ([]string, []gitx.Lease, error) {
 	get := func(prefix string) (map[string]string, error) { return g.Refs(ctx, prefix) }
 	pubHeads, err := get("refs/remotes/public")
 	if err != nil {
@@ -457,8 +494,8 @@ func (e *Engine) missingMirrorRefs(ctx context.Context, g *gitx.Git, res *InitRe
 		branches = append(branches, strings.TrimPrefix(ref, "refs/remotes/public/"))
 	}
 	sort.Slice(branches, func(i, j int) bool {
-		if (branches[i] == "main") != (branches[j] == "main") {
-			return branches[i] == "main"
+		if (branches[i] == base) != (branches[j] == base) {
+			return branches[i] == base
 		}
 		return branches[i] < branches[j]
 	})
@@ -470,16 +507,16 @@ func (e *Engine) missingMirrorRefs(ctx context.Context, g *gitx.Git, res *InitRe
 			res.MirroredBranches = append(res.MirroredBranches, b)
 			continue
 		}
-		if b != "main" || !ffMain || sb == pb {
+		if b != base || !ffBase || sb == pb {
 			continue
 		}
 		anc, err := g.IsAncestor(ctx, sb, pb)
 		if err != nil {
-			return nil, nil, internalErr(err, "compare shadow main with public main")
+			return nil, nil, internalErr(err, "compare shadow "+base+" with public "+base)
 		}
 		if anc {
-			specs = append(specs, pb+":refs/heads/main")
-			leases = append(leases, gitx.Lease{Ref: "refs/heads/main", Expect: sb})
+			specs = append(specs, pb+":refs/heads/"+base)
+			leases = append(leases, gitx.Lease{Ref: "refs/heads/" + base, Expect: sb})
 			res.MirroredBranches = append(res.MirroredBranches, b)
 		}
 	}
@@ -523,8 +560,8 @@ func (e *Engine) previewNewShadow(ctx context.Context, p workspace.Pair, pub for
 	if err := g.Fetch(ctx, remotePublic, "+refs/heads/*:refs/remotes/public/*", "+refs/tags/*:refs/public-tags/*"); err != nil {
 		return remoteErr(err, "fetch the public repo")
 	}
-	pm, _, _ := g.Resolve(ctx, publicRef("main"))
-	specs, leases, err := e.missingMirrorRefs(ctx, g, res, false)
+	pm, _, _ := g.Resolve(ctx, publicRef(res.BaseBranch))
+	specs, leases, err := e.missingMirrorRefs(ctx, g, res, res.BaseBranch, false)
 	if err != nil {
 		return err
 	}
@@ -562,7 +599,7 @@ func (e *Engine) createOverlay(ctx context.Context, pc *pairCtx, schedule string
 	if sched == "" {
 		sched = config.ScheduleOff
 	}
-	cfgBlob, err := g.HashObject(ctx, config.RenderSchedule(pc.pair.Public, pc.pair.Shadow, "main", sched))
+	cfgBlob, err := g.HashObject(ctx, config.RenderSchedule(pc.pair.Public, pc.pair.Shadow, pc.base, sched))
 	if err != nil {
 		return internalErr(err, "write .ghostbranch.yml")
 	}
@@ -571,9 +608,9 @@ func (e *Engine) createOverlay(ctx context.Context, pc *pairCtx, schedule string
 		return internalErr(err, "write the overlay README")
 	}
 	// The managed files the new config wants: the sync workflow when the
-	// schedule is on.
-	def := config.Default()
-	files := managed.Render(managed.Input{Public: pc.pair.Public, Schedule: sched, Branches: def.Sync.Branches})
+	// schedule is on, for the branches it renders (the base branch alone;
+	// never config.Default's main on another pair).
+	files := managed.Render(managed.Input{Public: pc.pair.Public, Schedule: sched, Branches: []string{pc.base}})
 	entries := []gitx.TreeEntry{
 		{Mode: "100644", Type: "blob", SHA: cfgBlob, Path: ".ghostbranch.yml"},
 		{Mode: "100644", Type: "blob", SHA: readme, Path: ".ghostbranch/README.md"},

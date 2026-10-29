@@ -123,6 +123,11 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	}
 	defer pc.unlock()
 	g := pc.git
+	// ValidatePromoteOptions ran before the pair was read: never publish to
+	// the base branch, whatever it is called.
+	if err := feature.ValidateName(branch, "branch", pc.base); err != nil {
+		return res, nil, err
+	}
 
 	cfg, O, warns, err := e.readConfig(ctx, pc)
 	if err != nil {
@@ -626,7 +631,7 @@ func ValidatePromoteOptions(opt *PromoteOptions) error {
 		opt.Feature = opt.Features[0]
 	}
 	for _, f := range opt.Features {
-		if err := feature.ValidateName(f, "feature"); err != nil {
+		if err := feature.ValidateName(f, "feature", "main"); err != nil {
 			return err
 		}
 	}
@@ -712,7 +717,7 @@ func ValidatePromoteOptions(opt *PromoteOptions) error {
 	if branch == "" {
 		branch = opt.Feature
 	}
-	return feature.ValidateName(branch, "branch")
+	return feature.ValidateName(branch, "branch", "main")
 }
 
 // curateFlags checks --curate against the resolved mode: curated mode

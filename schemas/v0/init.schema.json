@@ -3,11 +3,12 @@
   "title": "init data",
   "type": "object",
   "additionalProperties": false,
-  "required": ["public", "shadow", "created_shadow", "adopted", "resumed", "mirrored_branches", "mirrored_tags",
+  "required": ["public", "shadow", "base_branch", "created_shadow", "adopted", "resumed", "mirrored_branches", "mirrored_tags",
                "overlay_created", "default_branch_set", "audit", "preview", "guard_installed", "doctor", "setup"],
   "properties": {
     "public": { "$ref": "common.schema.json#/$defs/repo" },
     "shadow": { "$ref": "common.schema.json#/$defs/repo" },
+    "base_branch": { "description": "the public branch the pair works against: public_branch from an overlay that already exists (main when the key is missing), else the public repo's default branch; \"\" when init stopped before it knew", "type": "string" },
     "created_shadow": { "type": "boolean" },
     "adopted": { "type": "boolean" },
     "resumed": { "type": "boolean" },
