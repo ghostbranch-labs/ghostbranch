@@ -163,7 +163,7 @@ func (h *harness) setBlockPatterns(patterns ...string) {
 		b, _ := json.Marshal(p)
 		quoted[i] = string(b)
 	}
-	cfg := strings.Replace(string(config.Render(publicName, shadowName)), "block_patterns: []",
+	cfg := strings.Replace(string(config.Render(publicName, shadowName, "main")), "block_patterns: []",
 		"block_patterns: ["+strings.Join(quoted, ", ")+"]", 1)
 	testutil.Commit(h.t, h.shadowGit(), engine.OverlayBranch, "block patterns", map[string]string{".ghostbranch.yml": cfg})
 }

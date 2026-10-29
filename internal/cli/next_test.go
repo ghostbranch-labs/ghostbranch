@@ -226,7 +226,7 @@ func TestNextAsksForUpgradeWhenTheOverlayIsOutdated(t *testing.T) {
 	t.Parallel()
 	te := newTestEnv(t)
 	initOnly(te)
-	cfg := strings.Replace(string(config.Render("acme/widget", "acme/widget-shadow")), `schedule: "off"`, `schedule: "23 */6 * * *"`, 1)
+	cfg := strings.Replace(string(config.Render("acme/widget", "acme/widget-shadow", "main")), `schedule: "off"`, `schedule: "23 */6 * * *"`, 1)
 	te.shadowCommit(engine.OverlayBranch, map[string]string{".ghostbranch.yml": cfg})
 	_, env := te.runJSON("audit")
 	n := nextOf(t, env)
@@ -242,7 +242,7 @@ func TestNextPutsUpgradeAfterTheCommandsOwnSteps(t *testing.T) {
 	t.Parallel()
 	te := newTestEnv(t)
 	withFeature(te)
-	cfg := strings.Replace(string(config.Render("acme/widget", "acme/widget-shadow")), `schedule: "off"`, `schedule: "23 */6 * * *"`, 1)
+	cfg := strings.Replace(string(config.Render("acme/widget", "acme/widget-shadow", "main")), `schedule: "off"`, `schedule: "23 */6 * * *"`, 1)
 	te.shadowCommit(engine.OverlayBranch, map[string]string{".ghostbranch.yml": cfg})
 	const afterPlan = "after the plan is applied (upgrade moves the overlay and would make the plan stale)"
 	code, env := te.runJSON("gate", "feat-x")
@@ -302,7 +302,7 @@ jobs:
 		"warn":    "(skips in the shadow repo (ci.rewrite_repo_guards: warn))",
 		"off":     "(skips in the shadow repo (ci.rewrite_repo_guards: off))",
 	} {
-		cfg := strings.Replace(string(config.Render("acme/widget", "acme/widget-shadow")), "rewrite_repo_guards: rewrite", "rewrite_repo_guards: "+mode, 1)
+		cfg := strings.Replace(string(config.Render("acme/widget", "acme/widget-shadow", "main")), "rewrite_repo_guards: rewrite", "rewrite_repo_guards: "+mode, 1)
 		te.shadowCommit(engine.OverlayBranch, map[string]string{".ghostbranch.yml": cfg})
 		code, out, errOut := te.run("audit")
 		if code != 0 || !strings.Contains(out, "repo guard: .github/workflows/rel.yml job r "+want+"\n") {

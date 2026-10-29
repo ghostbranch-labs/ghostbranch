@@ -12,7 +12,7 @@ import (
 )
 
 func TestRenderRoundTripsToDefaults(t *testing.T) {
-	cfg, warns, err := config.Parse(config.Render("acme/widget", "acme/widget-shadow"))
+	cfg, warns, err := config.Parse(config.Render("acme/widget", "acme/widget-shadow", "main"))
 	if err != nil || len(warns) != 0 {
 		t.Fatalf("Parse(Render) = %v, %v", warns, err)
 	}
@@ -149,7 +149,7 @@ func TestParseSize(t *testing.T) {
 }
 
 func TestPromoteModesAndAuthors(t *testing.T) {
-	base := string(config.Render("acme/widget", "acme/widget-shadow"))
+	base := string(config.Render("acme/widget", "acme/widget-shadow", "main"))
 	cfg, warns, err := config.Parse([]byte(base))
 	if err != nil || len(warns) != 0 || cfg.Promote.DefaultMode != config.ModePreserve || cfg.Promote.AuthorEmail != config.AuthorNoreply {
 		t.Fatalf("rendered config: %+v %v %v", cfg.Promote, warns, err)
@@ -167,7 +167,7 @@ func TestPromoteModesAndAuthors(t *testing.T) {
 }
 
 func TestAuthorMapKeepsDottedEmails(t *testing.T) {
-	src := strings.Replace(string(config.Render("acme/widget", "acme/widget-shadow")), "author_email: noreply",
+	src := strings.Replace(string(config.Render("acme/widget", "acme/widget-shadow", "main")), "author_email: noreply",
 		"author_email: map\n  author_map:\n    \"Jane.Doe@Corp.example\": \"Jane Doe <123+jane@users.noreply.github.com>\"", 1)
 	cfg, _, err := config.Parse([]byte(src))
 	if err != nil {
@@ -179,7 +179,7 @@ func TestAuthorMapKeepsDottedEmails(t *testing.T) {
 }
 
 func TestAuthorConfigRejects(t *testing.T) {
-	base := string(config.Render("acme/widget", "acme/widget-shadow"))
+	base := string(config.Render("acme/widget", "acme/widget-shadow", "main"))
 	for name, repl := range map[string]string{
 		"unknown mode":   "author_email: someone",
 		"map but empty":  "author_email: map",
@@ -220,11 +220,11 @@ func TestParseIdentity(t *testing.T) {
 
 func parseWith(t *testing.T, extra string) (config.Config, []contract.Warning, error) {
 	t.Helper()
-	return config.Parse([]byte(string(config.Render("acme/widget", "acme/widget-shadow")) + extra))
+	return config.Parse([]byte(string(config.Render("acme/widget", "acme/widget-shadow", "main")) + extra))
 }
 
 func TestSyncAndCIDefaults(t *testing.T) {
-	cfg, warns, err := config.Parse(config.Render("acme/widget", "acme/widget-shadow"))
+	cfg, warns, err := config.Parse(config.Render("acme/widget", "acme/widget-shadow", "main"))
 	if err != nil || len(warns) != 0 {
 		t.Fatalf("Render does not parse cleanly: %v %v", warns, err)
 	}
@@ -252,7 +252,7 @@ func TestSyncSchedule(t *testing.T) {
 		{`"0 0 * * * *"`, "", false},
 		{`6h`, "", false},
 	} {
-		raw := strings.Replace(string(config.Render("acme/widget", "acme/widget-shadow")), `schedule: "off"`, "schedule: "+tc.in, 1)
+		raw := strings.Replace(string(config.Render("acme/widget", "acme/widget-shadow", "main")), `schedule: "off"`, "schedule: "+tc.in, 1)
 		got, _, err := config.Parse([]byte(raw))
 		if (err == nil) != tc.ok {
 			t.Fatalf("%s: err = %v", tc.in, err)
@@ -284,7 +284,7 @@ func TestSyncBranches(t *testing.T) {
 		{`[main, "v1.lockstep/x"]`, true},
 		{`[main, "a/.b"]`, false},
 	} {
-		raw := strings.Replace(string(config.Render("acme/widget", "acme/widget-shadow")), "branches: [main]", "branches: "+tc.in, 1)
+		raw := strings.Replace(string(config.Render("acme/widget", "acme/widget-shadow", "main")), "branches: [main]", "branches: "+tc.in, 1)
 		_, _, err := config.Parse([]byte(raw))
 		if (err == nil) != tc.ok {
 			t.Fatalf("%s: err = %v", tc.in, err)
@@ -296,13 +296,13 @@ func TestSyncBranches(t *testing.T) {
 // never carry metacharacters.
 func TestSyncValuesRejectInjection(t *testing.T) {
 	for _, branches := range []string{`[main, "x; rm -rf ~"]`, `[main, "a\"b"]`, `[main, "a b"]`, `[main, "a$(id)"]`, "[main, \"a\\nb\"]"} {
-		raw := strings.Replace(string(config.Render("acme/widget", "acme/widget-shadow")), "branches: [main]", "branches: "+branches, 1)
+		raw := strings.Replace(string(config.Render("acme/widget", "acme/widget-shadow", "main")), "branches: [main]", "branches: "+branches, 1)
 		if _, _, err := config.Parse([]byte(raw)); contract.From(err).Field != "sync.branches" {
 			t.Fatalf("branches %s accepted: %v", branches, err)
 		}
 	}
 	for _, sched := range []string{`"0 0 * * *\"\n"`, "\"0 0 * * *\\n\"", `"0 0 * * $(id)"`, `"0 0 * * 1;2"`} {
-		raw := strings.Replace(string(config.Render("acme/widget", "acme/widget-shadow")), `schedule: "off"`, "schedule: "+sched, 1)
+		raw := strings.Replace(string(config.Render("acme/widget", "acme/widget-shadow", "main")), `schedule: "off"`, "schedule: "+sched, 1)
 		if _, _, err := config.Parse([]byte(raw)); contract.From(err).Field != "sync.schedule" {
 			t.Fatalf("schedule %s accepted: %v", sched, err)
 		}
@@ -311,7 +311,7 @@ func TestSyncValuesRejectInjection(t *testing.T) {
 
 func TestRewriteRepoGuardsMode(t *testing.T) {
 	for mode, ok := range map[string]bool{"rewrite": true, "warn": true, "off": true, "yes": false} {
-		raw := strings.Replace(string(config.Render("acme/widget", "acme/widget-shadow")), "rewrite_repo_guards: rewrite", "rewrite_repo_guards: "+mode, 1)
+		raw := strings.Replace(string(config.Render("acme/widget", "acme/widget-shadow", "main")), "rewrite_repo_guards: rewrite", "rewrite_repo_guards: "+mode, 1)
 		cfg, _, err := config.Parse([]byte(raw))
 		if (err == nil) != ok || (ok && cfg.CI.RewriteRepoGuards != mode) {
 			t.Fatalf("%s: %+v %v", mode, cfg.CI, err)
@@ -409,10 +409,10 @@ func TestAScalarSyncOrCIIsAClearError(t *testing.T) {
 
 func TestRenderScheduleParses(t *testing.T) {
 	t.Parallel()
-	if !bytes.Equal(config.Render("acme/widget", "acme/widget-shadow"), config.RenderSchedule("acme/widget", "acme/widget-shadow", config.ScheduleOff)) {
+	if !bytes.Equal(config.Render("acme/widget", "acme/widget-shadow", "main"), config.RenderSchedule("acme/widget", "acme/widget-shadow", "main", config.ScheduleOff)) {
 		t.Fatal("Render changed")
 	}
-	cfg, _, err := config.Parse(config.RenderSchedule("acme/widget", "acme/widget-shadow", "23 */6 * * *"))
+	cfg, _, err := config.Parse(config.RenderSchedule("acme/widget", "acme/widget-shadow", "main", "23 */6 * * *"))
 	if err != nil || cfg.Sync.Schedule != "23 */6 * * *" {
 		t.Fatalf("%+v %v", cfg.Sync, err)
 	}
@@ -481,6 +481,128 @@ func TestConfigNoWorkflowsTimeout(t *testing.T) {
 		_, _, err := config.Parse([]byte(base + "gate:\n  ci_appear_timeout_no_workflows: " + bad + "\n"))
 		if ce := contract.From(err); ce == nil || ce.Code != contract.ConfigInvalid || ce.Field != "gate.ci_appear_timeout_no_workflows" {
 			t.Errorf("%s: want CONFIG_INVALID on the key, got %+v", bad, ce)
+		}
+	}
+}
+
+// Roadmap 8.12: public_branch names the public repo's default branch. A
+// missing key means main; sync.branches defaults to, and must include, the
+// base branch. Branch names compare exactly: Master is not master.
+func TestPublicBranchKey(t *testing.T) {
+	t.Parallel()
+	base := "version: 1\npublic: a/b\nshadow: a/b-shadow\n"
+	for _, tc := range []struct {
+		name, yaml   string
+		wantBase     string
+		wantField    string // "" when the config is valid
+		wantMsg      string
+		wantBranches []string
+	}{
+		{name: "no key", yaml: base, wantBase: "main", wantBranches: []string{"main"}},
+		{name: "master", yaml: base + "public_branch: master\nsync:\n  branches: [master]\n", wantBase: "master", wantBranches: []string{"master"}},
+		{name: "case kept", yaml: base + "public_branch: Master\nsync:\n  branches: [Master]\n", wantBase: "Master", wantBranches: []string{"Master"}},
+		{name: "default follows base", yaml: base + "public_branch: master\n", wantBase: "master", wantBranches: []string{"master"}},
+		{name: "branches miss base", yaml: base + "public_branch: master\nsync:\n  branches: [main]\n", wantField: "sync.branches", wantMsg: "must include master"},
+		{name: "case differs", yaml: base + "public_branch: Master\nsync:\n  branches: [master]\n", wantField: "sync.branches", wantMsg: "must include Master"},
+		{name: "gate prefix", yaml: base + "public_branch: ghostbranch-x\n", wantField: "public_branch"},
+		{name: "under overlay", yaml: base + "public_branch: ghostbranch/x\n", wantField: "public_branch"},
+		{name: "overlay", yaml: base + "public_branch: ghostbranch\n", wantField: "public_branch"},
+		{name: "not a branch", yaml: base + "public_branch: \"a b\"\n", wantField: "public_branch"},
+		{name: "not a string", yaml: base + "public_branch: [master]\n", wantField: "public_branch"},
+	} {
+		cfg, _, err := config.Parse([]byte(tc.yaml))
+		if tc.wantField != "" {
+			ce := contract.From(err)
+			if ce == nil || ce.Code != contract.ConfigInvalid || ce.Field != tc.wantField || !strings.Contains(ce.Message, tc.wantMsg) {
+				t.Errorf("%s: want CONFIG_INVALID on %s containing %q, got %+v", tc.name, tc.wantField, tc.wantMsg, ce)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("%s: %v", tc.name, err)
+			continue
+		}
+		if cfg.Base() != tc.wantBase || !reflect.DeepEqual(cfg.Sync.Branches, tc.wantBranches) {
+			t.Errorf("%s: Base() = %q, branches = %q", tc.name, cfg.Base(), cfg.Sync.Branches)
+		}
+		if tc.name == "no key" && cfg.PublicBranch != "" {
+			t.Errorf("no key: PublicBranch = %q, want empty", cfg.PublicBranch)
+		}
+	}
+}
+
+func TestValidBaseBranch(t *testing.T) {
+	t.Parallel()
+	for b, ok := range map[string]bool{
+		"main": true, "master": true, "trunk": true, "release/1.x": true, "ghostbranchy": true, "my-ghostbranch-x": true,
+		"": false, "ghostbranch": false, "ghostbranch/x": false, "ghostbranch-gate": false, "a..b": false, "-x": false,
+	} {
+		err := config.ValidBaseBranch(b)
+		if (err == nil) != ok {
+			t.Errorf("ValidBaseBranch(%q) = %v", b, err)
+		}
+		if ce := contract.From(err); !ok && (ce == nil || ce.Code != contract.ConfigInvalid || ce.Field != "public_branch") {
+			t.Errorf("ValidBaseBranch(%q): want CONFIG_INVALID on public_branch, got %+v", b, ce)
+		}
+	}
+}
+
+// renderedMain is the config init wrote for a main pair before 8.12; a
+// main pair's render must not change by a byte.
+const renderedMain = `# Ghostbranch configuration. It lives only on this shadow repo's
+# "ghostbranch" branch and is never promoted.
+version: 1
+public: a/b
+shadow: a/b-shadow
+
+promote:
+  target: pr
+  # preserve publishes each feature commit; squash publishes one commit;
+  # curated regroups, reorders and rewords commits from a --curate file.
+  default_mode: preserve
+  # noreply publishes every commit as your GitHub noreply identity; keep
+  # publishes the original authors; map uses author_map.
+  author_email: noreply
+
+leak_scan:
+  strip: [".ghostbranch/**"]
+  markers:
+    begin: BEGIN-INTERNAL
+    end: END-INTERNAL
+  block_patterns: []
+  large_file: 5MB
+  secrets: true
+
+sync:
+  # Scheduled sync is off: run ghostbranch sync yourself (commands warn when
+  # shadow main falls behind public). To opt in, set a cron such as
+  # "23 */6 * * *" (about 120 Actions minutes a month), then run
+  # ghostbranch upgrade.
+  schedule: "off"
+  branches: [main]
+
+ci:
+  rewrite_repo_guards: rewrite
+
+gate:
+  ci_appear_timeout: 10m
+  ci_timeout: 60m
+`
+
+func TestRenderBranch(t *testing.T) {
+	t.Parallel()
+	if got := string(config.Render("a/b", "a/b-shadow", "main")); got != renderedMain {
+		t.Fatalf("main render changed:\n%s", got)
+	}
+	for _, sched := range []string{config.ScheduleOff, "23 */6 * * *"} {
+		out := string(config.RenderSchedule("a/b", "a/b-shadow", "trunk", sched))
+		if !strings.Contains(out, "\nshadow: a/b-shadow\npublic_branch: trunk\n") || !strings.Contains(out, "branches: [trunk]") || strings.Contains(out, "main") {
+			t.Fatalf("%s: trunk render:\n%s", sched, out)
+		}
+		cfg, warns, err := config.Parse([]byte(out))
+		if err != nil || len(warns) != 0 || cfg.Base() != "trunk" || cfg.PublicBranch != "trunk" ||
+			!reflect.DeepEqual(cfg.Sync.Branches, []string{"trunk"}) || cfg.Sync.Schedule != sched {
+			t.Fatalf("%s: Parse(trunk render) = %+v %v %v", sched, cfg, warns, err)
 		}
 	}
 }

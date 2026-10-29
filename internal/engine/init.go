@@ -562,7 +562,7 @@ func (e *Engine) createOverlay(ctx context.Context, pc *pairCtx, schedule string
 	if sched == "" {
 		sched = config.ScheduleOff
 	}
-	cfgBlob, err := g.HashObject(ctx, config.RenderSchedule(pc.pair.Public, pc.pair.Shadow, sched))
+	cfgBlob, err := g.HashObject(ctx, config.RenderSchedule(pc.pair.Public, pc.pair.Shadow, "main", sched))
 	if err != nil {
 		return internalErr(err, "write .ghostbranch.yml")
 	}

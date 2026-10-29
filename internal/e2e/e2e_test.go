@@ -531,7 +531,7 @@ func TestSandboxLoop(t *testing.T) {
 	// A codename the overlay config blocks is refused, then published once a
 	// person has waived it. The waiver is written the way waivers add writes
 	// it after the console code; the binary has no other way.
-	cfgText := strings.Replace(string(config.Render(publicRepo, shadowRepo)), "block_patterns: []", `block_patterns: ["project-falcon"]`, 1)
+	cfgText := strings.Replace(string(config.Render(publicRepo, shadowRepo, "main")), "block_patterns: []", `block_patterns: ["project-falcon"]`, 1)
 	if !strings.Contains(cfgText, "project-falcon") {
 		t.Fatal("config.Render no longer has an empty block_patterns line to replace")
 	}

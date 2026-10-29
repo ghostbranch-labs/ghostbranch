@@ -333,7 +333,7 @@ func TestAReusedDetachedGateKeepsItsConfigWarnings(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	h.init()
-	cfg := strings.Replace(string(config.Render(publicName, shadowName)), "  target: pr\n", "  target: pr\n  require_human: false\n", 1)
+	cfg := strings.Replace(string(config.Render(publicName, shadowName, "main")), "  target: pr\n", "  target: pr\n  require_human: false\n", 1)
 	testutil.Commit(t, h.shadowGit(), engine.OverlayBranch, "an ignored key", map[string]string{".ghostbranch.yml": cfg})
 	h.startFeature("feat-x", map[string]string{"feature.txt": "x\n"})
 	first, w1, err := h.eng.GateDetached(h.ctx, h.pair, "feat-x")
