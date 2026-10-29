@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/guard"
@@ -212,14 +213,31 @@ func TestGuardUsesBaseBranch(t *testing.T) {
 func TestGuardFailsClosedWithoutBase(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	for _, c := range []struct{ what, file, body string }{
-		{"invalid YAML", ".ghostbranch.yml", "public: [acme/widget\n"},
-		{"a key from a newer Ghostbranch", ".ghostbranch.yml", trunkConfig + "from_the_future: 1\n"},
-		{"no .ghostbranch.yml", "README.md", "overlay\n"},
+	for _, c := range []struct {
+		what, file, body string
+		code             contract.Code
+		says             []string
+	}{
+		{"invalid YAML", ".ghostbranch.yml", "public: [acme/widget\n", contract.ConfigInvalid,
+			[]string{"parse .ghostbranch.yml", "ghostbranch doctor"}},
+		{"a key from a newer Ghostbranch", ".ghostbranch.yml", trunkConfig + "from_the_future: 1\n", contract.UpgradeNeeded,
+			[]string{`"from_the_future"`, "upgrade the ghostbranch binary"}},
+		{"no .ghostbranch.yml", "README.md", "overlay\n", contract.ConfigInvalid,
+			[]string{"has no .ghostbranch.yml", "ghostbranch doctor"}},
 	} {
 		g, _, _ := trunkMirror(t, map[string]string{c.file: c.body})
-		if f, err := guard.LoadFacts(ctx, g); err == nil {
+		f, err := guard.LoadFacts(ctx, g)
+		if err == nil {
 			t.Errorf("%s: LoadFacts must fail, got public main %q", c.what, f.PublicMain)
+			continue
+		}
+		if ce := contract.From(err); ce.Code != c.code {
+			t.Errorf("%s: code %s, want %s: %v", c.what, ce.Code, c.code, err)
+		}
+		for _, s := range c.says {
+			if !strings.Contains(err.Error(), s) {
+				t.Errorf("%s: the error must say %q: %v", c.what, s, err)
+			}
 		}
 	}
 

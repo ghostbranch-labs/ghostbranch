@@ -354,8 +354,8 @@ func (e *Engine) checkAdoptable(ctx context.Context, pc *pairCtx) error {
 				return nil
 			}
 			// A key from a newer Ghostbranch is not unrelated content.
-			if err != nil && contract.From(upgradeNeeded(err)).Code == contract.UpgradeNeeded {
-				return upgradeNeeded(err)
+			if err != nil && contract.From(config.UpgradeNeeded(err)).Code == contract.UpgradeNeeded {
+				return config.UpgradeNeeded(err)
 			}
 		}
 		return contract.New(contract.ShadowNotEmpty, "%s has a %q branch that is not the overlay for %s", pc.pair.Shadow, OverlayBranch, pc.pair.Public)

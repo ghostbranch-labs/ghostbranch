@@ -417,6 +417,25 @@ func set(cfg *Config, key string, v any) error {
 	return err
 }
 
+// UpgradeNeeded turns Parse's unknown-key error into UPGRADE_NEEDED: a key
+// this binary doesn't know most likely comes from a newer Ghostbranch. Any
+// other error passes through.
+func UpgradeNeeded(err error) error {
+	ce := contract.From(err)
+	if ce == nil || ce.Code != contract.ConfigInvalid {
+		return err
+	}
+	key, _ := ce.Details["unknown_key"].(string)
+	if key == "" {
+		return err
+	}
+	out := contract.New(contract.UpgradeNeeded,
+		".ghostbranch.yml on the overlay branch has the key %q, which this ghostbranch doesn't know: the pair was probably set up by a newer Ghostbranch; upgrade the ghostbranch binary, or fix it if it's a typo", key).
+		WithField(key).WithDetails(map[string]any{"unknown_key": key})
+	out.Err = err
+	return out
+}
+
 var identity = regexp.MustCompile(`^([^<>\p{Cc}\p{Zl}\p{Zp}]*[^<>\s\p{Cc}\p{Zl}\p{Zp}])[ \t]*<([^<>\s\p{Z}\p{Cc}@]+@[^<>\s\p{Z}\p{Cc}@]+)>$`)
 
 // ParseIdentity splits "Name <email>". The name must be non-empty after

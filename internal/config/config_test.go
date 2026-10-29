@@ -606,3 +606,21 @@ func TestRenderBranch(t *testing.T) {
 		}
 	}
 }
+
+// An unknown key most likely comes from a newer Ghostbranch, so it reads as
+// UPGRADE_NEEDED with the upgrade hint; any other error passes through.
+func TestUpgradeNeeded(t *testing.T) {
+	_, _, err := config.Parse([]byte("public: acme/widget\nshadow: acme/widget-shadow\nfrom_the_future: 1\n"))
+	ce := contract.From(config.UpgradeNeeded(err))
+	if ce.Code != contract.UpgradeNeeded || ce.Details["unknown_key"] != "from_the_future" ||
+		!strings.Contains(ce.Message, "upgrade the ghostbranch binary") {
+		t.Fatalf("an unknown key: %+v", ce)
+	}
+	_, _, err = config.Parse([]byte("public: [acme/widget\n"))
+	if err == nil || config.UpgradeNeeded(err) != err {
+		t.Fatalf("invalid YAML must pass through unchanged: %v", config.UpgradeNeeded(err))
+	}
+	if config.UpgradeNeeded(nil) != nil {
+		t.Fatal("no error stays no error")
+	}
+}
