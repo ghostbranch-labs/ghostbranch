@@ -311,7 +311,7 @@ func (e *Engine) build(ctx context.Context, pc *pairCtx, name, mode string, waiv
 	}
 	// forked_at..head when the feature records a fork point (stacked, or
 	// moved onto main off a parent), else every commit not on public main.
-	sources, err := ownSources(ctx, g, name, m, head, pm)
+	sources, err := ownSources(ctx, g, name, m, head, pm, pc.base)
 	if err != nil {
 		return b, warns, err
 	}

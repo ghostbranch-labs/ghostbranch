@@ -329,7 +329,7 @@ func (e *Engine) closeMerged(ctx context.Context, pc *pairCtx, p *workspace.Pair
 		if cr != nil {
 			refs = cr.Deleted
 			if err == nil {
-				summary = closeLedgerSummary(cr)
+				summary = closeLedgerSummary(cr, pc.base)
 			}
 		}
 		e.recordWith("feature close", p, r.Name, "", summary, err, func(ent *ledger.Entry) {

@@ -15,7 +15,8 @@ type FeatureStartResult struct {
 	Name   string `json:"name"`
 	Branch string `json:"branch"`
 	Base   string `json:"base"`
-	// Parent is the feature this one is stacked on, or "main".
+	// Parent is the feature this one is stacked on, or the placeholder
+	// "main" (feature.MainParent) for the base branch.
 	Parent       string     `json:"parent"`
 	Checkout     [][]string `json:"checkout"`      // argvs that get the branch into a checkout, in order
 	CheckoutHint string     `json:"checkout_hint"` // Checkout as one shell line
@@ -92,7 +93,8 @@ func (r *FeatureStartResult) SetCheckout(argvs [][]string) {
 type FeatureStartOptions struct {
 	// From is the feature to stack the new one on: it starts at that
 	// feature's tip in the shadow repo and records it as its parent, with
-	// the tip as forked_at. "" or "main" starts from shadow main.
+	// the tip as forked_at. "", the base branch's real name, or "main" (its
+	// alias on every pair) starts from the shadow's copy of the base.
 	From string
 }
 
@@ -130,9 +132,13 @@ func (e *Engine) FeatureStart(ctx context.Context, p workspace.Pair, name string
 	}
 	defer pc.unlock()
 	// The name was checked before the pair was read; the base branch's name
-	// is reserved too, as the shadow repo has a branch of that name.
+	// is reserved too, as the shadow repo has a branch of that name. --from
+	// the base by its real name starts from it, as --from main does.
 	if err := feature.ValidateName(name, "name", pc.base); err != nil {
 		return nil, nil, err
+	}
+	if from == pc.base {
+		from = ""
 	}
 	_, O, warns, err := e.readConfig(ctx, pc)
 	if err != nil {
@@ -218,7 +224,7 @@ func (e *Engine) parentTip(ctx context.Context, pc *pairCtx, from string) (strin
 		return "", contract.NewerRecord("feature", m.SchemaVersion).WithField("from")
 	case m.Abandoned:
 		return "", contract.New(contract.BadFlag,
-			"feature %q is abandoned, so nothing can be started from it; start from main or another feature", from).WithField("from")
+			"feature %q is abandoned, so nothing can be started from it; start from %s or another feature", from, pc.base).WithField("from")
 	case m.Archived != nil:
 		// Before the branch lookup: an archived feature's branch is gone
 		// on purpose (P25).

@@ -10,6 +10,7 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/config"
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/engine"
+	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 	"github.com/ghostbranch-labs/ghostbranch/internal/forge"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 	"github.com/ghostbranch-labs/ghostbranch/internal/managed"
@@ -632,6 +633,157 @@ func TestFeatureStartRefusesBaseName(t *testing.T) {
 		_, _, err := h.eng.FeatureStart(h.ctx, h.pair, "trunk")
 		if ce := wantCode(t, err, contract.NameInvalid); ce.Field != "name" || !strings.Contains(ce.Message, `"trunk"`) {
 			t.Fatalf("dry run %v: %+v", dry, ce)
+		}
+	}
+}
+
+// stackOnBase starts a on a pair whose base branch is base and b on a, one
+// commit each, and gates both.
+func stackOnBase(t *testing.T, base string) *harness {
+	t.Helper()
+	h := newHarnessOn(t, base)
+	h.init()
+	h.startFeature("a", map[string]string{"a.txt": "a\n"})
+	h.startOn("b", "a", map[string]string{"b.txt": "b\n"})
+	h.gateFeature("a")
+	h.gateFeature("b")
+	return h
+}
+
+// A stack on a trunk pair: the bottom's PR is based on trunk, the one
+// above on the bottom's branch, in the plan, on GitHub and in the records.
+func TestDefaultBranchStack(t *testing.T) {
+	t.Parallel()
+	h := stackOnBase(t, "trunk")
+	pres, _, err := promoteStack(h, engine.PromoteOptions{Features: []string{"a", "b"}, Mode: "squash", PlanOnly: true})
+	if err != nil || pres.Plan == nil || len(pres.Plan.PRs) != 2 {
+		t.Fatalf("promote --plan = %+v %v", pres, err)
+	}
+	if got := pres.Plan.PRs; got[0].Base != "trunk" || got[1].Base != "a" {
+		t.Fatalf("plan PRs = %+v", got)
+	}
+	ares, _ := h.applyPlan(engine.ApplyOptions{Plan: pres.Plan.ID, Yes: true})
+	if len(ares.PRs) != 2 || ares.PRs[0].Base != "trunk" || ares.PRs[1].Base != "a" {
+		t.Fatalf("apply PRs = %+v", ares.PRs)
+	}
+	if a, b := h.prBase(publicName, "a"), h.prBase(publicName, "b"); a != "trunk" || b != "a" {
+		t.Fatalf("public PR bases: a %q, b %q", a, b)
+	}
+	if a, b := h.meta("a"), h.meta("b"); a.Promoted == nil || a.Promoted.Base != "trunk" || a.ParentName() != feature.MainParent ||
+		b.Promoted == nil || b.Promoted.Base != "a" || b.Parent != "a" {
+		t.Fatalf("records: a %q %+v, b %q %+v", a.Parent, a.Promoted, b.Parent, b.Promoted)
+	}
+	h.noPRBase("main")
+	h.noPushTo(0, "refs/heads/main")
+}
+
+// Review Focus 2: once a merges (by fast-forward here) and GitHub retargets
+// b's PR onto the base, sync closes a and moves b onto the base: its parent
+// is the placeholder, its PR base the real name. A new commit on b then
+// appends to its PR: nothing reads the real base as a changed one. Run on a
+// main pair too, which must read as it always has.
+func TestDefaultBranchStackSyncAndUpdate(t *testing.T) {
+	t.Parallel()
+	for _, base := range []string{"main", "trunk"} {
+		t.Run(base, func(t *testing.T) {
+			t.Parallel()
+			h := stackOnBase(t, base)
+			res, _, err := promoteStack(h, engine.PromoteOptions{Features: []string{"a", "b"}, Mode: "preserve", Yes: true})
+			if err != nil || res.Applied == nil {
+				t.Fatalf("promote a b = %+v %v", res, err)
+			}
+			prs := res.Applied.PRs
+			if err := h.pubGit.UpdateRef(h.ctx, "refs/heads/"+base, h.pubTip("a")); err != nil {
+				t.Fatal(err)
+			}
+			h.forge.SetPRMerged(publicName, prs[0].Number)
+			h.forge.SetPRBase(publicName, prs[1].Number, base)
+			sres, warns := h.syncOK(engine.SyncOptions{})
+			if len(warns) != 0 || len(sres.Closed) != 1 || sres.Closed[0].Name != "a" || !slices.Equal(sres.Closed[0].Reparented, []string{"b"}) {
+				t.Fatalf("sync closed %+v, warnings %+v", sres.Closed, warns)
+			}
+			mb := h.meta("b")
+			if mb.ParentName() != feature.MainParent || mb.Promoted == nil || mb.Promoted.Base != base || mb.Promoted.NeedsUpdate {
+				t.Fatalf("b's record = parent %q, %+v", mb.Parent, mb.Promoted)
+			}
+			if r := h.report("b"); r.State != feature.StatePublished {
+				t.Fatalf("b is %s", r.State)
+			}
+			H := h.pubTip("b")
+			testutil.Commit(t, h.shadowGit(), "b", "b review fix", map[string]string{"b2.txt": "b2\n"})
+			pr, err := promote(h, engine.PromoteOptions{Feature: "b", Mode: "preserve", Yes: true})
+			if err != nil || pr.Applied == nil {
+				t.Fatalf("promote b = %+v %v", pr, err)
+			}
+			if pub := pr.Plan.Publish; !pub.Update || pub.Style != plan.StyleAppend || pub.ReplaceReason != "" || pub.ExpectedHead != H {
+				t.Fatalf("b's publish = %+v", pub)
+			}
+			if got := pr.Plan.PRs; len(got) != 1 || got[0].Base != base || got[0].Number != prs[1].Number {
+				t.Fatalf("b's plan PRs = %+v", got)
+			}
+			if m := h.meta("b"); m.Promoted.Base != base {
+				t.Fatalf("b's record after the update = %+v", m.Promoted)
+			}
+		})
+	}
+}
+
+// --onto takes the base branch's real name, and main as an alias on every
+// pair; both move the feature onto the base, whose parent is the
+// placeholder. Another name that is neither the base nor a feature is a bad
+// flag.
+func TestRestackOntoAlias(t *testing.T) {
+	t.Parallel()
+	for _, onto := range []string{"trunk", "main"} {
+		t.Run(onto, func(t *testing.T) {
+			t.Parallel()
+			h := newHarnessOn(t, "trunk")
+			h.init()
+			h.startFeature("a", map[string]string{"a.txt": "a\n"})
+			h.startOn("b", "a", map[string]string{"b.txt": "b\n"})
+			res, _, err := h.eng.FeatureRestack(h.ctx, h.pair, engine.RestackOptions{Feature: "b", Onto: onto})
+			if err != nil || res.Onto != "trunk" || len(res.Restacked) != 1 || res.Restacked[0].Parent != feature.MainParent || res.Restacked[0].ForkedAt != "" {
+				t.Fatalf("restack --onto %s = %+v %v", onto, res, err)
+			}
+			validateResult(t, "feature-restack.schema.json", res)
+			bNew := h.head("b")
+			if _, ok := h.fileAt(bNew, "a.txt"); ok {
+				t.Fatal("b still carries a's commit")
+			}
+			if _, ok := h.fileAt(bNew, "b.txt"); !ok {
+				t.Fatal("b lost its own commit")
+			}
+			if m := h.meta("b"); m.ParentName() != feature.MainParent || m.ForkedAt != "" || m.Base != h.head("trunk") {
+				t.Fatalf("b = parent %q, forked_at %q, base %s", m.Parent, m.ForkedAt, m.Base)
+			}
+			h.noPushTo(0, "refs/heads/main")
+		})
+	}
+	h := newHarnessOn(t, "trunk")
+	h.init()
+	h.startFeature("a", map[string]string{"a.txt": "a\n"})
+	h.startOn("b", "a", map[string]string{"b.txt": "b\n"})
+	before := len(h.pushes)
+	_, _, err := h.eng.FeatureRestack(h.ctx, h.pair, engine.RestackOptions{Feature: "b", Onto: "master"})
+	if ce := wantCode(t, err, contract.BadFlag); ce.Field != "onto" || !strings.Contains(ce.Message, "trunk") || len(h.pushes) != before {
+		t.Fatalf("--onto master: %+v", ce)
+	}
+}
+
+// feature start --from takes the base branch's real name, and main as an
+// alias: both start from the base, unstacked.
+func TestStartFromBaseAlias(t *testing.T) {
+	t.Parallel()
+	h := newHarnessOn(t, "trunk")
+	h.init()
+	for _, from := range []string{"trunk", "main"} {
+		name := "from-" + from
+		res, _, err := h.eng.FeatureStart(h.ctx, h.pair, name, engine.FeatureStartOptions{From: from})
+		if err != nil || res.Parent != feature.MainParent || res.Base != h.head("trunk") {
+			t.Fatalf("start --from %s = %+v %v", from, res, err)
+		}
+		if m := h.meta(name); m.Stacked() || m.ForkedAt != "" {
+			t.Fatalf("--from %s: record parent %q, forked_at %q", from, m.Parent, m.ForkedAt)
 		}
 	}
 }

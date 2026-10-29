@@ -406,7 +406,7 @@ func (e *Engine) FeatureArchive(ctx context.Context, p workspace.Pair, name stri
 	case err != nil:
 		return nil, warns, err
 	case len(kids) > 0:
-		return nil, warns, hasChildren(name, kids, "archive")
+		return nil, warns, hasChildren(name, kids, "archive", pc.base)
 	case len(unreadable) > 0:
 		return nil, warns, unreadableChildren(name, "archive", unreadable)
 	}
@@ -457,7 +457,8 @@ func archivedErr(name string, m feature.Meta, prState string) error {
 // stackOnArchivedRefusal is archivedRefusal for a command that would build
 // on name: feature start --from (field "from") and feature restack --onto
 // (field "onto"). The message adds what to do instead (P25): start from
-// main, or restack onto main. nil when m isn't archived.
+// the base branch, or restack onto it, by its real name. nil when m isn't
+// archived.
 func (e *Engine) stackOnArchivedRefusal(ctx context.Context, pc *pairCtx, name string, m feature.Meta, field string) error {
 	err := e.archivedRefusal(ctx, pc, name, m)
 	ce := contract.From(err)
@@ -465,9 +466,9 @@ func (e *Engine) stackOnArchivedRefusal(ctx context.Context, pc *pairCtx, name s
 		return nil
 	}
 	pr, _ := ce.Details["public_pr"].(int)
-	fromMain := "start from main"
+	fromMain := "start from " + pc.base
 	if field == "onto" {
-		fromMain = "restack onto main"
+		fromMain = "restack onto " + pc.base
 	}
 	instead := fmt.Sprintf("%s, or wait until PR #%d merges and run ghostbranch sync", fromMain, pr)
 	switch ce.Details["pr_state"] {
