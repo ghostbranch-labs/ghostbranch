@@ -68,6 +68,13 @@ func (h *harness) grant(d time.Duration) {
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
+	return newHarnessOn(t, "main")
+}
+
+// newHarnessOn is newHarness with the public repo's first commit on branch,
+// and branch its default branch.
+func newHarnessOn(t *testing.T, branch string) *harness {
+	t.Helper()
 	root := t.TempDir()
 	f := fake.New(filepath.Join(root, "forge"))
 	dir, err := f.AddRepo(publicName, false)
@@ -75,10 +82,16 @@ func newHarness(t *testing.T) *harness {
 		t.Fatal(err)
 	}
 	pubGit := gitx.New(dir)
-	testutil.Commit(t, pubGit, "main", "initial", map[string]string{
+	testutil.Commit(t, pubGit, branch, "initial", map[string]string{
 		"README.md":                "# widget\n",
 		".github/workflows/ci.yml": "name: ci\non: [pull_request]\n",
 	})
+	if branch != "main" {
+		if err := f.SetDefaultBranch(context.Background(), publicName, branch); err != nil {
+			t.Fatal(err)
+		}
+		f.DefaultBranchSets = nil // the repo was made this way, not by Ghostbranch
+	}
 	ws, err := workspace.Open(filepath.Join(root, "home"), "default")
 	if err != nil {
 		t.Fatal(err)

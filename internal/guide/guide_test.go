@@ -64,7 +64,8 @@ func TestRenderListsEveryCodeFromTheRegistry(t *testing.T) {
 	// 525: 8.7's Setting up a repo for a person section (13 lines), four stuck rows for the new codes and the exact login exception.
 	// 530: 8.7's final review (the person's own login step, doctor after init, AUTH_MISSING during setup).
 	// 531: feature start checks the branch out, and data.local (8.8, issue #35).
-	if n := strings.Count(out, "\n"); n > 531 {
+	// 532: the BASE_BRANCH_CHANGED error row (8.12).
+	if n := strings.Count(out, "\n"); n > 532 {
 		t.Errorf("the guide is %d lines; keep it short (spec: about 150 plus the tables)", n)
 	}
 }

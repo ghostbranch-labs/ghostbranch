@@ -229,6 +229,10 @@ var errorDocs = map[Code]Doc{
 		Causes: []string{"other_machine: the plan was made on another machine, or in another workspace or GHOSTBRANCH_HOME with the same shadow repo; the shadow repo has its ref, but plan files stay where they were made",
 			"unknown: no such plan here or in the shadow repo (a typo, or a plan for another shadow repo)"},
 		WhatToDo: "For other_machine, apply it on the machine that made it, or make a new plan here: next gives promote <error.details.feature> --plan when one feature's gate matches the plan. Otherwise run ghostbranch status and promote the feature you meant again."},
+	BaseBranchChanged: {Summary: "The public repo no longer has the branch this pair was set up on (error.details.recorded); its default branch is now error.details.current. Ghostbranch doesn't follow a renamed default branch yet, so every command on the pair stops before it changes anything; doctor still runs and reports it.",
+		Causes:     []string{"the public repo's default branch was renamed on GitHub (for example master to main)", "the recorded branch was deleted from the public repo"},
+		WhatToDo:   "A person moves the pair to the new branch by hand. First finish or abandon the pair's open features; while the old branch is gone they can't be, so if any are still open, rename the branch back on GitHub until they're done. Then run ghostbranch remove <repo> and ghostbranch init <repo> --shadow <owner/name> with a new shadow repo: init sets the pair up on the new default branch. The old shadow repo's overlay still records the old branch, so adopting it stops with this code again.",
+		NeedsHuman: true},
 }
 
 var warningDocs = map[WarningCode]Doc{

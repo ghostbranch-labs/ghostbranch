@@ -33,6 +33,7 @@ func TestEveryCodeHasItsExitCode(t *testing.T) {
 		contract.FoldNeedsRebase: 4, contract.HasChildren: 4, contract.NotAStack: 2, contract.ParentRewritten: 4,
 		contract.PRChangedOnGitHub: 4,
 		contract.AppNotInstalled:   2, contract.AppCantSeeRepo: 2, contract.TokenWrongAccount: 2, contract.AgentTokenRefused: 2,
+		contract.BaseBranchChanged: 2,
 	}
 	all := contract.AllCodes()
 	if len(all) != len(want) {

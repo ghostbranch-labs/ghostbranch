@@ -390,6 +390,44 @@ func (f *Forge) SetDefaultBranch(_ context.Context, full, branch string) error {
 	return nil
 }
 
+// RenameBranch renames branch from to to in full, as a rename on GitHub
+// does: the old name is gone, the repo's default branch follows when it was
+// from, and open PRs based on from are retargeted to to.
+func (f *Forge) RenameBranch(full, from, to string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	r, ok := f.repos[full]
+	if !ok {
+		return fmt.Errorf("rename branch in %s: %w", full, forge.ErrNotFound)
+	}
+	ctx, g := context.Background(), gitx.New(r.CloneURL)
+	sha, ok, err := g.Resolve(ctx, "refs/heads/"+from)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("rename branch in %s: branch %s does not exist", full, from)
+	}
+	if f.branchExists(full, to) {
+		return fmt.Errorf("rename branch in %s: branch %s already exists", full, to)
+	}
+	if err := g.UpdateRef(ctx, "refs/heads/"+to, sha); err != nil {
+		return err
+	}
+	if err := g.DeleteRef(ctx, "refs/heads/"+from); err != nil {
+		return err
+	}
+	if r.DefaultBranch == from {
+		r.DefaultBranch = to
+	}
+	for i := range f.prs[full] {
+		if pr := &f.prs[full][i]; pr.State == "open" && pr.Base == from {
+			pr.Base = to
+		}
+	}
+	return nil
+}
+
 func (f *Forge) FindOpenPR(_ context.Context, full, head, base string) (*forge.PR, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

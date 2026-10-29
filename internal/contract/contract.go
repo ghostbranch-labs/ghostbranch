@@ -193,6 +193,11 @@ const (
 	// lacks what agents need. details: reason (can_publish,
 	// missing_permissions, wrong_repo), link.
 	AgentTokenRefused Code = "AGENT_TOKEN_REFUSED"
+	// BaseBranchChanged means the public repo no longer has the branch the
+	// pair was set up on (its default branch was renamed, most likely), and
+	// Ghostbranch doesn't follow a rename. details: recorded (the pair's
+	// branch), current (the public repo's default branch now).
+	BaseBranchChanged Code = "BASE_BRANCH_CHANGED"
 )
 
 var exitCodes = map[Code]int{
@@ -233,6 +238,7 @@ var exitCodes = map[Code]int{
 	AppCantSeeRepo:         ExitUsage,
 	TokenWrongAccount:      ExitUsage,
 	AgentTokenRefused:      ExitUsage,
+	BaseBranchChanged:      ExitUsage,
 }
 
 // Exit is the process exit code for c.
