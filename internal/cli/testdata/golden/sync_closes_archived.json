@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.16",
+  "schema_version": "0.17",
   "command": "sync",
   "ok": true,
   "exit_code": 0,
@@ -7,6 +7,7 @@
     "public": "acme/widget",
     "shadow": "acme/widget-shadow",
     "action": "noop",
+    "base_branch": "main",
     "public_main": "<SHA1>",
     "shadow_main_before": "<SHA1>",
     "shadow_main_after": "<SHA1>",

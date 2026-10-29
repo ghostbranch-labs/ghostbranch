@@ -1,0 +1,7 @@
+Started feature feat-x from shadow trunk <SHA1:12>.
+Check it out with: git fetch shadow && git switch feat-x
+Next:
+  ghostbranch gate feat-x --repo acme/widget
+    check out with `git fetch shadow && git switch feat-x`, commit on feat-x, push it with `git push shadow feat-x` (the shadow repo, never origin), then gate it
+Reading acme/widget and acme/widget-shadow from GitHub
+Updating the local copy of acme/widget and acme/widget-shadow

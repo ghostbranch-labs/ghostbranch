@@ -547,8 +547,9 @@ func TestValidBaseBranch(t *testing.T) {
 	}
 }
 
-// renderedMain is the config init wrote for a main pair before 8.12; a
-// main pair's render must not change by a byte.
+// renderedMain is the config init writes for a main pair: as before 8.12,
+// but for the sync comment, which says "the shadow" where it said "shadow
+// main", so it reads true on any base branch. No public_branch key.
 const renderedMain = `# Ghostbranch configuration. It lives only on this shadow repo's
 # "ghostbranch" branch and is never promoted.
 version: 1
@@ -575,7 +576,7 @@ leak_scan:
 
 sync:
   # Scheduled sync is off: run ghostbranch sync yourself (commands warn when
-  # shadow main falls behind public). To opt in, set a cron such as
+  # the shadow falls behind public). To opt in, set a cron such as
   # "23 */6 * * *" (about 120 Actions minutes a month), then run
   # ghostbranch upgrade.
   schedule: "off"
@@ -596,7 +597,8 @@ func TestRenderBranch(t *testing.T) {
 	}
 	for _, sched := range []string{config.ScheduleOff, "23 */6 * * *"} {
 		out := string(config.RenderSchedule("a/b", "a/b-shadow", "trunk", sched))
-		if !strings.Contains(out, "\nshadow: a/b-shadow\npublic_branch: trunk\n") || !strings.Contains(out, "branches: [trunk]") || strings.Contains(out, "main") {
+		if !strings.Contains(out, "\nshadow: a/b-shadow\npublic_branch: trunk\n") || !strings.Contains(out, "branches: [trunk]") || strings.Contains(out, "main") ||
+			(sched == config.ScheduleOff && !strings.Contains(out, "\n  # the shadow falls behind public). ")) {
 			t.Fatalf("%s: trunk render:\n%s", sched, out)
 		}
 		cfg, warns, err := config.Parse([]byte(out))

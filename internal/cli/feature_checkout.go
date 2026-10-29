@@ -199,12 +199,12 @@ func localGit(ctx context.Context, dir string, args ...string) (string, error) {
 // featureStartText is feature start's human text: the new branch, then
 // what happened in this checkout and what is left for the person.
 func featureStartText(b *strings.Builder, v *engine.FeatureStartResult, st style.Styler) {
-	from := "shadow main " + short(v.Base)
+	from := "shadow " + baseName(v.BaseBranch) + " " + short(v.Base)
 	if v.Parent != "" && v.Parent != feature.MainParent {
 		fmt.Fprintf(b, "Started feature %s on %s, at its tip %s.\n", v.Name, v.Parent, short(v.Base))
 		from = v.Parent + " " + short(v.Base)
 	} else {
-		fmt.Fprintf(b, "Started feature %s from shadow main %s.\n", v.Name, short(v.Base))
+		fmt.Fprintf(b, "Started feature %s from %s.\n", v.Name, from)
 	}
 	l := v.Local
 	line := func(s string) { b.WriteString(s + "\n") }

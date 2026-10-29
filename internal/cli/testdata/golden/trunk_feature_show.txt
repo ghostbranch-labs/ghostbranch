@@ -1,0 +1,13 @@
+Feature feat-x: draft
+  branch: feat-x at <SHA1:12>, based on <SHA2:12>
+  drift: clean
+  gate: never run
+  public PR: none
+Commits since public trunk (1):
+  <SHA1:12>  work  (Test Author <author@example.com>)
+      feature.txt
+Ledger (1):
+  2026-10-05T12:00:00Z  human:octo  feature start  exit 0
+Reading acme/widget and acme/widget-shadow from GitHub
+Updating the local copy of acme/widget and acme/widget-shadow
+Reading the features and their pull requests

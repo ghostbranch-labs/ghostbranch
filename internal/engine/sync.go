@@ -25,9 +25,10 @@ type SyncResult struct {
 	Public           string           `json:"public"`
 	Shadow           string           `json:"shadow"`
 	Action           string           `json:"action"`
+	BaseBranch       string           `json:"base_branch"` // the pair's base branch; public_main and shadow_main_* are its tips
 	PublicMain       string           `json:"public_main"`
 	ShadowMainBefore string           `json:"shadow_main_before"`
-	ShadowMainAfter  string           `json:"shadow_main_after"` // where sync left shadow main; when its push failed, the SHA sync read
+	ShadowMainAfter  string           `json:"shadow_main_after"` // where sync left the shadow's base branch; when its push failed, the SHA sync read
 	Branches         []SyncBranch     `json:"branches"`
 	CancelledRuns    []CancelledRun   `json:"cancelled_runs"`
 	Closed           []ClosedFeature  `json:"closed"`          // merged features sync closed; never null
@@ -136,7 +137,7 @@ func (e *Engine) Sync(ctx context.Context, p workspace.Pair, o SyncOptions) (res
 	if err != nil {
 		return nil, warns, internalErr(err, "read shadow "+pc.base)
 	}
-	res = &SyncResult{Public: p.Public, Shadow: p.Shadow, PublicMain: pm, ShadowMainBefore: sm, ShadowMainAfter: sm, Branches: []SyncBranch{}, CancelledRuns: []CancelledRun{},
+	res = &SyncResult{Public: p.Public, Shadow: p.Shadow, BaseBranch: pc.base, PublicMain: pm, ShadowMainBefore: sm, ShadowMainAfter: sm, Branches: []SyncBranch{}, CancelledRuns: []CancelledRun{},
 		Closed: []ClosedFeature{}, Attention: []FeatureReport{}}
 	if e.DryRun {
 		res.Preview = preview.New(map[string]string{"public_main": pm, "shadow_main": sm})

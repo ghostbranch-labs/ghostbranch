@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
+	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 )
 
 // A LOCKED from workspace.Update reaches the caller as it is, holder and all,
@@ -41,5 +42,16 @@ func TestUpdateErr(t *testing.T) {
 				t.Fatalf("message = %q", ce.Message)
 			}
 		})
+	}
+}
+
+// A stale_gate refusal of a PR update names the pair's base branch among
+// what may have moved, not main (8.12).
+func TestUpdateGateErrNamesTheBase(t *testing.T) {
+	t.Parallel()
+	m := feature.Meta{Gate: &feature.Gate{}}
+	ce := updateGateErr("a", []string{"a"}, m, &prUpdate{PR: 7}, "squash", "preserve", false, false, "trunk")
+	if ce.Details["reason"] != "stale_gate" || !strings.Contains(ce.Message, "(a, public trunk, the PR's head or base") || strings.Contains(ce.Message, "main") {
+		t.Fatalf("stale_gate = %q %v", ce.Message, ce.Details)
 	}
 }

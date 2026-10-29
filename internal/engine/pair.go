@@ -153,6 +153,9 @@ func (e *Engine) openBase(ctx context.Context, pc *pairCtx) error {
 	default:
 		return err
 	}
+	if e.OnBase != nil {
+		e.OnBase(pc.base)
+	}
 	if pc.op == "init" || pc.op == "doctor" {
 		return nil
 	}
@@ -270,7 +273,7 @@ func (e *Engine) push(ctx context.Context, pc *pairCtx, remote string, opt gitx.
 			msg += "; the token needs Workflows write (fine-grained) or the workflow scope (gh/OAuth)"
 		}
 		details := map[string]any{"remote": remote, "refs": refused.Refs, "reason": refused.Reason}
-		if text, extra, ok := explainGH007(ctx, pc.git, refspecs, refused, pc.public.FullName); ok {
+		if text, extra, ok := explainGH007(ctx, pc.git, refspecs, refused, pc.public.FullName, pc.base); ok {
 			msg = text
 			for k, v := range extra {
 				details[k] = v

@@ -40,6 +40,13 @@ type testEnv struct {
 
 func newTestEnv(t *testing.T) *testEnv {
 	t.Helper()
+	return newTestEnvOn(t, "main")
+}
+
+// newTestEnvOn is newTestEnv with acme/widget's default branch named
+// branch, as GitHub made it, not Ghostbranch.
+func newTestEnvOn(t *testing.T, branch string) *testEnv {
+	t.Helper()
 	root := t.TempDir()
 	f := fake.New(filepath.Join(root, "forge"))
 	dir, err := f.AddRepo("acme/widget", false)
@@ -47,8 +54,14 @@ func newTestEnv(t *testing.T) *testEnv {
 		t.Fatal(err)
 	}
 	pubGit := gitx.New(dir)
-	testutil.Commit(t, pubGit, "main", "initial", map[string]string{
+	testutil.Commit(t, pubGit, branch, "initial", map[string]string{
 		"README.md": "# widget\n", ".github/workflows/ci.yml": "name: ci\non: [pull_request]\n"})
+	if branch != "main" {
+		if err := f.SetDefaultBranch(context.Background(), "acme/widget", branch); err != nil {
+			t.Fatal(err)
+		}
+		f.DefaultBranchSets = nil // the repo was made this way, not by Ghostbranch
+	}
 	// acme is an organization octo (the token's account) belongs to, so
 	// octo can set up acme/widget's shadow repo there.
 	f.Orgs = map[string]bool{"acme": true}

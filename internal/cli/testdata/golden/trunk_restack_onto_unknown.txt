@@ -1,0 +1,6 @@
+Reading acme/widget and acme/widget-shadow from GitHub
+Updating the local copy of acme/widget and acme/widget-shadow
+error: --onto takes the base branch trunk or a feature to stack feat-y on; "master" is neither: ghostbranch feature list --all lists the features [BAD_FLAG]
+Next:
+  ghostbranch feature list --all --repo acme/widget
+    --onto takes the base branch trunk or a feature; list every feature, abandoned ones included, to find it

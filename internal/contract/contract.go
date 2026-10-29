@@ -13,7 +13,7 @@ import (
 
 // SchemaVersion versions the envelope and every result and event schema. It
 // stays 0.x until launch, and 0.x versions may break.
-const SchemaVersion = "0.16"
+const SchemaVersion = "0.17"
 
 // RecordVersion versions what Ghostbranch stores: feature records, plans,
 // grants, waivers, workspace.json and the stored login. It moves only when a

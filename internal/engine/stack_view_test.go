@@ -123,22 +123,35 @@ func TestFeatureShowListsOnlyItsOwnCommits(t *testing.T) {
 }
 
 // A feature below the gated one that conflicts names the branch it was
-// replayed onto, not public main.
+// replayed onto, not public main; the public line is the pair's base
+// branch, by its name (8.12).
 func TestStackedGateConflictNamesTheLevelBelow(t *testing.T) {
 	t.Parallel()
-	h := newHarness(t)
-	h.init()
-	h.startFeature("a", map[string]string{"a.txt": "a\n"})
-	h.startOn("b", "a", map[string]string{"shared.txt": "b\n"})
-	h.startOn("c", "b", map[string]string{"c.txt": "c\n"})
-	testutil.Commit(t, h.pubGit, "main", "upstream", map[string]string{"shared.txt": "public\n"})
-	res, _, err := h.eng.Gate(h.ctx, h.pair, "c")
-	ce := wantCode(t, err, contract.RebaseConflict)
-	if ce.Details["feature"] != "b" || !strings.Contains(ce.Message, "does not rebase cleanly onto a (rebased onto public main)") {
-		t.Fatalf("conflict = %q %+v", ce.Message, ce.Details)
-	}
-	if res == nil || res.Parent != "b" {
-		t.Fatalf("a gate stopped below names its parent: %+v", res)
+	for _, base := range []string{"main", "trunk"} {
+		t.Run(base, func(t *testing.T) {
+			t.Parallel()
+			h := newHarnessOn(t, base)
+			h.init()
+			h.startFeature("a", map[string]string{"a.txt": "a\n"})
+			h.startOn("b", "a", map[string]string{"shared.txt": "b\n"})
+			h.startOn("c", "b", map[string]string{"c.txt": "c\n"})
+			testutil.Commit(t, h.pubGit, base, "upstream", map[string]string{"shared.txt": "public\n"})
+			res, _, err := h.eng.Gate(h.ctx, h.pair, "c")
+			ce := wantCode(t, err, contract.RebaseConflict)
+			if ce.Details["feature"] != "b" || !strings.Contains(ce.Message, "does not rebase cleanly onto a (rebased onto public "+base+")") {
+				t.Fatalf("conflict = %q %+v", ce.Message, ce.Details)
+			}
+			if res == nil || res.Parent != "b" {
+				t.Fatalf("a gate stopped below names its parent: %+v", res)
+			}
+			// The bottom itself conflicting names public's base branch.
+			testutil.Commit(t, h.pubGit, base, "upstream a", map[string]string{"a.txt": "public a\n"})
+			_, _, err = h.eng.Gate(h.ctx, h.pair, "b")
+			ce = wantCode(t, err, contract.RebaseConflict)
+			if ce.Details["feature"] != "a" || !strings.Contains(ce.Message, "does not rebase cleanly onto public "+base+";") {
+				t.Fatalf("bottom conflict = %q %+v", ce.Message, ce.Details)
+			}
+		})
 	}
 }
 

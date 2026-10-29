@@ -623,6 +623,34 @@ func TestDoctorBaseBranch(t *testing.T) {
 	}
 }
 
+// doctor reports base_branch only once it has read the overlay config: with
+// no overlay branch, pc.base is GitHub's default branch, a guess, and a
+// config that doesn't parse names no branch at all. Both report "".
+func TestDoctorBaseBranchIsNeverAGuess(t *testing.T) {
+	t.Parallel()
+	h := newHarnessOn(t, "trunk")
+	h.init()
+	h.asApp()
+	if _, err := h.shadowGit().Run(h.ctx, "update-ref", "-d", "refs/heads/"+engine.OverlayBranch); err != nil {
+		t.Fatal(err)
+	}
+	res, c := h.doctor(doctorOpts())
+	wantStatus(t, c["pair"], engine.DoctorFail)
+	if res.BaseBranch != "" || !strings.Contains(c["pair"].Message, "overlay branch") {
+		t.Fatalf("no overlay: base_branch %q, pair %+v", res.BaseBranch, c["pair"])
+	}
+
+	k := newHarnessOn(t, "trunk")
+	k.init()
+	k.asApp()
+	testutil.Commit(t, k.shadowGit(), engine.OverlayBranch, "break the config", map[string]string{".ghostbranch.yml": "version: [\n"})
+	res, c = k.doctor(doctorOpts())
+	wantStatus(t, c["pair"], engine.DoctorFail)
+	if res.BaseBranch != "" {
+		t.Fatalf("broken config: base_branch %q, pair %+v", res.BaseBranch, c["pair"])
+	}
+}
+
 // A feature can't take the base branch's name, under --plan too.
 func TestFeatureStartRefusesBaseName(t *testing.T) {
 	t.Parallel()

@@ -9,8 +9,8 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "public_main": { "$ref": "common.schema.json#/$defs/shaOrEmpty" },
-        "shadow_main": { "$ref": "common.schema.json#/$defs/shaOrEmpty" },
+        "public_main": { "description": "the public base branch's tip (the name says main on every pair)", "$ref": "common.schema.json#/$defs/shaOrEmpty" },
+        "shadow_main": { "description": "the shadow's base branch's tip", "$ref": "common.schema.json#/$defs/shaOrEmpty" },
         "feature_head": { "$ref": "common.schema.json#/$defs/shaOrEmpty" },
         "overlay": { "$ref": "common.schema.json#/$defs/shaOrEmpty" },
         "gate_candidate": { "$ref": "common.schema.json#/$defs/shaOrEmpty" }

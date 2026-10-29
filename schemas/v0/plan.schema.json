@@ -27,7 +27,7 @@
       "type": "object", "additionalProperties": false,
       "required": ["public_main", "feature_head", "overlay", "gate_candidate"],
       "properties": {
-        "public_main": { "$ref": "common.schema.json#/$defs/sha" },
+        "public_main": { "description": "the public base branch's tip the plan was made on (the name says main on every pair)", "$ref": "common.schema.json#/$defs/sha" },
         "feature_head": { "$ref": "common.schema.json#/$defs/sha" },
         "overlay": { "$ref": "common.schema.json#/$defs/sha" },
         "gate_candidate": { "$ref": "common.schema.json#/$defs/sha" }

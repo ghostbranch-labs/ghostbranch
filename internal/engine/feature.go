@@ -15,6 +15,9 @@ type FeatureStartResult struct {
 	Name   string `json:"name"`
 	Branch string `json:"branch"`
 	Base   string `json:"base"`
+	// BaseBranch is the pair's base branch: what a Parent of "main"
+	// stands for, and where an unstacked feature starts.
+	BaseBranch string `json:"base_branch"`
 	// Parent is the feature this one is stacked on, or the placeholder
 	// "main" (feature.MainParent) for the base branch.
 	Parent       string     `json:"parent"`
@@ -170,7 +173,7 @@ func (e *Engine) FeatureStart(ctx context.Context, p workspace.Pair, name string
 		}
 		base, parent, forkedAt = tip, from, tip
 	}
-	res = &FeatureStartResult{Name: name, Branch: name, Base: base, Parent: parent}
+	res = &FeatureStartResult{Name: name, Branch: name, Base: base, BaseBranch: pc.base, Parent: parent}
 	res.SetCheckout([][]string{{"git", "fetch", remoteShadow}, {"git", "switch", name}})
 	if e.DryRun {
 		res.Preview = preview.New(map[string]string{"shadow_main": shadowMain})

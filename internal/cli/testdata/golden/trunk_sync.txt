@@ -1,0 +1,9 @@
+Shadow trunk fast-forwarded <SHA1:12> -> <SHA2:12>.
+Next:
+  ghostbranch feature start --repo acme/widget <name>
+    no feature is in progress; start one: put its name (the <name> argument) after start
+Reading acme/widget and acme/widget-shadow from GitHub
+Updating the local copy of acme/widget and acme/widget-shadow
+Fast-forwarding shadow trunk
+shadow trunk: <SHA1:12> → <SHA2:12>
+ok: Fast-forwarded shadow trunk

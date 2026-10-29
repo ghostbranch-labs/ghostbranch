@@ -573,14 +573,15 @@ func validate(c Config) error {
 
 // Render is the config file init writes for a new pair, with scheduled
 // sync off. branch is the public repo's default branch; main renders no
-// public_branch key, so a main pair's file is the one earlier versions wrote.
+// public_branch key, so a main pair's file is the one earlier versions wrote
+// but for one comment's wording.
 func Render(public, shadow, branch string) []byte {
 	return RenderSchedule(public, shadow, branch, ScheduleOff)
 }
 
 const syncOffBlock = `sync:
   # Scheduled sync is off: run ghostbranch sync yourself (commands warn when
-  # shadow %[1]s falls behind public). To opt in, set a cron such as
+  # the shadow falls behind public). To opt in, set a cron such as
   # "23 */6 * * *" (about 120 Actions minutes a month), then run
   # ghostbranch upgrade.
   schedule: "off"

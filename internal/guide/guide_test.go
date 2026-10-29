@@ -65,7 +65,8 @@ func TestRenderListsEveryCodeFromTheRegistry(t *testing.T) {
 	// 530: 8.7's final review (the person's own login step, doctor after init, AUTH_MISSING during setup).
 	// 531: feature start checks the branch out, and data.local (8.8, issue #35).
 	// 532: the BASE_BRANCH_CHANGED error row (8.12).
-	if n := strings.Count(out, "\n"); n > 532 {
+	// 533: the intro defines the base branch, main unless the repo uses another default branch (8.12).
+	if n := strings.Count(out, "\n"); n > 533 {
 		t.Errorf("the guide is %d lines; keep it short (spec: about 150 plus the tables)", n)
 	}
 }
@@ -420,7 +421,9 @@ func TestGuideTeachesStacks(t *testing.T) {
 		"`--title-for b=\"<title>\"`",
 		"`NOT_A_STACK`", "`error.details.reason`",
 		"`ghostbranch feature fold <c> --repo <public> --json`",
-		"`HAS_CHILDREN`", "`feature restack <child> --onto main`",
+		"`HAS_CHILDREN`", "`feature restack <child> --onto <base branch>`",
+		// 8.12: main is the base branch only where the repo's default is main.
+		"a rebase on public's **base branch** (main unless the repo uses another default branch; `base_branch` names it, and `--onto main` works on every pair)",
 		"`public_pr_needs_update`",
 		// F-16/F-31: how a stack merges, and what a squash loses.
 		"Merging is a maintainer's call, on GitHub.",

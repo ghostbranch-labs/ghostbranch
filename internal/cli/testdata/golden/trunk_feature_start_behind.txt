@@ -1,0 +1,8 @@
+Reading acme/widget and acme/widget-shadow from GitHub
+Updating the local copy of acme/widget and acme/widget-shadow
+error: shadow trunk is 1 commit(s) behind public trunk, so a feature started now would be based on old code; run ghostbranch sync --repo acme/widget, then start the feature again [SHADOW_BEHIND]
+Next:
+  ghostbranch sync --repo acme/widget
+    shadow trunk is behind public trunk; sync it (fast-forward only)
+  ghostbranch feature start feat-x --repo acme/widget
+    then start the feature again, from the synced shadow trunk

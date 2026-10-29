@@ -1,0 +1,8 @@
+  feat-y onto trunk: <SHA1:12> -> <SHA2:12>
+These branches were rewritten in the shadow repo: in each checkout, git fetch, then git reset --keep <remote>/<branch>.
+Next:
+  ghostbranch gate feat-y --repo acme/widget
+    the restacked branches were rewritten; gate them again from the bottom (and in each checkout: git fetch, then git reset --keep <remote>/<branch>)
+Reading acme/widget and acme/widget-shadow from GitHub
+Updating the local copy of acme/widget and acme/widget-shadow
+Restacking feat-y onto trunk

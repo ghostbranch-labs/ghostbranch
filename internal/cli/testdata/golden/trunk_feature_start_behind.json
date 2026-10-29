@@ -1,0 +1,44 @@
+{
+  "schema_version": "0.17",
+  "command": "feature start",
+  "ok": false,
+  "exit_code": 4,
+  "data": {},
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "sync",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "shadow trunk is behind public trunk; sync it (fast-forward only)",
+      "needs_human": false,
+      "needs_input": []
+    },
+    {
+      "command": [
+        "ghostbranch",
+        "feature",
+        "start",
+        "feat-x",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "then start the feature again, from the synced shadow trunk",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
+  "error": {
+    "code": "SHADOW_BEHIND",
+    "message": "shadow trunk is 1 commit(s) behind public trunk, so a feature started now would be based on old code; run ghostbranch sync --repo acme/widget, then start the feature again",
+    "field": null,
+    "retryable": false,
+    "details": {
+      "public_main": "<SHA1>",
+      "shadow_main": "<SHA2>"
+    }
+  }
+}

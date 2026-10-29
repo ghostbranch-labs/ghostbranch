@@ -69,7 +69,7 @@ func TestSuccessEnvelopeShape(t *testing.T) {
 	if err := json.Unmarshal(b, &m); err != nil {
 		t.Fatal(err)
 	}
-	if m["schema_version"] != "0.16" || m["ok"] != true || m["exit_code"] != float64(0) ||
+	if m["schema_version"] != "0.17" || m["ok"] != true || m["exit_code"] != float64(0) ||
 		m["command"] != "sync" || m["error"] != nil {
 		t.Fatalf("bad envelope: %s", b)
 	}
@@ -140,7 +140,7 @@ func TestSubProject4CodesAreRegistered(t *testing.T) {
 	if err != nil || !es[0].NeedsHuman || !strings.Contains(es[0].WhatToDo, "--adopt") {
 		t.Fatalf("SHADOW_CREATE_DENIED doc: %+v %v", es, err)
 	}
-	if contract.SchemaVersion != "0.16" {
+	if contract.SchemaVersion != "0.17" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 }
@@ -163,7 +163,7 @@ func TestSubProject5aCodesAreRegistered(t *testing.T) {
 	if es, _ := contract.Explain("AUTHOR_UNMAPPED"); !es[0].NeedsHuman {
 		t.Fatal("AUTHOR_UNMAPPED needs a person: only they may edit the overlay config's author_map")
 	}
-	if contract.SchemaVersion != "0.16" {
+	if contract.SchemaVersion != "0.17" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 }
@@ -179,7 +179,7 @@ func TestSubProject5bCodesAreRegistered(t *testing.T) {
 			t.Fatalf("%s is not documented: %+v %v", c, es, err)
 		}
 	}
-	if contract.SchemaVersion != "0.16" {
+	if contract.SchemaVersion != "0.17" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 }
@@ -207,7 +207,7 @@ func TestFeatureNotClosedIsRegistered(t *testing.T) {
 	}
 	es, err := contract.Explain("FEATURE_NOT_CLOSED")
 	if err != nil || len(es) != 1 || es[0].Kind != contract.KindWarning ||
-		es[0].Summary != "Sync didn't close a merged feature: the close failed, sync couldn't survey the features and so closed none, another feature's record couldn't be read, so sync left the merged features open, or its PR merged into the public branch below it, not main." ||
+		es[0].Summary != "Sync didn't close a merged feature: the close failed, sync couldn't survey the features and so closed none, another feature's record couldn't be read, so sync left the merged features open, or its PR merged into the public branch below it, not the base branch (main unless the repo uses another default branch)." ||
 		!strings.Contains(es[0].WhatToDo, "With details.reason merged_into_parent_branch") ||
 		!strings.HasPrefix(es[0].WhatToDo, "If details.deleted is set, the feature is gone: close its gate draft PR in the shadow repo by hand.") ||
 		!strings.Contains(es[0].WhatToDo, "Otherwise run ghostbranch feature show <name>, then feature close <name>.") ||
@@ -288,7 +288,7 @@ func TestSubProject5cCodesAreRegistered(t *testing.T) {
 			t.Fatalf("%s is not documented: %+v %v", c, es, err)
 		}
 	}
-	if contract.SchemaVersion != "0.16" {
+	if contract.SchemaVersion != "0.17" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 }
@@ -304,7 +304,7 @@ func TestSubProject5d1CodesAreRegistered(t *testing.T) {
 			t.Fatalf("%s is not documented: %+v %v", w, es, err)
 		}
 	}
-	if contract.SchemaVersion != "0.16" {
+	if contract.SchemaVersion != "0.17" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 	if es, _ := contract.Explain(string(contract.Locked)); !strings.Contains(es[0].WhatToDo, "nothing to delete") ||
@@ -350,7 +350,7 @@ func TestNewer(t *testing.T) {
 // and the user docs are generated from them, and agents act on them.
 func TestSubProject61Contract(t *testing.T) {
 	t.Parallel()
-	if contract.SchemaVersion != "0.16" {
+	if contract.SchemaVersion != "0.17" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 	for c, s := range map[contract.Code]string{contract.LoginExpired: "LOGIN_EXPIRED", contract.LoginUnavailable: "LOGIN_UNAVAILABLE",
@@ -442,7 +442,7 @@ func TestNewerRecord(t *testing.T) {
 
 func TestSubProject5d2Contract(t *testing.T) {
 	t.Parallel()
-	if contract.SchemaVersion != "0.16" {
+	if contract.SchemaVersion != "0.17" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 	for _, c := range []contract.WarningCode{contract.LedgerNotWritten, contract.SyncPushFailed, contract.PlanFileUnreadable} {
@@ -506,7 +506,7 @@ func TestGuardUnsupportedAndWaiverUnknownTexts(t *testing.T) {
 // is generated from them, and agents act on them.
 func TestSubProject61aContract(t *testing.T) {
 	t.Parallel()
-	if contract.SchemaVersion != "0.16" {
+	if contract.SchemaVersion != "0.17" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 	for c, want := range map[contract.Code]struct {
@@ -535,7 +535,7 @@ func TestSubProject61aContract(t *testing.T) {
 		},
 		"HAS_CHILDREN": {
 			summary:  "The feature has children stacked on it (error.details.children), so it was not abandoned or closed: they would be left on a deleted parent.",
-			whatToDo: "Deal with each child in error.details.children first: fold it into this feature (ghostbranch feature fold <child>), abandon it (for abandon: ghostbranch feature abandon <child>) or close it (for close: ghostbranch feature close <child>), or move it onto main (ghostbranch feature restack <child> --onto main). An abandoned child blocks close, not abandon. Then run the command again.",
+			whatToDo: "Deal with each child in error.details.children first: fold it into this feature (ghostbranch feature fold <child>), abandon it (for abandon: ghostbranch feature abandon <child>) or close it (for close: ghostbranch feature close <child>), or move it onto the base branch (main unless the repo uses another default branch) with ghostbranch feature restack <child> --onto <base branch> (--onto main works on every pair). An abandoned child blocks close, not abandon. Then run the command again.",
 		},
 		"NOT_A_STACK": {
 			summary: "The features given to promote aren't a stack that can be published together; error.details.reason says why and error.details.feature names where.",
@@ -543,18 +543,18 @@ func TestSubProject61aContract(t *testing.T) {
 				"duplicate: a feature is listed twice",
 				"order: the features aren't listed bottom first",
 				"gap: a listed feature's parent is neither the feature listed just below it nor already public (for example promote a c, leaving out b)",
-				"parent_not_public: the bottom feature's parent is neither main nor already published",
+				"parent_not_public: the bottom feature's parent is neither the base branch nor already published",
 				"parent_merged: the bottom's published parent merged; run sync",
 				"parent_moved: the bottom's published parent changed since it was published",
 				"stale_gate: a listed feature has no fresh, green gate; a gate goes stale when its own branch or any branch below it moves. With error.details.update_mode, the bottom's gate built its open PR's update in another history mode (gate builds in promote.default_mode), so gating again won't help: promote that feature on its own with --mode <update_mode>, which gates it in that mode, then the branches above it. error.details.updating is true when the stack's PRs are open: the new plan updates them all.",
 				"open_above: two or more lines of open PRs stack on one published feature, and one plan updates one line: close or merge every other line's PRs on that feature on GitHub, then promote it again",
 				"parent_stale: a branch above wasn't restacked after the branch below moved; restack, gate up, promote",
 			},
-			whatToDo: "Run ghostbranch status to see the stack. List the features bottom first, starting from one whose parent is main or already published, with none left out. Gate each one that needs it (ghostbranch gate <feature>, bottom up), then run promote again.",
+			whatToDo: "Run ghostbranch status to see the stack. List the features bottom first, starting from one whose parent is the base branch (main unless the repo uses another default branch) or already published, with none left out. Gate each one that needs it (ghostbranch gate <feature>, bottom up), then run promote again.",
 		},
 		"PARENT_REWRITTEN": {
 			summary:  "The feature's parent no longer contains the commit the feature was branched from (forked_at): the parent was rebased, amended or force-pushed.",
-			whatToDo: "Run ghostbranch feature restack <parent> to replay the feature's own commits onto the parent's new tip (it stops with git steps on a conflict), or ghostbranch feature restack <feature> --onto main to move it off the parent. Then run the command again. error.details.parent and error.details.forked_at name them.",
+			whatToDo: "Run ghostbranch feature restack <parent> to replay the feature's own commits onto the parent's new tip (it stops with git steps on a conflict), or ghostbranch feature restack <feature> --onto <base branch> to move it off the parent onto the base branch (main unless the repo uses another default branch; --onto main works on every pair). Then run the command again. error.details.parent and error.details.forked_at name them; for a feature at the bottom, error.details.parent is the placeholder main, which stands for the base branch whatever its name.",
 		},
 	} {
 		es, err := contract.Explain(code)
@@ -580,7 +580,7 @@ func TestSubProject61aContract(t *testing.T) {
 // first.
 func TestSubProject61a2Contract(t *testing.T) {
 	t.Parallel()
-	if contract.SchemaVersion != "0.16" {
+	if contract.SchemaVersion != "0.17" {
 		t.Fatalf("SchemaVersion = %s", contract.SchemaVersion)
 	}
 	if string(contract.PRChangedOnGitHub) != "PUBLIC_BRANCH_CHANGED" || string(contract.PublicBranchChanged) != "PUBLIC_BRANCH_CHANGED" ||
@@ -598,7 +598,7 @@ func TestSubProject61a2Contract(t *testing.T) {
 		!slices.Equal(e.Causes, []string{
 			"someone pushed a commit to the PR's branch",
 			"a review suggestion was committed on GitHub",
-			"Update branch on GitHub merged main into the PR's branch",
+			"Update branch on GitHub merged the base branch (or the branch below) into the PR's branch",
 			"the branch was force-pushed outside Ghostbranch",
 			"unrecorded_update: the branch is at an update Ghostbranch pushed whose record was never written (error.details.plan); nothing is foreign",
 			"adopted_missing: a preserve update would drop commits feature pull brought in from GitHub that the feature no longer has (error.details.foreign)",
@@ -633,7 +633,7 @@ func TestSubProject61a2Contract(t *testing.T) {
 // later Ghostbranch whose record format this binary doesn't know.
 func TestContractKeepsRecordsAt012(t *testing.T) {
 	t.Parallel()
-	if contract.SchemaVersion != "0.16" || contract.RecordVersion != "0.12" {
+	if contract.SchemaVersion != "0.17" || contract.RecordVersion != "0.12" {
 		t.Fatalf("SchemaVersion %s, RecordVersion %s", contract.SchemaVersion, contract.RecordVersion)
 	}
 	if contract.Newer("0.12") || !contract.Newer("0.13") {
@@ -658,7 +658,7 @@ func TestContractKeepsRecordsAt012(t *testing.T) {
 // 0.12. PAIR_AMBIGUOUS no longer sends an agent to init.
 func TestSubProject63bCodesAreRegistered(t *testing.T) {
 	t.Parallel()
-	if contract.SchemaVersion != "0.16" || contract.RecordVersion != "0.12" {
+	if contract.SchemaVersion != "0.17" || contract.RecordVersion != "0.12" {
 		t.Fatalf("SchemaVersion %s, RecordVersion %s", contract.SchemaVersion, contract.RecordVersion)
 	}
 	for code, name := range map[contract.Code]string{
@@ -727,7 +727,7 @@ func TestSubProject63bDetailsAreDocumented(t *testing.T) {
 // 0.16; records stay 0.12 (archived is an optional field).
 func TestSubProject65CodesAreRegistered(t *testing.T) {
 	t.Parallel()
-	if contract.SchemaVersion != "0.16" || contract.RecordVersion != "0.12" {
+	if contract.SchemaVersion != "0.17" || contract.RecordVersion != "0.12" {
 		t.Fatalf("SchemaVersion %s, RecordVersion %s", contract.SchemaVersion, contract.RecordVersion)
 	}
 	if contract.FeatureArchived != "FEATURE_ARCHIVED" || contract.FeatureArchived.Exit() != contract.ExitUsage ||
@@ -764,8 +764,8 @@ func TestFeatureArchivedNamesTheStackingCommands(t *testing.T) {
 		!strings.Contains(es[0].Summary, "feature start --from and feature restack --onto can't build on it") {
 		t.Fatalf("FEATURE_ARCHIVED = %+v %v", es, err)
 	}
-	if contract.SchemaVersion != "0.16" {
-		t.Fatalf("SchemaVersion = %s, want 0.16", contract.SchemaVersion)
+	if contract.SchemaVersion != "0.17" {
+		t.Fatalf("SchemaVersion = %s, want 0.17", contract.SchemaVersion)
 	}
 }
 
@@ -778,6 +778,41 @@ func TestNewSetupCodes(t *testing.T) {
 		es, err := contract.Explain(string(c))
 		if err != nil || len(es) != 1 || !es[0].NeedsHuman {
 			t.Errorf("%s doc = %+v %v", c, es, err)
+		}
+	}
+}
+
+// 8.12: explain names the public line generically, the base branch, and
+// documents what the guard and the details say on any base branch:
+// PUSH_BLOCKED lists an overlay config the guard can't read, REBASE_CONFLICT's
+// details.parent and details.upstream hold real branch names (they feed git
+// steps), and PARENT_REWRITTEN's details.parent keeps the main placeholder.
+func TestBaseBranchDocs(t *testing.T) {
+	t.Parallel()
+	doc := func(code string) contract.Entry {
+		es, err := contract.Explain(code)
+		if err != nil || len(es) == 0 {
+			t.Fatalf("explain %s: %v", code, err)
+		}
+		return es[0]
+	}
+	pb := doc("PUSH_BLOCKED")
+	if len(pb.Causes) != 3 || !strings.Contains(pb.Causes[2], "can't read the pair's overlay config") ||
+		!strings.Contains(pb.Causes[2], "UPGRADE_NEEDED") || !strings.Contains(pb.WhatToDo, "ghostbranch doctor") ||
+		!strings.Contains(pb.WhatToDo, "upgrade ghostbranch") {
+		t.Errorf("PUSH_BLOCKED = %+v", pb)
+	}
+	rc := doc("REBASE_CONFLICT")
+	if !strings.Contains(rc.Summary, "the base branch (main unless the repo uses another default branch)") ||
+		!strings.Contains(rc.WhatToDo, "details.parent and details.upstream hold the real branch names") {
+		t.Errorf("REBASE_CONFLICT = %+v", rc)
+	}
+	if pr := doc("PARENT_REWRITTEN"); !strings.Contains(pr.WhatToDo, "error.details.parent is the placeholder main") {
+		t.Errorf("PARENT_REWRITTEN = %+v", pr)
+	}
+	for _, code := range []string{"SHADOW_BEHIND", "OVERLAY_COLLISION", "DRIFT_UNKNOWN", "JOB_STALE"} {
+		if e := doc(code); strings.Contains(e.Summary, "public main") || strings.Contains(e.Summary, "Shadow main") {
+			t.Errorf("%s still says main for the public line: %s", code, e.Summary)
 		}
 	}
 }

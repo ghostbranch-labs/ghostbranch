@@ -1,0 +1,64 @@
+{
+  "schema_version": "0.17",
+  "command": "status",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "public": "acme/widget",
+    "shadow": "acme/widget-shadow",
+    "base_branch": "trunk",
+    "public_main": "<SHA1>",
+    "shadow_main": "<SHA1>",
+    "shadow_behind": false,
+    "overlay": "<SHA2>",
+    "overlay_status": "current",
+    "scheduled_sync": false,
+    "features": [
+      {
+        "name": "feat-x",
+        "state": "draft",
+        "branch": "feat-x",
+        "head": "<SHA3>",
+        "base": "<SHA1>",
+        "parent": "main",
+        "children": [
+          "feat-y"
+        ],
+        "stack": null,
+        "drift": {
+          "status": "clean",
+          "files": []
+        },
+        "gate": null,
+        "public_pr": null,
+        "pr_state": "",
+        "plan_id": "",
+        "moved": false,
+        "abandoned": false
+      },
+      {
+        "name": "feat-y",
+        "state": "draft",
+        "branch": "feat-y",
+        "head": "<SHA4>",
+        "base": "<SHA3>",
+        "parent": "feat-x",
+        "children": [],
+        "stack": null,
+        "drift": {
+          "status": "clean",
+          "files": []
+        },
+        "gate": null,
+        "public_pr": null,
+        "pr_state": "",
+        "plan_id": "",
+        "moved": false,
+        "abandoned": false
+      }
+    ]
+  },
+  "warnings": [],
+  "next": [],
+  "error": null
+}

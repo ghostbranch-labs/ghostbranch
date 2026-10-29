@@ -223,7 +223,9 @@ func checkOnto(recs map[string]stackRecord, self stackRecord, above []string, on
 	}
 	t, ok := recs[onto]
 	if !ok {
-		return bad("--onto takes the base branch %s (or main, its alias) or a feature to stack %s on; %q is neither: ghostbranch feature list --all lists the features", base, self.name, onto)
+		// details.reason unknown: next lists the features to choose from.
+		return contract.New(contract.BadFlag, "--onto takes the base branch %s or a feature to stack %s on; %q is neither: ghostbranch feature list --all lists the features", base, self.name, onto).
+			WithField("onto").WithDetails(map[string]any{"onto": onto, "reason": "unknown"})
 	}
 	if t.head == "" {
 		return contract.New(contract.FeatureNotFound,

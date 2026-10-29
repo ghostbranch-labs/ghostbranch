@@ -141,8 +141,8 @@ func updateGateErr(name string, names []string, m feature.Meta, u *prUpdate, mod
 	}
 	if !fresh || gt.Update == nil || gt.ScannedAs != def || mode == def || !gateFitsUpdate(gt, u, m, def, above, base) {
 		return notAStack("stale_gate", name, names,
-			"%s's gate wasn't built for the update its public PR #%d needs now (%s, public main, the PR's head or base, the PRs open above it, or the history mode changed since %s was gated): gate %s, then the branches above it, then promote again",
-			name, u.PR, name, name, name)
+			"%s's gate wasn't built for the update its public PR #%d needs now (%s, public %s, the PR's head or base, the PRs open above it, or the history mode changed since %s was gated): gate %s, then the branches above it, then promote again",
+			name, u.PR, name, base, name, name)
 	}
 	built := "an append to"
 	if gt.Update.Style == plan.StyleReplace {

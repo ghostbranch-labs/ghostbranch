@@ -43,7 +43,7 @@ func TestExplainGH007TipOnPublicMain(t *testing.T) {
 	t.Parallel()
 	g, pub, _ := gh007Repo(t, "me@example.com")
 	refused := &gitx.RefusedError{Refs: []string{"refs/heads/probe2"}, Reason: gh007Reason}
-	msg, det, ok := explainGH007(context.Background(), g, []string{pub + ":refs/heads/probe2"}, refused, "acme/widget")
+	msg, det, ok := explainGH007(context.Background(), g, []string{pub + ":refs/heads/probe2"}, refused, "acme/widget", "main")
 	if !ok {
 		t.Fatal("no explanation")
 	}
@@ -66,7 +66,7 @@ func TestExplainGH007OwnCommit(t *testing.T) {
 	t.Parallel()
 	g, _, feat := gh007Repo(t, "me@example.com")
 	refused := &gitx.RefusedError{Refs: []string{"refs/heads/ghostbranch-gate/probe2"}, Reason: gh007Reason}
-	msg, det, ok := explainGH007(context.Background(), g, []string{"+" + feat + ":refs/heads/ghostbranch-gate/probe2"}, refused, "acme/widget")
+	msg, det, ok := explainGH007(context.Background(), g, []string{"+" + feat + ":refs/heads/ghostbranch-gate/probe2"}, refused, "acme/widget", "main")
 	if !ok {
 		t.Fatal("no explanation")
 	}
@@ -93,7 +93,7 @@ func TestExplainGH007FirstGH007Ref(t *testing.T) {
 		Reason:     "x",
 	}
 	msg, _, ok := explainGH007(context.Background(), g,
-		[]string{pub + ":refs/heads/a", feat + ":refs/heads/b", pub + ":refs/heads/c"}, refused, "acme/widget")
+		[]string{pub + ":refs/heads/a", feat + ":refs/heads/b", pub + ":refs/heads/c"}, refused, "acme/widget", "main")
 	if !ok || !strings.Contains(msg, "newest commit on b ("+feat[:7]) {
 		t.Fatalf("ok=%v msg=%s", ok, msg)
 	}
@@ -113,7 +113,7 @@ func TestExplainGH007LookupFailsLeavesMessage(t *testing.T) {
 		"no refspec":     {nil, &gitx.RefusedError{Refs: []string{"refs/heads/x"}, Reason: gh007Reason}},
 		"not GH007":      {[]string{missing + ":refs/heads/x"}, &gitx.RefusedError{Refs: []string{"refs/heads/x"}, Reason: "pre-receive hook declined"}},
 	} {
-		if msg, det, ok := explainGH007(ctx, g, tc.specs, tc.refused, "acme/widget"); ok || msg != "" || det != nil {
+		if msg, det, ok := explainGH007(ctx, g, tc.specs, tc.refused, "acme/widget", "main"); ok || msg != "" || det != nil {
 			t.Errorf("%s: got %q %v %v", name, msg, det, ok)
 		}
 	}
@@ -135,7 +135,7 @@ func TestExplainGH007EscapesCommitText(t *testing.T) {
 		t.Fatal(err)
 	}
 	refused := &gitx.RefusedError{Refs: []string{"refs/heads/x"}, Reason: gh007Reason}
-	msg, det, ok := explainGH007(ctx, g, []string{sha + ":refs/heads/x"}, refused, "acme/widget")
+	msg, det, ok := explainGH007(ctx, g, []string{sha + ":refs/heads/x"}, refused, "acme/widget", "main")
 	if !ok || strings.ContainsAny(msg, "\x1b\r") || !strings.Contains(msg, `evil \u001b[31mred\u000d\u001b[0m`) {
 		t.Fatalf("ok=%v msg=%q", ok, msg)
 	}
@@ -154,7 +154,7 @@ func TestExplainGH007MatchesGitHubPerRefReason(t *testing.T) {
 		RefReasons: []string{"push declined due to repository rule violations", "push declined due to email privacy restrictions"},
 		Reason:     "x",
 	}
-	msg, _, ok := explainGH007(context.Background(), g, []string{pub + ":refs/heads/a", feat + ":refs/heads/b"}, refused, "acme/widget")
+	msg, _, ok := explainGH007(context.Background(), g, []string{pub + ":refs/heads/a", feat + ":refs/heads/b"}, refused, "acme/widget", "main")
 	if !ok || !strings.Contains(msg, "newest commit on b ("+feat[:7]) {
 		t.Fatalf("ok=%v msg=%s", ok, msg)
 	}
@@ -182,7 +182,39 @@ func TestExplainGH007PublicMainLookupErrorLeavesMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 	refused := &gitx.RefusedError{Refs: []string{"refs/heads/x"}, Reason: gh007Reason}
-	if msg, det, ok := explainGH007(context.Background(), g, []string{feat + ":refs/heads/x"}, refused, "acme/widget"); ok || msg != "" || det != nil {
+	if msg, det, ok := explainGH007(context.Background(), g, []string{feat + ":refs/heads/x"}, refused, "acme/widget", "main"); ok || msg != "" || det != nil {
 		t.Fatalf("got %q %v %v", msg, det, ok)
+	}
+}
+
+// On a pair whose base branch is master, beside a stale main that doesn't
+// hold the tip, "already public" is read from master and the fix names it
+// (8.12, Review Focus 1). With the stale main read instead, the tip would
+// look like the person's own commit.
+func TestExplainGH007ReadsTheBaseBranch(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	g, pub, _ := gh007Repo(t, "me@example.com")
+	// public/main is stale: an unrelated root commit, not pub.
+	tree, err := g.MakeTree(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := gitx.Identity{Name: "t", Email: "old@example.com", When: time.Unix(1600000000, 0)}
+	stale, err := g.CommitTree(ctx, tree, nil, "old main", id, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := g.UpdateRef(ctx, "refs/remotes/public/main", stale); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.UpdateRef(ctx, "refs/remotes/public/master", pub); err != nil {
+		t.Fatal(err)
+	}
+	refused := &gitx.RefusedError{Refs: []string{"refs/heads/probe2"}, Reason: gh007Reason}
+	msg, _, ok := explainGH007(ctx, g, []string{pub + ":refs/heads/probe2"}, refused, "acme/widget", "master")
+	if !ok || !strings.Contains(msg, "That commit is already public in acme/widget") ||
+		!strings.HasSuffix(msg, "add any new commit to acme/widget's master using your no-reply address, then run this again") {
+		t.Fatalf("ok=%v msg:\n%s", ok, msg)
 	}
 }

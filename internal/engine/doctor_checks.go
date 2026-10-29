@@ -455,8 +455,11 @@ func (d *doctorRun) pairCheck(ctx context.Context) DoctorCheck {
 	if err != nil {
 		return fail("the overlay's .ghostbranch.yml: " + contract.From(err).Message)
 	}
-	// The config read, so pc.base is set. A base branch the public repo no
-	// longer has fails the pair, and the checks that need it skip.
+	// The config read, so pc.base is set, and it is the pair's own: before
+	// this, with no overlay, it is GitHub's default branch, a guess doctor
+	// never reports. A base branch the public repo no longer has fails the
+	// pair, and the checks that need it skip.
+	d.base = pc.base
 	_, there, err := pc.git.Resolve(ctx, publicRef(pc.base))
 	if err != nil {
 		return fail("couldn't read public " + pc.base + " in the local mirror: " + err.Error())

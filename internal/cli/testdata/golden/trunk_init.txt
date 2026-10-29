@@ -1,0 +1,21 @@
+Shadow repo acme/widget-shadow is ready for acme/widget on branch trunk.
+  mirrored 1 branch(es) and 0 tag(s)
+  created the ghostbranch overlay branch (.ghostbranch.yml)
+CI audit of acme/widget-shadow:
+  repo guards: none
+  secrets: none referenced
+  scheduled sync: off (run ghostbranch sync yourself)
+  managed .github/workflows/ghostbranch-sync.yml: current
+Next:
+  ghostbranch doctor --repo acme/widget
+    init is done; doctor checks the setup
+Creating the private repo acme/widget-shadow
+ok: Created the private repo acme/widget-shadow
+Reading acme/widget and acme/widget-shadow from GitHub
+Updating the local copy of acme/widget and acme/widget-shadow
+Mirroring 1 branch(es) and 0 tag(s) into acme/widget-shadow
+ok: Mirrored 1 branch(es) and 0 tag(s) into acme/widget-shadow
+Creating the overlay branch ghostbranch
+ok: Created the overlay branch ghostbranch
+Reading acme/widget and acme/widget-shadow again for the CI audit
+warning: acme/widget-shadow is private, so its Actions minutes are billed

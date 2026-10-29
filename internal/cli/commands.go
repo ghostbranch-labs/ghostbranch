@@ -16,8 +16,8 @@ func (a *app) root() *cobra.Command {
 		Use:   "ghostbranch",
 		Short: "Private feature branches for public GitHub repos",
 		Long: `Ghostbranch keeps unreleased work in a private shadow repo, runs the public repo's CI on it,
-and publishes a feature only through a gated promote: rebase on public main, green CI, and a leak
-scan of exactly what will go public.
+and publishes a feature only through a gated promote: rebase on the public repo's base branch (main
+unless it uses another default branch), green CI, and a leak scan of exactly what will go public.
 
 Every command takes --json for machine-readable output on stdout: one JSON object, except wait --json,
 which streams NDJSON (one event per line, the result envelope last). Exit codes:
@@ -118,8 +118,8 @@ func (a *app) syncCmd() *cobra.Command {
 	var o engine.SyncOptions
 	c := &cobra.Command{
 		Use:   "sync",
-		Short: "Fast-forward shadow main to public main",
-		Long: `sync fast-forwards the shadow repo's main to public main. It never force-pushes: if shadow main has diverged it stops with exit 4.
+		Short: "Fast-forward the shadow's base branch to public's",
+		Long: `sync fast-forwards the shadow repo's base branch (main unless the public repo uses another default branch) to public's. It never force-pushes: if the shadow's has diverged it stops with exit 4.
 Its pushes start the shadow repo's push-triggered workflows, which re-test what public CI already tested,
 so it then cancels those runs (the token needs Actions write on the shadow repo); --no-cancel leaves them running.
 Last, it closes each feature whose public PR merged and whose branch hasn't moved since it was published,
@@ -203,7 +203,7 @@ func (a *app) featureStartCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "start <name>",
 		Short: "Start a feature branch in the shadow repo",
-		Long: `feature start creates <name> from shadow main in the shadow repo and records it as a feature. With --from <feature> it starts at that feature's tip instead and records it as the parent, stacking the new feature on it.
+		Long: `feature start creates <name> from the shadow's base branch in the shadow repo and records it as a feature. With --from <feature> it starts at that feature's tip instead and records it as the parent, stacking the new feature on it.
 Run in a checkout of the public repo, it then adds a remote named shadow for the shadow repo (if no remote reaches it), fetches it, and switches to <name>, tracking shadow/<name>. It never rewrites a remote: a shadow remote that points elsewhere is left alone. With uncommitted changes, a local branch called <name>, or a detached HEAD with commits not on any branch, it fetches but doesn't switch. Elsewhere, or with --no-checkout, it prints the commands instead.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -229,7 +229,7 @@ Run in a checkout of the public repo, it then adds a remote named shadow for the
 			return done(a, res, w, err)
 		},
 	}
-	c.Flags().StringVar(&from, "from", "", "stack the feature on another feature: start it at that feature's tip in the shadow repo (default: shadow main)")
+	c.Flags().StringVar(&from, "from", "", "stack the feature on another feature: start it at that feature's tip in the shadow repo (default: the shadow's base branch)")
 	c.Flags().BoolVar(&noCheckout, "no-checkout", false, "leave this checkout alone: don't add the shadow remote, fetch or switch; print the commands instead")
 	c.Flags().BoolVar(&yes, "yes", false, "accepted for consistency; feature start never asks")
 	c.Flags().BoolVar(&a.dryRun, "plan", false, "preview exactly what would change, and change nothing (same as --dry-run)")
@@ -240,8 +240,8 @@ func (a *app) gateCmd() *cobra.Command {
 	var detach bool
 	c := &cobra.Command{
 		Use:   "gate <feature>",
-		Short: "Rebase on public main, scan for leaks, and run CI; report only",
-		Long: `gate rebases the feature onto public main, scans exactly what would be published for leaks,
+		Short: "Rebase on the public base branch, scan for leaks, and run CI; report only",
+		Long: `gate rebases the feature onto the public base branch, scans exactly what would be published for leaks,
 pushes a CI candidate (the feature plus the overlay) to a draft PR in the shadow repo, and waits for
 every check. It records the result and never touches the public repo. Exit 3 means the gate failed.
 With --detach it returns a job id once CI has started; ghostbranch wait <job> finishes it, from this machine or another. Without --detach, Ctrl-C leaves the job pending for wait.`,
@@ -316,12 +316,12 @@ func (a *app) promoteCmd() *cobra.Command {
 		Use:   "promote <feature>...",
 		Short: "Publish a gated feature, or a stack of them, to the public repo as PRs",
 		Long: `promote reuses a fresh green gate (or runs one), builds the public commits (each feature commit
-with --mode preserve, one with squash, or the groups of a --curate file) on public main, ending on
+with --mode preserve, one with squash, or the groups of a --curate file) on the public base branch, ending on
 exactly the gated tree, scans every commit's files, message and author, the branch name and PR text
 for leaks, and saves a plan.
 With --plan it stops there. Otherwise a person confirms by typing a code shown on the console, or, if they have allowed agents with "ghostbranch agents allow", --yes publishes. Without either it stops at the plan with exit 5.
 Several features, bottom first (promote a b c), publish a stack: each branch's PR is based on the
-branch below (a's on main) and shows only that branch's commits, and one approval covers every PR.
+branch below (a's on the base branch) and shows only that branch's commits, and one approval covers every PR.
 Each branch needs a fresh green gate built on the branch below. Where GitHub offers native stacked
 PRs, they are registered as one stack. --mode-for and --title-for set one branch's mode and PR title.
 After publishing, a person at the console picks Archive (the default: the shadow branch is archived and the PR is fixed by pushing to it) or Keep; with --yes, Archive applies unless --keep.`,
@@ -379,7 +379,7 @@ func (a *app) applyCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "apply <plan-id|plan.json>",
 		Short: "Publish a saved plan if the repos still match it",
-		Long: `apply publishes a plan saved by promote. It refuses with exit 6 if public main, the feature, the overlay or the gate candidate moved since the plan was made. Re-running it finishes an interrupted publish. A person confirms on the console, or --yes publishes under an agent grant.
+		Long: `apply publishes a plan saved by promote. It refuses with exit 6 if the public base branch, the feature, the overlay or the gate candidate moved since the plan was made. Re-running it finishes an interrupted publish. A person confirms on the console, or --yes publishes under an agent grant.
 After publishing, a person at the console picks Archive (the default: the shadow branch is archived and the PR is fixed by pushing to it) or Keep; with --yes, Archive applies unless --keep.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

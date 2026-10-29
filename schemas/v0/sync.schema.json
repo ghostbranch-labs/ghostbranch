@@ -3,14 +3,15 @@
   "title": "sync data",
   "type": "object",
   "additionalProperties": false,
-  "required": ["public", "shadow", "action", "public_main", "shadow_main_before", "shadow_main_after", "branches", "cancelled_runs", "closed", "surveyed", "active_features", "attention", "preview"],
+  "required": ["public", "shadow", "action", "base_branch", "public_main", "shadow_main_before", "shadow_main_after", "branches", "cancelled_runs", "closed", "surveyed", "active_features", "attention", "preview"],
   "properties": {
     "public": { "$ref": "common.schema.json#/$defs/repo" },
     "shadow": { "$ref": "common.schema.json#/$defs/repo" },
     "action": { "enum": ["noop", "fast_forward", "diverged", "push_failed"] },
-    "public_main": { "$ref": "common.schema.json#/$defs/sha" },
-    "shadow_main_before": { "$ref": "common.schema.json#/$defs/shaOrEmpty" },
-    "shadow_main_after": { "description": "where sync left shadow main; when action is push_failed, the SHA sync read", "$ref": "common.schema.json#/$defs/shaOrEmpty" },
+    "base_branch": { "description": "the pair's base branch, the public branch it works against: public_branch from the overlay config, main when the key is missing", "type": "string", "minLength": 1 },
+    "public_main": { "description": "the public base branch's tip (the name says main on every pair)", "$ref": "common.schema.json#/$defs/sha" },
+    "shadow_main_before": { "description": "the shadow's base branch's tip before sync", "$ref": "common.schema.json#/$defs/shaOrEmpty" },
+    "shadow_main_after": { "description": "where sync left the shadow's base branch; when action is push_failed, the SHA sync read", "$ref": "common.schema.json#/$defs/shaOrEmpty" },
     "branches": {
       "type": "array",
       "items": {
@@ -54,7 +55,7 @@
             "type": "object",
             "additionalProperties": { "$ref": "common.schema.json#/$defs/sha" }
           },
-          "reparented": { "description": "children moved onto main in the push that closed it", "type": "array", "items": { "type": "string" } }
+          "reparented": { "description": "children moved onto the base branch (their parent is main now) in the push that closed it", "type": "array", "items": { "type": "string" } }
         }
       }
     },

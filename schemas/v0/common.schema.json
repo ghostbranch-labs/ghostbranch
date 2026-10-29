@@ -3,7 +3,7 @@
   "title": "Ghostbranch shared definitions",
   "$defs": {
     "stackPR": {
-      "description": "one PR of a published chain, bottom first: the feature, the public branch it targets (main or the branch below), and the PR; number is 0 and url empty in a plan, before apply opens it; update and style are set for an open PR the plan updates",
+      "description": "one PR of a published chain, bottom first: the feature, the public branch it targets (the base branch by its real name, or the branch below), and the PR; number is 0 and url empty in a plan, before apply opens it; update and style are set for an open PR the plan updates",
       "type": "object", "additionalProperties": false,
       "required": ["feature", "base", "number", "url"],
       "dependentRequired": { "style": ["update"] },

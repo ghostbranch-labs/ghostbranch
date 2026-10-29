@@ -24,7 +24,7 @@ func (a *app) doctorCmd() *cobra.Command {
 		Long: `doctor runs seven checks, in order: tools (git and this binary), token (its source, account,
 expiry, whether it can publish, and the permissions each command group needs), app (for an app
 login: the Ghostbranch app is installed and can see the pair's repos), pair (both repos,
-the overlay and its config, shadow main, the managed files), guard (the pre-push hook in this
+the overlay and its config, the shadow's base branch, the managed files), guard (the pre-push hook in this
 checkout), state (this machine's records) and ci (the audit's summary). Each is ok, warn, fail or
 skipped, and names the command that fixes it. It changes nothing in your repos, records or
 keychain and never prompts; it fetches into its local copy of the pair (making it if needed) and

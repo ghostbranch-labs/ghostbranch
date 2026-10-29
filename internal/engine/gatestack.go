@@ -115,9 +115,9 @@ func (e *Engine) stackBase(ctx context.Context, pc *pairCtx, cfg config.Config, 
 			if err != nil {
 				var ce *gitx.ConflictError
 				if errors.As(err, &ce) {
-					onto := "public main"
+					onto := "public " + pc.base
 					if parent != "" {
-						onto = parent + " (rebased onto public main)"
+						onto = parent + " (rebased onto public " + pc.base + ")"
 					}
 					return stackBase{}, contract.New(contract.RebaseConflict,
 						"feature %s, below the gated feature in its stack, does not rebase cleanly onto %s; commit %s stopped on conflicts in: %s",

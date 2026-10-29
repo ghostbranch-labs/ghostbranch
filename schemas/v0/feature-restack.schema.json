@@ -18,7 +18,7 @@
           "parent": { "description": "\"main\" (a placeholder for the base branch, whatever its name) or the feature it is stacked on now", "type": "string" },
           "from": { "$ref": "common.schema.json#/$defs/sha" },
           "to": { "description": "its head now; equal to from when only its record moved", "$ref": "common.schema.json#/$defs/sha" },
-          "forked_at": { "description": "its fork point now; empty on main", "$ref": "common.schema.json#/$defs/shaOrEmpty" }
+          "forked_at": { "description": "its fork point now; empty on the base branch", "$ref": "common.schema.json#/$defs/shaOrEmpty" }
         }
       }
     },
