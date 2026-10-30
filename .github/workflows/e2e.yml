@@ -22,6 +22,7 @@ jobs:
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: go.mod
+          check-latest: true
       - run: go test -tags e2e -count=1 -timeout 35m -v ./internal/e2e/
         env:
           GHOSTBRANCH_E2E_TOKEN: ${{ secrets.GHOSTBRANCH_E2E_TOKEN }}
