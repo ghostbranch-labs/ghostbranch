@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"fmt"
 	"reflect"
 	"regexp"
@@ -355,5 +356,26 @@ func TestGuidedInitSaysMinutesAreBilled(t *testing.T) {
 	noAudit.Audit = nil
 	if got := human(noAudit, style.Styler{}); strings.Contains(got, "Note:") || !strings.Contains(got, "Your first feature:") {
 		t.Errorf("guided without an audit: %q", got)
+	}
+}
+
+// R9 (8.12): init's text names the base branch only when it isn't main, so
+// a main pair's text is as it was; the guided walkthrough names it too.
+func TestInitTextNamesANonMainBase(t *testing.T) {
+	t.Parallel()
+	for base, want := range map[string]string{
+		"":       "Shadow repo acme/widget-shadow is ready for acme/widget.\n",
+		"main":   "Shadow repo acme/widget-shadow is ready for acme/widget.\n",
+		"master": "Shadow repo acme/widget-shadow is ready for acme/widget on branch master.\n",
+	} {
+		r := &engine.InitResult{Public: "acme/widget", Shadow: "acme/widget-shadow", Ready: true, BaseBranch: base, Guided: true}
+		out := human(r, style.Styler{})
+		if !strings.HasPrefix(out, want) {
+			t.Errorf("base %q: %q", base, out)
+		}
+		gate := "rebases on public " + cmp.Or(base, "main") + ", scans for leaks and runs CI"
+		if !strings.Contains(out, gate) {
+			t.Errorf("base %q: the walkthrough lacks %q:\n%s", base, gate, out)
+		}
 	}
 }

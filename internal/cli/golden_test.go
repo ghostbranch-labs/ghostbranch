@@ -411,6 +411,7 @@ jobs:
 			te.shadowCommit("feat-x", map[string]string{"later.txt": "later\n"})
 		}, []string{"feature", "restack", "feat-x"}, 0},
 		{"feature_restack_onto_main", withStack, []string{"feature", "restack", "feat-y", "--onto", "main"}, 0},
+		{"feature_restack_onto_unknown", withStack, []string{"feature", "restack", "feat-y", "--onto", "nope"}, contract.BadFlag.Exit()},
 		{"feature_restack_conflict", withConflictingStack, []string{"feature", "restack", "feat-x"}, contract.RebaseConflict.Exit()},
 		{"feature_pull", publishedWithForeign, []string{"feature", "pull", "feat-x"}, 0},
 		{"feature_pull_by_hand", publishedWithConflict, []string{"feature", "pull", "feat-x"}, contract.PRChangedOnGitHub.Exit()},

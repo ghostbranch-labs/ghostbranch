@@ -15,7 +15,11 @@ type FeatureStartResult struct {
 	Name   string `json:"name"`
 	Branch string `json:"branch"`
 	Base   string `json:"base"`
-	// Parent is the feature this one is stacked on, or "main".
+	// BaseBranch is the pair's base branch: what a Parent of "main"
+	// stands for, and where an unstacked feature starts.
+	BaseBranch string `json:"base_branch"`
+	// Parent is the feature this one is stacked on, or the placeholder
+	// "main" (feature.MainParent) for the base branch.
 	Parent       string     `json:"parent"`
 	Checkout     [][]string `json:"checkout"`      // argvs that get the branch into a checkout, in order
 	CheckoutHint string     `json:"checkout_hint"` // Checkout as one shell line
@@ -92,14 +96,15 @@ func (r *FeatureStartResult) SetCheckout(argvs [][]string) {
 type FeatureStartOptions struct {
 	// From is the feature to stack the new one on: it starts at that
 	// feature's tip in the shadow repo and records it as its parent, with
-	// the tip as forked_at. "" or "main" starts from shadow main.
+	// the tip as forked_at. "", the base branch's real name, or "main" (its
+	// alias on every pair) starts from the shadow's copy of the base.
 	From string
 }
 
 // FeatureStart creates a feature branch and its metadata ref in one atomic
-// push: from shadow main, or, with From, stacked on another feature's tip.
-// It does not touch the user's checkout, and never writes the parent's
-// record.
+// push: from the shadow repo's copy of the base branch, or, with From,
+// stacked on another feature's tip. It does not touch the user's checkout,
+// and never writes the parent's record.
 func (e *Engine) FeatureStart(ctx context.Context, p workspace.Pair, name string, opts ...FeatureStartOptions) (res *FeatureStartResult, warns []contract.Warning, err error) {
 	var opt FeatureStartOptions
 	if len(opts) > 0 {
@@ -116,11 +121,11 @@ func (e *Engine) FeatureStart(ctx context.Context, p workspace.Pair, name string
 		}
 		e.record("feature start", &p, name, "", summary, err)
 	}()
-	if err := feature.ValidateName(name, "name"); err != nil {
+	if err := feature.ValidateName(name, "name", "main"); err != nil {
 		return nil, nil, err
 	}
 	if from != "" {
-		if err := feature.ValidateName(from, "from"); err != nil {
+		if err := feature.ValidateName(from, "from", "main"); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -129,27 +134,36 @@ func (e *Engine) FeatureStart(ctx context.Context, p workspace.Pair, name string
 		return nil, nil, err
 	}
 	defer pc.unlock()
+	// The name was checked before the pair was read; the base branch's name
+	// is reserved too, as the shadow repo has a branch of that name. --from
+	// the base by its real name starts from it, as --from main does.
+	if err := feature.ValidateName(name, "name", pc.base); err != nil {
+		return nil, nil, err
+	}
+	if from == pc.base {
+		from = ""
+	}
 	_, O, warns, err := e.readConfig(ctx, pc)
 	if err != nil {
 		return nil, warns, err
 	}
-	// A feature started from a stale shadow main would be based on old
-	// code: refuse, before anything is created (--plan too).
-	mn, err := compareMains(ctx, pc.git)
+	// A feature started from a stale shadow base branch would be based on
+	// old code: refuse, before anything is created (--plan too).
+	mn, err := compareMains(ctx, pc.git, pc.base)
 	if err != nil {
-		return nil, warns, internalErr(err, "compare shadow main with public main")
+		return nil, warns, internalErr(err, "compare shadow "+pc.base+" with public "+pc.base)
 	}
 	if mn.Behind > 0 {
 		return nil, warns, contract.New(contract.ShadowBehindError,
-			"shadow main is %d commit(s) behind public main, so a feature started now would be based on old code; run ghostbranch sync --repo %s, then start the feature again", mn.Behind, p.Public).
+			"shadow %s is %d commit(s) behind public %s, so a feature started now would be based on old code; run ghostbranch sync --repo %s, then start the feature again", pc.base, mn.Behind, pc.base, p.Public).
 			WithDetails(map[string]any{"public_main": mn.Public, "shadow_main": mn.Shadow})
 	}
 	if err := e.checkNameFree(ctx, pc, name); err != nil {
 		return nil, warns, err
 	}
-	shadowMain, err := pc.git.MustResolve(ctx, shadowRef("main"))
+	shadowMain, err := pc.git.MustResolve(ctx, shadowRef(pc.base))
 	if err != nil {
-		return nil, warns, internalErr(err, "read shadow main")
+		return nil, warns, internalErr(err, "read shadow "+pc.base)
 	}
 	base, parent, forkedAt := shadowMain, feature.MainParent, ""
 	if from != "" {
@@ -159,7 +173,7 @@ func (e *Engine) FeatureStart(ctx context.Context, p workspace.Pair, name string
 		}
 		base, parent, forkedAt = tip, from, tip
 	}
-	res = &FeatureStartResult{Name: name, Branch: name, Base: base, Parent: parent}
+	res = &FeatureStartResult{Name: name, Branch: name, Base: base, BaseBranch: pc.base, Parent: parent}
 	res.SetCheckout([][]string{{"git", "fetch", remoteShadow}, {"git", "switch", name}})
 	if e.DryRun {
 		res.Preview = preview.New(map[string]string{"shadow_main": shadowMain})
@@ -187,7 +201,7 @@ func (e *Engine) FeatureStart(ctx context.Context, p workspace.Pair, name string
 	warns = addWarnings(warns, e.updateMirror(ctx, pc.git, shadowRef(name), base)...)
 	warns = addWarnings(warns, e.updateMirror(ctx, pc.git, metaRef(name), metaSHA)...)
 	if from != "" {
-		if pm, err := pc.git.MustResolve(ctx, publicRef("main")); err == nil {
+		if pm, err := pc.git.MustResolve(ctx, publicRef(pc.base)); err == nil {
 			res.gateFirst = e.firstToGate(ctx, pc, from, pm, O)
 		}
 	}
@@ -213,7 +227,7 @@ func (e *Engine) parentTip(ctx context.Context, pc *pairCtx, from string) (strin
 		return "", contract.NewerRecord("feature", m.SchemaVersion).WithField("from")
 	case m.Abandoned:
 		return "", contract.New(contract.BadFlag,
-			"feature %q is abandoned, so nothing can be started from it; start from main or another feature", from).WithField("from")
+			"feature %q is abandoned, so nothing can be started from it; start from %s or another feature", from, pc.base).WithField("from")
 	case m.Archived != nil:
 		// Before the branch lookup: an archived feature's branch is gone
 		// on purpose (P25).

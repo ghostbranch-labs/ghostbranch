@@ -107,11 +107,8 @@ func (e *Engine) Apply(ctx context.Context, opt ApplyOptions) (res *ApplyResult,
 		return nil, nil, err
 	}
 	// The plan file is local and unsigned: re-check where it would publish.
-	if err := feature.ValidateName(pl.Publish.TargetBranch, "plan"); err != nil {
-		return nil, nil, err
-	}
-	for _, en := range pl.Chain {
-		if err := feature.ValidateName(en.Publish.TargetBranch, "plan"); err != nil {
+	for _, target := range planTargets(pl) {
+		if err := feature.ValidateName(target, "plan", "main"); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -126,7 +123,25 @@ func (e *Engine) Apply(ctx context.Context, opt ApplyOptions) (res *ApplyResult,
 		return nil, nil, err
 	}
 	defer pc.unlock()
+	// Again with the pair's base branch, now it is known: GitHub's default
+	// may be another branch (§ 4.6), so the default-branch check in
+	// applyPlan doesn't cover it.
+	for _, target := range planTargets(pl) {
+		if err := feature.ValidateName(target, "plan", pc.base); err != nil {
+			return nil, nil, err
+		}
+	}
 	return e.apply(ctx, pc, pl, applyOpts{yes: opt.Yes, archive: opt.Archive})
+}
+
+// planTargets is every public branch a plan would publish to: its own
+// target, then each chain entry's.
+func planTargets(pl plan.Plan) []string {
+	out := []string{pl.Publish.TargetBranch}
+	for _, en := range pl.Chain {
+		out = append(out, en.Publish.TargetBranch)
+	}
+	return out
 }
 
 // archivedSummary is the ledger's note of the features an apply archived.
@@ -317,9 +332,9 @@ func (e *Engine) applyPlan(ctx context.Context, pc *pairCtx, pl plan.Plan, ao ap
 		return e.finishLanded(ctx, pc, cfg, pl, ao.yes, warns) // never archives (R14)
 	}
 	head, _, _ := g.Resolve(ctx, shadowRef(m.Branch))
-	pm, err := g.MustResolve(ctx, publicRef("main"))
+	pm, err := g.MustResolve(ctx, publicRef(pc.base))
 	if err != nil {
-		return nil, warns, internalErr(err, "read public main")
+		return nil, warns, internalErr(err, "read public "+pc.base)
 	}
 	gateC, _, _ := g.Resolve(ctx, shadowRef(gateBranch(pl.Feature)))
 	live := plan.Fingerprint{PublicMain: pm, FeatureHead: head, Overlay: O, GateCandidate: gateC}
@@ -363,7 +378,7 @@ func (e *Engine) applyPlan(ctx context.Context, pc *pairCtx, pl plan.Plan, ao ap
 	}
 
 	branch := pl.Publish.TargetBranch
-	prs := []plan.StackPR{{Feature: pl.Feature, Base: "main"}}
+	prs := []plan.StackPR{{Feature: pl.Feature, Base: pc.base}}
 	if pl.Publish.Update {
 		prs = []plan.StackPR{pl.PRs[0]} // updateStands checked there is exactly one
 	}
@@ -388,7 +403,7 @@ func (e *Engine) applyPlan(ctx context.Context, pc *pairCtx, pl plan.Plan, ao ap
 		pv := preview.New(map[string]string{"public_main": pm, "feature_head": head, "overlay": O, "gate_candidate": gateC})
 		if pl.Publish.Update {
 			e.previewUpdate(ctx, pc, pv, branch, pl.Publish.ExpectedHead, P, pl.PRs[0].Number, pl.Typed)
-		} else if err := e.previewPublish(ctx, pc, pv, pl.Feature, publishedPlan(m), branch, "main", P); err != nil {
+		} else if err := e.previewPublish(ctx, pc, pv, pl.Feature, publishedPlan(m), branch, pc.base, P); err != nil {
 			return res, warns, err
 		}
 		ch, err := e.handOffChoice(ctx, pc, []string{pl.Feature}, ao.archive)
@@ -466,12 +481,12 @@ func (e *Engine) applyPlan(ctx context.Context, pc *pairCtx, pl plan.Plan, ao ap
 	} else {
 		res.Resumed = true
 	}
-	pr, err := e.Forge.FindOpenPR(ctx, pc.pair.Public, branch, "main")
+	pr, err := e.Forge.FindOpenPR(ctx, pc.pair.Public, branch, pc.base)
 	if err != nil {
 		return res, warns, forgeErr(err, "find the public PR")
 	}
 	if pr == nil {
-		created, err := e.Forge.CreatePR(ctx, pc.pair.Public, forge.NewPR{Title: pl.Publish.PR.Title, Body: pl.Publish.PR.Body, Head: branch, Base: "main"})
+		created, err := e.Forge.CreatePR(ctx, pc.pair.Public, forge.NewPR{Title: pl.Publish.PR.Title, Body: pl.Publish.PR.Body, Head: branch, Base: pc.base})
 		if err != nil {
 			return res, warns, forgeErr(err, "open the public PR")
 		}
@@ -483,7 +498,7 @@ func (e *Engine) applyPlan(ctx context.Context, pc *pairCtx, pl plan.Plan, ao ap
 	res.PRs[0].Number, res.PRs[0].URL = pr.Number, pr.URL
 	m.SchemaVersion = feature.SchemaVersion
 	m.Promoted = &feature.Promoted{PublicPR: pr.Number, PlanID: pl.ID, FeatureHead: pl.Fingerprint.FeatureHead,
-		Branch: branch, Base: "main", PublishedHead: P, PatchIDs: ids, Stack: stackOfRecord(m, pr.Number)}
+		Branch: branch, Base: pc.base, PublishedHead: P, PatchIDs: ids, Stack: stackOfRecord(m, pr.Number)}
 	_, mw, err := e.updateMeta(ctx, pc, m, metaSHA)
 	warns = addWarnings(warns, mw...)
 	if err != nil {
@@ -622,7 +637,7 @@ func (e *Engine) verifyEntry(ctx context.Context, pc *pairCtx, pl plan.Plan, m f
 	// The chain publishes on pubParent; the approval's file list is
 	// measured from there, so the plan file's parent must be it.
 	if pl.Publish.Parent != pubParent {
-		what := "public main"
+		what := "public " + pc.base
 		if pubParent != pm {
 			what = "the public commit below it"
 		}

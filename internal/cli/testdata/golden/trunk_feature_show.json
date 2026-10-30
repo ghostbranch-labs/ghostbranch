@@ -1,0 +1,53 @@
+{
+  "schema_version": "0.17",
+  "command": "feature show",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "base_branch": "trunk",
+    "feature": {
+      "name": "feat-x",
+      "state": "draft",
+      "branch": "feat-x",
+      "head": "<SHA1>",
+      "base": "<SHA2>",
+      "parent": "main",
+      "children": [],
+      "stack": null,
+      "drift": {
+        "status": "clean",
+        "files": []
+      },
+      "gate": null,
+      "public_pr": null,
+      "pr_state": "",
+      "plan_id": "",
+      "moved": false,
+      "abandoned": false
+    },
+    "commits": [
+      {
+        "source": "<SHA1>",
+        "subject": "work",
+        "author": "Test Author <author@example.com>",
+        "files": [
+          "feature.txt"
+        ]
+      }
+    ],
+    "ledger": [
+      {
+        "ts": "2026-10-05T12:00:00Z",
+        "actor": "human:octo",
+        "op": "feature start",
+        "pair": "acme/widget",
+        "feature": "feat-x",
+        "exit_code": 0,
+        "summary": ""
+      }
+    ]
+  },
+  "warnings": [],
+  "next": [],
+  "error": null
+}

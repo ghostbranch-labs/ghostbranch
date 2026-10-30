@@ -33,7 +33,7 @@ type stackLevel struct {
 	head string
 }
 
-// stackBelow walks from m's parent down to main and returns the features
+// stackBelow walks from m's parent down to the base and returns the features
 // below m, bottom first, at their heads now; nil when m is unstacked. Each
 // link must hold: the parent's record and branch exist, and both the
 // parent and the feature above it contain that feature's fork point.
@@ -50,7 +50,7 @@ func (e *Engine) stackBelow(ctx context.Context, pc *pairCtx, name string, m fea
 		seen[p] = true
 		pm, _, _, err := e.readMetaAny(ctx, pc, p)
 		if ce := contract.From(err); ce != nil && ce.Code == contract.FeatureNotFound {
-			return nil, parentRewritten(child, p, cm.ForkedAt, reasonParentGone)
+			return nil, parentRewritten(child, p, cm.ForkedAt, reasonParentGone, pc.base)
 		}
 		if err != nil {
 			return nil, err
@@ -60,20 +60,20 @@ func (e *Engine) stackBelow(ctx context.Context, pc *pairCtx, name string, m fea
 			return nil, internalErr(err, "read feature branch "+pm.Branch)
 		}
 		if !ok {
-			return nil, parentRewritten(child, p, cm.ForkedAt, reasonParentGone)
+			return nil, parentRewritten(child, p, cm.ForkedAt, reasonParentGone, pc.base)
 		}
 		if cm.ForkedAt == "" {
-			return nil, parentRewritten(child, p, "", reasonForkPointLost)
+			return nil, parentRewritten(child, p, "", reasonForkPointLost, pc.base)
 		}
 		if in, err := g.IsAncestor(ctx, cm.ForkedAt, phead); err != nil {
 			return nil, internalErr(err, "compare "+child+" with "+p)
 		} else if !in {
-			return nil, parentRewritten(child, p, cm.ForkedAt, reasonParentRewritten)
+			return nil, parentRewritten(child, p, cm.ForkedAt, reasonParentRewritten, pc.base)
 		}
 		if in, err := g.IsAncestor(ctx, cm.ForkedAt, chead); err != nil {
 			return nil, internalErr(err, "compare "+child+" with its fork point")
 		} else if !in {
-			return nil, parentRewritten(child, p, cm.ForkedAt, reasonForkPointLost)
+			return nil, parentRewritten(child, p, cm.ForkedAt, reasonForkPointLost, pc.base)
 		}
 		out = append(out, stackLevel{name: p, meta: pm, head: phead})
 		child, cm, chead = p, pm, phead
@@ -106,7 +106,7 @@ func (e *Engine) stackBase(ctx context.Context, pc *pairCtx, cfg config.Config, 
 		if r, t, ok := reusableR(ctx, g, lv, parent, forkOf(lv.meta), heads, pm, O); ok {
 			R, T = r, t
 		} else {
-			own, err := ownSources(ctx, g, lv.name, lv.meta, lv.head, pm)
+			own, err := ownSources(ctx, g, lv.name, lv.meta, lv.head, pm, pc.base)
 			if err != nil {
 				return stackBase{}, err
 			}
@@ -115,9 +115,9 @@ func (e *Engine) stackBase(ctx context.Context, pc *pairCtx, cfg config.Config, 
 			if err != nil {
 				var ce *gitx.ConflictError
 				if errors.As(err, &ce) {
-					onto := "public main"
+					onto := "public " + pc.base
 					if parent != "" {
-						onto = parent + " (rebased onto public main)"
+						onto = parent + " (rebased onto public " + pc.base + ")"
 					}
 					return stackBase{}, contract.New(contract.RebaseConflict,
 						"feature %s, below the gated feature in its stack, does not rebase cleanly onto %s; commit %s stopped on conflicts in: %s",
@@ -145,17 +145,17 @@ func (e *Engine) stackBase(ctx context.Context, pc *pairCtx, cfg config.Config, 
 }
 
 // ownSources are the commits name's gate replays: forked_at..head whenever
-// m records a fork point (a stacked feature, or one moved onto main that
+// m records a fork point (a stacked feature, or one moved onto the base that
 // still carries its old parent's commits), else every commit head has that
-// public main pm lacks. A feature that no longer contains its fork point is
-// PARENT_REWRITTEN (fork_point_lost).
-func ownSources(ctx context.Context, g *gitx.Git, name string, m feature.Meta, head, pm string) ([]string, error) {
+// pm, the public base branch base, lacks. A feature that no longer contains
+// its fork point is PARENT_REWRITTEN (fork_point_lost).
+func ownSources(ctx context.Context, g *gitx.Git, name string, m feature.Meta, head, pm, base string) ([]string, error) {
 	own, ok, err := ownCommits(ctx, g, m, head, pm)
 	if err != nil {
 		return nil, internalErr(err, "list "+name+"'s commits")
 	}
 	if !ok {
-		return nil, parentRewritten(name, m.ParentName(), m.ForkedAt, reasonForkPointLost)
+		return nil, parentRewritten(name, m.ParentName(), m.ForkedAt, reasonForkPointLost, base)
 	}
 	return own, nil
 }

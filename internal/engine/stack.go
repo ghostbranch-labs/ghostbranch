@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -16,6 +17,10 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 )
+
+// fullSHA is a whole commit ID, SHA-1 or SHA-256: a fork point as records
+// hold it, never a branch name a person would pick.
+var fullSHA = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
 
 // Why a stacked feature can't build on its parent (PARENT_REWRITTEN's
 // details.reason).
@@ -25,9 +30,10 @@ const (
 	reasonForkPointLost   = "fork_point_lost"  // the feature itself no longer contains forked_at
 )
 
-// parentFeature is the feature m is stacked on, or "" when its parent is main.
+// parentFeature is the feature m is stacked on, or "" when its parent is
+// the base branch (the placeholder feature.MainParent).
 func parentFeature(m feature.Meta) string {
-	if m.Parent == "main" {
+	if m.Parent == feature.MainParent {
 		return ""
 	}
 	return m.Parent
@@ -155,20 +161,22 @@ func descendants(recs map[string]stackRecord, name string) []string {
 }
 
 // RebaseSteps are the git commands that rebase branch's own commits onto
-// onto (a feature, or "main") in a checkout whose remote for the shadow
-// repo is remote, then push the result leased. upstream is where branch's
-// own commits start: a fork-point SHA, "main" for the shadow repo's main,
-// or "" for a plain rebase. Ghostbranch never runs them: a person or their
-// agent does, and resolves any conflict.
+// onto (a feature, or the base branch by its real name) in a checkout
+// whose remote for the shadow repo is remote, then push the result leased.
+// upstream is where branch's own commits start: a fork-point SHA (a full
+// one, as records hold), a branch name for the shadow repo's copy of that
+// branch (the base branch, "main" on most pairs), or "" for a plain
+// rebase. Ghostbranch never runs them: a person or their agent does, and
+// resolves any conflict.
 func RebaseSteps(remote, branch, onto, upstream string) [][]string {
 	rebase := []string{"git", "rebase"}
-	switch upstream {
-	case "":
+	switch {
+	case upstream == "":
 		rebase = append(rebase, remote+"/"+onto, branch)
-	case "main":
-		rebase = append(rebase, "--onto", remote+"/"+onto, remote+"/main", branch)
-	default:
+	case fullSHA.MatchString(upstream):
 		rebase = append(rebase, "--onto", remote+"/"+onto, upstream, branch)
+	default:
+		rebase = append(rebase, "--onto", remote+"/"+onto, remote+"/"+upstream, branch)
 	}
 	return [][]string{
 		{"git", "fetch", remote},
@@ -178,18 +186,20 @@ func RebaseSteps(remote, branch, onto, upstream string) [][]string {
 	}
 }
 
-// parentRewritten is PARENT_REWRITTEN: child can't build on parent, for
-// reason. forkedAt is child's recorded fork point.
-func parentRewritten(child, parent, forkedAt, reason string) error {
+// parentRewritten is PARENT_REWRITTEN: child can't build on parent (a
+// feature, or the placeholder feature.MainParent, which details.parent
+// keeps), for reason. forkedAt is child's recorded fork point; base is the
+// base branch's real name, which the message names.
+func parentRewritten(child, parent, forkedAt, reason, base string) error {
 	var msg string
 	switch {
 	case reason == reasonParentGone:
-		msg = fmt.Sprintf("feature %s is stacked on %s, which is gone from the shadow repo; move it onto main with ghostbranch feature restack %s --onto main",
-			child, parent, child)
+		msg = fmt.Sprintf("feature %s is stacked on %s, which is gone from the shadow repo; move it onto %s with ghostbranch feature restack %s --onto %s",
+			child, parent, base, child, base)
 	case reason == reasonForkPointLost && parent == feature.MainParent:
-		// Moved onto main off a parent: only its own commits were left.
-		msg = fmt.Sprintf("feature %s no longer contains its fork point %s from the feature it was moved off (it was rebased by hand); once it sits on main's tip, run ghostbranch feature restack %s --onto main to record it there",
-			child, short(forkedAt), child)
+		// Moved onto the base off a parent: only its own commits were left.
+		msg = fmt.Sprintf("feature %s no longer contains its fork point %s from the feature it was moved off (it was rebased by hand); once it sits on %s's tip, run ghostbranch feature restack %s --onto %s to record it there",
+			child, short(forkedAt), base, child, base)
 	case reason == reasonForkPointLost:
 		msg = fmt.Sprintf("feature %s no longer contains its fork point %s from %s (it was rebased by hand); run ghostbranch feature restack %s to put it on %s's tip",
 			child, short(forkedAt), parent, parent, parent)
@@ -202,19 +212,20 @@ func parentRewritten(child, parent, forkedAt, reason string) error {
 }
 
 // hasChildren is HAS_CHILDREN: name can't be op'd ("abandon", "close" or
-// "archive") while kids are stacked on it.
-func hasChildren(name string, kids []string, op string) error {
+// "archive") while kids are stacked on it. base is the base branch's real
+// name, which the way out names.
+func hasChildren(name string, kids []string, op, base string) error {
 	d := map[string]any{"feature": name, "children": kids, "op": op}
 	if op == "archive" {
 		// Archiving deletes the branch they are built on (R8, P6).
 		return contract.New(contract.HasChildren,
-			"feature %s has %d feature(s) stacked on it (%s), so it can't be archived; first, for each of them: publish it with %s (ghostbranch promote %s <child> --plan) and archive it, move it onto main (ghostbranch feature restack <child> --onto main), or, if it is abandoned, close it (ghostbranch feature close <child>, at the console)",
-			name, len(kids), strings.Join(kids, ", "), name, name).
+			"feature %s has %d feature(s) stacked on it (%s), so it can't be archived; first, for each of them: publish it with %s (ghostbranch promote %s <child> --plan) and archive it, move it onto %s (ghostbranch feature restack <child> --onto %s), or, if it is abandoned, close it (ghostbranch feature close <child>, at the console)",
+			name, len(kids), strings.Join(kids, ", "), name, name, base, base).
 			WithField("feature").WithDetails(d)
 	}
 	done := map[string]string{"abandon": "abandoned", "close": "closed"}[op]
 	return contract.New(contract.HasChildren,
-		"feature %s has %d feature(s) stacked on it (%s), so it can't be %s; first, for each of them: fold it into %s (ghostbranch feature fold <child>), %s it, or move it onto main (ghostbranch feature restack <child> --onto main)",
-		name, len(kids), strings.Join(kids, ", "), done, name, op).
+		"feature %s has %d feature(s) stacked on it (%s), so it can't be %s; first, for each of them: fold it into %s (ghostbranch feature fold <child>), %s it, or move it onto %s (ghostbranch feature restack <child> --onto %s)",
+		name, len(kids), strings.Join(kids, ", "), done, name, op, base, base).
 		WithField("feature").WithDetails(d)
 }

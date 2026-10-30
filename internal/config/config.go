@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -18,14 +19,26 @@ import (
 
 // Config is the subset of .ghostbranch.yml this version honours.
 type Config struct {
-	Version  int
-	Public   string
-	Shadow   string
-	Promote  Promote
-	LeakScan LeakScan
-	Gate     Gate
-	Sync     Sync
-	CI       CI
+	Version int
+	Public  string
+	Shadow  string
+	// PublicBranch is public_branch, the public repo's default branch: ""
+	// when the key is missing, which means main. Read it through Base.
+	PublicBranch string
+	Promote      Promote
+	LeakScan     LeakScan
+	Gate         Gate
+	Sync         Sync
+	CI           CI
+}
+
+// Base is the pair's base branch: public_branch, or main when the key is
+// missing. Gates, PR bases and sync target it and no other branch.
+func (c Config) Base() string {
+	if c.PublicBranch == "" {
+		return "main"
+	}
+	return c.PublicBranch
 }
 
 // ScheduleOff turns scheduled sync off: no sync workflow is installed.
@@ -98,7 +111,7 @@ func Default() Config {
 }
 
 var honoured = map[string]bool{
-	"version": true, "public": true, "shadow": true,
+	"version": true, "public": true, "shadow": true, "public_branch": true,
 	"promote.target": true, "promote.default_mode": true,
 	"promote.author_email": true, "promote.author_map": true,
 	"leak_scan.strip": true, "leak_scan.secrets": true,
@@ -150,6 +163,7 @@ func Parse(data []byte) (Config, []contract.Warning, error) {
 	sort.Strings(keys)
 
 	cfg := Default()
+	branchesSet := false
 	var warns []contract.Warning
 	for _, k := range keys {
 		if sections[k] && isEmptyMap(leaves[k]) {
@@ -165,6 +179,7 @@ func Parse(data []byte) (Config, []contract.Warning, error) {
 			if err := set(&cfg, k, leaves[k]); err != nil {
 				return Config{}, nil, err
 			}
+			branchesSet = branchesSet || k == "sync.branches"
 		case root != "":
 			warns = append(warns, contract.Warning{Code: contract.ConfigKeyIgnored,
 				Message: fmt.Sprintf("%s is not supported in this version and is ignored", k)})
@@ -174,6 +189,13 @@ func Parse(data []byte) (Config, []contract.Warning, error) {
 			return Config{}, nil, contract.New(contract.ConfigInvalid, "unknown key %q in .ghostbranch.yml", k).WithField(k).
 				WithDetails(map[string]any{"unknown_key": k})
 		}
+	}
+	// sync.branches follows public_branch, which may be read after it: the
+	// default is the base branch alone, and a list must include it.
+	if !branchesSet {
+		cfg.Sync.Branches = []string{cfg.Base()}
+	} else if !slices.Contains(cfg.Sync.Branches, cfg.Base()) {
+		return Config{}, nil, invalid("sync.branches", "must include %s", cfg.Base())
 	}
 	if err := validate(cfg); err != nil {
 		return Config{}, warns, err
@@ -269,6 +291,13 @@ func set(cfg *Config, key string, v any) error {
 		cfg.Public, err = str()
 	case "shadow":
 		cfg.Shadow, err = str()
+	case "public_branch":
+		var s string
+		if s, err = str(); err == nil {
+			if err = ValidBaseBranch(s); err == nil {
+				cfg.PublicBranch = s
+			}
+		}
 	case "promote.target":
 		cfg.Promote.Target, err = str()
 	case "promote.default_mode":
@@ -361,7 +390,7 @@ func set(cfg *Config, key string, v any) error {
 	case "sync.branches":
 		list, ok := v.([]any)
 		if !ok || len(list) == 0 {
-			return invalid(key, "must be a list of branch names that includes main")
+			return invalid(key, "must be a list of branch names that includes the base branch")
 		}
 		seen := map[string]bool{}
 		cfg.Sync.Branches = nil
@@ -376,9 +405,6 @@ func set(cfg *Config, key string, v any) error {
 			seen[b] = true
 			cfg.Sync.Branches = append(cfg.Sync.Branches, b)
 		}
-		if !seen["main"] {
-			return invalid(key, "must include main")
-		}
 	case "ci.rewrite_repo_guards":
 		var s string
 		if s, err = str(); err == nil {
@@ -389,6 +415,25 @@ func set(cfg *Config, key string, v any) error {
 		}
 	}
 	return err
+}
+
+// UpgradeNeeded turns Parse's unknown-key error into UPGRADE_NEEDED: a key
+// this binary doesn't know most likely comes from a newer Ghostbranch. Any
+// other error passes through.
+func UpgradeNeeded(err error) error {
+	ce := contract.From(err)
+	if ce == nil || ce.Code != contract.ConfigInvalid {
+		return err
+	}
+	key, _ := ce.Details["unknown_key"].(string)
+	if key == "" {
+		return err
+	}
+	out := contract.New(contract.UpgradeNeeded,
+		".ghostbranch.yml on the overlay branch has the key %q, which this ghostbranch doesn't know: the pair was probably set up by a newer Ghostbranch; upgrade the ghostbranch binary, or fix it if it's a typo", key).
+		WithField(key).WithDetails(map[string]any{"unknown_key": key})
+	out.Err = err
+	return out
 }
 
 var identity = regexp.MustCompile(`^([^<>\p{Cc}\p{Zl}\p{Zp}]*[^<>\s\p{Cc}\p{Zl}\p{Zp}])[ \t]*<([^<>\s\p{Z}\p{Cc}@]+@[^<>\s\p{Z}\p{Cc}@]+)>$`)
@@ -486,6 +531,22 @@ func validBranch(b string) bool {
 	return true
 }
 
+// ValidBaseBranch checks a public_branch value: a branch name the sync
+// workflow can carry (validBranch) that is not the overlay branch
+// ghostbranch, nothing under ghostbranch/, and not a gate branch
+// (ghostbranch-...). Names compare exactly, as git's do.
+func ValidBaseBranch(b string) error {
+	switch {
+	case !validBranch(b):
+		return invalid("public_branch", "%q is not a branch name Ghostbranch can use", b)
+	case b == "ghostbranch" || strings.HasPrefix(b, "ghostbranch/"):
+		return invalid("public_branch", "%s is Ghostbranch's overlay branch", b)
+	case strings.HasPrefix(b, "ghostbranch-"):
+		return invalid("public_branch", "%s is named like a Ghostbranch gate branch", b)
+	}
+	return nil
+}
+
 func validate(c Config) error {
 	switch {
 	case c.Version != 1:
@@ -511,36 +572,44 @@ func validate(c Config) error {
 }
 
 // Render is the config file init writes for a new pair, with scheduled
-// sync off.
-func Render(public, shadow string) []byte { return RenderSchedule(public, shadow, ScheduleOff) }
+// sync off. branch is the public repo's default branch; main renders no
+// public_branch key, so a main pair's file is the one earlier versions wrote
+// but for one comment's wording.
+func Render(public, shadow, branch string) []byte {
+	return RenderSchedule(public, shadow, branch, ScheduleOff)
+}
 
 const syncOffBlock = `sync:
   # Scheduled sync is off: run ghostbranch sync yourself (commands warn when
-  # shadow main falls behind public). To opt in, set a cron such as
+  # the shadow falls behind public). To opt in, set a cron such as
   # "23 */6 * * *" (about 120 Actions minutes a month), then run
   # ghostbranch upgrade.
   schedule: "off"
-  branches: [main]`
+  branches: [%[1]s]`
 
 const syncOnBlock = `sync:
   # Scheduled sync is on: a workflow in this shadow repo runs ghostbranch
   # sync on this cron (about 120 Actions minutes a month at every 6 hours).
   # To turn it off, set schedule: "off", then run ghostbranch upgrade.
-  schedule: "%s"
-  branches: [main]`
+  schedule: "%[2]s"
+  branches: [%[1]s]`
 
 // RenderSchedule is Render with sync.schedule set to schedule: ScheduleOff
 // or a five-field cron.
-func RenderSchedule(public, shadow, schedule string) []byte {
-	sync := syncOffBlock
+func RenderSchedule(public, shadow, branch, schedule string) []byte {
+	sync := fmt.Sprintf(syncOffBlock, branch)
 	if schedule != ScheduleOff {
-		sync = fmt.Sprintf(syncOnBlock, schedule)
+		sync = fmt.Sprintf(syncOnBlock, branch, schedule)
+	}
+	baseLine := "" // a missing public_branch means main
+	if branch != "main" {
+		baseLine = "\npublic_branch: " + branch
 	}
 	return []byte(fmt.Sprintf(`# Ghostbranch configuration. It lives only on this shadow repo's
 # "ghostbranch" branch and is never promoted.
 version: 1
 public: %s
-shadow: %s
+shadow: %s%s
 
 promote:
   target: pr
@@ -568,5 +637,5 @@ ci:
 gate:
   ci_appear_timeout: 10m
   ci_timeout: 60m
-`, public, shadow, sync))
+`, public, shadow, baseLine, sync))
 }

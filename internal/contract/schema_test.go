@@ -136,7 +136,7 @@ func schemaRejects(t *testing.T, name, raw string) {
 	}
 }
 
-const initBase = `"public":"acme/widget","shadow":"acme/widget-shadow","created_shadow":true,"adopted":false,"resumed":false,` +
+const initBase = `"public":"acme/widget","shadow":"acme/widget-shadow","base_branch":"main","created_shadow":true,"adopted":false,"resumed":false,` +
 	`"mirrored_branches":["main"],"mirrored_tags":[],"overlay_created":true,"default_branch_set":true,"audit":null,"preview":null`
 
 // setupJSON is init's data.setup: the eight steps, in order (8.7).

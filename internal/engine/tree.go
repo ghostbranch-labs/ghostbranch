@@ -194,7 +194,8 @@ func rules(cfg config.Config) leak.Rules {
 }
 
 // scan runs the leak scanner over published entries and texts. base is
-// public main: files that match it are not new or changed, so they raise no
+// the public base branch's tip (or the commit the published chain starts
+// on): files that match it are not new or changed, so they raise no
 // warnings. Findings and warnings are never nil.
 func (e *Engine) scan(ctx context.Context, g *gitx.Git, cfg config.Config, entries []gitx.TreeEntry, base string, texts []leak.Text) (leak.Report, string, error) {
 	sc, err := e.NewScanner(rules(cfg))
@@ -216,7 +217,7 @@ func (e *Engine) scan(ctx context.Context, g *gitx.Git, cfg config.Config, entri
 func blobsByPath(ctx context.Context, g *gitx.Git, rev string) (map[string]string, error) {
 	es, err := g.ListTree(ctx, rev)
 	if err != nil {
-		return nil, internalErr(err, "list public main")
+		return nil, internalErr(err, "list the files of "+rev)
 	}
 	out := make(map[string]string, len(es))
 	for _, en := range es {

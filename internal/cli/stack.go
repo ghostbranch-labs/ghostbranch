@@ -46,7 +46,8 @@ onto its parent's new tip, in a throwaway worktree, and pushes each with a lease
 record. A feature that already holds its parent's tip only has its record updated. The first conflict stops
 the restack with the git commands to rebase that feature yourself; features already restacked stay
 restacked. Ghostbranch never resolves conflicts.
-With --onto main or --onto <feature>, <feature> itself moves first: its own commits are replayed onto main
+With --onto <base branch> (main, or the public repo's other default branch; main works on every pair) or
+--onto <feature>, <feature> itself moves first: its own commits are replayed onto the base branch
 (dropping its parent's commits) or onto that feature, and then the features above it follow.
 It only touches the shadow repo; your checkouts of the rewritten branches need a fetch and reset afterwards.`,
 		Args: cobra.ExactArgs(1),
@@ -64,7 +65,7 @@ It only touches the shadow repo; your checkouts of the rewritten branches need a
 			return done(a, res, w, err)
 		},
 	}
-	c.Flags().StringVar(&onto, "onto", "", `move <feature> itself onto "main" or onto another feature first`)
+	c.Flags().StringVar(&onto, "onto", "", `move <feature> itself onto "<base branch>" (or main) or onto another feature first`)
 	c.Flags().BoolVar(&a.dryRun, "plan", false, "preview exactly what would change, and change nothing (same as --dry-run)")
 	return c
 }

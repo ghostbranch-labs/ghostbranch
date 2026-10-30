@@ -132,8 +132,12 @@ func commitInfo(ctx context.Context, g *gitx.Git, set overlay.Set, from, sha str
 	return CommitInfo{Source: sha, Subject: subject(msg), Author: author, Files: files}, nil
 }
 
-const gatePRBody = "Automated Ghostbranch gate candidate: the feature rebased onto public main, plus the overlay. " +
-	"CI on this PR decides the gate. Do not merge; Ghostbranch never merges into shadow main."
+// gatePRBody is the gate PR's description on a pair whose base branch is
+// base.
+func gatePRBody(base string) string {
+	return "Automated Ghostbranch gate candidate: the feature rebased onto public " + base + ", plus the overlay. " +
+		"CI on this PR decides the gate. Do not merge; Ghostbranch never merges into shadow " + base + "."
+}
 
 // Gate rebases a feature onto public main, scans what would be published,
 // runs CI on the candidate through a draft shadow PR, and records the
@@ -267,9 +271,9 @@ func (e *Engine) build(ctx context.Context, pc *pairCtx, name, mode string, waiv
 		return nil, warns, contract.New(contract.FeatureNotFound,
 			"feature %q has metadata, but its branch %q is gone from %s", name, m.Branch, pc.pair.Shadow).WithField("feature")
 	}
-	pm, err := g.MustResolve(ctx, publicRef("main"))
+	pm, err := g.MustResolve(ctx, publicRef(pc.base))
 	if err != nil {
-		return nil, warns, internalErr(err, "read public main")
+		return nil, warns, internalErr(err, "read public "+pc.base)
 	}
 	if mode == "" {
 		mode = cfg.Promote.DefaultMode
@@ -295,7 +299,7 @@ func (e *Engine) build(ctx context.Context, pc *pairCtx, name, mode string, waiv
 	}
 	if len(levels) == 0 {
 		b.base = pm
-		e.startStep("Replaying %s onto public main", name)
+		e.startStep("Replaying %s onto public %s", name, pc.base)
 	} else {
 		below := levels[len(levels)-1].name
 		sb, err := e.stackBase(ctx, pc, cfg, levels, pm, O)
@@ -307,7 +311,7 @@ func (e *Engine) build(ctx context.Context, pc *pairCtx, name, mode string, waiv
 	}
 	// forked_at..head when the feature records a fork point (stacked, or
 	// moved onto main off a parent), else every commit not on public main.
-	sources, err := ownSources(ctx, g, name, m, head, pm)
+	sources, err := ownSources(ctx, g, name, m, head, pm, pc.base)
 	if err != nil {
 		return b, warns, err
 	}
@@ -323,9 +327,9 @@ func (e *Engine) build(ctx context.Context, pc *pairCtx, name, mode string, waiv
 	if err != nil {
 		var ce *gitx.ConflictError
 		if errors.As(err, &ce) {
-			onto := "public main"
+			onto := "public " + pc.base
 			if b.parent != "" {
-				onto = b.parent + " (rebased onto public main)"
+				onto = b.parent + " (rebased onto public " + pc.base + ")"
 			}
 			return b, warns, contract.New(contract.RebaseConflict,
 				"the feature does not rebase cleanly onto %s; commit %s stopped on conflicts in: %s", onto, short(ce.Commit), strings.Join(ce.Files, ", ")).
@@ -356,7 +360,7 @@ func (e *Engine) build(ctx context.Context, pc *pairCtx, name, mode string, waiv
 		if b.stack != nil {
 			below = b.stack.T
 		} else if below, err = g.TreeOf(ctx, b.base); err != nil {
-			return b, warns, internalErr(err, "read public main's tree")
+			return b, warns, internalErr(err, "read public "+pc.base+"'s tree")
 		}
 		if b.T == below {
 			return b, warns, contract.New(contract.NothingToPublish,
@@ -512,12 +516,12 @@ func (e *Engine) gate(ctx context.Context, pc *pairCtx, name, mode string, how g
 		old, _, _ := g.Resolve(ctx, shadowRef(gateBranch(name)))
 		pv := preview.New(map[string]string{"public_main": pm, "feature_head": head, "overlay": O})
 		pv.Add(preview.PushRef(pc.pair.Shadow, "refs/heads/"+gateBranch(name), old, C))
-		pr, err := e.Forge.FindOpenPR(ctx, pc.pair.Shadow, gateBranch(name), "main")
+		pr, err := e.Forge.FindOpenPR(ctx, pc.pair.Shadow, gateBranch(name), pc.base)
 		if err != nil {
 			return res, warns, forgeErr(err, "find the gate PR")
 		}
 		if pr == nil {
-			pv.Add(preview.OpenPR(pc.pair.Shadow, gateBranch(name), "main", true))
+			pv.Add(preview.OpenPR(pc.pair.Shadow, gateBranch(name), pc.base, true))
 		}
 		// The pending record; unless detached, the wait, then the final
 		// record over it.
@@ -540,13 +544,13 @@ func (e *Engine) gate(ctx context.Context, pc *pairCtx, name, mode string, how g
 	}
 	st.Done("Pushed the gate candidate")
 	warns = addWarnings(warns, e.updateMirror(ctx, g, shadowRef(gateBranch(name)), C)...)
-	pr, err := e.Forge.FindOpenPR(ctx, pc.pair.Shadow, gateBranch(name), "main")
+	pr, err := e.Forge.FindOpenPR(ctx, pc.pair.Shadow, gateBranch(name), pc.base)
 	if err != nil {
 		return res, warns, forgeErr(err, "find the gate PR")
 	}
 	if pr == nil {
 		created, err := e.Forge.CreatePR(ctx, pc.pair.Shadow, forge.NewPR{Title: "ghostbranch gate: " + name,
-			Body: gatePRBody, Head: gateBranch(name), Base: "main", Draft: true})
+			Body: gatePRBody(pc.base), Head: gateBranch(name), Base: pc.base, Draft: true})
 		if err != nil {
 			return res, warns, forgeErr(err, "open the gate PR")
 		}

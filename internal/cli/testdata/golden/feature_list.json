@@ -1,9 +1,10 @@
 {
-  "schema_version": "0.16",
+  "schema_version": "0.17",
   "command": "feature list",
   "ok": true,
   "exit_code": 0,
   "data": {
+    "base_branch": "main",
     "features": [
       {
         "name": "feat-x",

@@ -5,7 +5,7 @@
   "additionalProperties": false,
   "required": ["schema_version", "command", "ok", "exit_code", "data", "warnings", "next", "error"],
   "properties": {
-    "schema_version": { "const": "0.16" },
+    "schema_version": { "const": "0.17" },
     "command": { "enum": ["ghostbranch", "init", "sync", "audit", "upgrade", "feature start", "gate", "promote", "apply", "agents allow", "agents revoke", "agents status", "agents token", "explain", "guide", "guard install", "guard uninstall", "guard status", "guard check", "waivers add", "waivers list", "waivers revoke", "status", "feature list", "feature show", "feature abandon", "feature close", "remove", "log", "wait", "login", "logout", "auth status", "doctor", "feature fold", "feature restack", "feature pull", "feature archive", "version", "reference"] },
     "ok": { "type": "boolean" },
     "exit_code": { "type": "integer", "minimum": 0, "maximum": 6 },
@@ -61,7 +61,7 @@
                        "TOKEN_CANNOT_PUBLISH", "GUARD_UNSUPPORTED", "PUSH_BLOCKED", "PUSH_REFUSED", "NOT_A_PAIR_CHECKOUT",
                        "MARKER_INVALID", "WAIVER_UNKNOWN", "UPGRADE_NEEDED", "FEATURE_MOVED", "SHADOW_BEHIND", "INTERRUPTED", "JOB_NOT_FOUND", "JOB_STALE",
                        "LOGIN_EXPIRED", "LOGIN_UNAVAILABLE", "TOKEN_PERMISSION_MISSING", "DOCTOR_FAILED",
-                       "FOLD_NEEDS_REBASE", "HAS_CHILDREN", "NOT_A_STACK", "PARENT_REWRITTEN", "PUBLIC_BRANCH_CHANGED", "PAIR_NOT_FOUND", "NO_OPEN_PR", "PLAN_NOT_FOUND", "FEATURE_ARCHIVED", "APP_NOT_INSTALLED", "APP_CANT_SEE_REPO", "TOKEN_WRONG_ACCOUNT", "AGENT_TOKEN_REFUSED"]
+                       "FOLD_NEEDS_REBASE", "HAS_CHILDREN", "NOT_A_STACK", "PARENT_REWRITTEN", "PUBLIC_BRANCH_CHANGED", "PAIR_NOT_FOUND", "NO_OPEN_PR", "PLAN_NOT_FOUND", "FEATURE_ARCHIVED", "APP_NOT_INSTALLED", "APP_CANT_SEE_REPO", "TOKEN_WRONG_ACCOUNT", "AGENT_TOKEN_REFUSED", "BASE_BRANCH_CHANGED"]
             },
             "message": { "type": "string" },
             "field": { "type": ["string", "null"] },

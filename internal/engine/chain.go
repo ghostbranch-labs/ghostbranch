@@ -38,8 +38,8 @@ type link struct {
 // chainInput is everything deriveChain needs.
 type chainInput struct {
 	mode     string               // config.ModeSquash | ModePreserve | ModeCurated
-	pm       string               // public main
-	baseTree string               // the published tree the chain starts from; "" means public main's (pm's) tree
+	pm       string               // the public base branch's tip
+	baseTree string               // the published tree the chain starts from; "" means pm's tree
 	onto     string               // the rebased commit curated groups replay onto; "" means pm (a stacked branch: its gate's Base)
 	T        string               // the gated published tree (stripped tip)
 	tEntries []gitx.TreeEntry     // T's entries
@@ -61,7 +61,7 @@ func deriveChain(ctx context.Context, g *gitx.Git, cfg config.Config, in chainIn
 	if base == "" {
 		var err error
 		if base, err = g.TreeOf(ctx, in.pm); err != nil {
-			return nil, nil, internalErr(err, "read public main's tree")
+			return nil, nil, internalErr(err, "read the public base branch's tree")
 		}
 	}
 	var links []link

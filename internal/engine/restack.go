@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -18,24 +19,25 @@ import (
 // RestackOptions are feature restack's inputs.
 type RestackOptions struct {
 	Feature string
-	// Onto re-parents Feature: "main", or the feature to stack it on. Empty
-	// restacks the features above Feature onto their parents' tips.
+	// Onto re-parents Feature: the pair's base branch (its real name, or
+	// "main" as an alias on every pair), or the feature to stack it on.
+	// Empty restacks the features above Feature onto their parents' tips.
 	Onto string
 }
 
 // RestackedBranch is one branch a restack moved, or whose record it moved.
 type RestackedBranch struct {
 	Feature  string `json:"feature"`
-	Parent   string `json:"parent"`    // "main", or the feature it is stacked on now
+	Parent   string `json:"parent"`    // the placeholder "main" for the base branch, or the feature it is stacked on now
 	From     string `json:"from"`      // its head before
 	To       string `json:"to"`        // its head now; From when only its record moved
-	ForkedAt string `json:"forked_at"` // its fork point now; "" on main
+	ForkedAt string `json:"forked_at"` // its fork point now; "" on the base branch
 }
 
 // RestackResult is what a restack moved, in the order it pushed.
 type RestackResult struct {
 	Feature   string            `json:"feature"`
-	Onto      string            `json:"onto"`      // "" when it restacked the features above Feature
+	Onto      string            `json:"onto"`      // the base branch's real name or a feature; "" when it restacked the features above Feature
 	Restacked []RestackedBranch `json:"restacked"` // never null
 	Pending   []string          `json:"pending"`   // not reached because it stopped, the one it stopped at first; never null
 	Preview   *preview.Preview  `json:"preview"`
@@ -53,9 +55,9 @@ func (r *RestackResult) GateFirst() string { return r.gateFirst }
 
 // FeatureRestack replays, in an isolated worktree, each feature above
 // opt.Feature onto its parent's tip, bottom first, or with opt.Onto moves
-// opt.Feature itself onto main or another feature first. Each branch and
-// its record go in one atomic push leased on what the restack read, so a
-// branch someone pushed to meanwhile is left alone. The first conflict
+// opt.Feature itself onto the base branch or another feature first. Each
+// branch and its record go in one atomic push leased on what the restack
+// read, so a branch someone pushed to meanwhile is left alone. The first conflict
 // stops it with the git steps; branches already restacked stay restacked.
 // Ghostbranch never resolves a conflict. It touches only the shadow repo.
 func (e *Engine) FeatureRestack(ctx context.Context, p workspace.Pair, opt RestackOptions) (res *RestackResult, warns []contract.Warning, err error) {
@@ -77,11 +79,11 @@ func (e *Engine) FeatureRestack(ctx context.Context, p workspace.Pair, opt Resta
 		}
 		e.record("feature restack", &p, name, "", summary, err)
 	}()
-	if err := feature.ValidateName(name, "feature"); err != nil {
+	if err := feature.ValidateName(name, "feature", "main"); err != nil {
 		return nil, nil, err
 	}
-	if opt.Onto != "" && opt.Onto != "main" {
-		if err := feature.ValidateName(opt.Onto, "onto"); err != nil {
+	if opt.Onto != "" && opt.Onto != feature.MainParent {
+		if err := feature.ValidateName(opt.Onto, "onto", "main"); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -90,6 +92,12 @@ func (e *Engine) FeatureRestack(ctx context.Context, p workspace.Pair, opt Resta
 		return nil, nil, err
 	}
 	defer pc.unlock()
+	// onto is opt.Onto with the base branch, by its real name or the main
+	// alias, as the parent placeholder (feature.MainParent).
+	onto := opt.Onto
+	if onto == pc.base {
+		onto = feature.MainParent
+	}
 	_, O, warns, err := e.readConfig(ctx, pc)
 	if err != nil {
 		return nil, warns, err
@@ -105,15 +113,15 @@ func (e *Engine) FeatureRestack(ctx context.Context, p workspace.Pair, opt Resta
 	}
 	above := descendants(recs, name)
 	order := above
-	if opt.Onto != "" {
+	if onto != "" {
 		// An archived target is refused before checkOnto, which would call
 		// its gone branch FEATURE_NOT_FOUND (P25).
-		if t, ok := recs[opt.Onto]; ok && opt.Onto != name {
-			if err := e.stackOnArchivedRefusal(ctx, pc, opt.Onto, t.meta, "onto"); err != nil {
+		if t, ok := recs[onto]; ok && onto != name && onto != feature.MainParent {
+			if err := e.stackOnArchivedRefusal(ctx, pc, onto, t.meta, "onto"); err != nil {
 				return nil, warns, err
 			}
 		}
-		if err := checkOnto(recs, self, above, opt.Onto); err != nil {
+		if err := checkOnto(recs, self, above, onto, pc.base); err != nil {
 			return nil, warns, err
 		}
 		order = append([]string{name}, above...)
@@ -123,7 +131,7 @@ func (e *Engine) FeatureRestack(ctx context.Context, p workspace.Pair, opt Resta
 	for _, n := range append([]string{name}, order...) {
 		r := recs[n]
 		// name's own record is written only when --onto moves it.
-		if r.newer && (n != name || opt.Onto != "") {
+		if r.newer && (n != name || onto != "") {
 			ce := contract.NewerRecord("feature", r.meta.SchemaVersion).WithField("feature")
 			ce.Details["feature"] = n
 			return nil, warns, ce
@@ -134,11 +142,17 @@ func (e *Engine) FeatureRestack(ctx context.Context, p workspace.Pair, opt Resta
 				n, pc.pair.Shadow, n).WithField("feature").WithDetails(map[string]any{"feature": n})
 		}
 	}
-	shadowMain, err := pc.git.MustResolve(ctx, shadowRef("main"))
+	shadowMain, err := pc.git.MustResolve(ctx, shadowRef(pc.base))
 	if err != nil {
-		return nil, warns, internalErr(err, "read shadow main")
+		return nil, warns, internalErr(err, "read shadow "+pc.base)
 	}
-	res = &RestackResult{Feature: name, Onto: opt.Onto, Restacked: []RestackedBranch{}, Pending: []string{}}
+	// The result and the commands that carry on name the base by its real
+	// name.
+	ontoArg := onto
+	if onto == feature.MainParent {
+		ontoArg = pc.base
+	}
+	res = &RestackResult{Feature: name, Onto: ontoArg, Restacked: []RestackedBranch{}, Pending: []string{}}
 	if e.DryRun {
 		res.Preview = preview.New(map[string]string{"feature_head": self.head, "shadow_main": shadowMain})
 	}
@@ -150,23 +164,23 @@ func (e *Engine) FeatureRestack(ctx context.Context, p workspace.Pair, opt Resta
 		// restack, so every branch above name (n's siblings too) is
 		// reached; without --onto once name's own move has landed.
 		again := []string{"feature", "restack", name}
-		reparent := opt.Onto != "" && n == name
+		reparent := onto != "" && n == name
 		if reparent {
-			parent = opt.Onto
-			if parent == "main" {
+			parent = onto
+			if parent == feature.MainParent {
 				parent = ""
 			}
-			again = []string{"feature", "restack", name, "--onto", opt.Onto}
+			again = []string{"feature", "restack", name, "--onto", ontoArg}
 		}
-		onto := shadowMain
+		tip := shadowMain
 		if parent != "" {
 			if t, ok := tips[parent]; ok {
-				onto = t
+				tip = t
 			} else {
-				onto = recs[parent].head
+				tip = recs[parent].head
 			}
 		}
-		b, changed, rw, err := e.restackOne(ctx, pc, r, parent, onto, reparent, again, res.Preview)
+		b, changed, rw, err := e.restackOne(ctx, pc, r, parent, tip, reparent, again, res.Preview)
 		warns = addWarnings(warns, rw...)
 		if err != nil {
 			res.Pending = append(res.Pending, order[i:]...)
@@ -179,26 +193,28 @@ func (e *Engine) FeatureRestack(ctx context.Context, p workspace.Pair, opt Resta
 		}
 	}
 	if res.Preview == nil && len(res.Restacked) > 0 {
-		if pm, err := pc.git.MustResolve(ctx, publicRef("main")); err == nil {
+		if pm, err := pc.git.MustResolve(ctx, publicRef(pc.base)); err == nil {
 			res.gateFirst = e.firstToGate(ctx, pc, res.Restacked[0].Feature, pm, O)
 		}
 	}
 	return res, warns, nil
 }
 
-// checkOnto refuses an --onto that would loop, does nothing, or names no
-// live feature.
-func checkOnto(recs map[string]stackRecord, self stackRecord, above []string, onto string) error {
+// checkOnto refuses an --onto that would loop, does nothing, or names
+// neither the base branch nor a live feature. onto is the parent
+// placeholder (feature.MainParent) for the base branch, whose real name is
+// base.
+func checkOnto(recs map[string]stackRecord, self stackRecord, above []string, onto, base string) error {
 	bad := func(format string, args ...any) error {
 		return contract.New(contract.BadFlag, format, args...).WithField("onto")
 	}
 	switch {
-	case onto == "main" && parentFeature(self.meta) == "" && self.meta.ForkedAt == "":
-		// A feature on main with a fork point (sync re-parented it when its
-		// parent merged) still carries its old parent's commits: --onto main
-		// drops them.
-		return bad("feature %s is already on main; --onto moves a stacked feature (leave it out to restack the features above %s)", self.name, self.name)
-	case onto == "main":
+	case onto == feature.MainParent && parentFeature(self.meta) == "" && self.meta.ForkedAt == "":
+		// A feature on the base with a fork point (sync re-parented it when
+		// its parent merged) still carries its old parent's commits: --onto
+		// the base drops them.
+		return bad("feature %s is already on %s; --onto moves a stacked feature (leave it out to restack the features above %s)", self.name, base, self.name)
+	case onto == feature.MainParent:
 		return nil
 	case onto == self.name:
 		return bad("feature %s can't be stacked on itself", onto)
@@ -206,32 +222,36 @@ func checkOnto(recs map[string]stackRecord, self stackRecord, above []string, on
 		return bad("feature %s is above %s in its stack, so %s can't be stacked on it: that would make a loop", onto, self.name, self.name)
 	}
 	t, ok := recs[onto]
-	if !ok || t.head == "" {
+	if !ok {
+		// details.reason unknown: next lists the features to choose from.
+		return contract.New(contract.BadFlag, "--onto takes the base branch %s or a feature to stack %s on; %q is neither: ghostbranch feature list --all lists the features", base, self.name, onto).
+			WithField("onto").WithDetails(map[string]any{"onto": onto, "reason": "unknown"})
+	}
+	if t.head == "" {
 		return contract.New(contract.FeatureNotFound,
 			"no feature %q with a branch in the shadow repo to stack %s on; list them with ghostbranch feature list --all", onto, self.name).WithField("onto")
 	}
 	if t.meta.Abandoned {
 		// As feature start --from: nothing is built on a parked feature.
-		return bad("feature %q is abandoned, so nothing can be stacked on it; move %s onto main or another feature", onto, self.name)
+		return bad("feature %q is abandoned, so nothing can be stacked on it; move %s onto %s or another feature", onto, self.name, base)
 	}
 	return nil
 }
 
-// restackOne moves one branch onto onto, the tip of parent ("" for main),
-// and records it, in one atomic push leased on the head and the record
-// the restack read. With reparent the branch's own commits are always
-// replayed, as it changes parent. Otherwise a branch that already holds
+// restackOne moves one branch onto onto, the tip of parent ("" for the
+// base branch), and records it, in one atomic push leased on the head and
+// the record the restack read. With reparent the branch's own commits are
+// always replayed, as it changes parent. Otherwise a branch that already holds
 // onto (it was rebased by hand) has only its record moved. Under --plan
 // (pv non-nil) it replays but only previews the push. It returns the
 // branch as it is now and whether anything changed.
 func (e *Engine) restackOne(ctx context.Context, pc *pairCtx, r stackRecord, parent, onto string, reparent bool, again []string, pv *preview.Preview) (RestackedBranch, bool, []contract.Warning, error) {
 	g := pc.git
 	m := r.meta
-	parentName := parent
-	if parentName == "" {
-		parentName = "main"
-	}
-	b := RestackedBranch{Feature: r.name, Parent: parentName, From: r.head, To: r.head}
+	// parentName names parent in text and git steps: the base branch by its
+	// real name. The result keeps the parent placeholder.
+	parentName := cmp.Or(parent, pc.base)
+	b := RestackedBranch{Feature: r.name, Parent: cmp.Or(parent, feature.MainParent), From: r.head, To: r.head}
 	has, err := g.IsAncestor(ctx, onto, r.head)
 	if err != nil {
 		return b, false, nil, internalErr(err, "compare "+r.name+" with "+parentName)
@@ -251,7 +271,7 @@ func (e *Engine) restackOne(ctx context.Context, pc *pairCtx, r stackRecord, par
 			if err != nil {
 				var ce *gitx.ConflictError
 				if errors.As(err, &ce) {
-					return b, false, nil, restackStopped(r.name, parentName, upstreamOf(m), ce.Commit, ce.Files, again)
+					return b, false, nil, restackStopped(r.name, parentName, upstreamOf(m, pc.base), ce.Commit, ce.Files, again)
 				}
 				return b, false, nil, contract.From(err)
 			}
@@ -312,10 +332,10 @@ func (e *Engine) restackOne(ctx context.Context, pc *pairCtx, r stackRecord, par
 
 // ownCommits are the commits a branch adds over its parent, oldest first:
 // forked_at..head whenever it records a fork point (a stacked branch, or
-// one sync moved onto main when its parent merged); for a branch on main
-// without one (moving onto a feature), the commits head has that onto
-// lacks. ok is false when the branch no longer contains its fork point, or
-// is stacked without one.
+// one sync moved onto the base branch when its parent merged); for a
+// branch on the base without one (moving onto a feature), the commits head
+// has that onto lacks. ok is false when the branch no longer contains its
+// fork point, or is stacked without one.
 func ownCommits(ctx context.Context, g *gitx.Git, m feature.Meta, head, onto string) ([]string, bool, error) {
 	if m.ForkedAt == "" {
 		if parentFeature(m) != "" {
@@ -333,16 +353,17 @@ func ownCommits(ctx context.Context, g *gitx.Git, m feature.Meta, head, onto str
 }
 
 // upstreamOf is where m's own commits start, for RebaseSteps, as
-// ownCommits counts them: its fork point when it records one, "main" when
-// on main without one.
-func upstreamOf(m feature.Meta) string {
+// ownCommits counts them: its fork point when it records one, the base
+// branch's name when on the base without one.
+func upstreamOf(m feature.Meta, base string) string {
 	if m.ForkedAt == "" && parentFeature(m) == "" {
-		return "main"
+		return base
 	}
 	return m.ForkedAt
 }
 
-// restackStopped is the REBASE_CONFLICT that stops a restack at name: a
+// restackStopped is the REBASE_CONFLICT that stops a restack at name, on
+// parent (a feature, or the base branch by its real name): a
 // conflict in commit (files), or, with no commit, a branch rebased by hand
 // somewhere the restack can't follow. details.again is the ghostbranch
 // argv that carries on once the person has rebased and pushed it.

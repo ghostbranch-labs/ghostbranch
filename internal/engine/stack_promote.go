@@ -28,7 +28,8 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/workflow"
 )
 
-// stackParent is m's parent: a feature's name, or "main".
+// stackParent is m's parent: a feature's name, or the placeholder
+// feature.MainParent for the base branch.
 func stackParent(m feature.Meta) string { return m.ParentName() }
 
 // publishedBranch is the public branch m was published to: the recorded
@@ -46,7 +47,8 @@ type stackBranch struct {
 	meta    feature.Meta
 	metaSHA string
 	head    string
-	// base is its PR's base branch: main, or the public branch below it.
+	// base is its PR's base branch: the pair's base branch by its real
+	// name, or the public branch below it.
 	base string
 	// pubParent is the public commit its first public commit sits on:
 	// public main, the bottom's published parent's head, or the tip of the
@@ -198,7 +200,7 @@ func (e *Engine) resolveStack(ctx context.Context, pc *pairCtx, cfg config.Confi
 		case i > 0:
 			b.base, belowTree = targetBranch(out[i-1].meta), out[i-1].T
 		case p == feature.MainParent:
-			b.base, b.pubParent = "main", pm
+			b.base, b.pubParent = pc.base, pm
 		default:
 			t, err := e.publicParent(ctx, pc, b, p, pm, names)
 			if err != nil {
@@ -281,7 +283,7 @@ func (e *Engine) publicParent(ctx context.Context, pc *pairCtx, b *stackBranch, 
 	g := pc.git
 	pmeta, _, _, err := e.readMetaAny(ctx, pc, p)
 	if ce := contract.From(err); ce != nil && ce.Code == contract.FeatureNotFound {
-		return "", notAStack("parent_not_public", b.name, names, "%s's parent %s is not a feature any more: run ghostbranch feature restack %s --onto main", b.name, p, b.name)
+		return "", notAStack("parent_not_public", b.name, names, "%s's parent %s is not a feature any more: run ghostbranch feature restack %s --onto %s", b.name, p, b.name, pc.base)
 	}
 	if err != nil {
 		return "", err
@@ -299,7 +301,7 @@ func (e *Engine) publicParent(ctx context.Context, pc *pairCtx, b *stackBranch, 
 	switch {
 	case pr.Merged:
 		return "", notAStack("parent_merged", b.name, names,
-			"%s's parent %s merged: run ghostbranch sync, which closes %s and moves %s onto main; then gate %s again", b.name, p, p, b.name, b.name)
+			"%s's parent %s merged: run ghostbranch sync, which closes %s and moves %s onto %s; then gate %s again", b.name, p, p, b.name, pc.base, b.name)
 	case pr.State != "open":
 		return "", notAStack("parent_not_public", b.name, names, "%s's parent %s's public PR #%d is closed", b.name, p, pr.Number)
 	}
@@ -332,8 +334,8 @@ func (e *Engine) publicParent(ctx context.Context, pc *pairCtx, b *stackBranch, 
 	// sync moving b onto main) gets b out of this.
 	if pmeta.Gate.PublicMain != pm {
 		ce := notAStack("parent_moved", b.name, names,
-			"public main moved since %s was published: promote %s first, which updates its PR onto the new main (ghostbranch promote %s --plan), then gate and promote %s; or wait for %s to merge, run ghostbranch sync (it moves %s onto main), then gate and promote %s",
-			p, p, p, b.name, p, b.name, b.name)
+			"public %s moved since %s was published: promote %s first, which updates its PR onto the new %s (ghostbranch promote %s --plan), then gate and promote %s; or wait for %s to merge, run ghostbranch sync (it moves %s onto %s), then gate and promote %s",
+			pc.base, p, p, pc.base, p, b.name, p, b.name, pc.base, b.name)
 		ce.Details["parent"] = p
 		ce.Details["public_main_moved"] = true
 		return "", ce
@@ -398,9 +400,9 @@ func (e *Engine) promoteStack(ctx context.Context, pc *pairCtx, cfg config.Confi
 		return "", nil, contract.New(contract.BadFlag, "--detach: a stack promote runs no gate; gate each branch, bottom first, then promote").WithField("detach")
 	}
 	warns := e.behind(ctx, pc)
-	pm, err := g.MustResolve(ctx, publicRef("main"))
+	pm, err := g.MustResolve(ctx, publicRef(pc.base))
 	if err != nil {
-		return "", warns, internalErr(err, "read public main")
+		return "", warns, internalErr(err, "read public "+pc.base)
 	}
 	modes := make([]string, len(names))
 	for i, n := range names {
@@ -777,9 +779,9 @@ func (e *Engine) applyStack(ctx context.Context, pc *pairCtx, pl plan.Plan, ao a
 	if allLanded {
 		return e.finishLanded(ctx, pc, cfg, pl, ao.yes, warns) // never archives (R14)
 	}
-	pm, err := g.MustResolve(ctx, publicRef("main"))
+	pm, err := g.MustResolve(ctx, publicRef(pc.base))
 	if err != nil {
-		return nil, warns, internalErr(err, "read public main")
+		return nil, warns, internalErr(err, "read public "+pc.base)
 	}
 	branches, err := e.resolveStack(ctx, pc, cfg, O, pm, names, planUpdates(pl))
 	if err != nil {

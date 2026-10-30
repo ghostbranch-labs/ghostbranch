@@ -81,6 +81,14 @@ func (a *app) again(forHuman bool, extra ...string) []string {
 	return out
 }
 
+// setBase is the engine's OnBase: it keeps the pair's base branch for next.
+func (a *app) setBase(branch string) { a.pairBase = branch }
+
+// base is the pair's base branch, the public line, for next steps and
+// their why: the name the engine read, else main, which --onto takes as an
+// alias on every pair.
+func (a *app) base() string { return cmp.Or(a.pairBase, feature.MainParent) }
+
 // next is spec section 9.3: what to run now, exactly as given. Flags the
 // caller must supply are in NeedsInput; nothing here is ever a placeholder.
 // An error that names a gate job leads with wait on it: the gate's CI
@@ -185,6 +193,9 @@ func (a *app) steps(err error) []contract.Next {
 			// The adopt can't succeed until a person has done steps 1 and 2.
 			return []contract.Next{{Command: a.gb(args...), NeedsHuman: true,
 				Why: "a person first creates the empty private repo and adds it to the token (error.details.steps 1 and 2); then run this to adopt it"}}
+		case contract.BaseBranchChanged:
+			return []contract.Next{{Command: a.gb("explain", string(contract.BaseBranchChanged)), NeedsHuman: true,
+				Why: "the public repo no longer has the branch this pair was set up on, and Ghostbranch doesn't follow a renamed default branch yet; a person moves the pair by hand, as the explanation says"}}
 		case contract.PlanStale:
 			if fs := stringList(ce.Details["features"]); len(fs) > 1 {
 				if pub, _ := ce.Details["public"].(string); pub != "" {
@@ -210,8 +221,8 @@ func (a *app) steps(err error) []contract.Next {
 			}
 		case contract.ShadowBehindError:
 			return []contract.Next{
-				{Command: a.scoped("sync"), Why: "shadow main is behind public main; sync it (fast-forward only)"},
-				{Command: a.startAgain(), Why: startAgainWhy(a.startFrom)},
+				{Command: a.scoped("sync"), Why: a.behindWhy()},
+				{Command: a.startAgain(), Why: a.startAgainWhy()},
 			}
 		case contract.SyncDiverged:
 			// A person sorts out the diverged branch (error.what_to_do), but
@@ -394,8 +405,8 @@ func (a *app) steps(err error) []contract.Next {
 					out = append(out,
 						contract.Next{Command: a.scoped("promote", f, k, "--plan"),
 							Why: "publish " + k + " with " + f + " (a stack plan), then archive " + k + " and then " + f},
-						contract.Next{Command: a.scoped("feature", "restack", k, "--onto", "main"),
-							Why: "or move " + k + " onto main, dropping " + f + "'s commits"},
+						contract.Next{Command: a.scoped("feature", "restack", k, "--onto", a.base()),
+							Why: "or move " + k + " onto " + a.base() + ", dropping " + f + "'s commits"},
 						contract.Next{Command: a.scoped("feature", "close", k), NeedsHuman: true,
 							Why: "or, if " + k + " is abandoned, a person closes it at the console"})
 				}
@@ -406,21 +417,21 @@ func (a *app) steps(err error) []contract.Next {
 				out = append(out,
 					contract.Next{Command: a.scoped("feature", "fold", k), Why: "fold " + k + " into its parent: the parent fast-forwards to it and " + k + " closes"},
 					contract.Next{Command: a.scoped("feature", op, k), NeedsHuman: op == "close", Why: "or " + op + " " + k + " too"},
-					contract.Next{Command: a.scoped("feature", "restack", k, "--onto", "main"), Why: "or move " + k + " onto main, dropping its parent's commits"})
+					contract.Next{Command: a.scoped("feature", "restack", k, "--onto", a.base()), Why: "or move " + k + " onto " + a.base() + ", dropping its parent's commits"})
 			}
 			return out
 		case contract.ParentRewritten:
 			f, _ := ce.Details["feature"].(string)
 			parent, _ := ce.Details["parent"].(string)
 			if reason, _ := ce.Details["reason"].(string); reason == "parent_gone" && f != "" {
-				return []contract.Next{{Command: a.scoped("feature", "restack", f, "--onto", "main"),
-					Why: "its parent is gone; move it onto main, keeping only its own commits"}}
+				return []contract.Next{{Command: a.scoped("feature", "restack", f, "--onto", a.base()),
+					Why: "its parent is gone; move it onto " + a.base() + ", keeping only its own commits"}}
 			}
-			if parent == "main" && f != "" {
-				// A feature moved onto main that was rebased by hand past
-				// its old fork point.
-				return []contract.Next{{Command: a.scoped("feature", "restack", f, "--onto", "main"),
-					Why: "once " + f + " sits on main's tip, record it there, dropping its old fork point"}}
+			if parent == feature.MainParent && f != "" {
+				// A feature moved onto the base branch that was rebased by
+				// hand past its old fork point.
+				return []contract.Next{{Command: a.scoped("feature", "restack", f, "--onto", a.base()),
+					Why: "once " + f + " sits on " + a.base() + "'s tip, record it there, dropping its old fork point"}}
 			}
 			if parent != "" {
 				return []contract.Next{
@@ -439,9 +450,9 @@ func (a *app) steps(err error) []contract.Next {
 				f, _ := ce.Details["feature"].(string)
 				return []contract.Next{
 					{Command: a.scoped("promote", parent, "--plan"),
-						Why: "public main moved since " + parent + " was published: promote " + parent + " first, which updates its PR onto the new main; then gate and promote " + cmp.Or(f, "this feature")},
+						Why: "public " + a.base() + " moved since " + parent + " was published: promote " + parent + " first, which updates its PR onto the new " + a.base() + "; then gate and promote " + cmp.Or(f, "this feature")},
 					{Command: a.scoped("sync"),
-						Why: "or wait for " + parent + "'s public PR to merge: sync then closes " + parent + " and moves its children onto main; gate and promote them then"},
+						Why: "or wait for " + parent + "'s public PR to merge: sync then closes " + parent + " and moves its children onto " + a.base() + "; gate and promote them then"},
 				}
 			case reason == "parent_merged", reason == "parent_moved":
 				return []contract.Next{{Command: a.scoped("sync"), Why: "sync records what changed on the public side; then restack and gate what moved"}}
@@ -619,6 +630,13 @@ func (a *app) steps(err error) []contract.Next {
 			}
 		case contract.BadFlag:
 			switch ce.Field {
+			case "onto":
+				// --onto named neither the base branch nor a feature (it was
+				// FEATURE_NOT_FOUND before 8.12, with this step).
+				if ce.Details["reason"] == "unknown" && a.pairFull.Public != "" {
+					return []contract.Next{{Command: a.scoped("feature", "list", "--all"),
+						Why: "--onto takes the base branch " + a.base() + " or a feature; list every feature, abandoned ones included, to find it"}}
+				}
 			case "message":
 				return []contract.Next{{Command: withoutFlags(a.again(false), "-m", "--message"),
 					Why: "-m is only for --mode squash; drop it (use --title/--body for the PR) or add --mode squash"}}
@@ -873,15 +891,16 @@ func (a *app) handedOffPRDone(name string, pr int, state string) []contract.Next
 
 // stackOnArchivedNexts is next for FEATURE_ARCHIVED from feature start
 // --from (field "from") or feature restack --onto ("onto"): nothing is built
-// on handed-off feature name, so the same run starts from main, or restacks
-// onto main, instead. Its PR is not this run's to fix. Once that PR merged,
-// sync comes first: it closes name and brings main up to date.
+// on handed-off feature name, so the same run starts from the base branch,
+// or restacks onto it, instead. Its PR is not this run's to fix. Once that
+// PR merged, sync comes first: it closes name and brings the base branch up
+// to date.
 func (a *app) stackOnArchivedNexts(field, name string, pr int, state string) []contract.Next {
 	cmd := withoutFlags(a.again(false), "--"+field, "--repo")
-	why := "nothing can be stacked on handed-off feature " + name + ": start from main instead"
+	why := "nothing can be stacked on handed-off feature " + name + ": start from " + a.base() + " instead"
 	if field == "onto" {
-		cmd = append(cmd, "--onto", "main")
-		why = "nothing can be stacked on handed-off feature " + name + ": restack onto main instead"
+		cmd = append(cmd, "--onto", a.base())
+		why = "nothing can be stacked on handed-off feature " + name + ": restack onto " + a.base() + " instead"
 	}
 	if a.pairFull.Public != "" {
 		cmd = append(cmd, "--repo", a.pairFull.Public)
@@ -889,7 +908,7 @@ func (a *app) stackOnArchivedNexts(field, name string, pr int, state string) []c
 	out := []contract.Next{{Command: cmd, Why: why}}
 	if state == "merged" {
 		out = append([]contract.Next{{Command: a.scoped("sync"),
-			Why: fmt.Sprintf("PR #%d merged; sync closes %s and brings main up to date", pr, name)}}, out...)
+			Why: fmt.Sprintf("PR #%d merged; sync closes %s and brings %s up to date", pr, name, a.base())}}, out...)
 	}
 	return out
 }
@@ -991,14 +1010,14 @@ func (a *app) mergedThenSync(r *engine.ApplyResult) contract.Next {
 		}
 		pub := cmp.Or(r.PublicRepo, a.pairFull.Public)
 		why += " From a terminal, `gh pr merge` refuses a stacked PR; use merge-async on the top PR: `gh api -X PUT repos/" + pub + "/pulls/" +
-			strconv.Itoa(r.PublicPR) + "/merge-async -f merge_method=merge`. Then sync closes the merged features and moves any branch above onto main."
+			strconv.Itoa(r.PublicPR) + "/merge-async -f merge_method=merge`. Then sync closes the merged features and moves any branch above onto " + a.base() + "."
 	case len(r.PRs) > 1:
 		how := ""
 		if r.KeepsHistory {
 			how = ", with a merge commit or a rebase, not a squash"
 		}
-		why = "a maintainer reviews and merges the PRs on GitHub from the bottom up (#" + strconv.Itoa(r.PRs[0].Number) + " first, each into main" + how +
-			"); then sync closes each merged feature and moves the branches above it onto main"
+		why = "a maintainer reviews and merges the PRs on GitHub from the bottom up (#" + strconv.Itoa(r.PRs[0].Number) + " first, each into " + a.base() + how +
+			"); then sync closes each merged feature and moves the branches above it onto " + a.base()
 	}
 	return contract.Next{Command: a.scoped("sync"), Why: why}
 }
@@ -1113,26 +1132,33 @@ func (a *app) startAgain() []string {
 	return a.scoped(args...)
 }
 
-// startAgainWhy is the reason for starting the feature again after a sync.
-func startAgainWhy(from string) string {
-	if from == "" || from == feature.MainParent {
-		return "then start the feature again, from the synced shadow main"
+// startAgainWhy is the reason for starting the feature again after a
+// sync: from the base branch, unless --from named a feature.
+func (a *app) startAgainWhy() string {
+	if from := a.startFrom; from != "" && from != feature.MainParent && from != a.base() {
+		return "then start the feature again on " + from
 	}
-	return "then start the feature again on " + from
+	return "then start the feature again, from the synced shadow " + a.base()
 }
 
-// syncNext leads next when shadow main is behind public main. Syncing moves
-// only shadow branches, none of which a gate candidate or a plan's
-// fingerprint depends on, so it is safe before any other step.
+// behindWhy is why sync comes first when the shadow's base branch is
+// behind public's.
+func (a *app) behindWhy() string {
+	return "shadow " + a.base() + " is behind public " + a.base() + "; sync it (fast-forward only)"
+}
+
+// syncNext leads next when the shadow's base branch is behind public's.
+// Syncing moves only shadow branches, none of which a gate candidate or a
+// plan's fingerprint depends on, so it is safe before any other step.
 func (a *app) syncNext() []contract.Next {
 	if a.command == "sync" || !a.hasWarning(contract.ShadowBehind) {
 		return nil
 	}
-	return []contract.Next{{Command: a.scoped("sync"), Why: "shadow main is behind public main; sync it (fast-forward only)"}}
+	return []contract.Next{{Command: a.scoped("sync"), Why: a.behindWhy()}}
 }
 
 // featureNexts adds what the features need, from their reports, to out
-// (which leads with syncNext's sync when shadow main is behind). Sync
+// (which leads with syncNext's sync when the shadow is behind). Sync
 // closes merged, unmoved features, so they share one sync step, folded into
 // that leading sync when there is one; then, by name, the features a person
 // must close, the ones to gate again, and the stacks to restack (one
@@ -1152,7 +1178,7 @@ func (a *app) featureNexts(out []contract.Next, rs []engine.FeatureReport) []con
 		}
 		if base, ok := intoParent[r.Name]; ok {
 			rest = append(rest, contract.Next{Command: closeCmd, NeedsHuman: true,
-				Why: "its PR merged into " + base + "'s public branch, not main, so sync left it open: a person checks that branch holds its changes, then closes it"})
+				Why: "its PR merged into " + base + "'s public branch, not " + a.base() + ", so sync left it open: a person checks that branch holds its changes, then closes it"})
 			continue
 		}
 		if engine.ClosableWithoutConsole(r) {
@@ -1202,23 +1228,23 @@ func (a *app) featureNexts(out []contract.Next, rs []engine.FeatureReport) []con
 					Why: "its gate is waiting on CI; finish it (wait streams progress with --json)"})
 			} else if r.Drift.Status == "conflicts" {
 				rest = append(rest, contract.Next{Command: a.scoped("gate", r.Name),
-					Why: "no longer merges cleanly onto public main"})
+					Why: "no longer merges cleanly onto public " + a.base()})
 			}
 		case feature.StateParentStale:
 			// Several branches on one moved parent share its restack.
 			cmd := a.scoped("feature", "restack", r.Parent)
 			why := "the branch below it, " + r.Parent + ", moved since it was started or restacked: restack the branches above " + r.Parent + ", then gate them again"
 			if r.Parent == feature.MainParent {
-				cmd = a.scoped("feature", "restack", r.Name, "--onto", "main")
-				why = "the branch it stood on merged: move its own commits onto main, then gate it again"
+				cmd = a.scoped("feature", "restack", r.Name, "--onto", a.base())
+				why = "the branch it stood on merged: move its own commits onto " + a.base() + ", then gate it again"
 			}
 			if k := shellJoin(cmd); !restacks[k] {
 				restacks[k] = true
 				rest = append(rest, contract.Next{Command: cmd, Why: why})
 			}
 		case feature.StatePublicPRNeedsUpdate:
-			rest = append(rest, contract.Next{Command: a.scoped("feature", "restack", r.Name, "--onto", "main"),
-				Why: "the PR below it merged by squash or rebase, and its open public PR still carries that PR's old commits: restack it onto main, gate it, then promote it (the update replaces its PR's branch)"})
+			rest = append(rest, contract.Next{Command: a.scoped("feature", "restack", r.Name, "--onto", a.base()),
+				Why: "the PR below it merged by squash or rebase, and its open public PR still carries that PR's old commits: restack it onto " + a.base() + ", gate it, then promote it (the update replaces its PR's branch)"})
 		case feature.StatePRBehind:
 			switch {
 			case r.Gate != nil && r.Gate.Job != nil:

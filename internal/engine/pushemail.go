@@ -15,8 +15,9 @@ const emailSettingsURL = "https://github.com/settings/emails"
 // so it looks up the first GH007 ref's new tip in the mirror g, with no
 // network call, and says which commit and email tripped it. It returns the
 // message and the extra error details; ok is false when the refusal is not
-// GH007 or the lookup fails, and the caller keeps its own message.
-func explainGH007(ctx context.Context, g *gitx.Git, refspecs []string, refused *gitx.RefusedError, public string) (msg string, details map[string]any, ok bool) {
+// GH007 or the lookup fails, and the caller keeps its own message. base is
+// the pair's base branch: a tip already on it is public, not the person's.
+func explainGH007(ctx context.Context, g *gitx.Git, refspecs []string, refused *gitx.RefusedError, public, base string) (msg string, details map[string]any, ok bool) {
 	ref := ""
 	for i, r := range refused.Refs {
 		if i < len(refused.RefReasons) && isEmailPrivacy(refused.RefReasons[i]) {
@@ -51,7 +52,7 @@ func explainGH007(ctx context.Context, g *gitx.Git, refspecs []string, refused *
 	}
 	subject, email, _ := strings.Cut(out, "\x00")
 	onPublic := false
-	pub, there, err := g.Resolve(ctx, "refs/remotes/public/main")
+	pub, there, err := g.Resolve(ctx, publicRef(base))
 	if err != nil {
 		return "", nil, false
 	}
@@ -68,7 +69,7 @@ func explainGH007(ctx context.Context, g *gitx.Git, refspecs []string, refused *
 		fmt.Fprintf(&b, "That commit is already public in %s; your own commits are fine.\n", public)
 		b.WriteString("Fix one of these:\n")
 		fmt.Fprintf(&b, "  - untick \"Block command line pushes that expose my email\" at %s, or\n", emailSettingsURL)
-		fmt.Fprintf(&b, "  - add any new commit to %s's main using your no-reply address, then run this again", public)
+		fmt.Fprintf(&b, "  - add any new commit to %s's %s using your no-reply address, then run this again", public, base)
 	} else {
 		b.WriteString("Fix one of these:\n")
 		fmt.Fprintf(&b, "  - untick \"Block command line pushes that expose my email\" at %s, or\n", emailSettingsURL)

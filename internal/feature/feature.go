@@ -143,8 +143,11 @@ type Promoted struct {
 	// Branch is the public branch it was published to; empty in a record
 	// written before 0.11 (the feature's name then, unless --branch named one).
 	Branch string `json:"branch,omitempty"`
-	// Base is its PR's base branch: main, or the public branch of the
-	// feature below it in a stack. Sync records GitHub's retargeting.
+	// Base is its PR's base branch, a real GitHub branch name: the pair's
+	// base branch (main on most pairs, but master or trunk on others), or
+	// the public branch of the feature below it in a stack. It is compared
+	// with the base GitHub reports, never with MainParent. Sync records
+	// GitHub's retargeting.
 	Base string `json:"base,omitempty"`
 	// PublishedHead is the public branch's head as Ghostbranch last knew it:
 	// the plan's tip at publish, and GitHub's restack of it once sync saw
@@ -203,8 +206,9 @@ type Meta struct {
 	Abandoned     bool      `json:"abandoned"`
 	Gate          *Gate     `json:"gate"`
 	Promoted      *Promoted `json:"promoted"`
-	// Parent is the feature this one is stacked on; "" means main, as in
-	// every record before 0.11. ParentName reads it.
+	// Parent is the feature this one is stacked on; "" (or MainParent)
+	// means the pair's base branch, as in every record before 0.11, whatever
+	// that branch's real name. ParentName reads it.
 	Parent string `json:"parent,omitempty"`
 	// ForkedAt is the parent's commit the feature was branched from or last
 	// restacked onto: the feature's own commits are ForkedAt..head. Empty
@@ -229,10 +233,14 @@ func Decode(b []byte) (Meta, error) {
 	return m, err
 }
 
-// MainParent is the parent of a feature that isn't stacked on another.
+// MainParent is the parent of a feature that isn't stacked on another: a
+// placeholder for the pair's base branch on every pair, never a GitHub
+// branch name. "Is this feature at the bottom?" compares a parent with it;
+// a PR base (Promoted.Base, a plan's prs[].base) holds the real name
+// instead, and display code names the base branch for it.
 const MainParent = "main"
 
-// ParentName is the feature's parent: a feature name, or "main".
+// ParentName is the feature's parent: a feature name, or MainParent.
 func (m Meta) ParentName() string {
 	if m.Parent == "" {
 		return MainParent
@@ -351,8 +359,10 @@ func StateOf(in StateInput) State {
 var nameChars = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
 
 // ValidateName checks a feature or public branch name. field names the
-// input in the error.
-func ValidateName(name, field string) error {
+// input in the error. base is the pair's base branch, reserved like main:
+// a feature of that name would collide with the shadow's copy of it.
+// Callers with no pair yet pass main.
+func ValidateName(name, field, base string) error {
 	bad := func(why string) error {
 		return contract.New(contract.NameInvalid, "invalid name %q: %s", name, why).WithField(field)
 	}
@@ -369,7 +379,7 @@ func ValidateName(name, field string) error {
 		return bad("no path component may start with '.'")
 	case strings.Contains(name, ".lock/"):
 		return bad("no path component may end with '.lock'")
-	case name == "main" || name == "HEAD" || name == "ghostbranch" || strings.HasPrefix(name, "ghostbranch/") || strings.HasPrefix(name, "ghostbranch-"):
+	case name == "main" || name == base || name == "HEAD" || name == "ghostbranch" || strings.HasPrefix(name, "ghostbranch/") || strings.HasPrefix(name, "ghostbranch-"):
 		return bad("this name is reserved")
 	}
 	return nil

@@ -25,9 +25,10 @@ type SyncResult struct {
 	Public           string           `json:"public"`
 	Shadow           string           `json:"shadow"`
 	Action           string           `json:"action"`
+	BaseBranch       string           `json:"base_branch"` // the pair's base branch; public_main and shadow_main_* are its tips
 	PublicMain       string           `json:"public_main"`
 	ShadowMainBefore string           `json:"shadow_main_before"`
-	ShadowMainAfter  string           `json:"shadow_main_after"` // where sync left shadow main; when its push failed, the SHA sync read
+	ShadowMainAfter  string           `json:"shadow_main_after"` // where sync left the shadow's base branch; when its push failed, the SHA sync read
 	Branches         []SyncBranch     `json:"branches"`
 	CancelledRuns    []CancelledRun   `json:"cancelled_runs"`
 	Closed           []ClosedFeature  `json:"closed"`          // merged features sync closed; never null
@@ -131,12 +132,12 @@ func (e *Engine) Sync(ctx context.Context, p workspace.Pair, o SyncOptions) (res
 		}
 		pubs[b] = pb
 	}
-	pm := pubs["main"]
-	sm, _, err := g.Resolve(ctx, shadowRef("main"))
+	pm := pubs[pc.base] // sync.branches always holds the base branch
+	sm, _, err := g.Resolve(ctx, shadowRef(pc.base))
 	if err != nil {
-		return nil, warns, internalErr(err, "read shadow main")
+		return nil, warns, internalErr(err, "read shadow "+pc.base)
 	}
-	res = &SyncResult{Public: p.Public, Shadow: p.Shadow, PublicMain: pm, ShadowMainBefore: sm, ShadowMainAfter: sm, Branches: []SyncBranch{}, CancelledRuns: []CancelledRun{},
+	res = &SyncResult{Public: p.Public, Shadow: p.Shadow, BaseBranch: pc.base, PublicMain: pm, ShadowMainBefore: sm, ShadowMainAfter: sm, Branches: []SyncBranch{}, CancelledRuns: []CancelledRun{},
 		Closed: []ClosedFeature{}, Attention: []FeatureReport{}}
 	if e.DryRun {
 		res.Preview = preview.New(map[string]string{"public_main": pm, "shadow_main": sm})
@@ -206,7 +207,7 @@ func (e *Engine) Sync(ctx context.Context, p workspace.Pair, o SyncOptions) (res
 				}
 			}
 		}
-		if b == "main" {
+		if b == pc.base {
 			res.Action = syncAction[br.Status]
 			res.ShadowMainAfter = br.To
 		}
@@ -276,11 +277,11 @@ func (e *Engine) closeMerged(ctx context.Context, pc *pairCtx, p *workspace.Pair
 	// fold refuse likewise), so none closes until it is dealt with.
 	unread := unreadableReports(rs)
 	for _, r := range rs {
-		closable := ClosableWithoutConsole(r) && !mergedIntoParent(r)
+		closable := ClosableWithoutConsole(r) && !mergedIntoParent(r, pc.base)
 		if !r.Abandoned && !closable {
 			res.ActiveFeatures++
 		}
-		attention := r.flagged || (closable && len(unread) > 0) || mergedIntoParent(r)
+		attention := r.flagged || (closable && len(unread) > 0) || mergedIntoParent(r, pc.base)
 		switch r.State {
 		// A merged feature that isn't closable has a record from a newer
 		// Ghostbranch: RECORD_NEWER says why it waits for a person.
@@ -295,7 +296,7 @@ func (e *Engine) closeMerged(ctx context.Context, pc *pairCtx, p *workspace.Pair
 	// isn't "moved onto main" in any sense a person needs to hear.
 	closing := map[string]bool{}
 	for _, r := range rs {
-		if ClosableWithoutConsole(r) && !mergedIntoParent(r) && len(unread) == 0 {
+		if ClosableWithoutConsole(r) && !mergedIntoParent(r, pc.base) && len(unread) == 0 {
 			closing[r.Name] = true
 		}
 	}
@@ -304,9 +305,9 @@ func (e *Engine) closeMerged(ctx context.Context, pc *pairCtx, p *workspace.Pair
 		if !ClosableWithoutConsole(r) {
 			continue
 		}
-		if mergedIntoParent(r) {
+		if mergedIntoParent(r, pc.base) {
 			_, there, err := pc.git.Resolve(ctx, publicRef(r.prBase))
-			warns = addWarnings(warns, mergedIntoParentWarning(r, err == nil && !there))
+			warns = addWarnings(warns, mergedIntoParentWarning(r, pc.base, err == nil && !there))
 			continue
 		}
 		if len(unread) > 0 {
@@ -329,7 +330,7 @@ func (e *Engine) closeMerged(ctx context.Context, pc *pairCtx, p *workspace.Pair
 		if cr != nil {
 			refs = cr.Deleted
 			if err == nil {
-				summary = closeLedgerSummary(cr)
+				summary = closeLedgerSummary(cr, pc.base)
 			}
 		}
 		e.recordWith("feature close", p, r.Name, "", summary, err, func(ent *ledger.Entry) {
@@ -363,12 +364,14 @@ func (e *Engine) closeMerged(ctx context.Context, pc *pairCtx, p *workspace.Pair
 }
 
 // mergedIntoParent is whether r is a plain chained PR (no native stack)
-// that merged into a base other than main: a person merged it into the
-// public branch of the feature below. Its changes aren't in main yet, so
-// sync leaves it open, and doesn't move its children, until a person has
-// checked that branch and closes it (mergedIntoParentWarning).
-func mergedIntoParent(r FeatureReport) bool {
-	if r.PRState != prMerged || r.prBase == "" || r.prBase == feature.MainParent || r.meta == nil {
+// that merged into a base other than the pair's base branch base: a person
+// merged it into the public branch of the feature below. Its changes aren't
+// in base yet, so sync leaves it open, and doesn't move its children, until
+// a person has checked that branch and closes it (mergedIntoParentWarning).
+// prBase is GitHub's name, so it is compared with the real branch, never
+// with the parent placeholder.
+func mergedIntoParent(r FeatureReport, base string) bool {
+	if r.PRState != prMerged || r.prBase == "" || r.prBase == base || r.meta == nil {
 		return false
 	}
 	return r.meta.Promoted == nil || r.meta.Promoted.Stack == 0
@@ -379,7 +382,7 @@ func mergedIntoParent(r FeatureReport) bool {
 // into is gone (the feature below merged and closed). The warning then
 // names the base r's record has now (details.record_base), as a person
 // can't check a deleted branch.
-func mergedIntoParentWarning(r FeatureReport, baseGone bool) contract.Warning {
+func mergedIntoParentWarning(r FeatureReport, base string, baseGone bool) contract.Warning {
 	pr := 0
 	if r.PublicPR != nil {
 		pr = *r.PublicPR
@@ -388,13 +391,13 @@ func mergedIntoParentWarning(r FeatureReport, baseGone bool) contract.Warning {
 	if rb := recordBase(r); baseGone && rb != "" && rb != r.prBase {
 		details["record_base"] = rb
 		return contract.Warning{Code: contract.FeatureNotClosed,
-			Message: fmt.Sprintf("sync left merged feature %s open: its PR #%d merged into %s, not main, and public branch %s is gone now; its record stands on %s: a person checks public branch %s holds its changes, then closes %s (ghostbranch feature close %s)",
-				r.Name, pr, r.prBase, r.prBase, rb, rb, r.Name, r.Name),
+			Message: fmt.Sprintf("sync left merged feature %s open: its PR #%d merged into %s, not %s, and public branch %s is gone now; its record stands on %s: a person checks public branch %s holds its changes, then closes %s (ghostbranch feature close %s)",
+				r.Name, pr, r.prBase, base, r.prBase, rb, rb, r.Name, r.Name),
 			Details: details}
 	}
 	return contract.Warning{Code: contract.FeatureNotClosed,
-		Message: fmt.Sprintf("sync left merged feature %s open: its PR #%d merged into %s, not main, so its changes reach main only with %s's PR; a person checks public branch %s, then closes %s (ghostbranch feature close %s)",
-			r.Name, pr, r.prBase, r.prBase, r.prBase, r.Name, r.Name),
+		Message: fmt.Sprintf("sync left merged feature %s open: its PR #%d merged into %s, not %s, so its changes reach %s only with %s's PR; a person checks public branch %s, then closes %s (ghostbranch feature close %s)",
+			r.Name, pr, r.prBase, base, base, r.prBase, r.prBase, r.Name, r.Name),
 		Details: details}
 }
 

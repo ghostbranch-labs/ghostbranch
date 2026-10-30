@@ -1,0 +1,6 @@
+NAME       STATE  DRIFT  GATE  PR
+feat-x     draft  clean  -     -
+└─ feat-y  draft  clean  -     -
+Reading acme/widget and acme/widget-shadow from GitHub
+Updating the local copy of acme/widget and acme/widget-shadow
+Reading the features and their pull requests

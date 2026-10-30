@@ -4,7 +4,7 @@
   "type": "object",
   "required": ["schema_version", "type", "user_code", "verification_uri", "expires_at"],
   "properties": {
-    "schema_version": { "const": "0.16" },
+    "schema_version": { "const": "0.17" },
     "type": { "const": "device_code" },
     "user_code": { "type": "string", "minLength": 1 },
     "verification_uri": { "type": "string", "minLength": 1 },

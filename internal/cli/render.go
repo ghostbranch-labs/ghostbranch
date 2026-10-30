@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"fmt"
 	"sort"
 	"strconv"
@@ -89,6 +90,10 @@ func restackStopText(b *strings.Builder, v *engine.RestackResult) {
 	fmt.Fprintf(b, "It stopped at %s (see the error below).\n", oneLine(v.Pending[0]))
 }
 
+// baseName is a result's base branch for its text: the name the engine
+// read, or main when the result has none (a result from before open).
+func baseName(branch string) string { return cmp.Or(branch, feature.MainParent) }
+
 // human renders a result for people. It never prints secret values.
 func human(r any, st style.Styler) string {
 	var b strings.Builder
@@ -158,9 +163,13 @@ func human(r any, st style.Styler) string {
 			previewText(&b, v.Preview)
 			break
 		}
-		if v.Ready {
+		switch {
+		case v.Ready && v.BaseBranch != "" && v.BaseBranch != feature.MainParent:
+			// A main pair's text is as before 8.12; another names its branch.
+			fmt.Fprintf(&b, "Shadow repo %s is ready for %s on branch %s.\n", v.Shadow, v.Public, v.BaseBranch)
+		case v.Ready:
 			fmt.Fprintf(&b, "Shadow repo %s is ready for %s.\n", v.Shadow, v.Public)
-		} else {
+		default:
 			fmt.Fprintf(&b, "Init of %s for %s stopped before the shadow repo was ready.\n", v.Shadow, v.Public)
 		}
 		if len(v.MirroredBranches)+len(v.MirroredTags) > 0 {
@@ -189,7 +198,7 @@ func human(r any, st style.Styler) string {
 				// scrolls by among init's progress lines (6.1 acceptance).
 				fmt.Fprintf(&b, "\nNote: %s is private, so the CI that every gate runs bills your GitHub Actions minutes.\n", v.Shadow)
 			}
-			b.WriteString(walkthrough)
+			fmt.Fprintf(&b, walkthrough, baseName(v.BaseBranch))
 		}
 	case *engine.AuditResult:
 		auditText(&b, v)
@@ -225,18 +234,19 @@ func human(r any, st style.Styler) string {
 			previewText(&b, v.Preview)
 			break
 		}
+		base := baseName(v.BaseBranch)
 		switch v.Action {
 		case "noop":
-			fmt.Fprintf(&b, "Shadow main is up to date with public main (%s).\n", short(v.PublicMain))
+			fmt.Fprintf(&b, "Shadow %s is up to date with public %s (%s).\n", base, base, short(v.PublicMain))
 		case "fast_forward":
-			fmt.Fprintf(&b, "Shadow main fast-forwarded %s -> %s.\n", short(v.ShadowMainBefore), short(v.PublicMain))
+			fmt.Fprintf(&b, "Shadow %s fast-forwarded %s -> %s.\n", base, short(v.ShadowMainBefore), short(v.PublicMain))
 		case "push_failed":
-			fmt.Fprintf(&b, "Shadow main could not be pushed; it was at %s when sync read it.\n", short(v.ShadowMainBefore))
+			fmt.Fprintf(&b, "Shadow %s could not be pushed; it was at %s when sync read it.\n", base, short(v.ShadowMainBefore))
 		default:
-			b.WriteString("Shadow main has diverged from public main; nothing was pushed to it.\n")
+			fmt.Fprintf(&b, "Shadow %s has diverged from public %s; nothing was pushed to it.\n", base, base)
 		}
 		for _, br := range v.Branches {
-			if br.Name != "main" {
+			if br.Name != base {
 				fmt.Fprintf(&b, "  %s: %s\n", br.Name, br.Status)
 			}
 		}
@@ -367,9 +377,10 @@ func human(r any, st style.Styler) string {
 				oneLine(e.Actor), oneLine(e.Op), oneLine(feat), e.ExitCode, oneLine(e.Summary))
 		}
 	case *engine.StatusResult:
-		mainState := "shadow main up to date"
+		base := baseName(v.BaseBranch)
+		mainState := "shadow " + base + " up to date"
 		if v.ShadowBehind {
-			mainState = "shadow main behind public main"
+			mainState = "shadow " + base + " behind public " + base
 		}
 		schedule := "off"
 		if v.ScheduledSync {
@@ -418,11 +429,16 @@ func human(r any, st style.Styler) string {
 			fmt.Fprintf(&b, "Nothing to restack: every feature above %s is on its parent's tip.\n", oneLine(v.Feature))
 		}
 		for _, r := range v.Restacked {
+			// A parent of "main" is the base branch, which --onto names.
+			parent := r.Parent
+			if parent == feature.MainParent {
+				parent = baseName(v.Onto)
+			}
 			if r.From == r.To {
-				fmt.Fprintf(&b, "  %s: on %s already; record updated\n", oneLine(r.Feature), oneLine(r.Parent))
+				fmt.Fprintf(&b, "  %s: on %s already; record updated\n", oneLine(r.Feature), oneLine(parent))
 				continue
 			}
-			fmt.Fprintf(&b, "  %s onto %s: %s -> %s\n", oneLine(r.Feature), oneLine(r.Parent), short(r.From), short(r.To))
+			fmt.Fprintf(&b, "  %s onto %s: %s -> %s\n", oneLine(r.Feature), oneLine(parent), short(r.From), short(r.To))
 		}
 		if len(v.Pending) > 0 {
 			fmt.Fprintf(&b, "Stopped at %s.\n", oneLine(strings.Join(v.Pending, ", ")))
@@ -890,8 +906,11 @@ func featureShowText(b *strings.Builder, v *engine.FeatureShowResult) {
 			kids = oneLine(strings.Join(r.Children, ", "))
 		}
 		parent := r.Parent
-		if parent == "" {
+		switch parent {
+		case "":
 			parent = "unknown" // the record couldn't be read
+		case feature.MainParent:
+			parent = baseName(v.BaseBranch)
 		}
 		fmt.Fprintf(b, "  stack: on %s; branches on it: %s\n", oneLine(parent), kids)
 	}
@@ -935,7 +954,7 @@ func featureShowText(b *strings.Builder, v *engine.FeatureShowResult) {
 	if r.Abandoned {
 		b.WriteString("  abandoned\n")
 	}
-	fmt.Fprintf(b, "Commits since public main (%d):\n", len(v.Commits))
+	fmt.Fprintf(b, "Commits since public %s (%d):\n", baseName(v.BaseBranch), len(v.Commits))
 	for _, c := range v.Commits {
 		fmt.Fprintf(b, "  %s  %s  (%s)\n", short(c.Source), oneLine(c.Subject), oneLine(c.Author))
 		for _, f := range c.Files {
@@ -1024,11 +1043,12 @@ func checklistLines(s *engine.Setup, st style.Styler, replace map[string][]strin
 }
 
 // walkthrough ends a guided init: the first feature, and agents' tokens.
+// Its one %s is the base branch's name.
 const walkthrough = `
 Your first feature:
   1. ghostbranch feature start <name>   creates the branch in the shadow repo and switches this checkout to it;
                                         commit there, then: git push shadow <name>
-  2. ghostbranch gate <name>            rebases on public main, scans for leaks and runs CI
+  2. ghostbranch gate <name>            rebases on public %s, scans for leaks and runs CI
   3. ghostbranch promote <name>         publishes it to the public repo as a PR, once you confirm
 Coding agents: give each agent its own token that reaches only the shadow repo, as GHOSTBRANCH_TOKEN
 in its environment, never your login. See "Tokens" in ghostbranch guide.

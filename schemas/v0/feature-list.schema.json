@@ -3,8 +3,9 @@
   "title": "feature list data",
   "type": "object",
   "additionalProperties": false,
-  "required": ["features"],
+  "required": ["base_branch", "features"],
   "properties": {
+    "base_branch": { "description": "the pair's base branch, the public branch it works against: public_branch from the overlay config, main when the key is missing; a feature whose parent is main is on it", "type": "string", "minLength": 1 },
     "features": { "description": "sorted by name; abandoned features only with --all", "type": "array", "items": { "$ref": "feature-report.schema.json" } }
   }
 }

@@ -1,11 +1,12 @@
 {
-  "schema_version": "0.16",
+  "schema_version": "0.17",
   "command": "init",
   "ok": false,
   "exit_code": 1,
   "data": {
     "public": "acme/widget",
     "shadow": "acme/widget-shadow",
+    "base_branch": "",
     "created_shadow": false,
     "adopted": false,
     "resumed": false,

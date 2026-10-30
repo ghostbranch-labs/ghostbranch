@@ -203,6 +203,13 @@ func (a *app) guardCheckCmd() *cobra.Command {
 			var blockedBy []string
 			for _, p := range pairs {
 				facts, err := mirrorFacts(ctx, ws.MirrorDir(p))
+				if ce := contract.From(err); ce != nil && (ce.Code == contract.UpgradeNeeded || ce.Code == contract.ConfigInvalid) {
+					// The overlay config names the base branch; its own
+					// message says what to do (upgrade, or run doctor).
+					out := contract.New(contract.PushBlocked, "the guard could not read the overlay config of %s, so the push is refused: %s", p.Public, ce.Message)
+					out.Err = err
+					return out
+				}
 				if err != nil {
 					return contract.Wrap(contract.PushBlocked, err, "the guard could not read the features of %s, so the push is refused", p.Public)
 				}

@@ -85,6 +85,10 @@ type Engine struct {
 	DryRun         bool
 	// OnPush observes every push before it happens (tests).
 	OnPush func(op, remote string, refspecs []string)
+	// OnBase hears the pair's base branch as soon as open has read it, so
+	// the CLI can name it in the next steps of an error, which carries no
+	// result. A doctor run whose overlay config can't be read never calls it.
+	OnBase func(branch string)
 	// ledgerWarns holds a LEDGER_NOT_WRITTEN warning for each ledger entry
 	// that couldn't be written, until LedgerWarnings hands them over.
 	ledgerWarns []contract.Warning

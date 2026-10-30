@@ -249,9 +249,10 @@ type reparent struct {
 }
 
 // reparentChildren rewrites the records of a closing feature's children to
-// stand on main, without pushing them. The close pushes them in the same
-// atomic push that deletes the parent, so no child is ever left naming a
-// deleted parent, and if that push fails nothing changes.
+// stand on the base branch (their parent the placeholder
+// feature.MainParent), without pushing them. The close pushes them in the
+// same atomic push that deletes the parent, so no child is ever left
+// naming a deleted parent, and if that push fails nothing changes.
 //
 // A child keeps its own commits. Its forked_at becomes the parent's
 // published feature head when the child contains it, so its next gate
@@ -261,12 +262,12 @@ type reparent struct {
 // restacked at, which it does contain. Nothing here checks that forked_at
 // is in the parent's published head; the child's next gate and restack
 // read the fork point as it stands.
-// Its PR's base becomes main, as GitHub retargets it. A parent whose
-// published head nothing records stops the close (HAS_CHILDREN), as its
-// children's fork point can't be told. When the PRs
+// Its PR's base becomes the base branch's real name, as GitHub retargets
+// it. A parent whose published head nothing records stops the close
+// (HAS_CHILDREN), as its children's fork point can't be told. When the PRs
 // were plain chained PRs (no native stack) and the parent's published head
-// isn't in public main (a squash or rebase merge), the child's open public
-// PR still carries the parent's old commits: it is marked
+// isn't in the public base branch (a squash or rebase merge), the child's
+// open public PR still carries the parent's old commits: it is marked
 // public_pr_needs_update. A child whose record this binary can't rewrite
 // stops the close (HAS_CHILDREN). In a dry run nothing is written.
 func (e *Engine) reparentChildren(ctx context.Context, pc *pairCtx, parent FeatureReport, kids []FeatureReport) ([]reparent, error) {
@@ -274,16 +275,16 @@ func (e *Engine) reparentChildren(ctx context.Context, pc *pairCtx, parent Featu
 		return nil, nil
 	}
 	g := pc.git
-	pm, err := g.MustResolve(ctx, publicRef("main"))
+	pm, err := g.MustResolve(ctx, publicRef(pc.base))
 	if err != nil {
-		return nil, internalErr(err, "read public main")
+		return nil, internalErr(err, "read public "+pc.base)
 	}
 	forkedAt, inMain := "", false
 	if pmeta := parent.meta; pmeta != nil && pmeta.Promoted != nil {
 		forkedAt = e.publishedHead(*pmeta)
 		if h := pmeta.Promoted.PublishedHead; h != "" {
 			if inMain, err = g.IsAncestor(ctx, h, pm); err != nil {
-				return nil, internalErr(err, "check whether "+parent.Name+"'s published head is in public main")
+				return nil, internalErr(err, "check whether "+parent.Name+"'s published head is in public "+pc.base)
 			}
 		}
 	}
@@ -293,8 +294,8 @@ func (e *Engine) reparentChildren(ctx context.Context, pc *pairCtx, parent Featu
 			names = append(names, k.Name)
 		}
 		return nil, contract.New(contract.HasChildren,
-			"feature %s has %d feature(s) stacked on it (%s), and nothing records the head %s was published from, so where they fork from it can't be told; %s stays until each of them is moved onto main (ghostbranch feature restack <child> --onto main)",
-			parent.Name, len(names), strings.Join(names, ", "), parent.Name, parent.Name).WithField("feature").
+			"feature %s has %d feature(s) stacked on it (%s), and nothing records the head %s was published from, so where they fork from it can't be told; %s stays until each of them is moved onto %s (ghostbranch feature restack <child> --onto %s)",
+			parent.Name, len(names), strings.Join(names, ", "), parent.Name, parent.Name, pc.base, pc.base).WithField("feature").
 			WithDetails(map[string]any{"feature": parent.Name, "children": names, "op": "close", "reason": "parent_head_unknown"})
 	}
 	out := make([]reparent, 0, len(kids))
@@ -320,7 +321,7 @@ func (e *Engine) reparentChildren(ctx context.Context, pc *pairCtx, parent Featu
 		}
 		if m.Promoted != nil {
 			p := *m.Promoted
-			p.Base = feature.MainParent
+			p.Base = pc.base
 			p.NeedsUpdate = p.NeedsUpdate || (p.Stack == 0 && !inMain)
 			m.Promoted = &p
 		}

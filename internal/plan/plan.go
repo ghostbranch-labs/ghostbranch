@@ -184,8 +184,9 @@ type Plan struct {
 }
 
 // StackPR is one PR a plan opens: the feature, the branch its PR is based
-// on (main, or the public branch of the feature below it), and, once apply
-// opened it, its number and URL (0 and "" until then).
+// on (a real branch name: the pair's base branch, main on most pairs, or
+// the public branch of the feature below it), and, once apply opened it,
+// its number and URL (0 and "" until then).
 type StackPR struct {
 	Feature string `json:"feature"`
 	Base    string `json:"base"`

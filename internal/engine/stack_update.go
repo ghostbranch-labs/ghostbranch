@@ -87,14 +87,14 @@ func (e *Engine) stackUpdates(ctx context.Context, pc *pairCtx, names, modes []s
 					return nil, err
 				}
 			}
-			if !gateFitsUpdate(m.Gate, u, m, modes[i], above) {
+			if !gateFitsUpdate(m.Gate, u, m, modes[i], above, pc.base) {
 				// A gate built on another feature head, public main or overlay
 				// is stale whatever it built: gating again builds anew.
 				head, _, err := pc.git.Resolve(ctx, shadowRef(m.Branch))
 				if err != nil {
 					return nil, internalErr(err, "read feature branch "+m.Branch)
 				}
-				ce := updateGateErr(n, names, m, u, modes[i], defaultMode, above, m.Gate.FreshFor(head, pm, O))
+				ce := updateGateErr(n, names, m, u, modes[i], defaultMode, above, m.Gate.FreshFor(head, pm, O), pc.base)
 				if slices.ContainsFunc(out, func(u *prUpdate) bool { return u != nil }) {
 					ce.Details["updating"] = true // the new plan updates the open PRs (next says so)
 				}
@@ -102,7 +102,7 @@ func (e *Engine) stackUpdates(ctx context.Context, pc *pairCtx, names, modes []s
 			}
 			if u != nil {
 				u.Style = m.Gate.Update.Style
-				u.Reason = planReason(u.Style, m.Gate.Update.Reason, forcedReason(u, &m, modes[i], above))
+				u.Reason = planReason(u.Style, m.Gate.Update.Reason, forcedReason(u, &m, modes[i], above, pc.base))
 			}
 			continue
 		}
@@ -129,19 +129,20 @@ func (e *Engine) stackUpdates(ctx context.Context, pc *pairCtx, names, modes []s
 // builds in, mode is another, and the gate would fit in def: gating again
 // would build the same update. Then the refusal says so, with
 // details.update_mode, and the way out is to promote name on its own,
-// which gates it in mode. In every other case (name, public main or the
+// which gates it in mode (base is the pair's base branch, for
+// gateFitsUpdate). In every other case (name, public main or the
 // overlay moved since the gate; the PR's head or base, or the PRs open
 // above it, changed; or the gate was built in another mode by an earlier
 // promote) gating again builds in def what fits.
-func updateGateErr(name string, names []string, m feature.Meta, u *prUpdate, mode, def string, above, fresh bool) *contract.Error {
+func updateGateErr(name string, names []string, m feature.Meta, u *prUpdate, mode, def string, above, fresh bool, base string) *contract.Error {
 	gt := m.Gate
 	if u == nil {
 		return staleGate(name, names)
 	}
-	if !fresh || gt.Update == nil || gt.ScannedAs != def || mode == def || !gateFitsUpdate(gt, u, m, def, above) {
+	if !fresh || gt.Update == nil || gt.ScannedAs != def || mode == def || !gateFitsUpdate(gt, u, m, def, above, base) {
 		return notAStack("stale_gate", name, names,
-			"%s's gate wasn't built for the update its public PR #%d needs now (%s, public main, the PR's head or base, the PRs open above it, or the history mode changed since %s was gated): gate %s, then the branches above it, then promote again",
-			name, u.PR, name, name, name)
+			"%s's gate wasn't built for the update its public PR #%d needs now (%s, public %s, the PR's head or base, the PRs open above it, or the history mode changed since %s was gated): gate %s, then the branches above it, then promote again",
+			name, u.PR, name, base, name, name)
 	}
 	built := "an append to"
 	if gt.Update.Style == plan.StyleReplace {

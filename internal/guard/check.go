@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/ghostbranch-labs/ghostbranch/internal/config"
+	"github.com/ghostbranch-labs/ghostbranch/internal/contract"
 	"github.com/ghostbranch-labs/ghostbranch/internal/feature"
 	"github.com/ghostbranch-labs/ghostbranch/internal/gitx"
 )
@@ -36,9 +38,9 @@ func ParseInput(r io.Reader) ([]Line, error) {
 // Facts are what the pair's mirror knows about features.
 type Facts struct {
 	Names      map[string]bool   // every feature
-	Heads      map[string]string // feature -> shadow head, for features with commits not in public main
+	Heads      map[string]string // feature -> shadow head, for features with commits not in the base branch
 	Commits    map[string]string // unpublished feature commit -> its feature
-	PublicMain string            // public main in the mirror, if known
+	PublicMain string            // the tip of the pair's base branch in the mirror, if known
 	// Archived maps the public branch of each feature handed off to the
 	// public repo (6.5) to that feature: a push to that branch isn't
 	// refused for the feature's name or head. The archive's private
@@ -46,15 +48,24 @@ type Facts struct {
 	Archived map[string]string
 }
 
-// LoadFacts reads features from the engine's mirror, offline. Any git error
-// is returned, so the check fails closed.
+// overlayRef is the shadow's overlay branch in the engine's mirror (the
+// engine's OverlayBranch); its .ghostbranch.yml names the pair's base branch.
+const overlayRef = "refs/remotes/shadow/ghostbranch"
+
+// LoadFacts reads features from the engine's mirror, offline, checked
+// against the pair's base branch. Any git error, or an overlay config it
+// can't read, is returned, so the check fails closed.
 func LoadFacts(ctx context.Context, mirror *gitx.Git) (Facts, error) {
 	f := Facts{Names: map[string]bool{}, Heads: map[string]string{}, Commits: map[string]string{}, Archived: map[string]string{}}
 	metas, err := mirror.Refs(ctx, "refs/shadow-meta/features")
 	if err != nil {
 		return f, err
 	}
-	pm, hasPM, err := mirror.Resolve(ctx, "refs/remotes/public/main")
+	base, err := baseBranch(ctx, mirror)
+	if err != nil {
+		return f, err
+	}
+	pm, hasPM, err := mirror.Resolve(ctx, "refs/remotes/public/"+base)
 	if err != nil {
 		return f, err
 	}
@@ -107,9 +118,48 @@ func LoadFacts(ctx context.Context, mirror *gitx.Git) (Facts, error) {
 	return f, nil
 }
 
+// baseBranch reads the pair's base branch from the overlay's .ghostbranch.yml
+// in the mirror: public_branch, or main when the key is missing. A mirror
+// with no overlay branch is main, as before the key existed. An overlay with
+// no config, or one that doesn't parse, is an error, never a guess at main:
+// main may not be the pair's branch at all, and the guard never checks a push
+// against the wrong one. A key from a newer Ghostbranch is UPGRADE_NEEDED,
+// which says to upgrade; any other config error is CONFIG_INVALID and points
+// to doctor.
+func baseBranch(ctx context.Context, mirror *gitx.Git) (string, error) {
+	O, ok, err := mirror.Resolve(ctx, overlayRef)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return config.Config{}.Base(), nil
+	}
+	raw, ok, err := mirror.ShowFile(ctx, O, ".ghostbranch.yml")
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", contract.New(contract.ConfigInvalid,
+			"the overlay branch has no .ghostbranch.yml, so the guard can't tell the pair's base branch; restore it on the shadow repo's ghostbranch branch, and run ghostbranch doctor to check the pair")
+	}
+	cfg, _, err := config.Parse(raw)
+	if err != nil {
+		if up := config.UpgradeNeeded(err); contract.From(up).Code == contract.UpgradeNeeded {
+			return "", up
+		}
+		ce := contract.From(err)
+		out := contract.New(contract.ConfigInvalid,
+			"%s, so the guard can't tell the pair's base branch; run ghostbranch doctor to check the pair", ce.Message).
+			WithField(ce.Field).WithDetails(ce.Details)
+		out.Err = err
+		return "", out
+	}
+	return cfg.Base(), nil
+}
+
 // loadArchive reads name's record. A feature handed off to the public repo
 // maps its public branch to name, and its archive's commits that aren't in
-// public main join f.Commits under name (R7), never f.Heads: a head
+// the public base branch join f.Commits under name (R7), never f.Heads: a head
 // already on its PR's branch would refuse every fix. A record that can't
 // be read, or an archive ref missing from the mirror, changes nothing, so
 // the name stays refused (fail closed); a git failure is an error.
@@ -312,8 +362,8 @@ func Check(ctx context.Context, checkout Objects, lines []Line, f Facts) ([]Bloc
 // carried sets why[i] for each line i in idx that carries an unpublished
 // feature commit. One rev-list covers the whole push (git push --tags would
 // otherwise walk the shared history once per tag): every pushed commit,
-// minus the ones the public repo already has, which are public main and
-// each line's remote SHA. The remote holds those, so they are published
+// minus the ones the public repo already has, which are its base branch
+// (f.PublicMain) and each line's remote SHA. The remote holds those, so they are published
 // whichever ref this push puts them on. Tracking refs aren't excluded: a
 // remote that fetches from the shadow, or any fetch into refs/remotes, can
 // hold unpublished feature commits there. Only when the list has a feature

@@ -1,6 +1,7 @@
 package cli_test
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -156,6 +157,30 @@ func TestGuardCheckMirror(t *testing.T) {
 				t.Fatalf("an unreadable mirror must refuse the push: %d %v", code, env)
 			}
 		})
+	}
+}
+
+// An overlay config from a newer Ghostbranch refuses the push, even of public
+// main, and tells the person to upgrade rather than blaming the features.
+func TestGuardCheckNewerOverlay(t *testing.T) {
+	hermeticGit(t)
+	te := newTestEnv(t)
+	initOnly(te)
+	pairCheckout(te)
+	ctx := context.Background()
+	g := gitx.New(filepath.Join(te.vars["GHOSTBRANCH_HOME"], "workspaces", "default", "pairs", "acme__widget", "mirror.git"))
+	o := testutil.Commit(t, g, "newer-overlay", "overlay",
+		map[string]string{".ghostbranch.yml": "public: acme/widget\nshadow: acme/widget-shadow\nfrom_the_future: 1\n"})
+	if err := g.UpdateRef(ctx, "refs/remotes/shadow/ghostbranch", o); err != nil {
+		t.Fatal(err)
+	}
+	te.env.Stdin = strings.NewReader("refs/heads/main 1111111111111111111111111111111111111111 refs/heads/main 0000000000000000000000000000000000000000\n")
+	code, env := te.runJSON("guard", "check", "origin", "https://github.com/acme/widget.git")
+	e, _ := env["error"].(map[string]any)
+	msg, _ := e["message"].(string)
+	if code != 1 || e["code"] != "PUSH_BLOCKED" || !strings.Contains(msg, "upgrade the ghostbranch binary") ||
+		strings.Contains(msg, "could not read the features") {
+		t.Fatalf("a newer overlay config must refuse the push and say to upgrade: %d %v", code, env)
 	}
 }
 

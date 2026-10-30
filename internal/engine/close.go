@@ -64,7 +64,7 @@ func (e *Engine) FeatureAbandon(ctx context.Context, p workspace.Pair, name stri
 		}
 		e.record("feature abandon", &p, name, "", summary, err)
 	}()
-	if err := feature.ValidateName(name, "feature"); err != nil {
+	if err := feature.ValidateName(name, "feature", "main"); err != nil {
 		return nil, nil, err
 	}
 	pc, err := e.open(ctx, "feature abandon", p, true)
@@ -87,7 +87,7 @@ func (e *Engine) FeatureAbandon(ctx context.Context, p workspace.Pair, name stri
 			return nil, warns, err
 		}
 		if kids := childrenOf(recs, name, false); len(kids) > 0 {
-			return nil, warns, hasChildren(name, kids, "abandon")
+			return nil, warns, hasChildren(name, kids, "abandon", pc.base)
 		}
 	}
 	changed = m.Abandoned != !undo
@@ -122,6 +122,7 @@ func (e *Engine) FeatureAbandon(ctx context.Context, p workspace.Pair, name stri
 func (e *Engine) FeatureClose(ctx context.Context, p workspace.Pair, name string) (res *FeatureCloseResult, warns []contract.Warning, err error) {
 	// The console's yes is recorded even when the close then fails.
 	var appr *ledger.Approval
+	base := "" // the pair's base branch, once open read it
 	defer func() {
 		summary := ""
 		var refs map[string]string
@@ -130,7 +131,7 @@ func (e *Engine) FeatureClose(ctx context.Context, p workspace.Pair, name string
 		if res != nil && res.Preview == nil {
 			refs = res.Deleted
 			if err == nil {
-				summary = closeLedgerSummary(res)
+				summary = closeLedgerSummary(res, base)
 			}
 		}
 		e.recordWith("feature close", &p, name, "", summary, err, func(ent *ledger.Entry) {
@@ -140,7 +141,7 @@ func (e *Engine) FeatureClose(ctx context.Context, p workspace.Pair, name string
 			ent.Approval = appr
 		})
 	}()
-	if err := feature.ValidateName(name, "feature"); err != nil {
+	if err := feature.ValidateName(name, "feature", "main"); err != nil {
 		return nil, nil, err
 	}
 	pc, err := e.open(ctx, "feature close", p, true)
@@ -148,6 +149,7 @@ func (e *Engine) FeatureClose(ctx context.Context, p workspace.Pair, name string
 		return nil, nil, err
 	}
 	defer pc.unlock()
+	base = pc.base
 	if _, _, warns, err = e.readConfig(ctx, pc); err != nil {
 		return nil, warns, err
 	}
@@ -180,7 +182,7 @@ func (e *Engine) FeatureClose(ctx context.Context, p workspace.Pair, name string
 		return nil, warns, err
 	}
 	if kids := childrenOf(recs, name, true); len(kids) > 0 {
-		return nil, warns, hasChildren(name, kids, "close")
+		return nil, warns, hasChildren(name, kids, "close", pc.base)
 	}
 	t, tw, err := e.closeTargets(ctx, pc, r)
 	warns = addWarnings(warns, tw...)
@@ -284,7 +286,7 @@ func (e *Engine) closeFeature(ctx context.Context, pc *pairCtx, r FeatureReport,
 		}
 	}
 	if len(staying) > 0 && !e.DryRun {
-		e.notef(progress.Info, "Moving %s onto main in the same push that closes %s", strings.Join(staying, ", "), r.Name)
+		e.notef(progress.Info, "Moving %s onto %s in the same push that closes %s", strings.Join(staying, ", "), pc.base, r.Name)
 	}
 	res, cw, err := e.closeWith(ctx, pc, r, t, o)
 	// The push landed once res is non-nil outside a dry run, even when the
@@ -403,7 +405,7 @@ func (e *Engine) closeWith(ctx context.Context, pc *pairCtx, r FeatureReport, t 
 	sh := pc.pair.Shadow
 	res := &FeatureCloseResult{Feature: r.Name, State: r.State, Deleted: map[string]string{}, NeedsConsole: !ClosableWithoutConsole(r),
 		Reparented: []string{}}
-	pr, err := e.Forge.FindOpenPR(ctx, sh, gateBranch(r.Name), "main")
+	pr, err := e.Forge.FindOpenPR(ctx, sh, gateBranch(r.Name), pc.base)
 	if err != nil {
 		return nil, nil, forgeErr(err, "find the gate PR of feature %s", r.Name)
 	}
@@ -583,14 +585,15 @@ func closeSummary(pc *pairCtx, r FeatureReport, t closeTargets) string {
 	return strings.TrimSuffix(b.String(), "\n")
 }
 
-// closeLedgerSummary is the ledger's line for a close.
-func closeLedgerSummary(res *FeatureCloseResult) string {
+// closeLedgerSummary is the ledger's line for a close, on a pair whose
+// base branch is base.
+func closeLedgerSummary(res *FeatureCloseResult, base string) string {
 	s := fmt.Sprintf("closed %s (%s): deleted %d ref(s)", res.Feature, res.State, len(res.Deleted))
 	if res.GatePR != nil {
 		s += fmt.Sprintf("; closed gate PR #%d", *res.GatePR)
 	}
 	if len(res.Reparented) > 0 {
-		s += fmt.Sprintf("; moved %s onto main", strings.Join(res.Reparented, ", "))
+		s += fmt.Sprintf("; moved %s onto %s", strings.Join(res.Reparented, ", "), base)
 	}
 	return s
 }

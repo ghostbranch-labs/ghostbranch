@@ -13,7 +13,7 @@ import (
 
 // SchemaVersion versions the envelope and every result and event schema. It
 // stays 0.x until launch, and 0.x versions may break.
-const SchemaVersion = "0.16"
+const SchemaVersion = "0.17"
 
 // RecordVersion versions what Ghostbranch stores: feature records, plans,
 // grants, waivers, workspace.json and the stored login. It moves only when a
@@ -193,6 +193,11 @@ const (
 	// lacks what agents need. details: reason (can_publish,
 	// missing_permissions, wrong_repo), link.
 	AgentTokenRefused Code = "AGENT_TOKEN_REFUSED"
+	// BaseBranchChanged means the public repo no longer has the branch the
+	// pair was set up on (its default branch was renamed, most likely), and
+	// Ghostbranch doesn't follow a rename. details: recorded (the pair's
+	// branch), current (the public repo's default branch now).
+	BaseBranchChanged Code = "BASE_BRANCH_CHANGED"
 )
 
 var exitCodes = map[Code]int{
@@ -233,6 +238,7 @@ var exitCodes = map[Code]int{
 	AppCantSeeRepo:         ExitUsage,
 	TokenWrongAccount:      ExitUsage,
 	AgentTokenRefused:      ExitUsage,
+	BaseBranchChanged:      ExitUsage,
 }
 
 // Exit is the process exit code for c.

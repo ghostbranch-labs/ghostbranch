@@ -123,6 +123,11 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	}
 	defer pc.unlock()
 	g := pc.git
+	// ValidatePromoteOptions ran before the pair was read: never publish to
+	// the base branch, whatever it is called.
+	if err := feature.ValidateName(branch, "branch", pc.base); err != nil {
+		return res, nil, err
+	}
 
 	cfg, O, warns, err := e.readConfig(ctx, pc)
 	if err != nil {
@@ -185,9 +190,9 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	if !ok {
 		return res, warns, contract.New(contract.FeatureNotFound, "feature branch %q is gone from %s", m.Branch, p.Shadow).WithField("feature")
 	}
-	pm, err := g.MustResolve(ctx, publicRef("main"))
+	pm, err := g.MustResolve(ctx, publicRef(pc.base))
 	if err != nil {
-		return res, warns, internalErr(err, "read public main")
+		return res, warns, internalErr(err, "read public "+pc.base)
 	}
 	// A feature whose PR is open is updated, not published again: read the
 	// PR now. Commits someone pushed to it stop the promote before any CI
@@ -211,7 +216,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	// for one moved onto main that keeps its fork point.
 	// An update keeps the PR's title unless one is typed.
 	if upd == nil && mode == config.ModePreserve && strings.TrimSpace(opt.Title) == "" {
-		sources, err := ownSources(ctx, g, opt.Feature, m, head, pm)
+		sources, err := ownSources(ctx, g, opt.Feature, m, head, pm, pc.base)
 		if err != nil {
 			return res, warns, err
 		}
@@ -224,7 +229,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 		if upd == nil && len(opt.Groups) > 1 && strings.TrimSpace(opt.Title) == "" {
 			return res, warns, contract.New(contract.MissingInput, "the --curate file has %d groups, so the PR needs a title: pass --title", len(opt.Groups)).WithField("title")
 		}
-		sources, err := ownSources(ctx, g, opt.Feature, m, head, pm)
+		sources, err := ownSources(ctx, g, opt.Feature, m, head, pm, pc.base)
 		if err != nil {
 			return res, warns, err
 		}
@@ -487,9 +492,9 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 	}
 	pub := plan.Publish{Commit: P, Tree: T, Parent: pubParent, TargetBranch: branch, PR: plan.PR{Title: title, Body: body},
 		Commits: chain, DroppedEmpty: dropped}
-	prs := []plan.StackPR{{Feature: opt.Feature, Base: "main"}}
+	prs := []plan.StackPR{{Feature: opt.Feature, Base: pc.base}}
 	if gu != nil {
-		pub.Update, pub.Style, pub.ReplaceReason, pub.ExpectedHead = true, gu.Style, planReason(gu.Style, gu.Reason, forcedReason(upd, &m, mode, false)), gu.Head
+		pub.Update, pub.Style, pub.ReplaceReason, pub.ExpectedHead = true, gu.Style, planReason(gu.Style, gu.Reason, forcedReason(upd, &m, mode, false, pc.base)), gu.Head
 		if gu.Style == plan.StyleReplace {
 			pub.Restores = upd.Restores // the published commits GitHub lost, which this replace puts back
 		}
@@ -515,7 +520,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 		}
 		if gu != nil {
 			e.previewUpdate(ctx, pc, pv, branch, gu.Head, P, gu.PR, pl.Typed)
-		} else if err := e.previewPublish(ctx, pc, pv, opt.Feature, publishedPlan(m), branch, "main", P); err != nil {
+		} else if err := e.previewPublish(ctx, pc, pv, opt.Feature, publishedPlan(m), branch, pc.base, P); err != nil {
 			return res, warns, err
 		}
 		res.Preview = pv
@@ -545,7 +550,7 @@ func (e *Engine) Promote(ctx context.Context, p workspace.Pair, opt PromoteOptio
 // record that can't be read is not: the one-feature path reports why.
 func (e *Engine) stacked(ctx context.Context, pc *pairCtx, name string) bool {
 	m, _, _, err := e.readMetaAny(ctx, pc, name)
-	return err == nil && stackParent(m) != "main"
+	return err == nil && stackParent(m) != feature.MainParent
 }
 
 // publishSummary is the ledger's line for a publish.
@@ -626,7 +631,7 @@ func ValidatePromoteOptions(opt *PromoteOptions) error {
 		opt.Feature = opt.Features[0]
 	}
 	for _, f := range opt.Features {
-		if err := feature.ValidateName(f, "feature"); err != nil {
+		if err := feature.ValidateName(f, "feature", "main"); err != nil {
 			return err
 		}
 	}
@@ -712,7 +717,7 @@ func ValidatePromoteOptions(opt *PromoteOptions) error {
 	if branch == "" {
 		branch = opt.Feature
 	}
-	return feature.ValidateName(branch, "branch")
+	return feature.ValidateName(branch, "branch", "main")
 }
 
 // curateFlags checks --curate against the resolved mode: curated mode

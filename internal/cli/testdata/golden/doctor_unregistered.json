@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.16",
+  "schema_version": "0.17",
   "command": "doctor",
   "ok": false,
   "exit_code": 1,
@@ -70,6 +70,7 @@
         "details": {}
       }
     ],
+    "base_branch": "",
     "update_check": {
       "enabled": false,
       "off_reason": "development build",

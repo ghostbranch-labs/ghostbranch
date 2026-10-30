@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.16",
+  "schema_version": "0.17",
   "command": "reference",
   "ok": true,
   "exit_code": 0,
@@ -78,7 +78,7 @@
         "path": "apply",
         "use": "apply <plan-id|plan.json>",
         "short": "Publish a saved plan if the repos still match it",
-        "long": "apply publishes a plan saved by promote. It refuses with exit 6 if public main, the feature, the overlay or the gate candidate moved since the plan was made. Re-running it finishes an interrupted publish. A person confirms on the console, or --yes publishes under an agent grant.\nAfter publishing, a person at the console picks Archive (the default: the shadow branch is archived and the PR is fixed by pushing to it) or Keep; with --yes, Archive applies unless --keep.",
+        "long": "apply publishes a plan saved by promote. It refuses with exit 6 if the public base branch, the feature, the overlay or the gate candidate moved since the plan was made. Re-running it finishes an interrupted publish. A person confirms on the console, or --yes publishes under an agent grant.\nAfter publishing, a person at the console picks Archive (the default: the shadow branch is archived and the PR is fixed by pushing to it) or Keep; with --yes, Archive applies unless --keep.",
         "read_only": false,
         "flags": [
           {
@@ -117,7 +117,7 @@
         "path": "doctor",
         "use": "doctor",
         "short": "Check this machine's setup and the pair, and name each fix; changes nothing",
-        "long": "doctor runs seven checks, in order: tools (git and this binary), token (its source, account,\nexpiry, whether it can publish, and the permissions each command group needs), app (for an app\nlogin: the Ghostbranch app is installed and can see the pair's repos), pair (both repos,\nthe overlay and its config, shadow main, the managed files), guard (the pre-push hook in this\ncheckout), state (this machine's records) and ci (the audit's summary). Each is ok, warn, fail or\nskipped, and names the command that fixes it. It changes nothing in your repos, records or\nkeychain and never prompts; it fetches into its local copy of the pair (making it if needed) and\nrefreshes the update check's cache. It isn't ledgered.\nIn a checkout of a pair it checks that pair; --repo names another; with neither, outside a checkout, it uses the\nworkspace's only pair, and with several it skips the checks that need a pair. It exits 0 unless a check fails (DOCTOR_FAILED, details.failed).",
+        "long": "doctor runs seven checks, in order: tools (git and this binary), token (its source, account,\nexpiry, whether it can publish, and the permissions each command group needs), app (for an app\nlogin: the Ghostbranch app is installed and can see the pair's repos), pair (both repos,\nthe overlay and its config, the shadow's base branch, the managed files), guard (the pre-push hook in this\ncheckout), state (this machine's records) and ci (the audit's summary). Each is ok, warn, fail or\nskipped, and names the command that fixes it. It changes nothing in your repos, records or\nkeychain and never prompts; it fetches into its local copy of the pair (making it if needed) and\nrefreshes the update check's cache. It isn't ledgered.\nIn a checkout of a pair it checks that pair; --repo names another; with neither, outside a checkout, it uses the\nworkspace's only pair, and with several it skips the checks that need a pair. It exits 0 unless a check fails (DOCTOR_FAILED, details.failed).",
         "read_only": true,
         "flags": []
       },
@@ -212,7 +212,7 @@
         "path": "feature list",
         "use": "list",
         "short": "List the pair's features with their state, drift, gate and public PR",
-        "long": "feature list prints one line per feature: its state, whether it still merges cleanly onto public\nmain (drift), its last gate and its public PR. Abandoned features are left out unless --all. It only reads.",
+        "long": "feature list prints one line per feature: its state, whether it still merges cleanly onto the public\nbase branch (drift), its last gate and its public PR. Abandoned features are left out unless --all. It only reads.",
         "read_only": true,
         "flags": [
           {
@@ -244,7 +244,7 @@
         "path": "feature restack",
         "use": "restack <feature>",
         "short": "Rebase the features stacked above <feature> onto its tip, in the shadow repo",
-        "long": "feature restack replays each feature stacked above <feature> (then the ones above those, in order)\nonto its parent's new tip, in a throwaway worktree, and pushes each with a lease, together with its updated\nrecord. A feature that already holds its parent's tip only has its record updated. The first conflict stops\nthe restack with the git commands to rebase that feature yourself; features already restacked stay\nrestacked. Ghostbranch never resolves conflicts.\nWith --onto main or --onto <feature>, <feature> itself moves first: its own commits are replayed onto main\n(dropping its parent's commits) or onto that feature, and then the features above it follow.\nIt only touches the shadow repo; your checkouts of the rewritten branches need a fetch and reset afterwards.",
+        "long": "feature restack replays each feature stacked above <feature> (then the ones above those, in order)\nonto its parent's new tip, in a throwaway worktree, and pushes each with a lease, together with its updated\nrecord. A feature that already holds its parent's tip only has its record updated. The first conflict stops\nthe restack with the git commands to rebase that feature yourself; features already restacked stay\nrestacked. Ghostbranch never resolves conflicts.\nWith --onto <base branch> (main, or the public repo's other default branch; main works on every pair) or\n--onto <feature>, <feature> itself moves first: its own commits are replayed onto the base branch\n(dropping its parent's commits) or onto that feature, and then the features above it follow.\nIt only touches the shadow repo; your checkouts of the rewritten branches need a fetch and reset afterwards.",
         "read_only": false,
         "flags": [
           {
@@ -252,7 +252,7 @@
             "shorthand": "",
             "type": "string",
             "default": "",
-            "usage": "move <feature> itself onto \"main\" or onto another feature first"
+            "usage": "move <feature> itself onto \"<base branch>\" (or main) or onto another feature first"
           },
           {
             "name": "plan",
@@ -267,7 +267,7 @@
         "path": "feature show",
         "use": "show <name>",
         "short": "Show one feature in full: state, drift, gate, PR, commits and ledger",
-        "long": "feature show prints everything about one feature: its state, branch and base, drift onto public\nmain and the files that conflict, its last gate, its public PR and plan, its commits since public main,\nand this pair's ledger entries for it. It only reads.",
+        "long": "feature show prints everything about one feature: its state, branch and base, drift onto the public\nbase branch and the files that conflict, its last gate, its public PR and plan, its commits since that branch,\nand this pair's ledger entries for it. It only reads.",
         "read_only": true,
         "flags": []
       },
@@ -275,7 +275,7 @@
         "path": "feature start",
         "use": "start <name>",
         "short": "Start a feature branch in the shadow repo",
-        "long": "feature start creates <name> from shadow main in the shadow repo and records it as a feature. With --from <feature> it starts at that feature's tip instead and records it as the parent, stacking the new feature on it.\nRun in a checkout of the public repo, it then adds a remote named shadow for the shadow repo (if no remote reaches it), fetches it, and switches to <name>, tracking shadow/<name>. It never rewrites a remote: a shadow remote that points elsewhere is left alone. With uncommitted changes, a local branch called <name>, or a detached HEAD with commits not on any branch, it fetches but doesn't switch. Elsewhere, or with --no-checkout, it prints the commands instead.",
+        "long": "feature start creates <name> from the shadow's base branch in the shadow repo and records it as a feature. With --from <feature> it starts at that feature's tip instead and records it as the parent, stacking the new feature on it.\nRun in a checkout of the public repo, it then adds a remote named shadow for the shadow repo (if no remote reaches it), fetches it, and switches to <name>, tracking shadow/<name>. It never rewrites a remote: a shadow remote that points elsewhere is left alone. With uncommitted changes, a local branch called <name>, or a detached HEAD with commits not on any branch, it fetches but doesn't switch. Elsewhere, or with --no-checkout, it prints the commands instead.",
         "read_only": false,
         "flags": [
           {
@@ -283,7 +283,7 @@
             "shorthand": "",
             "type": "string",
             "default": "",
-            "usage": "stack the feature on another feature: start it at that feature's tip in the shadow repo (default: shadow main)"
+            "usage": "stack the feature on another feature: start it at that feature's tip in the shadow repo (default: the shadow's base branch)"
           },
           {
             "name": "no-checkout",
@@ -311,8 +311,8 @@
       {
         "path": "gate",
         "use": "gate <feature>",
-        "short": "Rebase on public main, scan for leaks, and run CI; report only",
-        "long": "gate rebases the feature onto public main, scans exactly what would be published for leaks,\npushes a CI candidate (the feature plus the overlay) to a draft PR in the shadow repo, and waits for\nevery check. It records the result and never touches the public repo. Exit 3 means the gate failed.\nWith --detach it returns a job id once CI has started; ghostbranch wait <job> finishes it, from this machine or another. Without --detach, Ctrl-C leaves the job pending for wait.",
+        "short": "Rebase on the public base branch, scan for leaks, and run CI; report only",
+        "long": "gate rebases the feature onto the public base branch, scans exactly what would be published for leaks,\npushes a CI candidate (the feature plus the overlay) to a draft PR in the shadow repo, and waits for\nevery check. It records the result and never touches the public repo. Exit 3 means the gate failed.\nWith --detach it returns a job id once CI has started; ghostbranch wait <job> finishes it, from this machine or another. Without --detach, Ctrl-C leaves the job pending for wait.",
         "read_only": false,
         "flags": [
           {
@@ -546,7 +546,7 @@
         "path": "promote",
         "use": "promote <feature>...",
         "short": "Publish a gated feature, or a stack of them, to the public repo as PRs",
-        "long": "promote reuses a fresh green gate (or runs one), builds the public commits (each feature commit\nwith --mode preserve, one with squash, or the groups of a --curate file) on public main, ending on\nexactly the gated tree, scans every commit's files, message and author, the branch name and PR text\nfor leaks, and saves a plan.\nWith --plan it stops there. Otherwise a person confirms by typing a code shown on the console, or, if they have allowed agents with \"ghostbranch agents allow\", --yes publishes. Without either it stops at the plan with exit 5.\nSeveral features, bottom first (promote a b c), publish a stack: each branch's PR is based on the\nbranch below (a's on main) and shows only that branch's commits, and one approval covers every PR.\nEach branch needs a fresh green gate built on the branch below. Where GitHub offers native stacked\nPRs, they are registered as one stack. --mode-for and --title-for set one branch's mode and PR title.\nAfter publishing, a person at the console picks Archive (the default: the shadow branch is archived and the PR is fixed by pushing to it) or Keep; with --yes, Archive applies unless --keep.",
+        "long": "promote reuses a fresh green gate (or runs one), builds the public commits (each feature commit\nwith --mode preserve, one with squash, or the groups of a --curate file) on the public base branch, ending on\nexactly the gated tree, scans every commit's files, message and author, the branch name and PR text\nfor leaks, and saves a plan.\nWith --plan it stops there. Otherwise a person confirms by typing a code shown on the console, or, if they have allowed agents with \"ghostbranch agents allow\", --yes publishes. Without either it stops at the plan with exit 5.\nSeveral features, bottom first (promote a b c), publish a stack: each branch's PR is based on the\nbranch below (a's on the base branch) and shows only that branch's commits, and one approval covers every PR.\nEach branch needs a fresh green gate built on the branch below. Where GitHub offers native stacked\nPRs, they are registered as one stack. --mode-for and --title-for set one branch's mode and PR title.\nAfter publishing, a person at the console picks Archive (the default: the shadow branch is archived and the PR is fixed by pushing to it) or Keep; with --yes, Archive applies unless --keep.",
         "read_only": false,
         "flags": [
           {
@@ -655,15 +655,15 @@
         "path": "status",
         "use": "status",
         "short": "Pair health and every feature's state",
-        "long": "status reports whether shadow main is behind public main, whether the overlay's managed files\nneed an upgrade, and whether scheduled sync is on; then every feature, abandoned ones included, with its\nstate, whether it still merges cleanly onto public main (drift), its last gate and its public PR. It only\nreads: nothing is pushed and nothing is written to the ledger.",
+        "long": "status reports whether the shadow's base branch is behind public's, whether the overlay's managed files\nneed an upgrade, and whether scheduled sync is on; then every feature, abandoned ones included, with its\nstate, whether it still merges cleanly onto the public base branch (drift), its last gate and its public PR. It only\nreads: nothing is pushed and nothing is written to the ledger.",
         "read_only": true,
         "flags": []
       },
       {
         "path": "sync",
         "use": "sync",
-        "short": "Fast-forward shadow main to public main",
-        "long": "sync fast-forwards the shadow repo's main to public main. It never force-pushes: if shadow main has diverged it stops with exit 4.\nIts pushes start the shadow repo's push-triggered workflows, which re-test what public CI already tested,\nso it then cancels those runs (the token needs Actions write on the shadow repo); --no-cancel leaves them running.\nLast, it closes each feature whose public PR merged and whose branch hasn't moved since it was published,\nas feature close does; --no-close leaves them. It never closes a feature that needs a person.",
+        "short": "Fast-forward the shadow's base branch to public's",
+        "long": "sync fast-forwards the shadow repo's base branch (main unless the public repo uses another default branch) to public's. It never force-pushes: if the shadow's base branch has diverged it stops with exit 4.\nIts pushes start the shadow repo's push-triggered workflows, which re-test what public CI already tested,\nso it then cancels those runs (the token needs Actions write on the shadow repo); --no-cancel leaves them running.\nLast, it closes each feature whose public PR merged and whose branch hasn't moved since it was published,\nas feature close does; --no-close leaves them. It never closes a feature that needs a person.",
         "read_only": false,
         "flags": [
           {

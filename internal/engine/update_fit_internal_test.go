@@ -69,7 +69,7 @@ func TestGateFitsUpdate(t *testing.T) {
 		{"another head", moved(func(w *feature.GateUpdate) { w.Head = "h2" }), u(), meta(false), "squash", false, false},
 		{"another base", moved(func(w *feature.GateUpdate) { w.Base = "release" }), u(), meta(false), "squash", false, false},
 	} {
-		if got := gateFitsUpdate(c.gt, c.u, c.m, c.mode, c.above); got != c.want {
+		if got := gateFitsUpdate(c.gt, c.u, c.m, c.mode, c.above, "main"); got != c.want {
 			t.Errorf("%s: gateFitsUpdate = %v, want %v", c.name, got, c.want)
 		}
 	}

@@ -23,8 +23,9 @@ const (
 type StatusResult struct {
 	Public        string          `json:"public"`
 	Shadow        string          `json:"shadow"`
+	BaseBranch    string          `json:"base_branch"` // the pair's base branch; public_main and shadow_main are its tips
 	PublicMain    string          `json:"public_main"`
-	ShadowMain    string          `json:"shadow_main"` // "" when shadow main is missing
+	ShadowMain    string          `json:"shadow_main"` // "" when the shadow repo has no base branch
 	ShadowBehind  bool            `json:"shadow_behind"`
 	Overlay       string          `json:"overlay"`        // overlay commit
 	OverlayStatus string          `json:"overlay_status"` // current | outdated (a managed file needs upgrade)
@@ -34,14 +35,16 @@ type StatusResult struct {
 
 // FeatureListResult is the features table.
 type FeatureListResult struct {
-	Features []FeatureReport `json:"features"` // never null; abandoned only with all
+	BaseBranch string          `json:"base_branch"` // the pair's base branch: what a parent of "main" stands for
+	Features   []FeatureReport `json:"features"`    // never null; abandoned only with all
 }
 
 // FeatureShowResult is one feature in full.
 type FeatureShowResult struct {
-	Feature FeatureReport  `json:"feature"`
-	Commits []CommitInfo   `json:"commits"` // the feature's own commits (since its fork point, else since public main), oldest first; [] when the branch is gone
-	Ledger  []ledger.Entry `json:"ledger"`  // this pair's entries for this feature, oldest first
+	BaseBranch string         `json:"base_branch"` // the pair's base branch: what a parent of "main" stands for
+	Feature    FeatureReport  `json:"feature"`
+	Commits    []CommitInfo   `json:"commits"` // the feature's own commits (since its fork point, else since public's base branch), oldest first; [] when the branch is gone
+	Ledger     []ledger.Entry `json:"ledger"`  // this pair's entries for this feature, oldest first
 }
 
 // Status reports the pair's health (shadow main behind, the managed
@@ -59,18 +62,18 @@ func (e *Engine) Status(ctx context.Context, p workspace.Pair) (*StatusResult, [
 	if err != nil {
 		return nil, warns, err
 	}
-	m, err := compareMains(ctx, g)
+	m, err := compareMains(ctx, g, pc.base)
 	if err != nil {
-		return nil, warns, internalErr(err, "compare shadow main with public main")
+		return nil, warns, internalErr(err, "compare shadow "+pc.base+" with public "+pc.base)
 	}
 	if m.Public == "" {
-		return nil, warns, internalErr(fmt.Errorf("git: %s does not exist", publicRef("main")), "read public main")
+		return nil, warns, internalErr(fmt.Errorf("git: %s does not exist", publicRef(pc.base)), "read public "+pc.base)
 	}
 	files, err := e.managedFiles(ctx, g, O, cfg)
 	if err != nil {
 		return nil, warns, err
 	}
-	res := &StatusResult{Public: pc.pair.Public, Shadow: pc.pair.Shadow, PublicMain: m.Public, ShadowMain: m.Shadow,
+	res := &StatusResult{Public: pc.pair.Public, Shadow: pc.pair.Shadow, BaseBranch: pc.base, PublicMain: m.Public, ShadowMain: m.Shadow,
 		ShadowBehind: m.Behind > 0, Overlay: O, OverlayStatus: overlayStatus(files),
 		ScheduledSync: cfg.Sync.Schedule != config.ScheduleOff}
 	warns = addWarnings(warns, m.warnings(pc.pair.Public)...)
@@ -112,7 +115,7 @@ func (e *Engine) FeatureList(ctx context.Context, p workspace.Pair, all bool) (*
 	if err != nil {
 		return nil, warns, err
 	}
-	res := &FeatureListResult{Features: []FeatureReport{}}
+	res := &FeatureListResult{BaseBranch: pc.base, Features: []FeatureReport{}}
 	for _, r := range rs {
 		if all || !r.Abandoned {
 			res.Features = append(res.Features, r)
@@ -148,11 +151,11 @@ func (e *Engine) FeatureShow(ctx context.Context, p workspace.Pair, name string)
 	if rs[0].err != nil {
 		return nil, warns, rs[0].err
 	}
-	res := &FeatureShowResult{Feature: rs[0], Commits: []CommitInfo{}, Ledger: []ledger.Entry{}}
+	res := &FeatureShowResult{BaseBranch: pc.base, Feature: rs[0], Commits: []CommitInfo{}, Ledger: []ledger.Entry{}}
 	if head := res.Feature.Head; head != "" {
-		pm, err := g.MustResolve(ctx, publicRef("main"))
+		pm, err := g.MustResolve(ctx, publicRef(pc.base))
 		if err != nil {
-			return nil, warns, internalErr(err, "read public main")
+			return nil, warns, internalErr(err, "read public "+pc.base)
 		}
 		// Only its own commits: forked_at..head when it records a fork point
 		// (stacked, or moved onto main off a parent), else every commit

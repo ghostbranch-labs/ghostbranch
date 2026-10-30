@@ -6,7 +6,7 @@
   "required": ["feature", "onto", "restacked", "pending", "preview"],
   "properties": {
     "feature": { "type": "string" },
-    "onto": { "description": "\"main\" or the feature the feature was moved onto; \"\" when the features above it were restacked", "type": "string" },
+    "onto": { "description": "the base branch's real name (main on most repos) or the feature the feature was moved onto; \"\" when the features above it were restacked", "type": "string" },
     "restacked": {
       "description": "each branch moved (or whose record moved), in the order pushed; under --plan, what would be",
       "type": "array",
@@ -15,10 +15,10 @@
         "required": ["feature", "parent", "from", "to", "forked_at"],
         "properties": {
           "feature": { "type": "string" },
-          "parent": { "description": "\"main\" or the feature it is stacked on now", "type": "string" },
+          "parent": { "description": "\"main\" (a placeholder for the base branch, whatever its name) or the feature it is stacked on now", "type": "string" },
           "from": { "$ref": "common.schema.json#/$defs/sha" },
           "to": { "description": "its head now; equal to from when only its record moved", "$ref": "common.schema.json#/$defs/sha" },
-          "forked_at": { "description": "its fork point now; empty on main", "$ref": "common.schema.json#/$defs/shaOrEmpty" }
+          "forked_at": { "description": "its fork point now; empty on the base branch", "$ref": "common.schema.json#/$defs/shaOrEmpty" }
         }
       }
     },

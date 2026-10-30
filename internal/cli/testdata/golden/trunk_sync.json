@@ -1,0 +1,47 @@
+{
+  "schema_version": "0.17",
+  "command": "sync",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "public": "acme/widget",
+    "shadow": "acme/widget-shadow",
+    "action": "fast_forward",
+    "base_branch": "trunk",
+    "public_main": "<SHA1>",
+    "shadow_main_before": "<SHA2>",
+    "shadow_main_after": "<SHA1>",
+    "branches": [
+      {
+        "name": "trunk",
+        "from": "<SHA2>",
+        "to": "<SHA1>",
+        "status": "fast_forwarded"
+      }
+    ],
+    "cancelled_runs": [],
+    "closed": [],
+    "surveyed": true,
+    "active_features": 0,
+    "attention": [],
+    "preview": null
+  },
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "feature",
+        "start",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "no feature is in progress; start one: put its name (the <name> argument) after start",
+      "needs_human": false,
+      "needs_input": [
+        "<name>"
+      ]
+    }
+  ],
+  "error": null
+}

@@ -52,7 +52,7 @@ func ParseJob(id string) (JobRef, error) {
 		return JobRef{}, bad
 	}
 	f, c := rest[:i], rest[i+1:]
-	if !jobCandidate.MatchString(c) || feature.ValidateName(f, "job") != nil {
+	if !jobCandidate.MatchString(c) || feature.ValidateName(f, "job", "main") != nil {
 		return JobRef{}, bad
 	}
 	return JobRef{Feature: f, Candidate: c}, nil
@@ -386,9 +386,9 @@ func (e *Engine) pendingFor(ctx context.Context, pc *pairCtx, name, mode string)
 	if !ok {
 		return nil, nil // the gate reports the missing branch
 	}
-	pm, err := g.MustResolve(ctx, publicRef("main"))
+	pm, err := g.MustResolve(ctx, publicRef(pc.base))
 	if err != nil {
-		return nil, internalErr(err, "read public main")
+		return nil, internalErr(err, "read public "+pc.base)
 	}
 	tip, _, err := g.Resolve(ctx, shadowRef(gateBranch(name)))
 	if err != nil {

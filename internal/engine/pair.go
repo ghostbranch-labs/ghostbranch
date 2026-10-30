@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -40,6 +41,11 @@ type pairCtx struct {
 	git    *gitx.Git
 	public forge.Repo
 	shadow forge.Repo
+	// base is the pair's base branch, the public line every command works
+	// against: public_branch from the overlay config, main when the key is
+	// missing. open sets it; it is "" only in doctor, when the overlay
+	// config can't be read.
+	base string
 	// unlock releases the lock at the end of the operation; it is release.
 	unlock func()
 	// lockPath is the pair lock's file; empty in a dry run. held reports
@@ -71,7 +77,9 @@ func sameRepo(p workspace.Pair) error {
 
 // open runs the shared preflight: refuse a shadow repo that is the public
 // repo, look up both repos, refuse unless the shadow repo is private and not
-// a fork, take the lock, and fetch.
+// a fork, take the lock, fetch, and read the pair's base branch. Every
+// command but init and doctor stops with BASE_BRANCH_CHANGED when the
+// public repo no longer has that branch.
 func (e *Engine) open(ctx context.Context, op string, p workspace.Pair, mutating bool) (*pairCtx, error) {
 	if err := sameRepo(p); err != nil {
 		return nil, err
@@ -120,7 +128,98 @@ func (e *Engine) open(ctx context.Context, op string, p workspace.Pair, mutating
 		return nil, err
 	}
 	st.Done("")
+	if err := e.openBase(ctx, pc); err != nil {
+		pc.release()
+		return nil, err
+	}
 	return pc, nil
+}
+
+// openBase sets pc.base and checks the public repo still has it. A config
+// that can't be read stops every command but two: doctor reports it in its
+// config check (pc.base stays ""), and init leaves an overlay it can't read
+// to checkAdoptable, which refuses it before any write. Any other error,
+// such as git failing to read the mirror, stops them too. Neither checks
+// the branch here: init checks it itself once checkAdoptable has passed,
+// and doctor reports a missing one.
+func (e *Engine) openBase(ctx context.Context, pc *pairCtx) error {
+	base, err := e.readBase(ctx, pc)
+	unreadable := false
+	if ce := contract.From(err); ce != nil {
+		unreadable = ce.Code == contract.ConfigInvalid || ce.Code == contract.UpgradeNeeded
+	}
+	switch {
+	case err == nil:
+		pc.base = base
+	case pc.op == "doctor" && unreadable:
+		return nil
+	case pc.op == "init" && unreadable:
+		pc.base = defaultBase(pc.public)
+	default:
+		return err
+	}
+	if e.OnBase != nil {
+		e.OnBase(pc.base)
+	}
+	if pc.op == "init" || pc.op == "doctor" {
+		return nil
+	}
+	_, ok, err := pc.git.Resolve(ctx, publicRef(pc.base))
+	if err != nil {
+		return internalErr(err, "read public "+pc.base)
+	}
+	if !ok {
+		return baseGone(pc)
+	}
+	return nil
+}
+
+// baseGone is BASE_BRANCH_CHANGED: the public repo no longer has pc.base,
+// the branch the pair was set up on.
+func baseGone(pc *pairCtx) error {
+	now := " (its default branch is now " + pc.public.DefaultBranch + ")"
+	if pc.public.DefaultBranch == "" {
+		now = ", and GitHub names no default branch"
+	}
+	return contract.New(contract.BaseBranchChanged,
+		"%s no longer has the branch %s this pair was set up on%s; Ghostbranch doesn't follow a renamed default branch yet. See ghostbranch explain BASE_BRANCH_CHANGED.",
+		pc.pair.Public, pc.base, now).
+		WithDetails(map[string]any{"recorded": pc.base, "current": pc.public.DefaultBranch})
+}
+
+// readBase reads the pair's base branch from the overlay's .ghostbranch.yml:
+// public_branch, or main when the key is missing. Before init has made the
+// overlay, it is the public repo's default branch for init and doctor (which
+// reports the missing overlay itself); every other command stops there with
+// readConfig's error, so none acts on a branch the pair never recorded. A
+// config that doesn't parse is an error, never a guess: guessing main would
+// act on the wrong branch.
+func (e *Engine) readBase(ctx context.Context, pc *pairCtx) (string, error) {
+	O, ok, err := pc.git.Resolve(ctx, shadowRef(OverlayBranch))
+	if err != nil {
+		return "", internalErr(err, "read the overlay branch")
+	}
+	if !ok {
+		if pc.op != "init" && pc.op != "doctor" {
+			return "", noOverlay(pc)
+		}
+		return defaultBase(pc.public), nil
+	}
+	raw, ok, err := pc.git.ShowFile(ctx, O, ".ghostbranch.yml")
+	if err != nil || !ok {
+		return "", contract.Wrap(contract.ConfigInvalid, err, "the overlay branch has no .ghostbranch.yml")
+	}
+	cfg, _, err := config.Parse(raw)
+	if err != nil {
+		return "", config.UpgradeNeeded(err)
+	}
+	return cfg.Base(), nil
+}
+
+// defaultBase is the public repo's default branch, or main when GitHub
+// didn't say.
+func defaultBase(pub forge.Repo) string {
+	return cmp.Or(pub.DefaultBranch, config.Config{}.Base())
 }
 
 func (e *Engine) mirror(ctx context.Context, p workspace.Pair, pub, sh forge.Repo) (*gitx.Git, error) {
@@ -183,7 +282,7 @@ func (e *Engine) push(ctx context.Context, pc *pairCtx, remote string, opt gitx.
 			msg += "; the token needs Workflows write (fine-grained) or the workflow scope (gh/OAuth)"
 		}
 		details := map[string]any{"remote": remote, "refs": refused.Refs, "reason": refused.Reason}
-		if text, extra, ok := explainGH007(ctx, pc.git, refspecs, refused, pc.public.FullName); ok {
+		if text, extra, ok := explainGH007(ctx, pc.git, refspecs, refused, pc.public.FullName, pc.base); ok {
 			msg = text
 			for k, v := range extra {
 				details[k] = v
@@ -207,25 +306,6 @@ func (e *Engine) push(ctx context.Context, pc *pairCtx, remote string, opt gitx.
 		return remoteErr(err, "push to the "+remote+" repo")
 	}
 	return nil
-}
-
-// upgradeNeeded turns config.Parse's unknown-key error into UPGRADE_NEEDED:
-// a key this binary doesn't know most likely comes from a newer Ghostbranch.
-// Any other error passes through.
-func upgradeNeeded(err error) error {
-	ce := contract.From(err)
-	if ce == nil || ce.Code != contract.ConfigInvalid {
-		return err
-	}
-	key, _ := ce.Details["unknown_key"].(string)
-	if key == "" {
-		return err
-	}
-	out := contract.New(contract.UpgradeNeeded,
-		".ghostbranch.yml on the overlay branch has the key %q, which this ghostbranch doesn't know: the pair was probably set up by a newer Ghostbranch; upgrade the ghostbranch binary, or fix it if it's a typo", key).
-		WithField(key).WithDetails(map[string]any{"unknown_key": key})
-	out.Err = err
-	return out
 }
 
 // updateMirror moves the mirror's copy of ref to sha after a push to the
@@ -261,6 +341,12 @@ func mirrorNotUpdated(what string, err error, details map[string]any) contract.W
 		Details: details}
 }
 
+// noOverlay is CONFIG_INVALID for a shadow repo with no overlay branch.
+func noOverlay(pc *pairCtx) error {
+	return contract.New(contract.ConfigInvalid,
+		"shadow repo %s has no %q overlay branch; run ghostbranch init", pc.pair.Shadow, OverlayBranch)
+}
+
 // readConfig reads .ghostbranch.yml from the overlay branch, never from a
 // feature, and checks the overlay branch holds only overlay paths. It
 // returns the config and the overlay commit O.
@@ -271,8 +357,7 @@ func (e *Engine) readConfig(ctx context.Context, pc *pairCtx) (config.Config, st
 		return config.Config{}, "", nil, internalErr(err, "read the overlay branch")
 	}
 	if !ok {
-		return config.Config{}, "", nil, contract.New(contract.ConfigInvalid,
-			"shadow repo %s has no %q overlay branch; run ghostbranch init", pc.pair.Shadow, OverlayBranch)
+		return config.Config{}, "", nil, noOverlay(pc)
 	}
 	raw, ok, err := g.ShowFile(ctx, O, ".ghostbranch.yml")
 	if err != nil || !ok {
@@ -280,7 +365,7 @@ func (e *Engine) readConfig(ctx context.Context, pc *pairCtx) (config.Config, st
 	}
 	cfg, warns, err := config.Parse(raw)
 	if err != nil {
-		return config.Config{}, "", warns, upgradeNeeded(err)
+		return config.Config{}, "", warns, config.UpgradeNeeded(err)
 	}
 	if !strings.EqualFold(cfg.Public, pc.pair.Public) || !strings.EqualFold(cfg.Shadow, pc.pair.Shadow) {
 		return config.Config{}, "", warns, contract.New(contract.ConfigInvalid,

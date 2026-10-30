@@ -1,22 +1,23 @@
 # Ghostbranch: guide for coding agents
 
 Ghostbranch gives a public GitHub repo private feature branches. Unreleased work lives in a private
-**shadow repo**, and reaches the public repo only through a gated **promote**: a rebase on public
-main, green CI, and a leak scan of exactly what will be published.
+**shadow repo**, and reaches the public repo only through a gated **promote**: a rebase on public's
+**base branch** (main unless the repo uses another default branch; `base_branch` names it, and
+`--onto main` works on every pair), green CI, and a leak scan of exactly what will be published.
 
 `ghostbranch guide` prints this guide. It always matches the installed binary.
 
 ## The loop
 
 0. **Always run `ghostbranch sync --repo <public> --json` first**, before `feature start` or resuming
-   a feature: features start from shadow main. Sync never writes to public. New repo? *Set up a repo*.
+   a feature: features start from the shadow's base branch. Sync never writes to public. New repo? *Set up a repo*.
 1. `ghostbranch feature start <name> --repo <public> --json` creates the feature branch in the shadow repo.
    Run in a checkout of the public repo, it also adds the `shadow` remote, fetches it and switches to the branch.
 2. `data.local.status` `switched`: you are on `<name>`. Commit there, then push **to the shadow repo only**
    (`git push shadow <name>`; `data.local.remote` names the remote), never to `origin` (a handed-off PR: see
    *After publishing*). `fetched_only` or `skipped` (`data.local.reason` says why): follow `next`, or run
    `data.checkout` in order (argvs; `data.checkout_hint` is one shell line). It never switches over uncommitted work.
-3. `ghostbranch gate <name> --repo <public> --json` rebases on public main, scans for leaks and runs CI.
+3. `ghostbranch gate <name> --repo <public> --json` rebases on public's base branch, scans for leaks and runs CI.
 4. `ghostbranch promote <name> --repo <public> --plan --json` publishes in the repo's `promote.default_mode`
    (`preserve` unless set); pass `--mode` to choose. With more than one commit, add
    `--title "<PR title>"`, written by you. It saves a plan of exactly what goes public: every commit,
@@ -180,7 +181,7 @@ A login, the app's install and tokens are the person's to do. Help them one step
   `ghostbranch feature restack <parent> --repo <public> --json` (it rebases each branch above, in
   order), then gate them again. A restack never resolves a conflict: it stops with git steps.
 - `ghostbranch promote a b c --repo <public> --plan --json` plans the whole stack, bottom first: a's PR
-  on main, b's on a's branch, each showing only its own commits. One approval publishes every PR, and
+  on the base branch, b's on a's branch, each showing only its own commits. One approval publishes every PR, and
   GitHub groups them as a native stack where it offers one. Set one branch's mode or PR title with
   `--mode-for b=squash` or `--title-for b="<title>"`. `NOT_A_STACK` names the branch that breaks the
   list (`error.details.feature`) and why (`error.details.reason`): follow `next`.
@@ -192,10 +193,10 @@ A login, the app's install and tokens are the person's to do. Help them one step
   history. Either way `sync` then closes the merged features. Never merge a PR yourself unless the person told you to.
 - `ghostbranch feature fold <c> --repo <public> --json` folds a finished top branch into its parent
   (fast-forward only; `FOLD_NEEDS_REBASE` gives git steps). `abandon` and `close` refuse a branch with children
-  (`HAS_CHILDREN`): fold each, `feature restack <child> --onto main` it, or abandon it (for `close`: `close <child>`, as an abandoned child still blocks `close`).
-- After a PR of a stack merges, `sync` closes its feature and moves the branch above onto main.
+  (`HAS_CHILDREN`): fold each, `feature restack <child> --onto <base branch>` it, or abandon it (for `close`: `close <child>`, as an abandoned child still blocks `close`).
+- After a PR of a stack merges, `sync` closes its feature and moves the branch above onto the base branch.
   `public_pr_needs_update` means that branch's open PR still carries the merged one's old commits:
-  restack it with `--onto main`, gate it, and promote it: the update replaces its PR's branch.
+  restack it with `--onto <base branch>`, gate it, and promote it: the update replaces its PR's branch.
 
 ## Updating an open PR
 
@@ -206,7 +207,7 @@ A login, the app's install and tokens are the person's to do. Help them one step
   A changed history (restack, rebase, squash mode, a reworded message, a changed base, a conflict)
   replaces the branch (`replace`; `replace_reason` says why), pushed with a lease on the head the plan
   saw (`expected_head`). The approval summary says which. Every update needs the same approval.
-  A rebase onto a moved main replaces (`rebase`) even when no commit changed.
+  A rebase onto a moved base branch replaces (`rebase`) even when no commit changed.
 - In a stack, `promote a` updates the open PRs above a too, under one approval, bottom up; a PR in a stack,
   or with open PRs above it, is always replaced (a leased force-push), never appended. Restack and gate
   first (`feature restack a`, then `gate` a and each branch above it, from the bottom up); `NOT_A_STACK`
@@ -238,7 +239,7 @@ A login, the app's install and tokens are the person's to do. Help them one step
   (`feature restack --onto`). When its PR merges, `sync` closes it and deletes the archive (unless it
   reads `merged_moved`: a person closes it).
 - Archive is unavailable while another feature is built on this one: publish it with this one,
-  restack it onto main, or close an abandoned one first, then
+  restack it onto the base branch, or close an abandoned one first, then
   `ghostbranch feature archive <name> --repo <public> --json`. `ARCHIVE_INCOMPLETE`: the publish
   stands; run `ghostbranch feature archive <name> --repo <public> --json` to finish. An older
   Ghostbranch shows an archived feature as `branch_gone`: update it.
@@ -247,7 +248,7 @@ A login, the app's install and tokens are the person's to do. Help them one step
 ## Keeping up with public
 
 - Sync is manual by default. When a result warns `SHADOW_BEHIND`, run `ghostbranch sync --repo <public>`
-  (fast-forward only; it never resolves a conflict). The gate always rebases on public main, so it is
+  (fast-forward only; it never resolves a conflict). The gate always rebases on public's base branch, so it is
   never affected. `feature start` refuses instead, with the error `SHADOW_BEHIND`: sync, then start again.
 - Sync's pushes start the shadow repo's push-triggered workflows, which re-test what public CI already
   tested, so sync cancels those runs (`--no-cancel` skips that). `cancelled_runs` lists only runs

@@ -11,7 +11,7 @@
     "head": { "description": "the feature branch's head; empty when the branch is gone", "$ref": "common.schema.json#/$defs/shaOrEmpty" },
     "base": { "description": "empty when the record couldn't be read", "$ref": "common.schema.json#/$defs/shaOrEmpty" },
     "drift": {
-      "description": "whether the feature still merges cleanly onto public main; n/a when the branch is gone",
+      "description": "whether the feature still merges cleanly onto the public base branch; n/a when the branch is gone",
       "type": "object",
       "additionalProperties": false,
       "required": ["status", "files"],
@@ -35,7 +35,7 @@
               "description": "the mode the gate's leak scan covered; empty in a gate recorded by an older binary",
               "enum": ["", "squash", "preserve", "curated"]
             },
-            "fresh": { "description": "the gate still matches the feature head, public main and the overlay", "type": "boolean" },
+            "fresh": { "description": "the gate still matches the feature head, the public base branch and the overlay", "type": "boolean" },
             "at": { "$ref": "common.schema.json#/$defs/time" },
             "job": { "description": "the gate job to wait on; null unless checks is pending", "type": ["string", "null"] }
           }
@@ -53,7 +53,7 @@
     },
     "moved": { "description": "the branch moved since it was published; false when unpublished; for an archived feature, whether its archive holds anything other than what was published", "type": "boolean" },
     "abandoned": { "type": "boolean" },
-    "parent": { "description": "the feature this one is stacked on, or main; empty when the record couldn't be read", "type": "string" },
+    "parent": { "description": "the feature this one is stacked on, or main, the placeholder for the pair's base branch whatever its name; empty when the record couldn't be read", "type": "string" },
     "children": { "description": "the live features stacked directly on this one", "type": "array", "items": { "type": "string" } },
     "stack": { "description": "the native GitHub stack its public PR is in", "$ref": "common.schema.json#/$defs/stackNumber" },
     "archived": { "description": "set once the feature was handed off to the public repo (6.5)", "$ref": "common.schema.json#/$defs/archived" },

@@ -160,9 +160,9 @@ func (e *Engine) surveyRun(ctx context.Context, pc *pairCtx, shown bool, names [
 	if err != nil {
 		return nil, nil, err
 	}
-	pm, err := pc.git.MustResolve(ctx, publicRef("main"))
+	pm, err := pc.git.MustResolve(ctx, publicRef(pc.base))
 	if err != nil {
-		return nil, nil, internalErr(err, "read public main")
+		return nil, nil, internalErr(err, "read public "+pc.base)
 	}
 	var warns []contract.Warning
 	st := progress.Nop().Step("")
@@ -343,7 +343,7 @@ func (e *Engine) surveyOne(ctx context.Context, pc *pairCtx, name, pm, O string)
 		case err != nil:
 			r.Drift.Status = driftUnknown
 			warns = append(warns, contract.Warning{Code: contract.DriftUnknown,
-				Message: fmt.Sprintf("couldn't check whether feature %s merges cleanly onto public main: %v", name, err),
+				Message: fmt.Sprintf("couldn't check whether feature %s merges cleanly onto public %s: %v", name, pc.base, err),
 				Details: map[string]any{"feature": name}})
 		case clean:
 			r.Drift.Status = driftClean

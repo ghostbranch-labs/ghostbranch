@@ -192,6 +192,7 @@ type app struct {
 	eng            *engine.Engine
 	args           []string
 	pairFull       workspace.Pair
+	pairBase       string // the pair's base branch, once the engine has read it (setBase); "" before
 	shadowRemote   string
 	login          string     // the GitHub login Ghostbranch signed in as, when known without asking GitHub again
 	startName      string     // feature start's name argument, for next
@@ -566,7 +567,7 @@ func (a *app) engine(ctx context.Context) (*engine.Engine, error) {
 		LooksLikeAgent: auth.LooksLikeAgent(a.env.Getenv, a.env.ConsoleUsable), Now: a.env.Now, Sleep: a.env.Sleep, Rand: a.env.Rand, Progress: a.reporter(),
 		NewScanner: a.env.NewScanner, PollInterval: a.env.PollInterval, SettleWindow: a.env.SettleWindow, CIAppearWindow: a.env.CIAppearWindow, CIAppearPoll: a.env.CIAppearPoll,
 		DryRun: a.dryRun, OnPush: a.env.OnPush, Grants: grant.NewStore(ws.GrantsPath(), ws.GrantsLockPath()),
-		Waivers: waiver.NewStore(ws.WaiversPath(), ws.WaiversLockPath())}
+		Waivers: waiver.NewStore(ws.WaiversPath(), ws.WaiversLockPath()), OnBase: a.setBase}
 	if source == "login" && a.env.Keychain != nil {
 		if l, err := auth.LoadLogin(a.env.Keychain); err == nil && l != nil {
 			e.AppLogin = l.Kind == "app"

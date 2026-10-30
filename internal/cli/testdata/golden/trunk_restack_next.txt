@@ -1,0 +1,10 @@
+Reading acme/widget and acme/widget-shadow from GitHub
+Updating the local copy of acme/widget and acme/widget-shadow
+error: feature feat-x has 1 feature(s) stacked on it (feat-y), so it can't be abandoned; first, for each of them: fold it into feat-x (ghostbranch feature fold <child>), abandon it, or move it onto trunk (ghostbranch feature restack <child> --onto trunk) [HAS_CHILDREN]
+Next:
+  ghostbranch feature fold feat-y --repo acme/widget
+    fold feat-y into its parent: the parent fast-forwards to it and feat-y closes
+  ghostbranch feature abandon feat-y --repo acme/widget
+    or abandon feat-y too
+  ghostbranch feature restack feat-y --onto trunk --repo acme/widget
+    or move feat-y onto trunk, dropping its parent's commits

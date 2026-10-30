@@ -16,15 +16,34 @@ func TestValidateName(t *testing.T) {
 	bad := []string{"", "-x", ".x", "x/", "x..y", "x//y", "x.lock", "x@{1}", "a b", "x/.y", "a.lock/b", "x/y.lock/z",
 		"ghostbranch", "ghostbranch/gate/x", "ghostbranch/x", "ghostbranch-gate/x", "main", "HEAD", strings.Repeat("a", 101)}
 	for _, n := range ok {
-		if err := feature.ValidateName(n, "name"); err != nil {
+		if err := feature.ValidateName(n, "name", "main"); err != nil {
 			t.Errorf("%q should be valid: %v", n, err)
 		}
 	}
 	for _, n := range bad {
-		err := feature.ValidateName(n, "name")
+		err := feature.ValidateName(n, "name", "main")
 		if ce := contract.From(err); ce == nil || ce.Code != contract.NameInvalid || ce.Field != "name" {
 			t.Errorf("%q should be NAME_INVALID on field name, got %v", n, err)
 		}
+	}
+}
+
+// A feature can't take the pair's base branch's name: it would collide with
+// the shadow's copy of that branch. main stays reserved on every pair.
+func TestFeatureNameIsNotBase(t *testing.T) {
+	t.Parallel()
+	for _, n := range []string{"trunk", "main"} {
+		err := feature.ValidateName(n, "name", "trunk")
+		if ce := contract.From(err); ce == nil || ce.Code != contract.NameInvalid || ce.Field != "name" {
+			t.Errorf("%q on a trunk pair should be NAME_INVALID on field name, got %v", n, err)
+		}
+	}
+	if err := feature.ValidateName("x", "name", "trunk"); err != nil {
+		t.Errorf("x on a trunk pair: %v", err)
+	}
+	// Branch names compare exactly: Trunk is another branch.
+	if err := feature.ValidateName("Trunk", "name", "trunk"); err != nil {
+		t.Errorf("Trunk on a trunk pair: %v", err)
 	}
 }
 

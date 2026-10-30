@@ -1,0 +1,33 @@
+{
+  "schema_version": "0.17",
+  "command": "feature restack",
+  "ok": false,
+  "exit_code": 2,
+  "data": {},
+  "warnings": [],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "feature",
+        "list",
+        "--all",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "--onto takes the base branch trunk or a feature; list every feature, abandoned ones included, to find it",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
+  "error": {
+    "code": "BAD_FLAG",
+    "message": "--onto takes the base branch trunk or a feature to stack feat-y on; \"master\" is neither: ghostbranch feature list --all lists the features",
+    "field": "onto",
+    "retryable": false,
+    "details": {
+      "onto": "master",
+      "reason": "unknown"
+    }
+  }
+}

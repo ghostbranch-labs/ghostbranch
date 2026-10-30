@@ -25,7 +25,7 @@
         { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "console" } } }
       ]
     },
-    "reparented": { "description": "children moved onto main in the same atomic push that closed this feature", "type": "array", "items": { "type": "string" } },
+    "reparented": { "description": "children moved onto the base branch (their parent is main now) in the same atomic push that closed this feature", "type": "array", "items": { "type": "string" } },
     "preview": { "oneOf": [{ "type": "null" }, { "$ref": "preview.schema.json" }] }
   }
 }

@@ -592,23 +592,45 @@ func TestInitRefusesAPublicRepoWithoutMain(t *testing.T) {
 		t.Fatal(err)
 	}
 	testutil.Commit(t, gitx.New(dir), "trunk", "initial", map[string]string{"README.md": "# trunk\n"})
-	for _, tc := range []struct{ public, says string }{
-		{"acme/empty", "acme/empty has no commits on main yet: push a first commit (a README is enough), then run ghostbranch init again"},
-		{"acme/trunk", "acme/trunk has no main branch (it has trunk)"},
-	} {
-		for _, dry := range []bool{true, false} {
-			h.eng.DryRun = dry
-			_, _, err := h.eng.Init(h.ctx, engine.InitOptions{Public: tc.public})
-			ce := wantCode(t, err, contract.BadFlag)
-			if ce.Field != "public" || ce.Retryable || !strings.HasPrefix(ce.Message, tc.says) {
-				t.Fatalf("%s (dry %v): %+v", tc.public, dry, ce)
-			}
-			if _, err := h.forge.GetRepo(h.ctx, tc.public+"-shadow"); !errors.Is(err, forge.ErrNotFound) {
-				t.Fatalf("%s (dry %v): a shadow repo was created: %v", tc.public, dry, err)
-			}
-			if _, ok := h.eng.WS.Find(tc.public); ok || len(h.pushes) != 0 {
-				t.Fatalf("%s (dry %v): registered %v, pushes %v", tc.public, dry, ok, h.pushes)
-			}
+	if err := h.forge.SetDefaultBranch(h.ctx, "acme/trunk", "trunk"); err != nil {
+		t.Fatal(err)
+	}
+	// An empty repo has nothing to mirror: refused, creating nothing.
+	for _, dry := range []bool{true, false} {
+		h.eng.DryRun = dry
+		_, _, err := h.eng.Init(h.ctx, engine.InitOptions{Public: "acme/empty"})
+		ce := wantCode(t, err, contract.BadFlag)
+		says := "acme/empty has no commits on main yet: push a first commit (a README is enough), then run ghostbranch init again"
+		if ce.Field != "public" || ce.Retryable || !strings.HasPrefix(ce.Message, says) || ce.Details["branch"] != "main" {
+			t.Fatalf("acme/empty (dry %v): %+v", dry, ce)
 		}
+		if _, err := h.forge.GetRepo(h.ctx, "acme/empty-shadow"); !errors.Is(err, forge.ErrNotFound) {
+			t.Fatalf("acme/empty (dry %v): a shadow repo was created: %v", dry, err)
+		}
+		if _, ok := h.eng.WS.Find("acme/empty"); ok || len(h.pushes) != 0 {
+			t.Fatalf("acme/empty (dry %v): registered %v, pushes %v", dry, ok, h.pushes)
+		}
+	}
+	h.eng.DryRun = false
+	// A repo with no main is set up on its default branch, under the same
+	// name in the shadow repo.
+	res, _, err := h.eng.Init(h.ctx, engine.InitOptions{Public: "acme/trunk"})
+	if err != nil || res.BaseBranch != "trunk" {
+		t.Fatalf("acme/trunk: %+v %v", res, err)
+	}
+	sh := gitx.New(h.forge.RepoDir("acme/trunk-shadow"))
+	refs, err := sh.Refs(h.ctx, "refs/heads")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := refs["refs/heads/trunk"]; !ok {
+		t.Fatalf("shadow branches: %v", refs)
+	}
+	if _, ok := refs["refs/heads/main"]; ok {
+		t.Fatalf("shadow has a main: %v", refs)
+	}
+	raw, _, err := sh.ShowFile(h.ctx, "refs/heads/"+engine.OverlayBranch, ".ghostbranch.yml")
+	if err != nil || !strings.Contains(string(raw), "\npublic_branch: trunk\n") {
+		t.Fatalf("overlay config: %v\n%s", err, raw)
 	}
 }

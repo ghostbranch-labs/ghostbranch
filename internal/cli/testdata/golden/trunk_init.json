@@ -1,0 +1,134 @@
+{
+  "schema_version": "0.17",
+  "command": "init",
+  "ok": true,
+  "exit_code": 0,
+  "data": {
+    "public": "acme/widget",
+    "shadow": "acme/widget-shadow",
+    "base_branch": "trunk",
+    "created_shadow": true,
+    "adopted": false,
+    "resumed": false,
+    "mirrored_branches": [
+      "trunk"
+    ],
+    "mirrored_tags": [],
+    "overlay_created": true,
+    "default_branch_set": true,
+    "audit": {
+      "public": "acme/widget",
+      "shadow": "acme/widget-shadow",
+      "guards": [],
+      "guard_mode": "rewrite",
+      "secrets": {
+        "referenced": [],
+        "listed": false,
+        "missing": [],
+        "inherit": [],
+        "environments": []
+      },
+      "push_triggers": [],
+      "minutes": {
+        "billed": true,
+        "scheduled_sync": null
+      },
+      "overlay": [
+        {
+          "path": ".github/workflows/ghostbranch-sync.yml",
+          "status": "current"
+        }
+      ]
+    },
+    "preview": null,
+    "guard_installed": false,
+    "doctor": null,
+    "setup": {
+      "steps": [
+        {
+          "id": "login",
+          "status": "done",
+          "message": "Logged in as octo (from GHOSTBRANCH_TOKEN).",
+          "url": "",
+          "details": {
+            "account": "octo",
+            "source": "GHOSTBRANCH_TOKEN"
+          }
+        },
+        {
+          "id": "account",
+          "status": "done",
+          "message": "The token is octo's, which can set up acme/widget-shadow.",
+          "url": "",
+          "details": {
+            "owner": "acme",
+            "token_account": "octo"
+          }
+        },
+        {
+          "id": "app_installed",
+          "status": "skipped",
+          "message": "Only an app login can see where the Ghostbranch app is installed.",
+          "url": "",
+          "details": {}
+        },
+        {
+          "id": "shadow",
+          "status": "done",
+          "message": "acme/widget-shadow exists.",
+          "url": "",
+          "details": {}
+        },
+        {
+          "id": "app_access",
+          "status": "skipped",
+          "message": "Only an app login can see where the Ghostbranch app is installed.",
+          "url": "",
+          "details": {}
+        },
+        {
+          "id": "pair",
+          "status": "done",
+          "message": "acme/widget is registered with acme/widget-shadow.",
+          "url": "",
+          "details": {}
+        },
+        {
+          "id": "guard",
+          "status": "skipped",
+          "message": "No checkout, so no push guard to install.",
+          "url": "",
+          "details": {}
+        },
+        {
+          "id": "doctor",
+          "status": "todo",
+          "message": "Run ghostbranch doctor once init is done, to check the setup.",
+          "url": "",
+          "details": {}
+        }
+      ]
+    }
+  },
+  "warnings": [
+    {
+      "code": "ACTIONS_MINUTES_BILLED",
+      "message": "acme/widget-shadow is private, so its Actions minutes are billed"
+    }
+  ],
+  "next": [
+    {
+      "command": [
+        "ghostbranch",
+        "doctor",
+        "--json",
+        "--repo",
+        "acme/widget"
+      ],
+      "why": "init is done; doctor checks the setup",
+      "needs_human": false,
+      "needs_input": []
+    }
+  ],
+  "error": null
+}

@@ -380,12 +380,12 @@ func (e *Engine) hasOpenAbove(ctx context.Context, pc *pairCtx, name string) (bo
 // private history wasn't rewritten since the publish (rewritten, from
 // historyRewritten): a clean rebase onto a moved main keeps every patch-id
 // and message, yet the PR must move onto the new base, so it is a replace
-// (rebase).
+// (rebase). base is the pair's base branch (forcedReason).
 //
 // u is changed only on success: until then Style stays "", which
 // gateUpdateOf never reports or records.
-func setStyle(ctx context.Context, g *gitx.Git, u *prUpdate, m *feature.Meta, mode string, above, rewritten bool, publish []string) error {
-	reason := forcedReason(u, m, mode, above)
+func setStyle(ctx context.Context, g *gitx.Git, u *prUpdate, m *feature.Meta, mode string, above, rewritten bool, publish []string, base string) error {
+	reason := forcedReason(u, m, mode, above, base)
 	if reason == "" {
 		r, err := prefixReason(ctx, g, u.Public, publish)
 		if err != nil {
@@ -406,11 +406,14 @@ func setStyle(ctx context.Context, g *gitx.Git, u *prUpdate, m *feature.Meta, mo
 // new history is (setStyle): squash or curated mode, a changed base
 // branch, a pending restack or open PRs above, or published commits
 // removed on GitHub. It is "" when the new history decides (prefixReason).
-func forcedReason(u *prUpdate, m *feature.Meta, mode string, above bool) string {
+// The PR's base on GitHub is compared with the one its record holds, a
+// real branch name; a record from before 0.11 holds none, and its PR was
+// opened on the pair's base branch, base.
+func forcedReason(u *prUpdate, m *feature.Meta, mode string, above bool, base string) string {
 	switch {
 	case modeReason(mode) != "":
 		return modeReason(mode)
-	case u.Base != cmp.Or(m.Promoted.Base, feature.MainParent):
+	case u.Base != cmp.Or(m.Promoted.Base, base):
 		return plan.ReasonBaseChanged
 	case m.Promoted.NeedsUpdate || above:
 		return plan.ReasonRestack
@@ -603,7 +606,7 @@ func (e *Engine) buildUpdate(ctx context.Context, pc *pairCtx, b *built, name st
 	if err != nil {
 		return err
 	}
-	if err := setStyle(ctx, g, u, &b.meta, b.scannedAs, above, rewritten, commitSHAs(chain)); err != nil {
+	if err := setStyle(ctx, g, u, &b.meta, b.scannedAs, above, rewritten, commitSHAs(chain), pc.base); err != nil {
 		return err
 	}
 	b.scanTip, b.scanSources = b.pm, map[string][]string{}
@@ -783,8 +786,8 @@ func unpublished(ctx context.Context, g *gitx.Git, tip string) ([]string, error)
 // the new history alone gives (append, rebase, reworded or conflict),
 // which the gate decided on the same feature head and public main. A gate
 // built to append never stands for an update that must replace: CI never
-// ran on that branch.
-func gateFitsUpdate(gt *feature.Gate, u *prUpdate, m feature.Meta, mode string, above bool) bool {
+// ran on that branch. base is the pair's base branch (forcedReason).
+func gateFitsUpdate(gt *feature.Gate, u *prUpdate, m feature.Meta, mode string, above bool, base string) bool {
 	if gt == nil {
 		return false
 	}
@@ -795,7 +798,7 @@ func gateFitsUpdate(gt *feature.Gate, u *prUpdate, m feature.Meta, mode string, 
 	if w == nil || w.PR != u.PR || w.Head != u.Head || w.Base != u.Base || m.Promoted == nil {
 		return false
 	}
-	if forcedReason(u, &m, mode, above) != "" {
+	if forcedReason(u, &m, mode, above, base) != "" {
 		return w.Style == plan.StyleReplace
 	}
 	switch w.Style {
@@ -823,7 +826,7 @@ func (e *Engine) updateFits(ctx context.Context, pc *pairCtx, gt *feature.Gate, 
 			return false, u, err
 		}
 	}
-	return gateFitsUpdate(gt, u, m, mode, above), u, nil
+	return gateFitsUpdate(gt, u, m, mode, above, pc.base), u, nil
 }
 
 // gateUpdateOf is u as a gate records and reports it. It is nil for nil,

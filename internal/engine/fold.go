@@ -54,7 +54,7 @@ func (e *Engine) FeatureFold(ctx context.Context, p workspace.Pair, opt FoldOpti
 			}
 		})
 	}()
-	if err := feature.ValidateName(name, "feature"); err != nil {
+	if err := feature.ValidateName(name, "feature", "main"); err != nil {
 		return nil, nil, err
 	}
 	pc, err := e.open(ctx, "feature fold", p, true)
@@ -72,7 +72,7 @@ func (e *Engine) FeatureFold(ctx context.Context, p workspace.Pair, opt FoldOpti
 	parent := parentFeature(m)
 	if parent == "" {
 		return nil, warns, contract.New(contract.BadFlag,
-			"feature %s is not stacked: its parent is main, so there is nothing to fold it into; publish it with ghostbranch promote %s", name, name).
+			"feature %s is not stacked: its parent is %s, so there is nothing to fold it into; publish it with ghostbranch promote %s", name, pc.base, name).
 			WithField("feature")
 	}
 	if m.Promoted != nil {
@@ -86,7 +86,7 @@ func (e *Engine) FeatureFold(ctx context.Context, p workspace.Pair, opt FoldOpti
 	}
 	pr, ok := recs[parent]
 	if !ok || pr.head == "" {
-		return nil, warns, parentRewritten(name, parent, m.ForkedAt, reasonParentGone)
+		return nil, warns, parentRewritten(name, parent, m.ForkedAt, reasonParentGone, pc.base)
 	}
 	// Fold moves the parent's branch: a newer Ghostbranch's record of it may
 	// track what this binary doesn't know, so it is never moved from here.
