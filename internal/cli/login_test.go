@@ -21,8 +21,9 @@ import (
 	"github.com/ghostbranch-labs/ghostbranch/internal/testutil"
 )
 
-// consoleLog is a console device that records what is shown on it; login
-// asks nothing, so a read is the end of input.
+// consoleLog is a console device that records what is shown on it; a read
+// is the end of input, so a question gets no answer (login keeps a stored
+// login only after a person answers; these tests have none stored).
 type consoleLog struct {
 	mu  sync.Mutex
 	buf bytes.Buffer
@@ -99,10 +100,12 @@ func TestLoginWithTheDeviceFlow(t *testing.T) {
 	if code != 0 || !strings.Contains(out, install) {
 		t.Fatalf("human first login: %d\n%s\n%s", code, out, errOut)
 	}
-	// A second login replaces the first and doesn't repeat the install link.
+	// A second login with --yes replaces the first without asking, and doesn't
+	// repeat the install link. (Without --yes a person is asked first; see
+	// login_existing_test.go.)
 	srv2, _, _ := deviceLogin(te, authtest.Options{})
 	te.forge.User = forge.User{Login: "octo", ID: 1}
-	code, env := te.runJSON("login")
+	code, env := te.runJSON("login", "--yes")
 	data, _ := env["data"].(map[string]any)
 	if code != 0 || data["replaced"] != true || data["install_url"] != "" {
 		t.Fatalf("second login: %d %v", code, env)
@@ -403,7 +406,7 @@ func TestLoginOutputsNeverShowTheToken(t *testing.T) {
 			seen.WriteString(out + errOut)
 		}
 	}
-	run("", "login")
+	run("", "login", "--yes") // --yes: the second run replaces the first login
 	run("", "auth", "status")
 	run("", "sync") // a command using the stored login
 	run(pasted+"\n", "login", "--with-token")
