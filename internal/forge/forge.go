@@ -130,6 +130,10 @@ type Check struct {
 	Name       string
 	Status     string // queued | in_progress | completed
 	Conclusion string // success, failure, skipped, neutral, cancelled, timed_out, action_required, …
+	// Actions is true for a check GitHub Actions reports: a check run of
+	// the github-actions app, or a workflow run. A commit status or
+	// another app's check run is false.
+	Actions bool
 }
 
 // Run is a GitHub Actions workflow run.
@@ -139,6 +143,8 @@ type Run struct {
 	Status     string // queued | in_progress | waiting | requested | pending | completed
 	Conclusion string // set once Status is completed: success | failure | cancelled | …
 	URL        string
+	Path       string // the workflow file, such as .github/workflows/ci.yml (RunsForSHA)
+	Event      string // what started it: push, pull_request, pull_request_target, … (RunsForSHA)
 }
 
 type User struct {
@@ -194,6 +200,13 @@ func SplitName(full string) (string, string, error) {
 		return "", "", fmt.Errorf("%q is not owner/repo", full)
 	}
 	return owner, name, nil
+}
+
+// RunLister is an optional interface for forges that can list a commit's
+// GitHub Actions runs with the workflow file and event of each.
+type RunLister interface {
+	// RunsForSHA lists every Actions run for sha, any event and status.
+	RunsForSHA(ctx context.Context, full, sha string) ([]Run, error)
 }
 
 // CheckVisibility is an optional interface for forges that can see only part

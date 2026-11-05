@@ -64,6 +64,10 @@ type waitOpts struct {
 	// in the step.
 	noWorkflows bool
 	shadow      string
+	// workflows are the workflow files that run on the PR (nil: unknown
+	// or none); with each one's pull_request run finished and only GitHub
+	// Actions checks, the gate settles after QuickSettle (settleWindow).
+	workflows []string
 }
 
 // appearTimeout is how long the gate waits for a first check: the short
@@ -88,6 +92,27 @@ func startText(cfg config.Gate, o waitOpts, left time.Duration) string {
 		left = left.Truncate(time.Minute)
 	}
 	return fmt.Sprintf("Waiting for CI to start (up to %s, %s left)", shortDur(cfg.CIAppearTimeout), shortDur(max(left, 0)))
+}
+
+// waitText is the CI step while the gate waits: CI to start (startLeft is
+// the time left for that), the checks running, or every check done and
+// the settle window running (settleLeft left of it).
+func waitText(cfg config.Gate, o waitOpts, checks []forge.Check, done bool, startLeft, settleLeft time.Duration) string {
+	switch {
+	case len(checks) == 0:
+		return startText(cfg, o, startLeft)
+	case done && len(checks) == 1:
+		return fmt.Sprintf("1 check done; waiting %s more in case more CI starts", shortDur(max(settleLeft, 0)))
+	case done:
+		return fmt.Sprintf("All %d checks done; waiting %s more in case more CI starts", len(checks), shortDur(max(settleLeft, 0)))
+	}
+	n := 0
+	for _, c := range checks {
+		if c.Status == "completed" {
+			n++
+		}
+	}
+	return fmt.Sprintf("Waiting for CI (%d of %d checks done)", n, len(checks))
 }
 
 // shortDur is d to the second without zero tails: 10m, 1h, 1m30s, 45s.
@@ -119,6 +144,53 @@ func interruptedErr(job, feature string) error {
 	}
 	return contract.New(contract.Interrupted, "interrupted before any gate job was recorded; nothing is pending, so run the command again").
 		WithDetails(map[string]any{"feature": feature})
+}
+
+// settleWindow is how long the check list must stay unchanged, with every
+// check done, before the gate trusts it. It is QuickSettle only for the
+// complete picture: every check comes from GitHub Actions, the token can
+// see other apps' checks, and each workflow file that runs on the PR
+// (workflows) has a finished pull_request or pull_request_target run on
+// sha. A push run never counts: with on: [push, pull_request] and the push
+// guard, the gate's push makes a run whose jobs are all skipped, which
+// finishes before the pull_request run has started. Anything less is
+// SettleWindow, which leaves time for another CI's first check to appear.
+// It asks the forge for runs only once every check is done.
+func (e *Engine) settleWindow(ctx context.Context, repo, sha string, checks []forge.Check, done bool, workflows []string) time.Duration {
+	if !done || e.QuickSettle <= 0 || e.QuickSettle >= e.SettleWindow || len(workflows) == 0 || len(checks) == 0 {
+		return e.SettleWindow
+	}
+	if v, ok := e.Forge.(forge.CheckVisibility); ok && v.ChecksLimited(repo) {
+		return e.SettleWindow
+	}
+	for _, c := range checks {
+		if !c.Actions {
+			return e.SettleWindow
+		}
+	}
+	lister, ok := e.Forge.(forge.RunLister)
+	if !ok {
+		return e.SettleWindow
+	}
+	runs, err := lister.RunsForSHA(ctx, repo, sha)
+	if err != nil {
+		return e.SettleWindow
+	}
+	finished := map[string]bool{}
+	for _, r := range runs {
+		// GitHub records a pull_request_target run against the base
+		// branch's commit, so a workflow that runs only on it never matches
+		// here and keeps the full window: slower, never early.
+		if (r.Event == "pull_request" || r.Event == "pull_request_target") && r.Status == "completed" {
+			finished[r.Path] = true
+		}
+	}
+	for _, w := range workflows {
+		if !finished[w] {
+			return e.SettleWindow
+		}
+	}
+	return e.QuickSettle
 }
 
 // summarize reports whether every check has completed, and which failed.
@@ -165,30 +237,20 @@ func (e *Engine) waitChecks(ctx context.Context, repo, sha string, cfg config.Ga
 			return checkOutcome{}, forgeErr(err, "list checks on %s", short(sha))
 		}
 		now := e.Now()
-		if o.step != nil {
-			if len(checks) == 0 {
-				o.step.Update(startText(cfg, o, appearTimeout(cfg, o.noWorkflows)-now.Sub(start)))
-			} else {
-				n := 0
-				for _, c := range checks {
-					if c.Status == "completed" {
-						n++
-					}
-				}
-				o.step.Update(fmt.Sprintf("Waiting for CI (%d of %d checks done)", n, len(checks)))
-			}
-		}
 		if len(checks) != last {
 			last, stableSince = len(checks), now
 		}
+		done, failed := summarize(checks)
+		settle := e.settleWindow(ctx, repo, sha, checks, done, o.workflows)
 		seen = seen || len(checks) > 0
 		for _, c := range checks {
-			if p, ok := prev[c.Name]; !ok || p != c {
+			// Only what the event carries counts as a change: two checks may
+			// share a name (a workflow's push and pull_request runs).
+			if p, ok := prev[c.Name]; !ok || p.Status != c.Status || p.Conclusion != c.Conclusion {
 				e.event(o, JobEvent{Type: EventCheck, Name: c.Name, Status: c.Status, Conclusion: c.Conclusion})
 				prev[c.Name] = c
 			}
 		}
-		done, failed := summarize(checks)
 		var out *checkOutcome
 		switch {
 		case !seen && now.Sub(start) >= appearTimeout(cfg, o.noWorkflows):
@@ -196,7 +258,7 @@ func (e *Engine) waitChecks(ctx context.Context, repo, sha string, cfg config.Ga
 		// At ci_timeout, checks that have all completed report their outcome
 		// even if the settle window has not elapsed: there is no more time
 		// to wait for late checks, and the completed result is the truth.
-		case done && (now.Sub(stableSince) >= e.SettleWindow || now.Sub(start) >= cfg.CITimeout):
+		case done && (now.Sub(stableSince) >= settle || now.Sub(start) >= cfg.CITimeout):
 			out = &checkOutcome{status: feature.ChecksPassed, failed: []string{}}
 			if len(failed) > 0 {
 				out = &checkOutcome{status: feature.ChecksFailed, failed: failed}
@@ -209,6 +271,9 @@ func (e *Engine) waitChecks(ctx context.Context, repo, sha string, cfg config.Ga
 		if out != nil {
 			e.event(o, JobEvent{Type: EventSettled, Outcome: out.status, FailedChecks: out.failed})
 			return *out, nil
+		}
+		if o.step != nil {
+			o.step.Update(waitText(cfg, o, checks, done, appearTimeout(cfg, o.noWorkflows)-now.Sub(start), settle-now.Sub(stableSince)))
 		}
 		d := e.PollInterval
 		if !o.deadline.IsZero() {

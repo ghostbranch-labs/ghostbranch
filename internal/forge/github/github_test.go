@@ -136,7 +136,8 @@ func TestPRsChecksAndDefaultBranch(t *testing.T) {
 	})
 	mux.HandleFunc("GET /repos/acme/s/commits/abc/check-runs", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"total_count": 1, "check_runs": []map[string]any{
-			{"name": "build", "status": "completed", "conclusion": "success"}}})
+			{"name": "build", "status": "completed", "conclusion": "success", "app": map[string]any{"slug": "github-actions"}},
+			{"name": "buildkite", "status": "completed", "conclusion": "success", "app": map[string]any{"slug": "buildkite"}}}})
 	})
 	var srvURL string
 	mux.HandleFunc("GET /repos/acme/s/commits/abc/status", func(w http.ResponseWriter, r *http.Request) {
@@ -168,13 +169,14 @@ func TestPRsChecksAndDefaultBranch(t *testing.T) {
 		t.Fatalf("CreatePR = %+v %v", p, err)
 	}
 	checks, err := c.ListChecks(ctx, "acme/s", "abc")
-	if err != nil || len(checks) != 3 {
+	if err != nil || len(checks) != 4 {
 		t.Fatalf("ListChecks = %+v %v", checks, err)
 	}
 	want := map[string]forge.Check{
-		"build":  {Name: "build", Status: "completed", Conclusion: "success"},
-		"legacy": {Name: "legacy", Status: "in_progress"},
-		"lint":   {Name: "lint", Status: "completed", Conclusion: "failure"},
+		"build":     {Name: "build", Status: "completed", Conclusion: "success", Actions: true},
+		"buildkite": {Name: "buildkite", Status: "completed", Conclusion: "success"},
+		"legacy":    {Name: "legacy", Status: "in_progress"},
+		"lint":      {Name: "lint", Status: "completed", Conclusion: "failure"},
 	}
 	for _, ch := range checks {
 		if ch != want[ch.Name] {
@@ -221,9 +223,9 @@ func TestListChecksFallsBackToWorkflowRunsOn403(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]forge.Check{
-		"CI":         {Name: "CI", Status: "completed", Conclusion: "success"},
-		"Lint":       {Name: "Lint", Status: "in_progress"},
-		"workflow 3": {Name: "workflow 3", Status: "in_progress"},
+		"CI":         {Name: "CI", Status: "completed", Conclusion: "success", Actions: true},
+		"Lint":       {Name: "Lint", Status: "in_progress", Actions: true},
+		"workflow 3": {Name: "workflow 3", Status: "in_progress", Actions: true},
 		"legacy":     {Name: "legacy", Status: "completed", Conclusion: "success"},
 	}
 	if len(checks) != len(want) {
@@ -951,5 +953,28 @@ func TestOnlyAnInaccessible403NamesAPermission(t *testing.T) {
 		if errors.Is(err, forge.ErrForbidden) || !errors.Is(err, forge.ErrTransient) {
 			t.Errorf("%s: %v, want transient and not forbidden", repo, err)
 		}
+	}
+}
+
+// RunsForSHA lists every Actions run for a commit with its workflow file
+// (any @ref suffix dropped) and the event that started it.
+func TestRunsForSHA(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /repos/acme/s/actions/runs", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("head_sha") != "abc" || r.URL.Query().Get("event") != "" {
+			t.Errorf("runs query = %v", r.URL.Query())
+		}
+		writeJSON(w, map[string]any{"total_count": 2, "workflow_runs": []map[string]any{
+			{"id": 1, "name": "CI", "path": ".github/workflows/ci.yml", "event": "pull_request", "status": "completed", "conclusion": "success"},
+			{"id": 2, "name": "CI", "path": ".github/workflows/ci.yml@refs/heads/main", "event": "push", "status": "in_progress"}}})
+	})
+	c := newClient(t, mux)
+	runs, err := c.RunsForSHA(context.Background(), "acme/s", "abc")
+	if err != nil || len(runs) != 2 {
+		t.Fatalf("RunsForSHA = %+v %v", runs, err)
+	}
+	if runs[0].Path != ".github/workflows/ci.yml" || runs[0].Event != "pull_request" || runs[0].Status != "completed" ||
+		runs[1].Path != ".github/workflows/ci.yml" || runs[1].Event != "push" {
+		t.Fatalf("runs = %+v", runs)
 	}
 }

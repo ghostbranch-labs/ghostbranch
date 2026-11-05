@@ -31,6 +31,10 @@ import (
 const (
 	DefaultPollInterval = 15 * time.Second
 	DefaultSettleWindow = 60 * time.Second
+	// DefaultQuickSettle replaces DefaultSettleWindow when the gate has
+	// the complete picture: a finished pull_request run for each workflow
+	// file that runs on its PR, and only GitHub Actions checks.
+	DefaultQuickSettle = 15 * time.Second
 	// DefaultCIAppearWindow is how long sync looks for the workflow runs
 	// its pushes start in the shadow repo.
 	DefaultCIAppearWindow = 30 * time.Second
@@ -77,6 +81,10 @@ type Engine struct {
 	NewScanner   func(leak.Rules) (leak.Scanner, error)
 	PollInterval time.Duration
 	SettleWindow time.Duration
+	// QuickSettle is the settle window when each workflow file that runs
+	// on the gate PR has a finished pull_request run and every check comes
+	// from GitHub Actions (zero: always SettleWindow).
+	QuickSettle time.Duration
 	// CIAppearWindow is how long sync looks for the workflow runs its
 	// pushes start; zero looks once. CIAppearPoll is how often it looks
 	// (zero means DefaultCIAppearPoll).
