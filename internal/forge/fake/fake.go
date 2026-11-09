@@ -41,6 +41,9 @@ type Forge struct {
 	UserErr error // CurrentUser fails with it when set
 	// Checks scripts check results. Nil means one passing check, "ci".
 	Checks func(repo, sha string) []forge.Check
+	// RunsFor, when set, scripts RunsForSHA; otherwise it lists Runs for
+	// the commit.
+	RunsFor func(repo, sha string) []forge.Run
 	// LimitedChecks makes ChecksLimited report true for every repo.
 	LimitedChecks bool
 	// PushDenied makes PushAccess report "false" (403) for these repos.
@@ -528,6 +531,25 @@ func (f *Forge) SecretNames(_ context.Context, full string) ([]string, error) {
 	}
 	out := append([]string{}, f.Secrets[full]...)
 	sort.Strings(out)
+	return out, nil
+}
+
+// RunsForSHA implements forge.RunLister.
+func (f *Forge) RunsForSHA(_ context.Context, full, sha string) ([]forge.Run, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.missing("RunsForSHA", full); err != nil {
+		return nil, err
+	}
+	if f.RunsFor != nil {
+		return f.RunsFor(full, sha), nil
+	}
+	out := []forge.Run{}
+	for _, r := range f.Runs[full] {
+		if r.SHA == sha {
+			out = append(out, r.Run)
+		}
+	}
 	return out, nil
 }
 

@@ -85,6 +85,7 @@ type Env struct {
 	NewScanner   func(leak.Rules) (leak.Scanner, error)
 	PollInterval time.Duration
 	SettleWindow time.Duration
+	QuickSettle  time.Duration
 	OnPush       func(op, remote string, refspecs []string)
 	// CIAppearWindow is how long sync looks for the workflow runs its
 	// pushes start in the shadow repo, and CIAppearPoll how often.
@@ -156,7 +157,7 @@ func DefaultEnv() Env {
 		CwdRemotes:   cwdRemotes,
 		NewScanner:   func(r leak.Rules) (leak.Scanner, error) { return leak.NewGitleaks(r) },
 		PollInterval: engine.DefaultPollInterval,
-		SettleWindow: engine.DefaultSettleWindow, CIAppearWindow: engine.DefaultCIAppearWindow, CIAppearPoll: engine.DefaultCIAppearPoll,
+		SettleWindow: engine.DefaultSettleWindow, QuickSettle: engine.DefaultQuickSettle, CIAppearWindow: engine.DefaultCIAppearWindow, CIAppearPoll: engine.DefaultCIAppearPoll,
 		Executable:   os.Executable,
 		Getwd:        os.Getwd,
 		GuardState:   guardState,
@@ -565,7 +566,7 @@ func (a *app) engine(ctx context.Context) (*engine.Engine, error) {
 	}
 	e := &engine.Engine{Forge: f, WS: ws, Actor: actor, Token: token, TokenSource: source,
 		LooksLikeAgent: auth.LooksLikeAgent(a.env.Getenv, a.env.ConsoleUsable), Now: a.env.Now, Sleep: a.env.Sleep, Rand: a.env.Rand, Progress: a.reporter(),
-		NewScanner: a.env.NewScanner, PollInterval: a.env.PollInterval, SettleWindow: a.env.SettleWindow, CIAppearWindow: a.env.CIAppearWindow, CIAppearPoll: a.env.CIAppearPoll,
+		NewScanner: a.env.NewScanner, PollInterval: a.env.PollInterval, SettleWindow: a.env.SettleWindow, QuickSettle: a.env.QuickSettle, CIAppearWindow: a.env.CIAppearWindow, CIAppearPoll: a.env.CIAppearPoll,
 		DryRun: a.dryRun, OnPush: a.env.OnPush, Grants: grant.NewStore(ws.GrantsPath(), ws.GrantsLockPath()),
 		Waivers: waiver.NewStore(ws.WaiversPath(), ws.WaiversLockPath()), OnBase: a.setBase}
 	if source == "login" && a.env.Keychain != nil {

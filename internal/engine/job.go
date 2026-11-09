@@ -184,6 +184,9 @@ func (e *Engine) finish(ctx context.Context, pc *pairCtx, name string, res *Gate
 	wf, known := prWorkflows(ctx, pc.git, guardNames(pc), C, gateBranch(name))
 	noWorkflows := known && len(wf) == 0
 	o.job, o.noWorkflows, o.shadow = job, noWorkflows, shadow
+	if known {
+		o.workflows = wf
+	}
 	title := "Waiting for CI to start"
 	if noWorkflows {
 		title = startText(cfg.Gate, o, 0)
@@ -192,7 +195,7 @@ func (e *Engine) finish(ctx context.Context, pc *pairCtx, name string, res *Gate
 	e.event(o, JobEvent{Type: EventWaiting, Candidate: C, ShadowPR: pending.ShadowPR, ShadowPRURL: url, CITimeout: cfg.Gate.CITimeout.String(),
 		NoWorkflows: &noWorkflows, CIAppearTimeout: appearTimeout(cfg.Gate, noWorkflows).String()})
 	out, err := e.waitChecks(ctx, shadow, C, cfg.Gate, waitOpts{start: pending.StartedAt, deadline: o.deadline, job: job, emit: o.emit, step: ci,
-		noWorkflows: noWorkflows, shadow: shadow})
+		noWorkflows: noWorkflows, shadow: shadow, workflows: o.workflows})
 	if err != nil {
 		return res, warns, err // the step stays running; the CLI marks it failed
 	}

@@ -416,7 +416,8 @@ func (c *Client) checkRuns(ctx context.Context, owner, name, full, sha string) (
 			return nil, err
 		}
 		for _, r := range runs.CheckRuns {
-			out = append(out, forge.Check{Name: r.GetName(), Status: r.GetStatus(), Conclusion: r.GetConclusion()})
+			out = append(out, forge.Check{Name: r.GetName(), Status: r.GetStatus(), Conclusion: r.GetConclusion(),
+				Actions: r.GetApp().GetSlug() == "github-actions"})
 		}
 		if resp.NextPage == 0 {
 			return out, nil
@@ -437,7 +438,7 @@ func (c *Client) workflowRuns(ctx context.Context, owner, name, full, sha string
 			return nil, err
 		}
 		for _, r := range runs.WorkflowRuns {
-			ch := forge.Check{Name: r.GetName(), Status: "in_progress", Conclusion: r.GetConclusion()}
+			ch := forge.Check{Name: r.GetName(), Status: "in_progress", Conclusion: r.GetConclusion(), Actions: true}
 			if ch.Name == "" {
 				ch.Name = fmt.Sprintf("workflow %d", r.GetID())
 			}
@@ -556,6 +557,36 @@ func (c *Client) PushRuns(ctx context.Context, full, sha string) ([]forge.Run, e
 		}
 		for _, r := range runs.WorkflowRuns {
 			out = append(out, forge.Run{ID: r.GetID(), Workflow: r.GetName(), Status: r.GetStatus(), Conclusion: r.GetConclusion(), URL: r.GetHTMLURL()})
+		}
+		if resp.NextPage == 0 {
+			return out, nil
+		}
+		opts.Page = resp.NextPage
+	}
+}
+
+// RunsForSHA lists every Actions run for sha, any event and status, with
+// its workflow file (GitHub may add an @ref suffix, which is dropped) and
+// the event that started it.
+func (c *Client) RunsForSHA(ctx context.Context, full, sha string) ([]forge.Run, error) {
+	owner, name, err := forge.SplitName(full)
+	if err != nil {
+		return nil, err
+	}
+	out := []forge.Run{}
+	opts := &gh.ListWorkflowRunsOptions{HeadSHA: sha, ListOptions: gh.ListOptions{PerPage: 100}}
+	for {
+		runs, resp, err := c.c.Actions.ListRepositoryWorkflowRuns(ctx, owner, name, opts)
+		if isForbidden(resp, err) {
+			return nil, fmt.Errorf("list workflow runs of %s: %w", full, forbidden(full, resp, err))
+		}
+		if err := wrap(ctx, full, resp, err); err != nil {
+			return nil, err
+		}
+		for _, r := range runs.WorkflowRuns {
+			p, _, _ := strings.Cut(r.GetPath(), "@")
+			out = append(out, forge.Run{ID: r.GetID(), Workflow: r.GetName(), Status: r.GetStatus(), Conclusion: r.GetConclusion(),
+				URL: r.GetHTMLURL(), Path: p, Event: r.GetEvent()})
 		}
 		if resp.NextPage == 0 {
 			return out, nil

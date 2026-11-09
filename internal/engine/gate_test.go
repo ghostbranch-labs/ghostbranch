@@ -874,7 +874,8 @@ func TestGateWaitShowsTimeLeft(t *testing.T) {
 	if _, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x"); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"Waiting for CI to start (up to 10m, 10m left)", "Waiting for CI to start (up to 10m, 8m left)", "Waiting for CI to start (up to 10m, 7m left)", "Waiting for CI (1 of 1 checks done)"}
+	want := []string{"Waiting for CI to start (up to 10m, 10m left)", "Waiting for CI to start (up to 10m, 8m left)", "Waiting for CI to start (up to 10m, 7m left)",
+		"1 check done; waiting 5s more in case more CI starts"}
 	if !inOrder(rec.Updates(), want) {
 		t.Fatalf("CI updates:\n%s", rec.String())
 	}
@@ -960,5 +961,39 @@ func TestGateWithoutChecksStillWorks(t *testing.T) {
 	}
 	if !slices.ContainsFunc(warns, func(w contract.Warning) bool { return w.Code == contract.ChecksLimited }) {
 		t.Fatalf("no CHECKS_LIMITED warning in %+v", warns)
+	}
+}
+
+// The gate knows the workflows that run on its PR (the harness has one,
+// ci.yml on pull_request): with that workflow's pull_request run finished
+// and only GitHub Actions checks, it settles after QuickSettle, not
+// SettleWindow.
+func TestGateSettlesQuicklyOnACompleteActionsPicture(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		actions bool
+		quick   bool
+	}{{"actions only", true, true}, {"another CI", false, false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			h := newHarness(t)
+			h.init()
+			h.startFeature("feat-x", map[string]string{"x.txt": "x\n"})
+			h.eng.QuickSettle = time.Second
+			h.forge.Checks = func(string, string) []forge.Check {
+				return []forge.Check{{Name: "ci", Status: "completed", Conclusion: "success", Actions: tc.actions}}
+			}
+			h.forge.RunsFor = func(string, string) []forge.Run {
+				return []forge.Run{{Path: ".github/workflows/ci.yml", Event: "pull_request", Status: "completed", Conclusion: "success"}}
+			}
+			start := h.clock.Now()
+			if _, _, err := h.eng.Gate(h.ctx, h.pair, "feat-x"); err != nil {
+				t.Fatal(err)
+			}
+			if took := h.clock.Now().Sub(start); (took < 5*time.Second) != tc.quick {
+				t.Fatalf("took %s with SettleWindow 5s, QuickSettle 1s; want quick = %v", took, tc.quick)
+			}
+		})
 	}
 }
