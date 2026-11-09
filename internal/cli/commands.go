@@ -229,7 +229,7 @@ Run in a checkout of the public repo, it then adds a remote named shadow for the
 			return done(a, res, w, err)
 		},
 	}
-	c.Flags().StringVar(&from, "from", "", "stack the feature on another feature: start it at that feature's tip in the shadow repo (default: the shadow's base branch)")
+	c.Flags().StringVar(&from, "from", "", "stack the feature on another feature: start it at that feature's tip in the shadow repo (default: the shadow's base branch; --from main or --from <base branch> starts from the shadow's base branch too)")
 	c.Flags().BoolVar(&noCheckout, "no-checkout", false, "leave this checkout alone: don't add the shadow remote, fetch or switch; print the commands instead")
 	c.Flags().BoolVar(&yes, "yes", false, "accepted for consistency; feature start never asks")
 	c.Flags().BoolVar(&a.dryRun, "plan", false, "preview exactly what would change, and change nothing (same as --dry-run)")

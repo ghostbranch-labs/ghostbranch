@@ -414,9 +414,9 @@ never read.
 
 - `ghostbranch login` signs you in with the Ghostbranch GitHub App in your browser. Then install the app
   on the account that owns your public repo and pick that repo; `ghostbranch init` creates the shadow
-  repo. The login lives in your OS keychain and
-  refreshes itself; `LOGIN_EXPIRED` means log in again. `ghostbranch login --with-token` stores a
-  token you pipe in on stdin instead. With no keychain (`LOGIN_UNAVAILABLE`), set `GHOSTBRANCH_TOKEN`.
+  repo. The login lives in your OS keychain and refreshes itself; a later `login` asks before
+  replacing one that works (`--yes` doesn't). `LOGIN_EXPIRED` means log in again, and
+  `ghostbranch login --with-token` stores a token you pipe in on stdin instead. With no keychain (`LOGIN_UNAVAILABLE`), set `GHOSTBRANCH_TOKEN`.
 - `ghostbranch auth status` shows the source, account, kind, expiry and whether it can publish;
   `ghostbranch logout` deletes the stored login. It doesn't revoke the app at GitHub: for an app
   login it returns `revoke_url`, where you do that.

@@ -512,9 +512,12 @@ func human(r any, st style.Styler) string {
 		if who == "" {
 			who = "an account GitHub didn't name"
 		}
-		if v.Kind == "app" {
+		switch {
+		case v.Kept:
+			fmt.Fprintf(&b, "Kept the stored GitHub login for %s.\n", who)
+		case v.Kind == "app":
 			fmt.Fprintf(&b, "Logged in to GitHub as %s with the Ghostbranch GitHub App (token expires %s; it refreshes itself).\n", who, when(v.Expires))
-		} else {
+		default:
 			fmt.Fprintf(&b, "Stored the %s token for %s in the OS keychain.\n", v.TokenKind, who)
 		}
 		if v.InstallURL != "" {
@@ -551,7 +554,10 @@ func human(r any, st style.Styler) string {
 				who = "unknown account"
 			}
 			fmt.Fprintf(&b, "Token: from %s, %s token, %s (valid: %s)\n", v.Source, v.TokenKind, who, v.Valid)
-			if v.Pair != "" {
+			switch {
+			case v.Pair != "" && v.OnlyPair:
+				fmt.Fprintf(&b, "Can publish to %s (the only repo set up on this machine): %s\n", v.Pair, v.CanPublish)
+			case v.Pair != "":
 				fmt.Fprintf(&b, "Can publish to %s: %s\n", v.Pair, v.CanPublish)
 			}
 		}

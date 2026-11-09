@@ -30,6 +30,9 @@ type LoginResult struct {
 	Replaced   bool       `json:"replaced"`    // a stored login was replaced
 	InstallURL string     `json:"install_url"` // first app login: where to pick the repos; "" otherwise
 	EnvToken   string     `json:"env_token"`   // "GHOSTBRANCH_TOKEN" when it is set and wins over this login
+	// Kept: the person kept a stored login that still works, so nothing
+	// new was stored. Text only; the JSON reads as that login.
+	Kept bool `json:"-"`
 }
 
 type LogoutResult struct {
@@ -52,6 +55,9 @@ type AuthStatusResult struct {
 	Problem            string       `json:"problem"`              // the error code that stopped resolution; ""
 	StoredLoginChecked bool         `json:"stored_login_checked"` // false when GHOSTBRANCH_TOKEN is set: the keychain is not touched
 	StoredLogin        *StoredLogin `json:"stored_login"`
+	// OnlyPair: neither the checkout nor --repo named Pair; it is the
+	// workspace's only pair. Text only.
+	OnlyPair bool `json:"-"`
 }
 
 type StoredLogin struct {
@@ -70,7 +76,7 @@ func noKeychain() *contract.Error {
 }
 
 func (a *app) loginCmd() *cobra.Command {
-	var withToken bool
+	var withToken, yes bool
 	c := &cobra.Command{
 		Use:   "login",
 		Short: "Log in to GitHub with the Ghostbranch GitHub App, or store a token from stdin",
@@ -79,7 +85,9 @@ console, opens the browser when it can, and waits while you approve. The token r
 you install the app on, refreshes itself, and is kept in the OS keychain (never in a file).
 With --with-token it reads one token from stdin instead (never from an argument, so it stays out of
 shell history), checks it with GitHub, and stores it. GHOSTBRANCH_TOKEN, when set, still wins over
-the stored login.`,
+the stored login.
+At a console, a stored login that still works is kept unless you say to log in again (--yes logs in
+again without asking); one that has expired or that GitHub refuses is replaced.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			a.ran = true
@@ -87,11 +95,12 @@ the stored login.`,
 				res, err := a.loginWithToken(cmd.Context())
 				return done(a, res, nil, err)
 			}
-			res, err := a.loginDevice(cmd.Context())
+			res, err := a.loginDevice(cmd.Context(), yes)
 			return done(a, res, nil, err)
 		},
 	}
 	c.Flags().BoolVar(&withToken, "with-token", false, "read a token from stdin and store it")
+	c.Flags().BoolVar(&yes, "yes", false, "never ask: log in again even when the stored login still works")
 	return c
 }
 
@@ -112,7 +121,7 @@ func (a *app) priorLogin() (*auth.Login, error) {
 	return prev, nil
 }
 
-func (a *app) loginDevice(ctx context.Context) (*LoginResult, error) {
+func (a *app) loginDevice(ctx context.Context, yes bool) (*LoginResult, error) {
 	noConsole := !a.env.ConsoleUsable || a.nonInteractive || a.env.OpenConsole == nil
 	if noConsole && a.jsonOut {
 		return a.loginStreaming(ctx)
@@ -128,6 +137,9 @@ func (a *app) loginDevice(ctx context.Context) (*LoginResult, error) {
 	if err != nil {
 		return nil, loginUnavailable("no_console", "the console can't be opened; pipe a token to `ghostbranch login --with-token`, or set GHOSTBRANCH_TOKEN")
 	}
+	if kept, err := a.existingLogin(ctx, con, prev, yes); err != nil || kept != nil {
+		return kept, err
+	}
 	l, err := a.runLogin(ctx, con)
 	if err != nil {
 		return nil, err
@@ -137,6 +149,105 @@ func (a *app) loginDevice(ctx context.Context) (*LoginResult, error) {
 		res.InstallURL = "https://github.com/apps/" + a.env.AppSlug + "/installations/new"
 	}
 	return res, nil
+}
+
+// existingLogin tells the person, before a new login, what already works.
+// A stored login that GitHub still accepts is kept unless they say to log
+// in again (or pass --yes), and nothing is opened. One that has expired or
+// that GitHub refuses is replaced, and they read why. With nothing stored,
+// a working gh login is named, with why the app login is the safer one.
+// A nil result means: log in.
+func (a *app) existingLogin(ctx context.Context, ask prompt.Asker, prev *auth.Login, yes bool) (*LoginResult, error) {
+	if prev == nil {
+		a.noteGHLogin(ctx, ask)
+		return nil, nil
+	}
+	if yes {
+		return nil, nil // --yes logs in again, as login always did: nothing to check
+	}
+	// The stored login alone: an env token or gh must not stand in for it.
+	// A refresh it can't save leaves a login the next command can't use, so
+	// that one is replaced too.
+	src := a.authSource()
+	src.Getenv = func(string) string { return "" }
+	src.GH = nil
+	unsaved := false
+	onSave := src.OnSaveError
+	src.OnSaveError = func(err error) { unsaved = true; onSave(err) }
+	tok, _, err := auth.Resolve(ctx, src)
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	if err != nil {
+		if ce := contract.From(err); ce != nil && ce.Code == contract.LoginExpired {
+			ask.Say("Your stored GitHub login has expired; logging in again.")
+		}
+		return nil, nil
+	}
+	f, err := a.env.NewForge(tok)
+	if err != nil {
+		return nil, nil
+	}
+	u, err := f.CurrentUser(ctx)
+	switch {
+	case ctx.Err() != nil:
+		return nil, ctx.Err()
+	case errors.Is(err, forge.ErrTransient):
+		return nil, nil // offline: whether it works can't be told, so log in as asked
+	case err != nil:
+		ask.Say("GitHub no longer accepts your stored login; logging in again.")
+		return nil, nil
+	case unsaved:
+		return nil, nil // the warning about the unsaved refresh is already shown
+	}
+	cur := prev
+	if l, err := auth.LoadLogin(a.env.Keychain); err == nil && l != nil {
+		cur = l // a refresh above may have moved the expiry
+	}
+	switch {
+	case cur.Kind == "app" && !cur.RefreshExpires.IsZero():
+		ask.Say(fmt.Sprintf("Already logged in to GitHub as %s with the Ghostbranch GitHub App (refreshable until %s).", u.Login, when(timePtr(cur.RefreshExpires))))
+	case cur.Kind == "app":
+		ask.Say(fmt.Sprintf("Already logged in to GitHub as %s with the Ghostbranch GitHub App.", u.Login))
+	default:
+		ask.Say(fmt.Sprintf("Already logged in to GitHub as %s with a token you stored (ghostbranch login --with-token), not the Ghostbranch app.", u.Login))
+	}
+	again, err := ask.YesNo(ctx, "Log in again?", false)
+	if err != nil {
+		return nil, err
+	}
+	if again {
+		return nil, nil
+	}
+	res := a.loginResult(*cur, nil)
+	res.Account, res.Kept = u.Login, true
+	return res, nil
+}
+
+// noteGHLogin names a working gh login before a first app login: commands
+// already work with it, but it reaches every repo the person can.
+func (a *app) noteGHLogin(ctx context.Context, ask prompt.Asker) {
+	tok, src, err := auth.Resolve(ctx, a.authSource())
+	if err != nil || src != "gh auth token" {
+		return
+	}
+	f, err := a.env.NewForge(tok)
+	if err != nil {
+		return
+	}
+	if _, err := f.CurrentUser(ctx); err != nil {
+		return
+	}
+	ask.Say("Commands already work with the GitHub CLI's login (gh), which reaches every repo you can. " +
+		"The Ghostbranch app login reaches only the repos you pick, so it's the safer one to use.")
+}
+
+func timePtr(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	u := t.UTC()
+	return &u
 }
 
 // loginStreaming is login --json without a console, for an agent: the first
@@ -407,7 +518,7 @@ func (a *app) authStatus(ctx context.Context) (*AuthStatusResult, []contract.War
 		return res, warns
 	}
 	if p, ok := a.statusPair(); ok {
-		res.Pair = p.Public
+		res.Pair, res.OnlyPair = p.Public, !a.pairNamed(p)
 		if pr, ok := f.(forge.PushProber); ok {
 			res.CanPublish = pr.PushAccess(ctx, p.Public).Can
 		}
@@ -428,4 +539,19 @@ func (a *app) statusPair() (workspace.Pair, bool) {
 	}
 	a.pairFull = p
 	return p, true
+}
+
+// pairNamed reports whether --repo or one of the checkout's remotes names
+// p, rather than p being the workspace's only pair.
+func (a *app) pairNamed(p workspace.Pair) bool {
+	if a.repo != "" {
+		return true
+	}
+	for _, r := range a.env.CwdRemotes() {
+		if name, ok := workspace.ParseRemoteURL(r.URL); ok &&
+			(strings.EqualFold(name, p.Public) || strings.EqualFold(name, p.Shadow)) {
+			return true
+		}
+	}
+	return false
 }

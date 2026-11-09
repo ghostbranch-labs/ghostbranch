@@ -283,7 +283,7 @@
             "shorthand": "",
             "type": "string",
             "default": "",
-            "usage": "stack the feature on another feature: start it at that feature's tip in the shadow repo (default: the shadow's base branch)"
+            "usage": "stack the feature on another feature: start it at that feature's tip in the shadow repo (default: the shadow's base branch; --from main or --from <base branch> starts from the shadow's base branch too)"
           },
           {
             "name": "no-checkout",
@@ -522,7 +522,7 @@
         "path": "login",
         "use": "login",
         "short": "Log in to GitHub with the Ghostbranch GitHub App, or store a token from stdin",
-        "long": "login runs GitHub's device flow for the Ghostbranch GitHub App: it shows a code and a URL on the\nconsole, opens the browser when it can, and waits while you approve. The token reaches only the repos\nyou install the app on, refreshes itself, and is kept in the OS keychain (never in a file).\nWith --with-token it reads one token from stdin instead (never from an argument, so it stays out of\nshell history), checks it with GitHub, and stores it. GHOSTBRANCH_TOKEN, when set, still wins over\nthe stored login.",
+        "long": "login runs GitHub's device flow for the Ghostbranch GitHub App: it shows a code and a URL on the\nconsole, opens the browser when it can, and waits while you approve. The token reaches only the repos\nyou install the app on, refreshes itself, and is kept in the OS keychain (never in a file).\nWith --with-token it reads one token from stdin instead (never from an argument, so it stays out of\nshell history), checks it with GitHub, and stores it. GHOSTBRANCH_TOKEN, when set, still wins over\nthe stored login.\nAt a console, a stored login that still works is kept unless you say to log in again (--yes logs in\nagain without asking); one that has expired or that GitHub refuses is replaced.",
         "read_only": false,
         "flags": [
           {
@@ -531,6 +531,13 @@
             "type": "bool",
             "default": "false",
             "usage": "read a token from stdin and store it"
+          },
+          {
+            "name": "yes",
+            "shorthand": "",
+            "type": "bool",
+            "default": "false",
+            "usage": "never ask: log in again even when the stored login still works"
           }
         ]
       },
