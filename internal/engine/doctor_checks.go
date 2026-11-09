@@ -285,7 +285,8 @@ func (d *doctorRun) token(ctx context.Context) DoctorCheck {
 					Message: "the stored login expired on " + day(l.RefreshExpires) + "; log in again"}.withFix("ghostbranch", "login")
 			}
 			if l.RefreshExpires.Sub(now) < 14*24*time.Hour {
-				v.add(DoctorWarn, "the stored login ends on "+day(l.RefreshExpires)+"; log in again before then", "ghostbranch", "login")
+				// It still works, so plain login would ask first.
+				v.add(DoctorWarn, "the stored login ends on "+day(l.RefreshExpires)+"; log in again before then", "ghostbranch", "login", "--yes")
 			}
 		}
 	}
@@ -344,10 +345,21 @@ func (d *doctorRun) token(ctx context.Context) DoctorCheck {
 	}
 	if len(missing) > 0 {
 		fix := []string{"ghostbranch", "guide"} // its token table names each permission
-		if kind == "app" {
-			fix = []string{"ghostbranch", "login"} // shows the App's install page
-		}
 		msg := "it lacks permissions these commands need (or can't see the repo): " + permList(missing)
+		if kind == "app" {
+			// An app's install grants them, and login shows the Ghostbranch
+			// app's page only on a first login, so there is no command to
+			// run: say which install, with its page when known.
+			fix = nil
+			switch {
+			case e.AppLogin && e.TokenSource == sourceLogin && d.opt.InstallURL != "":
+				msg += "; the Ghostbranch app's install must include both repos and accept every permission it asks for: " + d.opt.InstallURL
+			case e.AppLogin && e.TokenSource == sourceLogin:
+				msg += "; the Ghostbranch app's install must include both repos and accept every permission it asks for"
+			default:
+				msg += "; the GitHub App this token comes from must be installed on both repos with these permissions"
+			}
+		}
 		// Only a person gets the link: that token could publish, and an
 		// agent must never relay a link for one.
 		if kind != "app" && !e.LooksLikeAgent {

@@ -351,7 +351,28 @@ func TestDoctorTokenCheck(t *testing.T) {
 			h.asApp()
 			h.eng.TokenSource = "login"
 			opt.Login = login(now.Add(time.Hour), now.Add(3*24*time.Hour))
-		}, engine.DoctorWarn, "the stored login ends on 2026-10-08", "ghostbranch login", nil},
+		}, engine.DoctorWarn, "the stored login ends on 2026-10-08", "ghostbranch login --yes", nil},
+		// login shows the app's install page only on a first login, so for
+		// a Ghostbranch login that lacks permissions the message names the
+		// page and there is no command to run.
+		{"a Ghostbranch login that lacks permissions", func(h *harness, opt *engine.DoctorOptions) {
+			h.asApp()
+			h.eng.TokenSource, h.eng.AppLogin = "login", true
+			opt.InstallURL = "https://github.com/apps/ghostbranch-cli/installations/new"
+			h.forge.PermsDenied = map[string]map[string]bool{shadowName: {forge.PermActionsRead: true}}
+		}, engine.DoctorFail, "the Ghostbranch app's install must include both repos and accept every permission it asks for: https://github.com/apps/ghostbranch-cli/installations/new", "", nil},
+		{"a Ghostbranch login that lacks permissions, no install page known", func(h *harness, opt *engine.DoctorOptions) {
+			h.asApp()
+			h.eng.TokenSource, h.eng.AppLogin = "login", true
+			h.forge.PermsDenied = map[string]map[string]bool{shadowName: {forge.PermActionsRead: true}}
+		}, engine.DoctorFail, "the Ghostbranch app's install must include both repos and accept every permission it asks for", "", nil},
+		// Another GitHub App's token: it isn't the Ghostbranch app's install
+		// that grants it.
+		{"another app's token that lacks permissions", func(h *harness, opt *engine.DoctorOptions) {
+			h.asApp()
+			opt.InstallURL = "https://github.com/apps/ghostbranch-cli/installations/new"
+			h.forge.PermsDenied = map[string]map[string]bool{shadowName: {forge.PermActionsRead: true}}
+		}, engine.DoctorFail, "the GitHub App this token comes from must be installed on both repos with these permissions", "", nil},
 		{"the login has expired", func(h *harness, opt *engine.DoctorOptions) {
 			h.asApp()
 			h.eng.TokenSource = "login"
@@ -1000,5 +1021,22 @@ func TestDoctorChecksUnknownAccessOK(t *testing.T) {
 	wantStatus(t, c["app"], engine.DoctorOK)
 	if strings.Contains(c["app"].Message, "check runs") {
 		t.Fatalf("app %+v", c["app"])
+	}
+}
+
+// The token check never names the Ghostbranch app for another app's token,
+// and never gives the PAT link for an app token.
+func TestDoctorAppTokenMessageNamesTheRightApp(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.init()
+	h.asApp()
+	h.forge.PermsDenied = map[string]map[string]bool{shadowName: {forge.PermActionsRead: true}}
+	opt := doctorOpts()
+	opt.InstallURL = "https://github.com/apps/ghostbranch-cli/installations/new"
+	_, c := h.doctor(opt)
+	msg := c["token"].Message
+	if strings.Contains(msg, "Ghostbranch app") || strings.Contains(msg, "installations/new") || strings.Contains(msg, "personal-access-tokens") {
+		t.Fatalf("message %q", msg)
 	}
 }

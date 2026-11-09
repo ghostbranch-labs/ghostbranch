@@ -194,7 +194,7 @@ func (e *Engine) SetupCheck(ctx context.Context, opt SetupOptions) (*Setup, erro
 	}
 	if lk.instsErr != nil {
 		set("app_installed", SetupBlocked, "", nil,
-			"GitHub refused to list the Ghostbranch app's installations; log in again with ghostbranch login.")
+			"GitHub refused to list the Ghostbranch app's installations; log in again with ghostbranch login --yes.")
 		set("app_access", SetupTodo, "", nil, "Ghostbranch checks the app can see %s once it can list the app's installations.", p.Public)
 		return ordered(steps), nil
 	}
