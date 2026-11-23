@@ -112,7 +112,15 @@ func (e *Engine) authorizeChoosing(ctx context.Context, p workspace.Pair, planID
 		}
 		return &ledger.Approval{Kind: "console"}, pick, nil
 	}
-	return nil, pick, needsApproval(planID, d.Reason)
+	err = needsApproval(planID, d.Reason)
+	if yes && !valid && d.Reason == approval.NoConsole {
+		// Most often the grant was made under another GHOSTBRANCH_HOME:
+		// name the file this one looked in.
+		if ce := contract.From(err); ce != nil {
+			ce.Message += fmt.Sprintf(" (no agent grant for %s in %s)", p.Public, e.WS.GrantsPath())
+		}
+	}
+	return nil, pick, err
 }
 
 // planSummary is the "what goes public" view shown before confirming.

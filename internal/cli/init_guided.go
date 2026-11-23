@@ -238,7 +238,7 @@ func originSlug(remotes func() []workspace.Remote) string {
 const publicQ = "Which public repo should get private branches? (owner/repo)"
 
 var intro = []string{
-	"Ghostbranch will set up private branches for a public GitHub repo.",
+	"Ghostbranch will set up private branches for a GitHub repo.",
 	"It asks a few questions. Press Enter to accept the suggestion in [brackets].",
 }
 
@@ -570,7 +570,7 @@ func checkPublic(ctx context.Context, ask prompt.Asker, f forge.Forge, public st
 		case err == nil && !pub.Private:
 			return public, pub, nil
 		case err == nil:
-			use, aerr := ask.YesNo(ctx, public+" is private, and Ghostbranch is meant for public repos. Use it anyway?", false)
+			use, aerr := ask.YesNo(ctx, public+" is private. That's supported: its private branches go in a separate private shadow repo, and scheduled sync isn't supported. Is this the repo you meant?", true)
 			if aerr != nil {
 				return "", forge.Repo{}, aerr
 			}
@@ -578,7 +578,7 @@ func checkPublic(ctx context.Context, ask prompt.Asker, f forge.Forge, public st
 				return public, pub, nil
 			}
 			if !reask {
-				return "", forge.Repo{}, contract.New(contract.BadFlag, "%s is private, and init stopped there", public).WithField("public")
+				return "", forge.Repo{}, contract.New(contract.BadFlag, "%s isn't the repo you meant, so init stopped there", public).WithField("public")
 			}
 		case errors.Is(err, forge.ErrNotFound) && reask:
 			ask.Say(public + " doesn't exist, or your login can't see it.")
@@ -1122,7 +1122,9 @@ func (a *app) guidedInit(ctx context.Context, args []string, f initFlags) error 
 			return err
 		}
 	}
-	if f.sync == nil && !registered && !overlayExists(ctx, e.Forge, o) {
+	// Scheduled sync isn't supported for a private source repo (a token
+	// that could read it could also write it), so it isn't offered.
+	if f.sync == nil && !registered && !pub.Private && !overlayExists(ctx, e.Forge, o) {
 		on, err := ask.YesNo(ctx, "Turn on scheduled sync? A workflow in the shadow repo then syncs it every 6 hours (about 120 Actions minutes a month).", false)
 		if err != nil {
 			return err

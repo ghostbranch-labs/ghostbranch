@@ -237,6 +237,20 @@ func permList(m map[string][]string) string {
 	return strings.Join(parts, ", ")
 }
 
+// privateSourceNote is PUBLIC_NOT_PUBLIC's text: a private source repo is
+// supported, and this is what changes for it.
+func privateSourceNote(p workspace.Pair) string {
+	return fmt.Sprintf("%s is private: that's supported. Its private branches live in %s, a separate private repo, so only people with access to it can see them. Scheduled sync isn't supported for a private source repo (a token that could read it could also write it), so run ghostbranch sync yourself", p.Public, p.Shadow)
+}
+
+// visibility names a repo's visibility.
+func visibility(private bool) string {
+	if private {
+		return "private"
+	}
+	return "public"
+}
+
 // tokenErrFix is the token check's message and fix for why no token
 // resolved. Only a missing or expired login, and a corrupt stored one, have
 // a command that fixes them: a locked keychain must not be fixed by logout,
@@ -482,9 +496,6 @@ func (d *doctorRun) pairCheck(ctx context.Context) DoctorCheck {
 	}
 	d.cfg, d.O = cfg, O
 	var v verdict
-	if pub.Private {
-		v.add(DoctorWarn, p.Public+" is private; Ghostbranch is meant for public repos")
-	}
 	if def := pc.public.DefaultBranch; def != "" && def != pc.base {
 		v.add(DoctorWarn, fmt.Sprintf("%s's default branch is %s, but this pair works on %s, the branch it was set up on; Ghostbranch keeps using %s", p.Public, def, pc.base, pc.base))
 	}
@@ -507,8 +518,14 @@ func (d *doctorRun) pairCheck(ctx context.Context) DoctorCheck {
 			v.add(DoctorWarn, "Ghostbranch's managed overlay files are out of date", "ghostbranch", "upgrade", "--repo", p.Public)
 		}
 	}
-	return v.result(fmt.Sprintf("%s (public) and %s (private) are reachable, and the overlay and its config are valid", p.Public, p.Shadow),
-		"; shadow "+pc.base+" and the managed files are current", det)
+	okTail := "; shadow " + pc.base + " and the managed files are current"
+	if pub.Private {
+		// A private source repo is supported, so it isn't a warning; init's
+		// PUBLIC_NOT_PUBLIC says the rest once, at setup.
+		okTail += "; private source repo: run ghostbranch sync yourself (scheduled sync isn't supported)"
+	}
+	return v.result(fmt.Sprintf("%s (%s) and %s (private) are reachable, and the overlay and its config are valid", p.Public, visibility(pub.Private), p.Shadow),
+		okTail, det)
 }
 
 // clones reports whether any remote URL names public.

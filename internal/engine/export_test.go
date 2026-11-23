@@ -23,3 +23,9 @@ func BaseOf(e *Engine, ctx context.Context, p workspace.Pair) (string, error) {
 func OpenBaseIn(e *Engine, ctx context.Context, op, dir string) error {
 	return e.openBase(ctx, &pairCtx{op: op, git: gitx.New(dir)})
 }
+
+// AuthorizeForTest runs authorize, the last step before a public push.
+func AuthorizeForTest(e *Engine, ctx context.Context, p workspace.Pair, planID string, yes bool) error {
+	_, err := e.authorize(ctx, p, planID, "summary", yes)
+	return err
+}
