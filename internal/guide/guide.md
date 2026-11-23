@@ -264,7 +264,7 @@ A login, the app's install and tokens are the person's to do. Help them one step
 - The workflow uses its own default token. If public commits change workflow files, the person adds a
   `GHOSTBRANCH_SYNC_TOKEN` secret to the shadow repo: a fine-grained token with shadow Contents and
   Workflows write, never public write. A fine-grained token applies its permissions to every repo it
-  selects, so for a private public repo it could write that repo too: scheduled sync isn't supported
+  selects, so for a private source repo it could write that repo too: scheduled sync isn't supported
   there; use `ghostbranch sync --repo <public>`.
 - `OVERLAY_OUTDATED` means run `ghostbranch upgrade --plan`, then `ghostbranch upgrade`.
 - Repo guards: the gate rewrites `github.repository == 'org/project'` guards in its CI candidate only,

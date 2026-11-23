@@ -116,8 +116,9 @@ func (e *Engine) AgentsAllow(ctx context.Context, p workspace.Pair, opt AgentsAl
 		return nil, nil, needsApproval("", approval.NoConsole)
 	}
 	summary := fmt.Sprintf("Allow coding agents on this machine to publish to %s (shadow %s) with --yes, without this code, %s.\n"+
-		"Agents still need a green gate and a clean leak scan for every publish. Revoke with: ghostbranch agents revoke --repo %s",
-		p.Public, p.Shadow, label, p.Public)
+		"Agents still need a green gate and a clean leak scan for every publish. Revoke with: ghostbranch agents revoke --repo %s\n"+
+		"The grant is saved in %s; commands run with another GHOSTBRANCH_HOME don't see it.",
+		p.Public, p.Shadow, label, p.Public, visible(e.WS.GrantsPath()))
 	// A grants file that cannot be read could not be saved to either; say so
 	// before the person types a code.
 	if _, err := s.Load(); err != nil {

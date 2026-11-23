@@ -8,9 +8,9 @@
 
 [![Sponsor](https://img.shields.io/github/sponsors/ayushguptax)](https://github.com/sponsors/ayushguptax)
 
-**Private branches for public repos.**
+**Private branches for any GitHub repo.**
 
-Build unreleased features in a private shadow of your open-source repo, running the same CI. Publish with one gated command, after a leak scan and with a person's approval.
+Built for open-source repos, where every branch is public: build unreleased features in a private shadow repo, with the same CI, and publish with one gated command after a leak scan and a person's approval. On a private repo, it keeps a few branches to the few people you add: see [Use Ghostbranch with a private repo](https://ghostbranch.site/docs/guides/private-repo).
 
 <img width="1100" height="600" alt="Demo: ghostbranch init creates a private shadow repo, the guard refuses a push of feature work to the public repo, the gate's checks pass, and one clean public pull request opens without the internal note." src="https://github.com/user-attachments/assets/e881a266-e807-4d36-a4be-2b76d82b0c28" />
 
@@ -20,7 +20,7 @@ Website and docs: <https://ghostbranch.site>.
 
 ## The problem
 
-On GitHub, a public repo can't have a private branch. Teams building unannounced features on an open-source project, and maintainers fixing a vulnerability under embargo, end up running a private mirror by hand. That works until someone makes a mistake.
+On GitHub, a public repo can't have a private branch. Teams building unannounced features on an open-source project, and maintainers fixing a vulnerability under embargo, end up running a private mirror by hand. Private repos have the same gap: every branch is visible to everyone on the repo. A hand-run mirror works until someone makes a mistake.
 
 - **Every branch is public.** Anyone can see a branch pushed to a public repo, and its CI runs, too.
 - **Forks stay public.** A fork of a public repository is always public, so a fork can't keep anything private.
@@ -118,7 +118,7 @@ Then run `ghostbranch init` in a clone of your public repo. It asks only what it
 
 - **CI that runs on pull requests.** The gate runs your public repo's GitHub Actions workflows on a draft pull request in the shadow repo, so at least one workflow needs `on: pull_request`. Without one, the gate stops with `NO_CI`.
 - **The Ghostbranch GitHub app, on the repos you pick.** It asks for write access to contents, pull requests, workflows, Actions and administration (administration only so `init` can create the shadow repo). [What each permission is for](https://ghostbranch.site/docs/security/tokens-and-keychain#the-github-app-login). Ghostbranch never deletes a repo, and `init` never writes to the public repo.
-- **Actions minutes.** The shadow repo is private, so its CI counts against your account's minutes: GitHub Free includes 2,000 a month, Pro and Team 3,000. Each gate costs one run of your pull-request CI. Scheduled sync is off unless you turn it on.
+- **Actions minutes.** The shadow repo is private, so its CI counts against your account's minutes, as does a private source repo's own CI: GitHub Free includes 2,000 a month, Pro and Team 3,000. Each gate costs one run of your pull-request CI. Scheduled sync is off unless you turn it on.
 
 ## A first feature in six commands
 

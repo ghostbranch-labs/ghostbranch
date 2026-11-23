@@ -104,8 +104,12 @@ func (e *Engine) Init(ctx context.Context, opt InitOptions) (res *InitResult, wa
 		return res, nil, forgeErr(err, "look up public repo %s", p.Public)
 	}
 	if pub.Private {
+		if s := opt.Schedule; s != "" && s != config.ScheduleOff {
+			return res, warns, contract.New(contract.BadFlag,
+				"scheduled sync isn't supported for a private source repo (a token that could read %s could also write it); run init without --sync, then ghostbranch sync yourself", p.Public).WithField("sync")
+		}
 		warns = append(warns, contract.Warning{Code: contract.PublicNotPublic,
-			Message: fmt.Sprintf("%s is private; Ghostbranch is meant for public repos", p.Public)})
+			Message: privateSourceNote(p)})
 	}
 	if err := e.checkPublicBranches(ctx, p, pub); err != nil {
 		return res, warns, err

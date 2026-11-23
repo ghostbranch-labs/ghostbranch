@@ -1000,7 +1000,7 @@ func TestGuidedInitAdoptsAnExistingPersonalShadowAfterARefusal(t *testing.T) {
 func TestGuidedInitIntroducesItselfOnce(t *testing.T) {
 	t.Parallel()
 	intro := []string{
-		"! Ghostbranch will set up private branches for a public GitHub repo.",
+		"! Ghostbranch will set up private branches for a GitHub repo.",
 		"! It asks a few questions. Press Enter to accept the suggestion in [brackets].",
 	}
 	for _, args := range [][]string{{"init"}, {"init", "acme/widget"}, {"init", "acme/widget", "--shadow", "acme/widget-shadow", "--no-sync"}} {
@@ -1463,5 +1463,33 @@ func TestGuidedInitAnnouncesTheLoginOnce(t *testing.T) {
 	}
 	if !slices.Contains(p.said, "✓ Logged in as acme (from your Ghostbranch login).") {
 		t.Fatalf("checklist login line: %q", p.said)
+	}
+}
+
+// A private source repo is supported: guided init says so, and Enter goes
+// on with it (it used to ask "Use it anyway?", with No as the default).
+func TestGuidedInitAcceptsAPrivateSourceRepo(t *testing.T) {
+	hermeticGit(t)
+	te := newTestEnv(t)
+	pairCheckout(te)
+	te.forge.SetPrivate("acme/widget", true)
+	p := atTerminal(te, "", "", "", "", "", "")
+	code, out, errOut := te.run("init")
+	if code != 0 {
+		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
+	}
+	const q = "acme/widget is private. That's supported: its private branches go in a separate private shadow repo, and scheduled sync isn't supported. Is this the repo you meant?"
+	if !slices.Contains(p.asked, q) {
+		t.Fatalf("asked %q", p.asked)
+	}
+	if !strings.Contains(out, "Shadow repo acme/widget-shadow is ready for acme/widget.") {
+		t.Fatalf("stdout:\n%s", out)
+	}
+	// Scheduled sync isn't supported for a private source, so it isn't offered.
+	if slices.ContainsFunc(p.asked, func(q string) bool { return strings.HasPrefix(q, "Turn on scheduled sync?") }) {
+		t.Fatalf("asked about scheduled sync: %q", p.asked)
+	}
+	if !slices.Contains(p.said, "Ghostbranch will set up private branches for a GitHub repo.") {
+		t.Fatalf("intro: %q", p.said)
 	}
 }

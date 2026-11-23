@@ -238,7 +238,7 @@ var errorDocs = map[Code]Doc{
 
 var warningDocs = map[WarningCode]Doc{
 	ConfigKeyIgnored:  {Summary: ".ghostbranch.yml has a key this version does not use.", WhatToDo: "Nothing is required; remove the key to silence the warning."},
-	PublicNotPublic:   {Summary: "The public repo is private.", WhatToDo: "Ghostbranch is meant for public repos; check you named the right repo."},
+	PublicNotPublic:   {Summary: "The source repo is private. That's supported: its private branches live in the shadow repo, which only people with access to that repo can see.", WhatToDo: "Nothing, if you meant it; check you named the right repo. Scheduled sync isn't supported here, because a token that could read a private repo could also write it: run ghostbranch sync yourself."},
 	GateNotRecorded:   {Summary: "The gate result could not be saved to the feature metadata; the result itself stands.", WhatToDo: "With details.job, run ghostbranch wait <job>: it records the outcome the job's CI gave. Without it (the gate stopped on a leak), fix the leak and gate again. promote needs a recorded green gate."},
 	ChecksLimited:     {Summary: "The token cannot read check runs, so only GitHub Actions workflows and commit statuses were considered.", WhatToDo: "Use a token that can read checks if you rely on CI apps other than Actions."},
 	ActorUnknown:      {Summary: "GHOSTBRANCH_ACTOR is unset and the GitHub login wasn't read; the ledger records human:unknown.", WhatToDo: "Set GHOSTBRANCH_ACTOR, for example agent:claude-code."},
